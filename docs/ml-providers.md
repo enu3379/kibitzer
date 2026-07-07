@@ -22,7 +22,7 @@ embedding:
 tier1:
   provider: experiment
   experiment_models_file: configs/models.local.yaml
-  experiment_model_key: gemma4   # Ollama Cloud gemma4:e4b — fast hot-path classifier
+  experiment_model_key: gemma4   # Ollama Cloud gemma3:4b — fast hot-path classifier
   timeout_seconds: 10            # hot path: caps the models-file timeout
 
 tier2:

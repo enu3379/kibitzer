@@ -9,10 +9,11 @@
 
 gemma4:
   # Tier 1 hot-path classifier: small, fast model. The tier1 config timeout
-  # (10s) applies instead of timeout_sec here.
+  # (10s) applies instead of timeout_sec here. Check availability with
+  # GET https://ollama.com/api/tags before picking a model.
   api_url: "https://ollama.com/api/chat"
   api_style: "ollama"
-  ollama_model: "gemma4:e4b"
+  ollama_model: "gemma3:4b"
   timeout_sec: 10
   max_output_tokens: 128
 
