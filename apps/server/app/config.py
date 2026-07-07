@@ -46,6 +46,7 @@ class Tier1Config(BaseModel):
     provider: str = "openai_compatible"
     base_url: str = "${TIER1_BASE_URL}"
     api_key_env: str = "TIER1_API_KEY"
+    fallback_api_key_env: str | None = None
     model: str = "cheap-classifier"
     timeout_seconds: float = 3
     recent_observations: int = 5
