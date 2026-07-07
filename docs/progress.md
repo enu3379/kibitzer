@@ -293,6 +293,22 @@ Verified:
 - `npm run build` passes in `apps/extension`.
 - `grep -c silent apps/extension/dist/background.js` returns `2`.
 
+## 2026-07-07 Dwell-Gated Judging
+
+Changed extension-side navigation handling so accidental short visits do not start
+judging:
+
+- Browser navigation observations are posted only after the active tab remains on
+  the same URL for 5 seconds, delaying Tier 0/Tier 1 work.
+- Tier 2 excerpt submission waits until the page has been active on the same URL
+  for 10 seconds total, so expensive confirmation does not run for brief visits.
+- The tab URL is rechecked before excerpt extraction, before excerpt submission,
+  and before notification display to avoid stale-page messages.
+
+Verified:
+
+- `npm --prefix apps/extension run build` passes.
+
 ## 2026-07-06 Persona Voice Redesign (Design Round)
 
 User direction: drop mom-style nagging entirely; every voice should be calm on the
