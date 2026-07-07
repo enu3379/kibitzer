@@ -20,7 +20,8 @@ Parent plan: [roadmap-fun-layer.md](roadmap-fun-layer.md)
 
 - Trigger: a genuine drift-departure → return. The preceding stretch must be a
   *sustained* DRIFT (controller-confirmed drift, not a single borderline
-  observation) lasting ≥ `celebration.min_drift_minutes` (config, default 3), and
+  observation) lasting ≥ `celebration.min_drift_minutes` (config; shipped default
+  currently 0.5 for dogfooding, target 3), and
   the returning observation must be a real OK. Borderline blips must not fire it —
   the user's words: "드리프트 완벽히 이탈 후 복귀를 했을 때만."
 - Frequency (Claude-adjusted 2026-07-07): fire on every qualifying return — this

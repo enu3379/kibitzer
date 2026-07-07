@@ -65,7 +65,8 @@ guard: pages whose OK came only from the anchor path (exemplar score <
 `relevance.anchor_epsilon`, default 0.05) or that weren't LLM-vetted keep the OK
 verdict but are NOT admitted into the anchor — `features.anchor_eligible`,
 filtered in `recent_ok_embeddings`; (3) `models.local.yaml` restored — Ollama Cloud, tier1 → gemma3:4b (e4b does
-not exist on cloud; caught by per-key probing), tier2 → gemma4:31b; live
+not exist on cloud; caught by per-key probing), tier2 → gemma4:31b — later the
+same day superseded by nemotron-3-super / minimax-m3 (see D3); live
 `/health` shows `tiers: active`, all three keys individually verified and tier
 degradation surfaced in `/health` + a popup warning ("판정 축소 모드").
 Regression test `test_drift_fixes.py` replays the 나무위키 chain end-to-end.

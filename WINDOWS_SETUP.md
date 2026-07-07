@@ -73,7 +73,8 @@ Copy the example env file:
 Copy-Item .env.example .env
 ```
 
-Fill `ollama1` and `ollama2` in `.env` with your Ollama Cloud API keys
+Fill `ollama1` and `ollama2` (and optionally `ollama3` — with 2+ keys each
+tier rotates across all of them) in `.env` with your Ollama Cloud API keys
 (one-time — every later start picks them up automatically). For model
 routing, copy:
 

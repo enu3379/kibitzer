@@ -68,7 +68,7 @@ on the system theme.
 - perform first-pass sensitive-domain drop
 - call the local server
 - run Readability excerpt extraction only when requested
-- show Chrome notifications
+- show the in-page toast (system notifications as fallback on non-injectable pages)
 - send feedback button clicks to the server
 - popup for declaring the goal and viewing session state, streak, and stats
 - popup snooze / resume / end-session controls with an end-of-session summary

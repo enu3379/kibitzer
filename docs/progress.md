@@ -523,3 +523,24 @@ Next:
 - Human check: reload the extension, open the popup → 설정, switch persona, and
   browse to hear/see the new voice in a real intervention.
 - Execute P1 after P0 soak (Codex).
+
+## 2026-07-08 P1 Design Layer, Celebration Chime, and Doc Reconciliation
+
+- Claude completed the P1 design handoff: celebration toast styling (happy-arc
+  eyes, buttonless — also fixed the `[hidden]` vs `display:flex` bug that was
+  showing feedback buttons on celebrations), `5분만` copy + button order, popup
+  personas from `GET /personas`, pending-card "왜?" (tier1_reason) toggle, and
+  the popup 리포트 view over `/sessions/current/report`.
+- Fixed celebration delivery end-to-end: results returned on the browser-nav
+  response were dropped by `handlePipelineResult`; the server was logging
+  `celebration.delivered` with nothing displayed. Celebration gate is
+  temporarily 0.5 min (dogfooding; target 3), and celebrations now play a soft
+  two-note chime (`offscreen/celebrate.wav`) distinct from the nag ding.
+- Doc reconciliation pass (supersedes stale claims in earlier entries): Windows
+  startup + tray and the macOS menu bar status item are MERGED (the 2026-07-06
+  "planned but not implemented" line below is outdated); delivery is the
+  in-page toast with system notifications as fallback; tier judging runs on
+  Ollama Cloud (nemotron-3-super / minimax-m3) with `.env` keys and 3-key
+  rotation — the 2026-07-06 "Tier 1 Enabled (Local Ollama)" entry is history,
+  not current state. READMEs, SETUP guides, platforms/architecture docs, and
+  the docs index were aligned with the code in the same pass.

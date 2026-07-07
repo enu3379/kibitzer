@@ -21,18 +21,28 @@ The server is the local SSOT for Kibitzer.
 - continuous page body collection
 - keystroke capture
 
-## Planned API
+## API
 
 ```text
-GET  /health
+GET  /health                          (includes tier provider status)
 POST /sessions
 GET  /sessions/current
+GET  /sessions/current/state
+GET  /sessions/current/stats
 POST /sessions/current/goal
+POST /sessions/current/snooze
+POST /sessions/current/end
+GET  /sessions/current/report
+GET  /reports/daily?date=YYYY-MM-DD
+GET  /personas
+GET|PUT /settings
 POST /observations/browser-nav
 POST /observations/{id}/excerpt
 POST /feedback
-POST /replay
+POST /interventions/{id}/delivery
 ```
+
+Still planned: `POST /replay` (Work Package 10, gated on the D4 scope decision).
 
 ## Implementation Note
 
