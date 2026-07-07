@@ -33,6 +33,26 @@ For development rebuilds:
 npm run watch
 ```
 
+## Icons
+
+The live toolbar icon source is `icons/icon-128.svg`. Regenerate transparent
+PNGs with:
+
+```bash
+python ../../scripts/gen_extension_icons.py
+```
+
+Design variants live under `icons/variants/` and can be regenerated with:
+
+```bash
+python ../../scripts/gen_icon_variants.py
+```
+
+Native status surfaces use the monochrome template assets generated under
+`icons/variants/`, especially `monitor-template-128.png`. macOS lets AppKit tint
+that template for light/dark menu bars; Windows tints the same alpha mask based
+on the system theme.
+
 ## Load In Chrome
 
 1. Open `chrome://extensions`.

@@ -26,6 +26,7 @@ language_for() {
     *.mjs) echo "js" ;;
     *.json) echo "json" ;;
     *.yaml|*.yml) echo "yaml" ;;
+    *.swift) echo "swift" ;;
     *) echo "text" ;;
   esac
 }
@@ -39,6 +40,9 @@ module_links_for() {
       ;;
     apps/server/app/providers/*|configs/*)
       links="$links [[server-provider-boundaries-module]] [[tiered-drift-judging]]"
+      ;;
+    apps/menubar/*)
+      links="$links [[fastapi-local-server]]"
       ;;
     apps/extension/*)
       links="$links [[extension-background-worker-module]] [[chrome-extension-adapter]]"
@@ -84,6 +88,7 @@ while IFS= read -r file; do
 done < <(
   {
     find "$ROOT/apps/server/app" -type f -name '*.py'
+    find "$ROOT/apps/menubar" -type f -name '*.swift'
     find "$ROOT/apps/extension/src" -type f \( -name '*.ts' -o -name '*.tsx' \)
     find "$ROOT/apps/extension" -maxdepth 1 -type f \( -name 'manifest.json' -o -name 'package.json' -o -name 'build.mjs' \)
     find "$ROOT/configs" -maxdepth 1 -type f \( -name '*.yaml' -o -name '*.yml' \)

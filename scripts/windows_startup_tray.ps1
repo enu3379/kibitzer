@@ -6,7 +6,14 @@ $ErrorActionPreference = "Stop"
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $RunScript = Join-Path $Root "scripts\windows_run_server.ps1"
-$IconPath = Join-Path $Root "apps\extension\icons\icon-32.png"
+$IconCandidates = @(
+  (Join-Path $Root "apps\extension\icons\variants\monitor-template-128.png"),
+  (Join-Path $Root "apps\extension\icons\variants\monitor-template-48.png"),
+  (Join-Path $Root "apps\extension\icons\variants\monitor-template-32.png"),
+  (Join-Path $Root "apps\extension\dist\icons\variants\monitor-template-128.png"),
+  (Join-Path $Root "apps\extension\dist\icons\variants\monitor-template-48.png"),
+  (Join-Path $Root "apps\extension\dist\icons\variants\monitor-template-32.png")
+)
 $HealthUrl = "http://127.0.0.1:8765/health"
 $LogDir = Join-Path $Root "data\logs"
 $TrayLog = Join-Path $LogDir "windows-startup-tray.log"
@@ -74,40 +81,93 @@ function Start-KibitzerServer {
   Start-Process -FilePath $PowerShell -ArgumentList $Arguments -WorkingDirectory $Root -WindowStyle Hidden
 }
 
+function Get-KibitzerTrayIconPath {
+  foreach ($Candidate in $IconCandidates) {
+    if (Test-Path $Candidate) {
+      return $Candidate
+    }
+  }
+  return $null
+}
+
+function Test-WindowsLightSystemTheme {
+  try {
+    $Theme = Get-ItemProperty `
+      -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" `
+      -Name "SystemUsesLightTheme" `
+      -ErrorAction Stop
+    return ([int]$Theme.SystemUsesLightTheme -ne 0)
+  }
+  catch {
+    return $false
+  }
+}
+
+function Get-KibitzerTrayGlyphColor {
+  if (Test-WindowsLightSystemTheme) {
+    return [System.Drawing.Color]::FromArgb(31, 41, 55)
+  }
+  return [System.Drawing.Color]::FromArgb(249, 250, 251)
+}
+
+function Get-KibitzerTrayHaloColor {
+  if (Test-WindowsLightSystemTheme) {
+    return [System.Drawing.Color]::FromArgb(249, 250, 251)
+  }
+  return [System.Drawing.Color]::FromArgb(31, 41, 55)
+}
+
 function New-KibitzerTrayIcon {
   param(
     [System.Drawing.Color]$Color
   )
 
-  if (Test-Path $IconPath) {
+  $IconPath = Get-KibitzerTrayIconPath
+  $GlyphColor = Get-KibitzerTrayGlyphColor
+  $HaloColor = Get-KibitzerTrayHaloColor
+  $Bitmap = New-Object System.Drawing.Bitmap 32, 32
+  $ClearGraphics = [System.Drawing.Graphics]::FromImage($Bitmap)
+  $ClearGraphics.Clear([System.Drawing.Color]::Transparent)
+  $ClearGraphics.Dispose()
+
+  if ($IconPath) {
     $Source = [System.Drawing.Image]::FromFile($IconPath)
-    $Bitmap = New-Object System.Drawing.Bitmap 16, 16
-    $SourceGraphics = [System.Drawing.Graphics]::FromImage($Bitmap)
-    $SourceGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-    $SourceGraphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-    $SourceGraphics.Clear([System.Drawing.Color]::Transparent)
-    $SourceGraphics.DrawImage($Source, 0, 0, 16, 16)
-    $SourceGraphics.Dispose()
+    $Mask = New-Object System.Drawing.Bitmap 26, 26
+    $MaskGraphics = [System.Drawing.Graphics]::FromImage($Mask)
+    $MaskGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $MaskGraphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $MaskGraphics.Clear([System.Drawing.Color]::Transparent)
+    $MaskGraphics.DrawImage($Source, 0, 0, 26, 26)
+    $MaskGraphics.Dispose()
+
+    for ($X = 0; $X -lt 26; $X++) {
+      for ($Y = 0; $Y -lt 26; $Y++) {
+        $Pixel = $Mask.GetPixel($X, $Y)
+        if ($Pixel.A -gt 0) {
+          $Tinted = [System.Drawing.Color]::FromArgb($Pixel.A, $GlyphColor.R, $GlyphColor.G, $GlyphColor.B)
+          $Bitmap.SetPixel($X + 2, $Y + 2, $Tinted)
+        }
+      }
+    }
+
+    $Mask.Dispose()
     $Source.Dispose()
-  }
-  else {
-    $Bitmap = New-Object System.Drawing.Bitmap 16, 16
-    $FallbackGraphics = [System.Drawing.Graphics]::FromImage($Bitmap)
-    $FallbackGraphics.Clear([System.Drawing.Color]::Transparent)
-    $FallbackGraphics.Dispose()
   }
 
   $Graphics = [System.Drawing.Graphics]::FromImage($Bitmap)
   $Graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
 
-  $Brush = New-Object System.Drawing.SolidBrush $Color
-  $Pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White), 1
-  $Graphics.FillEllipse($Brush, 10, 10, 5, 5)
-  $Graphics.DrawEllipse($Pen, 10, 10, 5, 5)
+  $Brush = New-Object System.Drawing.SolidBrush -ArgumentList @($Color)
+  $HaloBrush = New-Object System.Drawing.SolidBrush -ArgumentList @($HaloColor)
+  $Pen = New-Object System.Drawing.Pen -ArgumentList @($HaloColor, 1)
+  $Graphics.FillEllipse($HaloBrush, 21, 21, 10, 10)
+  $Graphics.FillEllipse($Brush, 22, 22, 8, 8)
+  $Graphics.DrawEllipse($Pen, 22, 22, 8, 8)
 
   $Icon = [System.Drawing.Icon]::FromHandle($Bitmap.GetHicon()).Clone()
 
   $Pen.Dispose()
+  $HaloBrush.Dispose()
   $Brush.Dispose()
   $Graphics.Dispose()
   $Bitmap.Dispose()

@@ -14,7 +14,8 @@ Read these in order when starting work:
 10. [LLM Wiki Integration](llm-wiki-integration.md)
 11. [Judgment Audit Plan](judgment-audit-plan.md)
 12. [Idle Daemon Plan](idle-daemon-plan.md)
-13. [Windows Idle Tray Plan](windows-idle-tray-plan.md)
+13. [macOS Menu Bar Plan](macos-menu-bar-plan.md)
+14. [Windows Idle Tray Plan](windows-idle-tray-plan.md)
 
 ## Stage Boundaries
 

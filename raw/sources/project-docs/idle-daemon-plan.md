@@ -35,7 +35,7 @@ separate status daemon.
 
 ## macOS Phase
 
-The macOS implementation uses a user LaunchAgent:
+The macOS implementation uses a user LaunchAgent plus a menu bar status item:
 
 - `scripts/macos_install_launch_agent.sh` writes
   `~/Library/LaunchAgents/com.kibitzer.server.plist`.
@@ -43,9 +43,12 @@ The macOS implementation uses a user LaunchAgent:
 - stdout/stderr go to `data/logs/`.
 - `scripts/macos_uninstall_launch_agent.sh` unloads the LaunchAgent and removes
   the plist.
+- `scripts/macos_install_menu_bar_agent.sh` installs a companion menu bar item
+  that polls `GET /health` and displays `dead` / `idle` / `active`.
 
-No macOS menu bar icon is required for this phase. The extension badge remains
-the primary user-facing connection indicator.
+The menu bar item shows server/process state. The Chrome extension badge remains
+the browser/extension reachability and intervention-state indicator. See
+[macOS Menu Bar Plan](macos-menu-bar-plan.md).
 
 ## Windows Phase
 
@@ -65,6 +68,7 @@ should not become a second worker that owns judging state.
 
 - Add packaging entries under `packaging/macos/` and `packaging/windows/` when
   installers become real deliverables.
+- Replace the placeholder macOS menu bar title with Claude-owned final artwork.
 - Add Windows startup/tray implementation from
   [Windows Idle Tray Plan](windows-idle-tray-plan.md).
 - Consider an idle timeout for long-lived active sessions only if users need a
