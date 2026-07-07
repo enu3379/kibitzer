@@ -3,6 +3,7 @@ import sqlite3
 import tempfile
 import unittest
 import uuid
+from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -164,7 +165,7 @@ class Tier2ApiTest(unittest.TestCase):
         self.assertEqual(payload["current"]["url_host"], "example.com")
         self.assertNotIn("secret=not-stored", json.dumps(payload))
 
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             events = "\n".join(row[0] for row in conn.execute("SELECT payload_json FROM event_log").fetchall())
             intervention_count = conn.execute("SELECT COUNT(*) FROM interventions").fetchone()[0]
         self.assertEqual(intervention_count, 1)
@@ -183,7 +184,7 @@ class Tier2ApiTest(unittest.TestCase):
             client.__exit__(None, None, None)
 
         self.assertEqual(response.json()["action"], "none")
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             intervention_count = conn.execute("SELECT COUNT(*) FROM interventions").fetchone()[0]
             cancelled = conn.execute("SELECT COUNT(*) FROM event_log WHERE event_type = 'tier2.cancelled'").fetchone()[0]
         self.assertEqual(intervention_count, 0)
@@ -203,7 +204,7 @@ class Tier2ApiTest(unittest.TestCase):
         result = response.json()
         self.assertEqual(result["action"], "notify")
         self.assertIn("Kibitzer observation API", result["message"])
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             confirmed = conn.execute("SELECT COUNT(*) FROM event_log WHERE event_type = 'tier2.confirmed'").fetchone()[0]
         self.assertEqual(confirmed, 1)
 
@@ -282,7 +283,7 @@ class Tier2ApiTest(unittest.TestCase):
 
         result = response.json()
         self.assertTrue(result["silent"])
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             suppressed = conn.execute(
                 "SELECT COUNT(*) FROM event_log WHERE event_type = 'delivery.suppressed_quiet_hours'"
             ).fetchone()[0]

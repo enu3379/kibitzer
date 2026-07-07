@@ -18,6 +18,21 @@ def validate_hhmm(value: str) -> str:
 
 def runtime_settings(config: AppConfig, store: SQLiteStore) -> dict[str, Any]:
     stored = store.get_settings()
+    controller = {
+        "type": config.controller.type,
+        "k": config.controller.k,
+        "window_size": config.controller.window_size,
+    }
+    stored_controller = stored.get("controller")
+    if isinstance(stored_controller, dict):
+        controller.update(
+            {
+                key: value
+                for key, value in stored_controller.items()
+                if key in {"type", "k", "window_size"}
+            }
+        )
+
     cooldown = {
         "enabled": config.controller.cooldown_seconds > 0,
         "seconds": config.controller.cooldown_seconds,
@@ -52,16 +67,26 @@ def runtime_settings(config: AppConfig, store: SQLiteStore) -> dict[str, Any]:
         "voice_enabled": (
             bool(stored["voice_enabled"]) if "voice_enabled" in stored else config.delivery.voice.enabled
         ),
+        "controller": controller,
         "cooldown": cooldown,
         "quiet_hours": quiet_hours,
     }
 
 
 def effective_controller_config(config: AppConfig, store: SQLiteStore) -> ControllerConfig:
-    cooldown = runtime_settings(config, store)["cooldown"]
+    settings = runtime_settings(config, store)
+    controller = settings["controller"]
+    cooldown = settings["cooldown"]
     enabled = bool(cooldown.get("enabled"))
     seconds = int(cooldown.get("seconds") or 0)
-    return config.controller.model_copy(update={"cooldown_seconds": seconds if enabled else 0})
+    return config.controller.model_copy(
+        update={
+            "type": str(controller.get("type") or config.controller.type),
+            "k": int(controller.get("k") or config.controller.k),
+            "window_size": int(controller.get("window_size") or config.controller.window_size),
+            "cooldown_seconds": seconds if enabled else 0,
+        }
+    )
 
 
 def quiet_hours_active(quiet_hours: dict[str, Any], now: datetime | None = None) -> bool:

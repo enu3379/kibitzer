@@ -2,6 +2,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -88,7 +89,7 @@ class ObservationIntakeTest(unittest.TestCase):
         self.assertEqual(observations[0].title, "Docs")
         self.assertEqual(observations[0].tab_id, 7)
 
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             row = conn.execute(
                 "SELECT url_path_hash, features_json FROM observations WHERE id = ?",
                 (body["observation_id"],),
@@ -122,7 +123,7 @@ class ObservationIntakeTest(unittest.TestCase):
         self.assertIsNone(body["observation_id"])
         self.assertEqual(self.store.list_observations(session_id), [])
 
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             event = conn.execute(
                 "SELECT session_id, payload_json FROM event_log WHERE event_type = 'observation.dropped'"
             ).fetchone()
@@ -150,7 +151,7 @@ class ObservationIntakeTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["observation_id"])
 
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             observation_count = conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0]
             event = conn.execute(
                 "SELECT session_id, payload_json FROM event_log WHERE event_type = 'observation.dropped'"

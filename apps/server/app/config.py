@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from dotenv import load_dotenv
@@ -66,8 +66,9 @@ class Tier2Config(BaseModel):
 
 
 class ControllerConfig(BaseModel):
-    type: str = "streak"
+    type: Literal["streak", "window"] = "streak"
     k: int = 3
+    window_size: int = 5
     cooldown_seconds: int = 300
     snooze_seconds: int = 1800
     coldstart_observations: int = 5

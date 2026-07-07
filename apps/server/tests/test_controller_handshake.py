@@ -47,6 +47,18 @@ class ControllerHandshakeTest(unittest.TestCase):
             },
         ).json()
 
+    def _post_ok(self, client: TestClient, index: int) -> dict[str, object]:
+        return client.post(
+            "/observations/browser-nav",
+            json={
+                "source": "browser_nav",
+                "payload": {
+                    "url": f"https://example.com/api-{index}",
+                    "title": f"Kibitzer observation API docs {index}",
+                },
+            },
+        ).json()
+
     def test_coldstart_blocks_until_observation_gate_passes(self) -> None:
         client = self._client(ControllerConfig(k=2, coldstart_observations=3, cooldown_seconds=300))
         try:
@@ -71,16 +83,7 @@ class ControllerHandshakeTest(unittest.TestCase):
         try:
             session_id = self._start_goal(client)
             first = self._post_drift(client, 1)
-            ok = client.post(
-                "/observations/browser-nav",
-                json={
-                    "source": "browser_nav",
-                    "payload": {
-                        "url": "https://example.com/api",
-                        "title": "Kibitzer observation API docs",
-                    },
-                },
-            ).json()
+            ok = self._post_ok(client, 1)
             second = self._post_drift(client, 2)
         finally:
             client.__exit__(None, None, None)
@@ -109,6 +112,47 @@ class ControllerHandshakeTest(unittest.TestCase):
         self.assertEqual(fourth["action"], "none")
         state = self.store.get_controller_state(session_id)
         self.assertEqual(state.streak, 2)
+
+    def test_window_controller_catches_interleaved_drift(self) -> None:
+        client = self._client(
+            ControllerConfig(type="window", k=3, window_size=5, coldstart_observations=1, cooldown_seconds=0)
+        )
+        try:
+            session_id = self._start_goal(client)
+            first = self._post_drift(client, 1)
+            self._post_ok(client, 1)
+            second = self._post_drift(client, 2)
+            self._post_ok(client, 2)
+            third = self._post_drift(client, 3)
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertEqual(first["action"], "none")
+        self.assertEqual(second["action"], "none")
+        self.assertEqual(third["action"], "request_excerpt")
+        state = self.store.get_controller_state(session_id)
+        self.assertEqual(state.obs_count, 5)
+        self.assertEqual(state.streak, 0)
+        self.assertIsNotNone(state.last_intervention_ts)
+
+    def test_streak_controller_ignores_interleaved_drift(self) -> None:
+        client = self._client(
+            ControllerConfig(type="streak", k=3, window_size=5, coldstart_observations=1, cooldown_seconds=0)
+        )
+        try:
+            session_id = self._start_goal(client)
+            self._post_drift(client, 1)
+            self._post_ok(client, 1)
+            self._post_drift(client, 2)
+            self._post_ok(client, 2)
+            third = self._post_drift(client, 3)
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertEqual(third["action"], "none")
+        state = self.store.get_controller_state(session_id)
+        self.assertEqual(state.obs_count, 5)
+        self.assertEqual(state.streak, 1)
 
     def test_snooze_blocks_request_excerpt(self) -> None:
         client = self._client(ControllerConfig(k=2, coldstart_observations=1, cooldown_seconds=0))
@@ -142,11 +186,14 @@ class ControllerHandshakeTest(unittest.TestCase):
         finally:
             client.__exit__(None, None, None)
 
-        with sqlite3.connect(self.db_path) as conn:
+        conn = sqlite3.connect(self.db_path)
+        try:
             count = conn.execute(
                 "SELECT COUNT(*) FROM event_log WHERE session_id = ? AND event_type = 'intervention.request_excerpt'",
                 (session_id,),
             ).fetchone()[0]
+        finally:
+            conn.close()
         self.assertEqual(response["action"], "request_excerpt")
         self.assertEqual(count, 1)
 

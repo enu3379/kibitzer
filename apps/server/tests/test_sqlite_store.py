@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from apps.server.app.storage.sqlite import NoActiveSessionError, SQLiteStore
@@ -24,7 +25,7 @@ class SQLiteStoreTest(unittest.TestCase):
 
         self.assertIsNotNone(current)
         self.assertEqual(current.session.id, second.id)
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             active_count = conn.execute("SELECT COUNT(*) FROM sessions WHERE active = 1").fetchone()[0]
             first_active = conn.execute("SELECT active FROM sessions WHERE id = ?", (first.id,)).fetchone()[0]
         self.assertEqual(active_count, 1)
@@ -47,7 +48,7 @@ class SQLiteStoreTest(unittest.TestCase):
         self.assertEqual(current.goal.raw_text, "revise the talk")
         self.assertEqual(current.goal.keywords, ["slides"])
 
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             goals = conn.execute("SELECT COUNT(*) FROM goals WHERE session_id = ?", (session.id,)).fetchone()[0]
             goal_events = conn.execute(
                 "SELECT COUNT(*) FROM event_log WHERE session_id = ? AND event_type = 'goal.declared'",

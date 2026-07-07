@@ -59,6 +59,7 @@ relevance:
 controller:
   type: "streak"
   k: 3
+  window_size: 5
   cooldown_seconds: 300
   snooze_seconds: 1800
   coldstart_observations: 5

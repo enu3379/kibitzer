@@ -45,8 +45,10 @@ class SessionStateResponse(BaseModel):
     session_id: str
     has_goal: bool
     tracking: str
+    controller_type: str
     streak: int
     streak_threshold: int
+    window_size: int
     obs_count: int
     coldstart_observations: int
     snoozed_until: str | None = None
@@ -132,6 +134,17 @@ async def get_current_state(request: Request) -> SessionStateResponse:
     controller_config = effective_controller_config(request.app.state.config, store)
     state = store.get_controller_state(current.session.id)
     now = datetime.now(timezone.utc)
+    drift_score = state.streak
+    if controller_config.type == "window":
+        drift_score = sum(
+            1
+            for verdict in store.recent_verdicts(
+                current.session.id,
+                controller_config.window_size,
+                after=state.last_intervention_ts,
+            )
+            if verdict == "DRIFT"
+        )
 
     cooldown_until = None
     if state.last_intervention_ts:
@@ -154,8 +167,10 @@ async def get_current_state(request: Request) -> SessionStateResponse:
         session_id=current.session.id,
         has_goal=current.goal is not None,
         tracking=tracking,
-        streak=state.streak,
+        controller_type=controller_config.type,
+        streak=drift_score,
         streak_threshold=controller_config.k,
+        window_size=controller_config.window_size,
         obs_count=state.obs_count,
         coldstart_observations=controller_config.coldstart_observations,
         snoozed_until=state.snoozed_until.isoformat() if snoozed else None,

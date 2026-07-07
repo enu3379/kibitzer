@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -93,7 +94,7 @@ class FeedbackApiTest(unittest.TestCase):
         self.assertTrue(duplicate["duplicate"])
         self.assertEqual(duplicate["exemplar_count"], 2)
         self.assertEqual(self.store.goal_exemplar_count(session_id), 2)
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             feedback_count = conn.execute("SELECT COUNT(*) FROM feedback WHERE kind = 'related'").fetchone()[0]
         self.assertEqual(feedback_count, 1)
 
@@ -174,7 +175,7 @@ class FeedbackApiTest(unittest.TestCase):
             client.__exit__(None, None, None)
 
         self.assertEqual(response["intervention_status"], "accepted")
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             status = conn.execute("SELECT status FROM interventions WHERE id = ?", (notification["intervention_id"],)).fetchone()[0]
         self.assertEqual(status, "accepted")
 

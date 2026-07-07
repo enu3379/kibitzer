@@ -10,6 +10,7 @@ Read these in order when starting work:
 6. [Progress](progress.md)
 7. [Replay Harness](replay-harness.md)
 8. [LLM Wiki Integration](llm-wiki-integration.md)
+9. [Judgment Audit Plan](judgment-audit-plan.md)
 
 ## Stage Boundaries
 

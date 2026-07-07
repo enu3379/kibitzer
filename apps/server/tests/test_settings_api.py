@@ -47,6 +47,7 @@ class SettingsApiTest(unittest.TestCase):
         defaults = self.client.get("/settings").json()
         self.assertEqual(defaults["persona"], "dry_kibitzer")
         self.assertFalse(defaults["voice_enabled"])
+        self.assertEqual(defaults["controller"], {"type": "streak", "k": 1, "window_size": 5})
         self.assertEqual(defaults["cooldown"], {"enabled": False, "seconds": 0})
         self.assertEqual(defaults["quiet_hours"], {"enabled": False, "start": "09:00", "end": "18:00"})
 
@@ -55,6 +56,7 @@ class SettingsApiTest(unittest.TestCase):
             json={
                 "persona": "quiet_coach",
                 "voice_enabled": True,
+                "controller": {"type": "window", "k": 3, "window_size": 5},
                 "cooldown": {"enabled": True, "seconds": 30},
                 "quiet_hours": {"enabled": True, "start": "22:30", "end": "07:15"},
             },
@@ -62,15 +64,22 @@ class SettingsApiTest(unittest.TestCase):
 
         self.assertEqual(updated["persona"], "quiet_coach")
         self.assertTrue(updated["voice_enabled"])
+        self.assertEqual(updated["controller"], {"type": "window", "k": 3, "window_size": 5})
         self.assertEqual(updated["cooldown"], {"enabled": True, "seconds": 30})
         self.assertEqual(updated["quiet_hours"], {"enabled": True, "start": "22:30", "end": "07:15"})
         self.assertEqual(self.client.get("/settings").json(), updated)
 
-        with sqlite3.connect(self.db_path) as conn:
+        conn = sqlite3.connect(self.db_path)
+        try:
             event = conn.execute(
                 "SELECT payload_json FROM event_log WHERE event_type = 'settings.updated'"
             ).fetchone()[0]
-        self.assertEqual(json.loads(event)["keys"], ["cooldown", "persona", "quiet_hours", "voice_enabled"])
+        finally:
+            conn.close()
+        self.assertEqual(
+            json.loads(event)["keys"],
+            ["controller", "cooldown", "persona", "quiet_hours", "voice_enabled"],
+        )
 
     def test_settings_validation(self) -> None:
         self.assertEqual(self.client.put("/settings", json={"persona": "missing"}).status_code, 400)
@@ -81,6 +90,10 @@ class SettingsApiTest(unittest.TestCase):
         self.assertEqual(
             self.client.put("/settings", json={"cooldown": {"seconds": -1}}).status_code,
             422,
+        )
+        self.assertEqual(
+            self.client.put("/settings", json={"controller": {"type": "window", "k": 6, "window_size": 5}}).status_code,
+            400,
         )
 
 

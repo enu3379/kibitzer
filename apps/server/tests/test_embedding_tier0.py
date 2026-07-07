@@ -3,6 +3,7 @@ import math
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -129,7 +130,7 @@ class Tier0ApiTest(unittest.TestCase):
         self.assertEqual([obs.verdict for obs in observations], ["DRIFT", "OK"])
         self.assertEqual(len(self.store.recent_ok_embeddings(session_id, limit=10)), 1)
 
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             drift_features = json.loads(
                 conn.execute(
                     "SELECT features_json FROM observations WHERE verdict = 'DRIFT'",

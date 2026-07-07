@@ -6,6 +6,7 @@ from ..config import ControllerConfig
 from ..schemas import Observation, PageInfo, PipelineAction, PipelineResult, Verdict
 from ..storage.sqlite import SQLiteStore
 from .controllers.streak import StreakController
+from .controllers.window import WindowController
 
 
 def apply_controller(
@@ -22,15 +23,34 @@ def apply_controller(
         )
 
     state = store.get_controller_state(observation.session_id)
-    controller = StreakController(
-        k=config.k,
-        cooldown_seconds=config.cooldown_seconds,
-        coldstart_observations=config.coldstart_observations,
-        streak=state.streak,
-        obs_count=state.obs_count,
-        last_intervention_ts=state.last_intervention_ts,
-        snoozed_until=state.snoozed_until,
-    )
+    if config.type == "window":
+        controller = WindowController(
+            k=config.k,
+            window_size=config.window_size,
+            cooldown_seconds=config.cooldown_seconds,
+            coldstart_observations=config.coldstart_observations,
+            recent_verdicts=tuple(
+                store.recent_verdicts(
+                    observation.session_id,
+                    config.window_size,
+                    after=state.last_intervention_ts,
+                )
+            ),
+            streak=state.streak,
+            obs_count=state.obs_count,
+            last_intervention_ts=state.last_intervention_ts,
+            snoozed_until=state.snoozed_until,
+        )
+    else:
+        controller = StreakController(
+            k=config.k,
+            cooldown_seconds=config.cooldown_seconds,
+            coldstart_observations=config.coldstart_observations,
+            streak=state.streak,
+            obs_count=state.obs_count,
+            last_intervention_ts=state.last_intervention_ts,
+            snoozed_until=state.snoozed_until,
+        )
     controller.update(observation.verdict, observation.features.r_final)
     now = datetime.now(timezone.utc)
 

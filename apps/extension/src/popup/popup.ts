@@ -1,4 +1,5 @@
 import {
+  ControllerType,
   FeedbackKind,
   PendingIntervention,
   SessionState,
@@ -30,6 +31,11 @@ const PERSONAS: { key: string; name: string; hint: string }[] = [
   { key: "chungcheong", name: "느긋한 이웃", hint: "말을 아끼는 함축 화법" },
   { key: "kyoto", name: "교토식 안주인", hint: "칭찬으로 포장한 지적" },
   { key: "quiet_coach", name: "조용한 코치", hint: "수치심 없는 리다이렉트" },
+]
+
+const CONTROLLERS: { type: ControllerType; label: string; hint: string }[] = [
+  { type: "window", label: "A안", hint: "최근 흐름" },
+  { type: "streak", label: "B안", hint: "연속 이탈" },
 ]
 
 const root = document.getElementById("root") as HTMLElement
@@ -135,6 +141,7 @@ function renderSetup(sessionExists: boolean, currentGoal = ""): void {
   })
   document.getElementById("goal-cancel")?.addEventListener("click", () => {
     editing = false
+    settingsOpen = false
     void refresh()
   })
 }
@@ -177,6 +184,11 @@ function renderDashboard(state: SessionState, goalText: string, stats: SessionSt
     `<span class="dot${index < state.streak ? " filled" : ""}"></span>`,
   ).join("")
   const snoozed = state.tracking === "snoozed"
+  const driftLabel = state.controller_type === "window" ? "이탈 누적" : "연속 이탈"
+  const driftHint =
+    state.controller_type === "window"
+      ? `최근 ${state.window_size}개 관측 중 ${state.streak_threshold}회 이탈이면 한 번 말을 겁니다.`
+      : `${state.streak_threshold}회 연속 이탈 시에만 한 번 말을 겁니다.`
 
   const pending = state.pending_intervention
   const pendingCard = pending
@@ -202,9 +214,9 @@ function renderDashboard(state: SessionState, goalText: string, stats: SessionSt
       <p class="goal-text">${esc(goalText)}</p>
       <button id="goal-edit" class="icon-btn" title="목표 수정">수정</button>
     </div>
-    <p class="label">드리프트 누적</p>
+    <p class="label">${driftLabel}</p>
     <div class="dots">${dots}<span class="count">${Math.min(state.streak, state.streak_threshold)} / ${state.streak_threshold}</span></div>
-    <p class="hint">${state.streak_threshold}회 연속 이탈 시에만 한 번 말을 겁니다.</p>
+    <p class="hint">${driftHint}</p>
     <div class="cards">
       <div class="card"><p class="k">관측</p><p class="v">${stats ? stats.observations : "–"}</p></div>
       <div class="card"><p class="k">목표 관련</p><p class="v">${stats ? formatRatio(stats.related_ratio) : "–"}</p></div>
@@ -319,7 +331,13 @@ async function openSettings(): Promise<void> {
     schedulePoll()
     return
   }
-  renderSettings(settings)
+  try {
+    renderSettings(settings)
+  } catch {
+    settingsOpen = false
+    renderUnreachable()
+    schedulePoll()
+  }
 }
 
 function closeSettings(): void {
@@ -335,6 +353,15 @@ function renderSettings(settings: Settings): void {
       <span class="phint">${esc(persona.hint)}</span>
     </div>`,
   ).join("")
+  const controllerButtons = CONTROLLERS.map(
+    (controller) => `
+      <button class="segbtn${controller.type === settings.controller.type ? " sel" : ""}"
+        data-controller="${controller.type}">
+        <span>${controller.label}</span><small>${controller.hint}</small>
+      </button>`,
+  ).join("")
+  const thresholdLabel = settings.controller.type === "window" ? "이탈 횟수" : "연속 횟수"
+  const windowDisabled = settings.controller.type === "window" ? "" : "disabled"
 
   root.innerHTML = `
     <div class="header">
@@ -343,6 +370,21 @@ function renderSettings(settings: Settings): void {
     </div>
     <p class="label">페르소나</p>
     <div class="pers">${personaCards}</div>
+    <p class="label">개입 방식</p>
+    <div class="seg">${controllerButtons}</div>
+    <div class="setrow">
+      <span class="grow">${thresholdLabel}</span>
+      <input id="controller-k" class="number" type="number" min="1" max="20" step="1"
+        value="${settings.controller.k}" />
+      <span style="color: var(--muted);">회</span>
+    </div>
+    <div class="setrow">
+      <span class="grow">최근 관측</span>
+      <input id="controller-window" class="number" type="number" min="1" max="50" step="1"
+        value="${settings.controller.window_size}" ${windowDisabled} />
+      <span style="color: var(--muted);">개</span>
+    </div>
+    <p class="subhint">A안은 최근 관측 안의 이탈 수, B안은 연속 이탈 수로 판단합니다.</p>
     <div class="setrow">
       <span class="grow">소리 내어 말하기</span>
       <input id="voice-toggle" type="checkbox" ${settings.voice_enabled ? "checked" : ""} />
@@ -375,6 +417,46 @@ function renderSettings(settings: Settings): void {
       if (key && key !== settings.persona) void applySettings({ persona: key })
     })
   })
+  root.querySelectorAll<HTMLElement>(".segbtn").forEach((button) => {
+    button.addEventListener("click", () => {
+      const type = button.dataset.controller as ControllerType | undefined
+      if (!type || type === settings.controller.type) return
+      void applySettings({
+        controller: {
+          type,
+          window_size: type === "window" ? Math.max(settings.controller.window_size, settings.controller.k) : settings.controller.window_size,
+        },
+      })
+    })
+  })
+  const updateControllerK = (event: Event) => {
+    const k = Number.parseInt((event.target as HTMLInputElement).value, 10)
+    if (!Number.isFinite(k) || k < 1) return
+    void applySettings({
+      controller: {
+        k,
+        window_size:
+          settings.controller.type === "window"
+            ? Math.max(settings.controller.window_size, k)
+            : settings.controller.window_size,
+      },
+    })
+  }
+  document.getElementById("controller-k")?.addEventListener("input", updateControllerK)
+  document.getElementById("controller-k")?.addEventListener("change", updateControllerK)
+
+  const updateControllerWindow = (event: Event) => {
+    const windowSize = Number.parseInt((event.target as HTMLInputElement).value, 10)
+    if (!Number.isFinite(windowSize) || windowSize < 1) return
+    void applySettings({
+      controller: {
+        window_size: windowSize,
+        k: settings.controller.type === "window" ? Math.min(settings.controller.k, windowSize) : settings.controller.k,
+      },
+    })
+  }
+  document.getElementById("controller-window")?.addEventListener("input", updateControllerWindow)
+  document.getElementById("controller-window")?.addEventListener("change", updateControllerWindow)
   document.getElementById("voice-toggle")?.addEventListener("change", (event) => {
     void applySettings({ voice_enabled: (event.target as HTMLInputElement).checked })
   })

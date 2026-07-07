@@ -57,8 +57,10 @@ export interface SessionState {
   session_id: string
   has_goal: boolean
   tracking: "coldstart" | "tracking" | "snoozed" | "cooldown"
+  controller_type: ControllerType
   streak: number
   streak_threshold: number
+  window_size: number
   obs_count: number
   coldstart_observations: number
   snoozed_until?: string | null
@@ -179,9 +181,18 @@ export interface Cooldown {
   seconds: number
 }
 
+export type ControllerType = "streak" | "window"
+
+export interface ControllerSettings {
+  type: ControllerType
+  k: number
+  window_size: number
+}
+
 export interface Settings {
   persona: string
   voice_enabled: boolean
+  controller: ControllerSettings
   cooldown: Cooldown
   quiet_hours: QuietHours
 }
@@ -189,14 +200,50 @@ export interface Settings {
 export interface SettingsPatch {
   persona?: string
   voice_enabled?: boolean
+  controller?: Partial<ControllerSettings>
   cooldown?: Partial<Cooldown>
   quiet_hours?: Partial<QuietHours>
+}
+
+function normalizeSettings(value: Partial<Settings>): Settings {
+  const rawController = (value.controller ?? {}) as Partial<ControllerSettings>
+  const rawCooldown = (value.cooldown ?? {}) as Partial<Cooldown>
+  const rawQuietHours = (value.quiet_hours ?? {}) as Partial<QuietHours>
+  const controllerType: ControllerType = rawController.type === "window" ? "window" : "streak"
+  const k = clampInt(rawController.k, 3, 1, 20)
+  const windowSize = clampInt(rawController.window_size, Math.max(5, k), controllerType === "window" ? k : 1, 50)
+
+  return {
+    persona: typeof value.persona === "string" ? value.persona : "dry_kibitzer",
+    voice_enabled: Boolean(value.voice_enabled),
+    controller: {
+      type: controllerType,
+      k,
+      window_size: windowSize,
+    },
+    cooldown: {
+      enabled: Boolean(rawCooldown.enabled),
+      seconds: clampInt(rawCooldown.seconds, 0, 0, 86400),
+    },
+    quiet_hours: {
+      enabled: Boolean(rawQuietHours.enabled),
+      start: typeof rawQuietHours.start === "string" ? rawQuietHours.start : "09:00",
+      end: typeof rawQuietHours.end === "string" ? rawQuietHours.end : "18:00",
+    },
+  }
+}
+
+function clampInt(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.min(max, Math.max(min, Math.trunc(parsed)))
 }
 
 export async function getSettings(): Promise<Settings | null> {
   const response = await fetch(`${SERVER_BASE_URL}/settings`).catch(() => null)
   if (!response?.ok) return null
-  return response.json() as Promise<Settings>
+  const body = (await response.json()) as Partial<Settings>
+  return normalizeSettings(body)
 }
 
 export async function putSettings(patch: SettingsPatch): Promise<Settings | null> {
@@ -206,7 +253,8 @@ export async function putSettings(patch: SettingsPatch): Promise<Settings | null
     body: JSON.stringify(patch),
   }).catch(() => null)
   if (!response?.ok) return null
-  return response.json() as Promise<Settings>
+  const body = (await response.json()) as Partial<Settings>
+  return normalizeSettings(body)
 }
 
 export async function getSessionState(): Promise<SessionStateResult> {

@@ -1069,6 +1069,29 @@ class SQLiteStore:
             for row in reversed(rows)
         ]
 
+    def recent_verdicts(
+        self,
+        session_id: str,
+        limit: int,
+        after: datetime | None = None,
+    ) -> list[str]:
+        after_text = after.isoformat() if after else None
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                """
+                SELECT verdict
+                FROM observations
+                WHERE session_id = ?
+                  AND verdict IS NOT NULL
+                  AND (? IS NULL OR ts > ?)
+                ORDER BY ts DESC, id DESC
+                LIMIT ?
+                """,
+                (session_id, after_text, after_text, limit),
+            ).fetchall()
+        return [row["verdict"] for row in reversed(rows)]
+
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.db_path)

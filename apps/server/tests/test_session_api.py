@@ -1,7 +1,8 @@
 import tempfile
 import unittest
-from pathlib import Path
 import sqlite3
+from contextlib import closing
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -42,7 +43,7 @@ class SessionApiTest(unittest.TestCase):
         self.assertEqual(current_response.json()["goal"]["keywords"], ["api"])
 
         db_path = Path(self.tmpdir.name) / "kibitzer.sqlite3"
-        with sqlite3.connect(db_path) as conn:
+        with closing(sqlite3.connect(db_path)) as conn:
             exemplar = conn.execute(
                 "SELECT vector_json FROM goal_exemplars WHERE session_id = ?",
                 (session_id,),

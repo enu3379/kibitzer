@@ -3,6 +3,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -119,7 +120,7 @@ class Tier1ResilienceAndFactoryTest(unittest.TestCase):
             observation = store.list_observations(session_id)[0]
             self.assertEqual(observation.verdict, "DRIFT")
             self.assertEqual(observation.tier_reached, 0)
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn:
                 count = conn.execute(
                     "SELECT COUNT(*) FROM event_log WHERE event_type = 'tier1.provider_error'"
                 ).fetchone()[0]
@@ -169,7 +170,7 @@ class Tier1ResilienceAndFactoryTest(unittest.TestCase):
             client = TestClient(create_app(config=config, store=store))
             client.__enter__()
             try:
-                with sqlite3.connect(self.db_path) as conn:
+                with closing(sqlite3.connect(self.db_path)) as conn:
                     rows = conn.execute(
                         "SELECT payload_json FROM event_log WHERE event_type = 'provider.degraded'"
                     ).fetchall()
@@ -243,7 +244,7 @@ class Tier1ApiTest(unittest.TestCase):
         observations = store.list_observations(session_id)
         self.assertEqual(observations[-1].verdict, "OK")
         self.assertEqual(observations[-1].tier_reached, 1)
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             event = conn.execute(
                 "SELECT payload_json FROM event_log WHERE event_type = 'tier1.classified'"
             ).fetchone()[0]
