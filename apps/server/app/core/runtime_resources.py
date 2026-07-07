@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -53,6 +54,40 @@ class RuntimeResources:
             "mode": self.mode,
             "active_since": self._active_since.isoformat() if self._active_since else None,
         }
+
+    def tier_status(self) -> dict[str, str]:
+        """Judge-provider health for /health. Must not activate() — /health is
+        polled from idle and waking the runtime would defeat the idle daemon."""
+        return {
+            "tier1": self._describe_tier(
+                self.config.tier1.enabled,
+                self._tier1_initialized,
+                self._tier1_provider,
+                lambda: create_tier1_judge_provider(self.config.tier1),
+            ),
+            "tier2": self._describe_tier(
+                self.config.tier2.enabled,
+                self._tier2_initialized,
+                self._tier2_provider,
+                lambda: create_tier2_judge_provider(self.config.tier2),
+            ),
+        }
+
+    def _describe_tier(
+        self,
+        enabled: bool,
+        initialized: bool,
+        provider: JudgeProvider | None,
+        probe: Callable[[], JudgeProvider | None],
+    ) -> str:
+        if not enabled:
+            return "disabled"
+        if initialized:
+            return "active" if provider is not None else "degraded"
+        try:
+            return "active" if probe() is not None else "degraded"
+        except Exception:
+            return "degraded"
 
     def activate(self, reason: str) -> None:
         if self._active_since is None:

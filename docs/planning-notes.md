@@ -41,6 +41,40 @@ Critical-path insight: the whole audit plan is gated on the **Replay CLI**
 (long-deferred WP10). Its Step 0 is "label the log and build histograms," which
 needs a replay harness. So the Replay CLI is the true unlock.
 
+### Evidence: 2026-07-08 "LG그램 수리" session (sess_f249ac14…)
+
+A 6-minute live session failed in *both* directions, all at Tier 0
+(`tier_reached=0` on every row):
+
+1. **Cold-start FALSE DRIFTs ×6** — the user booking the repair (LG 서비스센터 /
+   고객지원 / 출장 예약) scored r0 0.06–0.13 because "수리" shares no CJK bigrams
+   with "서비스센터/예약" and `keywords_json` was `[]` (no goal enrichment → D3).
+2. **Anchor hijack FALSE OKs ×5** — "킬로그램 - 나무위키" entered OK via the
+   "그램" bigram, its "나무위키" title furniture entered the anchor (mean of last
+   10 OK embeddings), and then Giggle/미니언즈/현덕왕후/호날두 all rode
+   `0.85 × cos(anchor)` past τ=0.15. The reference frame drifted with the user —
+   platform self-whitelisting without any feedback click.
+3. **Why Tier 0 only:** Tier 1/2 run as `provider: experiment`, which reads
+   `configs/models.local.yaml` — the file is missing on this Mac (likely lost in
+   the Windows-packaging config-path change; a 07-06 `tier1.provider_error:
+   ReadTimeout` proves Tier 1 used to run). Since 07-07 every server start logs
+   `provider.degraded credentials_missing` — silently, nowhere user-visible.
+   Ollama itself is up (qwen3.6:27b, gemma4:26b, gemma4:e4b).
+
+**Agreed fixes — all IMPLEMENTED 2026-07-08 (78 server tests green):**
+(1) per-host repeated-title-suffix stripping in normalization ("- 나무위키" /
+"| LG전자" furniture) — `strip_repeated_title_suffix`; (2) anchor admission
+guard: pages whose OK came only from the anchor path (exemplar score <
+`relevance.anchor_epsilon`, default 0.05) or that weren't LLM-vetted keep the OK
+verdict but are NOT admitted into the anchor — `features.anchor_eligible`,
+filtered in `recent_ok_embeddings`; (3) `models.local.yaml` restored (tier1 →
+gemma4:e4b, tier2 → gemma4:26b; live `/health` shows `tiers: active`) and tier
+degradation surfaced in `/health` + a popup warning ("판정 축소 모드").
+Regression test `test_drift_fixes.py` replays the 나무위키 chain end-to-end.
+Still deferred to the audit plan as scheduled — goal enrichment (D3) and
+threshold tuning via Replay CLI (D4). Note Tier 1 only reviews Tier-0 DRIFTs
+(false-nag rescue); the FALSE-OK side is carried entirely by fixes 1–2.
+
 ## Open decisions
 
 ### D1 — Sequencing → RESOLVED (2026-07-07)
@@ -149,3 +183,16 @@ the extension badge.
 - 2026-07-07: Menubar-mono SVGs (monitor + wall) got the transparent separation
   slit actually implemented (was spec-only under D2) — head/screen read apart at
   large + retina; softens toward true 18px, where eyes + silhouette carry it.
+- 2026-07-08: Live-session audit evidence captured (see "Evidence" under the
+  pivot section): dual-direction Tier-0 failures + silent tier degradation.
+  Fixes 1–3 agreed for now; D3/D4 stay the structural track. Also agreed in
+  principle: in-page toast notifications replacing OS notification popups
+  (mockup approved-ish, implementation pending go), since macOS banners are
+  suppressed by user notification settings and the user dislikes OS popups.
+- 2026-07-08 (later): Everything above shipped in one pass — detection fixes
+  1–3 implemented with regression tests (78 green), and the **in-page toast**
+  implemented (`toastOverlay.ts` shadow-DOM overlay, peek-over character,
+  버튼 related/snooze + body=accepted + ✕/25s dismiss; system notification kept
+  as fallback for non-injectable pages; ding.wav unchanged). Toast verified in
+  a live browser preview, light+dark. P1 handoff updated so Codex's celebration
+  and "5분만" ride the toast surface (3-button layout now possible in-page).

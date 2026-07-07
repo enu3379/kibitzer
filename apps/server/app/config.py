@@ -27,6 +27,10 @@ class RelevanceConfig(BaseModel):
     beta: float = 0.85
     anchor_window: int = 10
     exemplar_cap: int = 20
+    # Anchor admission: a page whose OK came only through the anchor path
+    # (goal-exemplar similarity below this) keeps its verdict but must not
+    # join the anchor, or the reference frame drifts with the user.
+    anchor_epsilon: float = 0.05
 
 
 class Tier1SendConfig(BaseModel):

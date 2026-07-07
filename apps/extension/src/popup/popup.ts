@@ -1,12 +1,14 @@
 import {
   ControllerType,
   FeedbackKind,
+  HealthTiers,
   PendingIntervention,
   SessionState,
   SessionStats,
   Settings,
   createSession,
   getCurrentSession,
+  getHealthTiers,
   getSessionState,
   getSessionStats,
   getSettings,
@@ -112,8 +114,12 @@ async function refresh(): Promise<void> {
     renderSetup(true)
     return
   }
-  const [current, stats] = await Promise.all([getCurrentSession(), getSessionStats()])
-  renderDashboard(result.state, current?.goal?.raw_text ?? "", stats)
+  const [current, stats, tiers] = await Promise.all([
+    getCurrentSession(),
+    getSessionStats(),
+    getHealthTiers(),
+  ])
+  renderDashboard(result.state, current?.goal?.raw_text ?? "", stats, tiers)
   schedulePoll()
 }
 
@@ -179,7 +185,12 @@ async function submitGoal(sessionExists: boolean): Promise<void> {
   await refresh()
 }
 
-function renderDashboard(state: SessionState, goalText: string, stats: SessionStats | null): void {
+function renderDashboard(
+  state: SessionState,
+  goalText: string,
+  stats: SessionStats | null,
+  tiers: HealthTiers | null = null,
+): void {
   const pill = TRACKING_PILLS[state.tracking] ?? TRACKING_PILLS.tracking
   const pillLabel =
     state.tracking === "coldstart"
@@ -197,6 +208,14 @@ function renderDashboard(state: SessionState, goalText: string, stats: SessionSt
   const driftHint = isAlignment
     ? `정렬도 ${formatScore(state.theta_low)} 미만이면 말하고, ${formatScore(state.theta_high)} 초과면 회복으로 봅니다.`
     : `${state.streak_threshold}회 연속 이탈 시에만 한 번 말을 겁니다.`
+
+  const degraded = tiers?.tier1 === "degraded" || tiers?.tier2 === "degraded"
+  const degradedNote = degraded
+    ? `
+    <div style="background: var(--amber-bg); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px;">
+      <p style="margin: 0; font-size: 12px; color: var(--amber-tx);">판정 축소 모드 — LLM 판정 없이 어휘 매칭만 쓰는 중이에요. configs/models.local.yaml을 확인하세요.</p>
+    </div>`
+    : ""
 
   const pending = state.pending_intervention
   const pendingCard = pending
@@ -216,6 +235,7 @@ function renderDashboard(state: SessionState, goalText: string, stats: SessionSt
     <div style="display: flex; justify-content: flex-end; margin: -8px 0 6px;">
       <button id="open-settings" class="icon-btn">설정</button>
     </div>
+    ${degradedNote}
     ${pendingCard}
     <p class="label">오늘의 목표</p>
     <div class="goal-row">

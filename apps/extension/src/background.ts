@@ -1,4 +1,5 @@
 import { extractPageExcerpt } from "./content/readabilityExtract"
+import { showKibitzerToast } from "./content/toastOverlay"
 import {
   FeedbackKind,
   PageInfo,
@@ -17,6 +18,7 @@ const TIER2_DWELL_MS = 10000
 const EXCERPT_LIMIT = 3500
 const NOTIFICATION_ICON = "icons/icon-128.png"
 const BADGE_ALARM = "kibitzer-badge-refresh"
+const TOAST_AUTO_DISMISS_MS = 25000
 // Chrome notifications support at most 2 action buttons; creating with 3 throws
 // and the notification never appears. "accepted" maps to clicking the body.
 const NOTIFICATION_BUTTONS: FeedbackKind[] = ["related", "snooze"]
@@ -113,7 +115,7 @@ async function handlePipelineResult(
   const finalResult = await postObservationExcerpt(result.observation_id, excerpt)
   if (finalResult?.action === "notify" && finalResult.message) {
     if (!(await tabStillOnObservedPage(tabId, observation.url))) return
-    await showNotification(finalResult)
+    await showNotification(finalResult, tabId)
   }
 }
 
@@ -141,7 +143,7 @@ async function extractFromTab(tabId: number): Promise<PageExcerpt | null> {
   }
 }
 
-async function showNotification(result: PipelineResult): Promise<void> {
+async function showNotification(result: PipelineResult, tabId?: number): Promise<void> {
   if (!result.intervention_id || !result.observation_id || !result.message) return
   const silent = (result as PipelineResult & { silent?: boolean }).silent === true
   if (silent) {
@@ -154,6 +156,34 @@ async function showNotification(result: PipelineResult): Promise<void> {
     interventionId: result.intervention_id,
     observationId: result.observation_id,
   })
+
+  // Preferred surface: an in-page toast on the drifting tab. It bypasses OS
+  // notification settings (macOS banners were silently swallowed) and keeps the
+  // kibitzer in the page it is kibitzing.
+  if (tabId !== undefined) {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: showKibitzerToast,
+        args: [
+          {
+            notificationId,
+            message: result.message,
+            contextLabel: pageLabel(result.page) ?? null,
+            autoDismissMs: TOAST_AUTO_DISMISS_MS,
+          },
+        ],
+      })
+      void postDeliveryReport(result.intervention_id, true)
+      void playNotificationSound()
+      return
+    } catch (error) {
+      // Non-injectable surface (chrome:// pages, web store, PDF viewer) —
+      // fall back to the system notification below.
+      console.warn("kibitzer: in-page toast failed, falling back", error)
+    }
+  }
+
   try {
     await chrome.notifications.create(notificationId, {
       type: "basic",
@@ -308,9 +338,20 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === BADGE_ALARM) void refreshBadge()
 })
 
-chrome.runtime.onMessage.addListener((message: { type?: string } | undefined) => {
-  if (message?.type === "kibitzer:refresh-badge") void refreshBadge()
-})
+chrome.runtime.onMessage.addListener(
+  (message: { type?: string; notificationId?: string; kind?: string } | undefined) => {
+    if (message?.type === "kibitzer:refresh-badge") void refreshBadge()
+    if (message?.type === "kibitzer:toast-feedback" && message.notificationId) {
+      const kind = message.kind
+      if (kind === "related" || kind === "accepted" || kind === "snooze") {
+        void submitNotificationFeedback(message.notificationId, kind)
+      } else {
+        // dismissed / timeout: no feedback signal, just stop tracking it.
+        pendingNotifications.delete(message.notificationId)
+      }
+    }
+  },
+)
 
 chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) => {
   void submitNotificationFeedback(notificationId, NOTIFICATION_BUTTONS[buttonIndex])

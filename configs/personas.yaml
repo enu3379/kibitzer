@@ -2,6 +2,8 @@
 # style_prompt is a STYLE layer only; the strict-JSON output contract is composed
 # in code and must never be duplicated or overridden here.
 # Placeholders available in templates: {goal} {title} {host} {nag_count} {return_minutes}
+# celebrate_templates fire only on a real drift-departure -> return (see P1 handoff);
+# the server picks one at random each time, so keep the pool varied and non-repeating.
 #
 # Design brief (2026-07-06, user-directed): no mom-style nagging. Every voice is
 # calm on the surface with a blade underneath. Benchmarks: British black humor
@@ -33,6 +35,10 @@ personas:
     celebrate_templates:
       - "복귀까지 {return_minutes}분. 기록적이라고는 하지 않겠습니다만, 나쁘지 않습니다."
       - "다시 제 국면입니다. 이 정도면 관전할 맛이 납니다."
+      - "돌아오셨군요. 솔직히 조금 놀랐습니다."
+      - "{return_minutes}분간의 외유를 마치고 복귀. 여정이 유익하셨길 바랍니다."
+      - "제자리로 돌아오셨습니다. 이 수는 기보에 남겨둘 만하군요."
+      - "{goal}(으)로 회항하셨습니다. 항로를 아예 잊으신 줄 알았습니다."
     voice:
       voice: "Yuna"
       rate: 175
@@ -59,6 +65,10 @@ personas:
     celebrate_templates:
       - "오셨네요. 뭐, 올 줄 알았어요."
       - "거 봐요, 오니까 좋잖아요."
+      - "돌아왔으면 됐죠, 뭐."
+      - "어, 왔네요. 잘 왔어요."
+      - "{return_minutes}분 만인가요. 뭐, 자리는 안 치웠어요."
+      - "말 안 해도 올 줄 알았어요. 원래 그런 거죠."
     voice:
       voice: "Yuna"
       rate: 150
@@ -85,6 +95,10 @@ personas:
     celebrate_templates:
       - "돌아와 주셨네요. {return_minutes}분밖에 안 걸리셨다니, 발이 참 가벼우세요."
       - "역시 하실 분은 하시네요. 진작 알아봤어요."
+      - "이렇게 돌아와 주시니, 제가 다 마음이 놓이네요."
+      - "{return_minutes}분이면 다녀오기 딱 좋은 시간이지요. 안목이 참 좋으세요."
+      - "기다린 보람이 있네요. 이런 걸음이시라면 얼마든지 기다리지요."
+      - "자리를 아시는 분은 역시 다르세요. 금방 찾아 오시고."
     voice:
       voice: "Yuna"
       rate: 170
@@ -106,6 +120,10 @@ personas:
     celebrate_templates:
       - "돌아오셨네요. 그거면 충분합니다."
       - "{return_minutes}분 만의 복귀, 좋은 신호예요."
+      - "다시 왔네요. 돌아오는 게 제일 어려운 건데, 해냈어요."
+      - "잘 돌아왔어요. 아무 일도 없었던 걸로 하죠."
+      - "여기서부터 다시 하면 됩니다. 좋아요."
+      - "돌아온 것만으로 오늘 몫은 했어요."
     voice:
       voice: "Yuna"
       rate: 165

@@ -1050,10 +1050,32 @@ class SQLiteStore:
         embeddings: list[list[float]] = []
         for row in rows:
             features = json.loads(row["features_json"])
+            # Anchor admission guard: anchor-only OKs (anchor_eligible False) must
+            # not steer the anchor. Rows from before the flag existed pass through.
+            if features.get("anchor_eligible") is False:
+                continue
             emb = features.get("emb")
             if isinstance(emb, list):
                 embeddings.append(emb)
         return list(reversed(embeddings))
+
+    def recent_titles_for_host(self, url_host: str, limit: int = 10) -> list[str]:
+        """Recent titles observed on a host (any session) — title-furniture learning."""
+        if not url_host:
+            return []
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                """
+                SELECT title
+                FROM observations
+                WHERE url_host = ? AND title IS NOT NULL AND title != ''
+                ORDER BY ts DESC, id DESC
+                LIMIT ?
+                """,
+                (url_host, limit),
+            ).fetchall()
+        return [row["title"] for row in rows]
 
     def anchor_value(self, session_id: str, limit: int) -> list[float] | None:
         embeddings = self.recent_ok_embeddings(session_id, limit)

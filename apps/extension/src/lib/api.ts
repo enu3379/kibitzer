@@ -320,3 +320,15 @@ export async function postObservationExcerpt(
   if (!response?.ok) return null
   return response.json() as Promise<PipelineResult>
 }
+
+export interface HealthTiers {
+  tier1?: string
+  tier2?: string
+}
+
+export async function getHealthTiers(): Promise<HealthTiers | null> {
+  const response = await fetch(`${SERVER_BASE_URL}/health`).catch(() => null)
+  if (!response?.ok) return null
+  const body = (await response.json()) as { tiers?: HealthTiers }
+  return body.tiers ?? null
+}
