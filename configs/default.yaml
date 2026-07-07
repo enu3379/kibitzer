@@ -20,6 +20,7 @@ tier1:
   provider: "experiment"
   base_url: "${TIER1_BASE_URL}"
   api_key_env: "ollama1"
+  fallback_api_key_env: "ollama3"
   model: "cheap-classifier"
   timeout_seconds: 10
   recent_observations: 5
@@ -37,7 +38,7 @@ tier2:
   provider: "experiment"
   base_url: "${TIER2_BASE_URL}"
   api_key_env: "ollama2"
-  fallback_api_key_env: null
+  fallback_api_key_env: "ollama3"
   model: "gemma4:31b"
   timeout_seconds: 180
   recent_observations: 5

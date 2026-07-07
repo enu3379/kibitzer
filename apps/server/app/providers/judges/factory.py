@@ -32,7 +32,7 @@ def create_tier1_judge_provider(config: Tier1Config) -> JudgeProvider | None:
             models_file=config.experiment_models_file,
             model_key=config.experiment_model_key,
             api_key_env=config.api_key_env,
-            fallback_api_key_env=None,
+            fallback_api_key_env=config.fallback_api_key_env,
             default_model=config.model,
             timeout_seconds=config.timeout_seconds,
             max_output_tokens=128,
