@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Kibitzer">
+  <!-- peek-over-wall (B2): head behind a green ledge with a light rim; hands drape over the top edge -->
+  <circle cx="64" cy="74" r="36" fill="#1F2937"/>
+  <rect x="8" y="72" width="112" height="42" rx="11" fill="#F9FAFB"/>
+  <rect x="10" y="74" width="108" height="38" rx="9" fill="#10B981"/>
+  <circle cx="51" cy="60" r="8" fill="#F9FAFB"/>
+  <circle cx="77" cy="60" r="8" fill="#F9FAFB"/>
+  <rect x="27" y="69" width="15" height="13" rx="6.5" fill="#1F2937"/>
+  <rect x="86" y="69" width="15" height="13" rx="6.5" fill="#1F2937"/>
+</svg>
