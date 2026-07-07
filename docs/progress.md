@@ -1,5 +1,55 @@
 # Progress
 
+## 2026-07-07 Alignment Controller And Dwell Merge
+
+Session handoff:
+
+- Added [handoff-2026-07-07-alignment-dwell.md](handoff-2026-07-07-alignment-dwell.md)
+  as the durable summary of today's controller, dwell, verification, and runtime
+  state.
+- Preserved the original Korean Kibitzer implementation guideline as
+  [kibitzer-implementation-guideline.md](kibitzer-implementation-guideline.md) and
+  made it the first doc in [README.md](README.md).
+
+Completed:
+
+- Kept B안 as the configurable consecutive-drift controller.
+- Corrected A안 to the original "cumulative alignment + hysteresis" design:
+  `A_t = alpha * A_{t-1} + (1 - alpha) * r_t`, intervene below `theta_low`,
+  recover above `theta_high`.
+- Replaced the earlier window-count controller with `AlignmentController`.
+- Added settings/API/popup support for:
+  - A안: `alignment_alpha`, `theta_low`, `theta_high`;
+  - B안: consecutive drift count `k`.
+- Added legacy handling so stored `"window"` controller settings are interpreted
+  as `"alignment"`.
+- Merged `origin/main`, bringing in dwell-gated navigation judging and the macOS
+  idle daemon runtime-resource changes.
+- Pushed final `main` to `origin/main`.
+
+Current navigation timing:
+
+- A browser navigation observation updates the controller only after the active
+  tab remains on the same URL for 5 seconds.
+- Tier 2 excerpt confirmation waits until the same page has been active for 10
+  seconds total and rechecks the active URL before extraction, submission, and
+  notification display.
+
+Verified:
+
+- `python -m pytest` -> `68 passed`.
+- `$env:Path = 'D:\Program Files;' + $env:Path; npm --prefix apps\extension run build` -> passed.
+- Server restarted on `127.0.0.1:8765`.
+- `/settings`, `/health`, and `/sessions/current/state` responded after restart.
+- `git status --short --branch` was clean and synced with `origin/main` after
+  push.
+
+Next:
+
+- Reload the Chrome extension after pulling, so the background service worker
+  picks up dwell gating.
+- Build the replay harness before further A/B/Page-Hinkley tuning.
+
 ## 2026-07-07 macOS Idle Daemon
 
 Completed:

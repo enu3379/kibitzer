@@ -3,16 +3,17 @@
 Read these in order when starting work:
 
 1. [Kibitzer Implementation Guideline](kibitzer-implementation-guideline.md)
-2. [Implementation Plan](implementation-plan.md)
-3. [Architecture](architecture.md)
-4. [Data Model](data-model.md)
-5. [ML Providers](ml-providers.md)
-6. [Privacy](privacy.md)
-7. [Progress](progress.md)
-8. [Replay Harness](replay-harness.md)
-9. [LLM Wiki Integration](llm-wiki-integration.md)
-10. [Judgment Audit Plan](judgment-audit-plan.md)
-11. [Idle Daemon Plan](idle-daemon-plan.md)
+2. [2026-07-07 Alignment/Dwell Handoff](handoff-2026-07-07-alignment-dwell.md)
+3. [Implementation Plan](implementation-plan.md)
+4. [Architecture](architecture.md)
+5. [Data Model](data-model.md)
+6. [ML Providers](ml-providers.md)
+7. [Privacy](privacy.md)
+8. [Progress](progress.md)
+9. [Replay Harness](replay-harness.md)
+10. [LLM Wiki Integration](llm-wiki-integration.md)
+11. [Judgment Audit Plan](judgment-audit-plan.md)
+12. [Idle Daemon Plan](idle-daemon-plan.md)
 
 ## Stage Boundaries
 
