@@ -16,57 +16,51 @@ Target states:
 dead    no response from http://127.0.0.1:8765/health
 idle    server responds with mode=idle
 active  server responds with mode=active
+unknown server responds without a known mode
 ```
 
 The Chrome extension badge remains the extension-to-server reachability signal.
 The Windows tray icon should show the local process/server state.
 
-## Proposed Phases
+## Current Implementation
 
-### Phase 1: Startup Registration
+The current Windows implementation uses a per-user Startup shortcut rather than
+a scheduled task:
 
-- Add `scripts/windows_install_startup.ps1`.
-- Add `scripts/windows_uninstall_startup.ps1`.
-- Prefer a per-user scheduled task at logon over copying shortcuts into Startup:
-  scheduled tasks give clearer status, logs, and working-directory control.
-- The task should run `scripts/windows_run_server.ps1` from the repository root.
+- `scripts/windows_install_startup_app.ps1` creates the shortcut and starts the
+  tray process immediately if it is not already running.
+- `scripts/windows_startup_tray.ps1` owns the `NotifyIcon`, polls `/health`, and
+  starts `scripts/windows_run_server.ps1` when the server is dead and the local
+  `.venv` exists.
+- `scripts/windows_uninstall_startup_app.ps1` removes the shortcut.
 - Logs should go under `data\logs\`.
+
+Tray icon contract:
+
+- Base artwork comes from the shared Chrome extension icon, preferring
+  `apps\extension\icons\icon-128.png` and falling back to smaller source or
+  built `dist` PNGs.
+- State overlay uses red for `dead`, gray for `idle`, green for `active`, and
+  yellow for `unknown`.
+- The tray must not own judging state. It observes and controls the same server
+  process; it does not run a separate heavy worker.
 
 Acceptance checks:
 
-- `Get-ScheduledTask` shows the Kibitzer task.
-- Logging out/in starts the server without a visible terminal.
+- The Startup folder contains `Kibitzer Server.lnk`.
+- Logging out/in starts the tray process without a visible terminal.
 - `Invoke-RestMethod http://127.0.0.1:8765/health` returns `mode = idle`.
+- The tray context menu can refresh status, start the server, open health, and
+  quit the tray.
 
-### Phase 2: Tray Status
-
-- Add a small tray process that polls `GET /health`.
-- Map state to icon:
-  - `dead`: warning/red
-  - `idle`: gray
-  - `active`: color
-- Tray menu:
-  - Open Chrome extension page or Kibitzer popup instructions.
-  - Open logs folder.
-  - Restart server.
-  - Stop server.
-  - Quit tray.
-
-Recommended implementation:
-
-- Use Python + `pystray` only if packaging remains Python-first.
-- If a Windows installer/app shell is introduced, keep the tray adapter native to
-  that package instead of adding a second long-lived worker.
-
-The tray must not own judging state. It observes and controls the same server
-process; it does not run a separate heavy worker.
-
-### Phase 3: Packaging
+## Future Work
 
 - Add packaging under `packaging/windows/`.
 - Decide whether the packaged app bundles Python or expects the repo `.venv`.
 - Keep API keys and `configs\models.local.yaml` local-only.
 - Preserve manual scripts for development and debugging.
+- Consider a scheduled task or packaged app service wrapper if Startup shortcut
+  visibility/control becomes insufficient.
 
 ## Non-goals
 
@@ -78,8 +72,6 @@ process; it does not run a separate heavy worker.
 
 ## Open Questions
 
-- Whether tray icons should be generated from existing extension icons or have
-  separate Windows-native assets.
 - Whether restart/stop should control a scheduled task, a child process, or a
   packaged app service wrapper.
 - Whether Windows voice should use SAPI later or keep voice disabled until a

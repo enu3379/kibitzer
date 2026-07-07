@@ -6,7 +6,14 @@ $ErrorActionPreference = "Stop"
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $RunScript = Join-Path $Root "scripts\windows_run_server.ps1"
-$IconPath = Join-Path $Root "apps\extension\icons\icon-32.png"
+$IconCandidates = @(
+  (Join-Path $Root "apps\extension\icons\icon-128.png"),
+  (Join-Path $Root "apps\extension\icons\icon-48.png"),
+  (Join-Path $Root "apps\extension\icons\icon-32.png"),
+  (Join-Path $Root "apps\extension\dist\icons\icon-128.png"),
+  (Join-Path $Root "apps\extension\dist\icons\icon-48.png"),
+  (Join-Path $Root "apps\extension\dist\icons\icon-32.png")
+)
 $HealthUrl = "http://127.0.0.1:8765/health"
 $LogDir = Join-Path $Root "data\logs"
 $TrayLog = Join-Path $LogDir "windows-startup-tray.log"
@@ -74,40 +81,48 @@ function Start-KibitzerServer {
   Start-Process -FilePath $PowerShell -ArgumentList $Arguments -WorkingDirectory $Root -WindowStyle Hidden
 }
 
+function Get-KibitzerTrayIconPath {
+  foreach ($Candidate in $IconCandidates) {
+    if (Test-Path $Candidate) {
+      return $Candidate
+    }
+  }
+  return $null
+}
+
 function New-KibitzerTrayIcon {
   param(
     [System.Drawing.Color]$Color
   )
 
-  if (Test-Path $IconPath) {
+  $IconPath = Get-KibitzerTrayIconPath
+  $Bitmap = New-Object System.Drawing.Bitmap 32, 32
+  $BaseGraphics = [System.Drawing.Graphics]::FromImage($Bitmap)
+  $BaseGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+  $BaseGraphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+  $BaseGraphics.Clear([System.Drawing.Color]::Transparent)
+
+  if ($IconPath) {
     $Source = [System.Drawing.Image]::FromFile($IconPath)
-    $Bitmap = New-Object System.Drawing.Bitmap 16, 16
-    $SourceGraphics = [System.Drawing.Graphics]::FromImage($Bitmap)
-    $SourceGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-    $SourceGraphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-    $SourceGraphics.Clear([System.Drawing.Color]::Transparent)
-    $SourceGraphics.DrawImage($Source, 0, 0, 16, 16)
-    $SourceGraphics.Dispose()
+    $BaseGraphics.DrawImage($Source, 2, 2, 26, 26)
     $Source.Dispose()
   }
-  else {
-    $Bitmap = New-Object System.Drawing.Bitmap 16, 16
-    $FallbackGraphics = [System.Drawing.Graphics]::FromImage($Bitmap)
-    $FallbackGraphics.Clear([System.Drawing.Color]::Transparent)
-    $FallbackGraphics.Dispose()
-  }
+  $BaseGraphics.Dispose()
 
   $Graphics = [System.Drawing.Graphics]::FromImage($Bitmap)
   $Graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
 
   $Brush = New-Object System.Drawing.SolidBrush $Color
+  $HaloBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
   $Pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White), 1
-  $Graphics.FillEllipse($Brush, 10, 10, 5, 5)
-  $Graphics.DrawEllipse($Pen, 10, 10, 5, 5)
+  $Graphics.FillEllipse($HaloBrush, 21, 21, 10, 10)
+  $Graphics.FillEllipse($Brush, 22, 22, 8, 8)
+  $Graphics.DrawEllipse($Pen, 22, 22, 8, 8)
 
   $Icon = [System.Drawing.Icon]::FromHandle($Bitmap.GetHicon()).Clone()
 
   $Pen.Dispose()
+  $HaloBrush.Dispose()
   $Brush.Dispose()
   $Graphics.Dispose()
   $Bitmap.Dispose()
