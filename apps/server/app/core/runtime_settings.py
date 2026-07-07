@@ -21,7 +21,9 @@ def runtime_settings(config: AppConfig, store: SQLiteStore) -> dict[str, Any]:
     controller = {
         "type": config.controller.type,
         "k": config.controller.k,
-        "window_size": config.controller.window_size,
+        "alignment_alpha": config.controller.alignment_alpha,
+        "theta_low": config.controller.theta_low,
+        "theta_high": config.controller.theta_high,
     }
     stored_controller = stored.get("controller")
     if isinstance(stored_controller, dict):
@@ -29,9 +31,11 @@ def runtime_settings(config: AppConfig, store: SQLiteStore) -> dict[str, Any]:
             {
                 key: value
                 for key, value in stored_controller.items()
-                if key in {"type", "k", "window_size"}
+                if key in {"type", "k", "alignment_alpha", "theta_low", "theta_high"}
             }
         )
+    if controller["type"] == "window":
+        controller["type"] = "alignment"
 
     cooldown = {
         "enabled": config.controller.cooldown_seconds > 0,
@@ -83,7 +87,9 @@ def effective_controller_config(config: AppConfig, store: SQLiteStore) -> Contro
         update={
             "type": str(controller.get("type") or config.controller.type),
             "k": int(controller.get("k") or config.controller.k),
-            "window_size": int(controller.get("window_size") or config.controller.window_size),
+            "alignment_alpha": _float_setting(controller.get("alignment_alpha"), config.controller.alignment_alpha),
+            "theta_low": _float_setting(controller.get("theta_low"), config.controller.theta_low),
+            "theta_high": _float_setting(controller.get("theta_high"), config.controller.theta_high),
             "cooldown_seconds": seconds if enabled else 0,
         }
     )
@@ -106,3 +112,7 @@ def quiet_hours_active(quiet_hours: dict[str, Any], now: datetime | None = None)
 def _minutes(value: str) -> int:
     hour, minute = value.split(":")
     return int(hour) * 60 + int(minute)
+
+
+def _float_setting(value: Any, fallback: float) -> float:
+    return fallback if value is None else float(value)

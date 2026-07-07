@@ -33,7 +33,9 @@ class SessionLifecycleApiTest(unittest.TestCase):
         coldstart_observations: int = 5,
         controller_type: str = "streak",
         k: int = 3,
-        window_size: int = 5,
+        alignment_alpha: float = 0.85,
+        theta_low: float = 0.15,
+        theta_high: float = 0.3,
     ) -> TestClient:
         config = AppConfig(
             server=ServerConfig(db_path=str(self.db_path)),
@@ -42,7 +44,9 @@ class SessionLifecycleApiTest(unittest.TestCase):
             controller=ControllerConfig(
                 type=controller_type,
                 k=k,
-                window_size=window_size,
+                alignment_alpha=alignment_alpha,
+                theta_low=theta_low,
+                theta_high=theta_high,
                 coldstart_observations=coldstart_observations,
                 cooldown_seconds=300,
                 snooze_seconds=snooze_seconds,
@@ -89,7 +93,9 @@ class SessionLifecycleApiTest(unittest.TestCase):
         self.assertEqual(state["controller_type"], "streak")
         self.assertEqual(state["streak"], 0)
         self.assertEqual(state["streak_threshold"], 3)
-        self.assertEqual(state["window_size"], 5)
+        self.assertIsNone(state["alignment_score"])
+        self.assertIsNone(state["theta_low"])
+        self.assertIsNone(state["theta_high"])
         self.assertEqual(state["obs_count"], 0)
         self.assertIsNone(state["snoozed_until"])
         self.assertIsNone(state["cooldown_until"])
@@ -98,19 +104,27 @@ class SessionLifecycleApiTest(unittest.TestCase):
         state = client.get("/sessions/current/state").json()
         self.assertTrue(state["has_goal"])
 
-    def test_state_reports_window_controller_score(self) -> None:
-        client = self._client(controller_type="window", k=3, window_size=5)
+    def test_state_reports_alignment_controller_score(self) -> None:
+        client = self._client(controller_type="alignment", theta_low=0.2, theta_high=0.6)
         session_id = client.post("/sessions").json()["id"]
         client.post("/sessions/current/goal", json={"raw_text": "Plan a trip to Finland"})
-
-        for verdict in [Verdict.DRIFT, Verdict.OK, Verdict.DRIFT, Verdict.OK, Verdict.DRIFT]:
-            self._seed_observation(session_id, verdict)
+        self.store.save_controller_state(
+            session_id=session_id,
+            streak=1,
+            obs_count=5,
+            last_intervention_ts=None,
+            snoozed_until=None,
+            alignment_score=0.17,
+            drift_latched=True,
+        )
 
         state = client.get("/sessions/current/state").json()
-        self.assertEqual(state["controller_type"], "window")
-        self.assertEqual(state["streak"], 3)
-        self.assertEqual(state["streak_threshold"], 3)
-        self.assertEqual(state["window_size"], 5)
+        self.assertEqual(state["controller_type"], "alignment")
+        self.assertEqual(state["streak"], 1)
+        self.assertEqual(state["streak_threshold"], 1)
+        self.assertEqual(state["alignment_score"], 0.17)
+        self.assertEqual(state["theta_low"], 0.2)
+        self.assertEqual(state["theta_high"], 0.6)
 
     def test_snooze_sets_state_and_zero_duration_clears_it(self) -> None:
         client = self._client(snooze_seconds=900)

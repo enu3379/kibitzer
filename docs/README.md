@@ -2,15 +2,16 @@
 
 Read these in order when starting work:
 
-1. [Implementation Plan](implementation-plan.md)
-2. [Architecture](architecture.md)
-3. [Data Model](data-model.md)
-4. [ML Providers](ml-providers.md)
-5. [Privacy](privacy.md)
-6. [Progress](progress.md)
-7. [Replay Harness](replay-harness.md)
-8. [LLM Wiki Integration](llm-wiki-integration.md)
-9. [Judgment Audit Plan](judgment-audit-plan.md)
+1. [Kibitzer Implementation Guideline](kibitzer-implementation-guideline.md)
+2. [Implementation Plan](implementation-plan.md)
+3. [Architecture](architecture.md)
+4. [Data Model](data-model.md)
+5. [ML Providers](ml-providers.md)
+6. [Privacy](privacy.md)
+7. [Progress](progress.md)
+8. [Replay Harness](replay-harness.md)
+9. [LLM Wiki Integration](llm-wiki-integration.md)
+10. [Judgment Audit Plan](judgment-audit-plan.md)
 
 ## Stage Boundaries
 

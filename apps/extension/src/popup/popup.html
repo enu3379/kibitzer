@@ -68,6 +68,11 @@
       .dot { width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid var(--border); box-sizing: border-box; }
       .dot.filled { background: var(--amber); border-color: var(--amber); }
       .dots .count { font-size: 12px; color: var(--muted); margin-left: 2px; }
+      .scoreline {
+        display: flex; align-items: baseline; gap: 7px; margin-bottom: 2px;
+        color: var(--muted); font-size: 12px;
+      }
+      .scoreline strong { color: var(--text); font-size: 16px; }
       .hint { font-size: 12px; color: var(--muted); margin: 0 0 12px; }
       .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
       .card { background: var(--card); border-radius: 8px; padding: 8px 10px; }

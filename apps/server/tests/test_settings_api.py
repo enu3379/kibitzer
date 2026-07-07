@@ -47,7 +47,10 @@ class SettingsApiTest(unittest.TestCase):
         defaults = self.client.get("/settings").json()
         self.assertEqual(defaults["persona"], "dry_kibitzer")
         self.assertFalse(defaults["voice_enabled"])
-        self.assertEqual(defaults["controller"], {"type": "streak", "k": 1, "window_size": 5})
+        self.assertEqual(
+            defaults["controller"],
+            {"type": "streak", "k": 1, "alignment_alpha": 0.85, "theta_low": 0.15, "theta_high": 0.3},
+        )
         self.assertEqual(defaults["cooldown"], {"enabled": False, "seconds": 0})
         self.assertEqual(defaults["quiet_hours"], {"enabled": False, "start": "09:00", "end": "18:00"})
 
@@ -56,7 +59,7 @@ class SettingsApiTest(unittest.TestCase):
             json={
                 "persona": "quiet_coach",
                 "voice_enabled": True,
-                "controller": {"type": "window", "k": 3, "window_size": 5},
+                "controller": {"type": "alignment", "k": 3, "alignment_alpha": 0.5, "theta_low": 0.25, "theta_high": 0.55},
                 "cooldown": {"enabled": True, "seconds": 30},
                 "quiet_hours": {"enabled": True, "start": "22:30", "end": "07:15"},
             },
@@ -64,7 +67,10 @@ class SettingsApiTest(unittest.TestCase):
 
         self.assertEqual(updated["persona"], "quiet_coach")
         self.assertTrue(updated["voice_enabled"])
-        self.assertEqual(updated["controller"], {"type": "window", "k": 3, "window_size": 5})
+        self.assertEqual(
+            updated["controller"],
+            {"type": "alignment", "k": 3, "alignment_alpha": 0.5, "theta_low": 0.25, "theta_high": 0.55},
+        )
         self.assertEqual(updated["cooldown"], {"enabled": True, "seconds": 30})
         self.assertEqual(updated["quiet_hours"], {"enabled": True, "start": "22:30", "end": "07:15"})
         self.assertEqual(self.client.get("/settings").json(), updated)
@@ -92,7 +98,7 @@ class SettingsApiTest(unittest.TestCase):
             422,
         )
         self.assertEqual(
-            self.client.put("/settings", json={"controller": {"type": "window", "k": 6, "window_size": 5}}).status_code,
+            self.client.put("/settings", json={"controller": {"type": "alignment", "theta_low": 0.7, "theta_high": 0.6}}).status_code,
             400,
         )
 

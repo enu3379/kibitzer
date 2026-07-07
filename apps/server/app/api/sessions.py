@@ -48,7 +48,9 @@ class SessionStateResponse(BaseModel):
     controller_type: str
     streak: int
     streak_threshold: int
-    window_size: int
+    alignment_score: float | None = None
+    theta_low: float | None = None
+    theta_high: float | None = None
     obs_count: int
     coldstart_observations: int
     snoozed_until: str | None = None
@@ -135,16 +137,15 @@ async def get_current_state(request: Request) -> SessionStateResponse:
     state = store.get_controller_state(current.session.id)
     now = datetime.now(timezone.utc)
     drift_score = state.streak
-    if controller_config.type == "window":
-        drift_score = sum(
-            1
-            for verdict in store.recent_verdicts(
-                current.session.id,
-                controller_config.window_size,
-                after=state.last_intervention_ts,
-            )
-            if verdict == "DRIFT"
-        )
+    drift_threshold = controller_config.k
+    alignment_score = None
+    theta_low = None
+    theta_high = None
+    if controller_config.type == "alignment":
+        drift_threshold = 1
+        alignment_score = state.alignment_score
+        theta_low = controller_config.theta_low
+        theta_high = controller_config.theta_high
 
     cooldown_until = None
     if state.last_intervention_ts:
@@ -169,8 +170,10 @@ async def get_current_state(request: Request) -> SessionStateResponse:
         tracking=tracking,
         controller_type=controller_config.type,
         streak=drift_score,
-        streak_threshold=controller_config.k,
-        window_size=controller_config.window_size,
+        streak_threshold=drift_threshold,
+        alignment_score=alignment_score,
+        theta_low=theta_low,
+        theta_high=theta_high,
         obs_count=state.obs_count,
         coldstart_observations=controller_config.coldstart_observations,
         snoozed_until=state.snoozed_until.isoformat() if snoozed else None,
@@ -218,6 +221,8 @@ async def snooze_current_session(request: Request, body: SnoozeRequest | None = 
         obs_count=state.obs_count,
         last_intervention_ts=state.last_intervention_ts,
         snoozed_until=snoozed_until,
+        alignment_score=state.alignment_score,
+        drift_latched=state.drift_latched,
         ts=now,
     )
     store.record_session_snoozed(session_id, snoozed_until, source="api", ts=now)

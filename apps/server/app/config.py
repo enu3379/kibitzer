@@ -3,7 +3,7 @@ from typing import Any, Literal
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ServerConfig(BaseModel):
@@ -66,12 +66,20 @@ class Tier2Config(BaseModel):
 
 
 class ControllerConfig(BaseModel):
-    type: Literal["streak", "window"] = "streak"
-    k: int = 3
-    window_size: int = 5
+    type: Literal["streak", "alignment"] = "streak"
+    k: int = Field(default=3, ge=1, le=20)
+    alignment_alpha: float = Field(default=0.85, ge=0.0, le=0.99)
+    theta_low: float = Field(default=0.15, ge=0.0, le=1.0)
+    theta_high: float = Field(default=0.3, ge=0.0, le=1.0)
     cooldown_seconds: int = 300
     snooze_seconds: int = 1800
     coldstart_observations: int = 5
+
+    @model_validator(mode="after")
+    def _validate_alignment_thresholds(self) -> "ControllerConfig":
+        if self.theta_low >= self.theta_high:
+            raise ValueError("theta_low must be lower than theta_high")
+        return self
 
 
 class PrivacyConfig(BaseModel):

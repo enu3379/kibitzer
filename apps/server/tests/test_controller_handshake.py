@@ -7,7 +7,9 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from apps.server.app.config import AppConfig, ControllerConfig, ServerConfig, Tier1Config
+from apps.server.app.core.controllers.alignment import AlignmentController
 from apps.server.app.main import create_app
+from apps.server.app.schemas import Verdict
 from apps.server.app.storage.sqlite import SQLiteStore
 
 
@@ -113,31 +115,47 @@ class ControllerHandshakeTest(unittest.TestCase):
         state = self.store.get_controller_state(session_id)
         self.assertEqual(state.streak, 2)
 
-    def test_window_controller_catches_interleaved_drift(self) -> None:
-        client = self._client(
-            ControllerConfig(type="window", k=3, window_size=5, coldstart_observations=1, cooldown_seconds=0)
+    def test_alignment_controller_uses_ewma_hysteresis(self) -> None:
+        now = datetime.now(timezone.utc)
+        controller = AlignmentController(
+            alpha=0.5,
+            theta_low=0.3,
+            theta_high=0.6,
+            cooldown_seconds=0,
+            coldstart_observations=1,
         )
-        try:
-            session_id = self._start_goal(client)
-            first = self._post_drift(client, 1)
-            self._post_ok(client, 1)
-            second = self._post_drift(client, 2)
-            self._post_ok(client, 2)
-            third = self._post_drift(client, 3)
-        finally:
-            client.__exit__(None, None, None)
 
-        self.assertEqual(first["action"], "none")
-        self.assertEqual(second["action"], "none")
-        self.assertEqual(third["action"], "request_excerpt")
-        state = self.store.get_controller_state(session_id)
-        self.assertEqual(state.obs_count, 5)
-        self.assertEqual(state.streak, 0)
-        self.assertIsNotNone(state.last_intervention_ts)
+        controller.update(Verdict.OK, 0.8)
+        self.assertAlmostEqual(controller.alignment_score or 0, 0.8)
+        self.assertFalse(controller.should_intervene(now))
+
+        controller.update(Verdict.DRIFT, 0.0)
+        self.assertAlmostEqual(controller.alignment_score or 0, 0.4)
+        self.assertFalse(controller.should_intervene(now))
+
+        controller.update(Verdict.DRIFT, 0.0)
+        self.assertAlmostEqual(controller.alignment_score or 0, 0.2)
+        self.assertTrue(controller.should_intervene(now))
+
+        controller.on_intervened(now)
+        self.assertFalse(controller.should_intervene(now))
+
+        controller.update(Verdict.DRIFT, 0.0)
+        self.assertFalse(controller.should_intervene(now))
+
+        controller.update(Verdict.OK, 1.0)
+        self.assertFalse(controller.should_intervene(now))
+        controller.update(Verdict.OK, 1.0)
+        self.assertFalse(controller.drift_latched)
+
+        controller.update(Verdict.DRIFT, 0.0)
+        self.assertFalse(controller.should_intervene(now))
+        controller.update(Verdict.DRIFT, 0.0)
+        self.assertTrue(controller.should_intervene(now))
 
     def test_streak_controller_ignores_interleaved_drift(self) -> None:
         client = self._client(
-            ControllerConfig(type="streak", k=3, window_size=5, coldstart_observations=1, cooldown_seconds=0)
+            ControllerConfig(type="streak", k=3, coldstart_observations=1, cooldown_seconds=0)
         )
         try:
             session_id = self._start_goal(client)

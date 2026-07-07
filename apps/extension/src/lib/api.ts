@@ -60,7 +60,9 @@ export interface SessionState {
   controller_type: ControllerType
   streak: number
   streak_threshold: number
-  window_size: number
+  alignment_score?: number | null
+  theta_low?: number | null
+  theta_high?: number | null
   obs_count: number
   coldstart_observations: number
   snoozed_until?: string | null
@@ -181,12 +183,14 @@ export interface Cooldown {
   seconds: number
 }
 
-export type ControllerType = "streak" | "window"
+export type ControllerType = "streak" | "alignment"
 
 export interface ControllerSettings {
   type: ControllerType
   k: number
-  window_size: number
+  alignment_alpha: number
+  theta_low: number
+  theta_high: number
 }
 
 export interface Settings {
@@ -209,9 +213,12 @@ function normalizeSettings(value: Partial<Settings>): Settings {
   const rawController = (value.controller ?? {}) as Partial<ControllerSettings>
   const rawCooldown = (value.cooldown ?? {}) as Partial<Cooldown>
   const rawQuietHours = (value.quiet_hours ?? {}) as Partial<QuietHours>
-  const controllerType: ControllerType = rawController.type === "window" ? "window" : "streak"
+  const rawType = String(rawController.type ?? "")
+  const controllerType: ControllerType = rawType === "alignment" || rawType === "window" ? "alignment" : "streak"
   const k = clampInt(rawController.k, 3, 1, 20)
-  const windowSize = clampInt(rawController.window_size, Math.max(5, k), controllerType === "window" ? k : 1, 50)
+  const alignmentAlpha = clampFloat(rawController.alignment_alpha, 0.85, 0, 0.99)
+  const thetaLow = clampFloat(rawController.theta_low, 0.15, 0, 1)
+  const thetaHigh = Math.max(thetaLow + 0.01, clampFloat(rawController.theta_high, 0.3, 0, 1))
 
   return {
     persona: typeof value.persona === "string" ? value.persona : "dry_kibitzer",
@@ -219,7 +226,9 @@ function normalizeSettings(value: Partial<Settings>): Settings {
     controller: {
       type: controllerType,
       k,
-      window_size: windowSize,
+      alignment_alpha: alignmentAlpha,
+      theta_low: thetaLow,
+      theta_high: Math.min(1, thetaHigh),
     },
     cooldown: {
       enabled: Boolean(rawCooldown.enabled),
@@ -237,6 +246,12 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
   const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10)
   if (!Number.isFinite(parsed)) return fallback
   return Math.min(max, Math.max(min, Math.trunc(parsed)))
+}
+
+function clampFloat(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = typeof value === "number" ? value : Number.parseFloat(String(value))
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.min(max, Math.max(min, parsed))
 }
 
 export async function getSettings(): Promise<Settings | null> {

@@ -34,7 +34,7 @@ const PERSONAS: { key: string; name: string; hint: string }[] = [
 ]
 
 const CONTROLLERS: { type: ControllerType; label: string; hint: string }[] = [
-  { type: "window", label: "A안", hint: "최근 흐름" },
+  { type: "alignment", label: "A안", hint: "EWMA" },
   { type: "streak", label: "B안", hint: "연속 이탈" },
 ]
 
@@ -78,6 +78,11 @@ function formatDuration(totalSeconds: number): string {
 function formatRatio(ratio: number | null | undefined): string {
   if (ratio === null || ratio === undefined) return "–"
   return `${Math.round(ratio * 100)}%`
+}
+
+function formatScore(score: number | null | undefined): string {
+  if (score === null || score === undefined) return "–"
+  return score.toFixed(2)
 }
 
 function header(pillLabel: string, pillTone: string): string {
@@ -180,15 +185,18 @@ function renderDashboard(state: SessionState, goalText: string, stats: SessionSt
     state.tracking === "coldstart"
       ? `워밍업 ${Math.min(state.obs_count, state.coldstart_observations)}/${state.coldstart_observations}`
       : pill.label
+  const isAlignment = state.controller_type === "alignment"
   const dots = Array.from({ length: state.streak_threshold }, (_, index) =>
     `<span class="dot${index < state.streak ? " filled" : ""}"></span>`,
   ).join("")
   const snoozed = state.tracking === "snoozed"
-  const driftLabel = state.controller_type === "window" ? "이탈 누적" : "연속 이탈"
-  const driftHint =
-    state.controller_type === "window"
-      ? `최근 ${state.window_size}개 관측 중 ${state.streak_threshold}회 이탈이면 한 번 말을 겁니다.`
-      : `${state.streak_threshold}회 연속 이탈 시에만 한 번 말을 겁니다.`
+  const driftLabel = isAlignment ? "누적 정렬도" : "연속 이탈"
+  const driftMeter = isAlignment
+    ? `<div class="scoreline"><span>A<sub>t</sub></span><strong>${formatScore(state.alignment_score)}</strong></div>`
+    : `<div class="dots">${dots}<span class="count">${Math.min(state.streak, state.streak_threshold)} / ${state.streak_threshold}</span></div>`
+  const driftHint = isAlignment
+    ? `정렬도 ${formatScore(state.theta_low)} 미만이면 말하고, ${formatScore(state.theta_high)} 초과면 회복으로 봅니다.`
+    : `${state.streak_threshold}회 연속 이탈 시에만 한 번 말을 겁니다.`
 
   const pending = state.pending_intervention
   const pendingCard = pending
@@ -215,7 +223,7 @@ function renderDashboard(state: SessionState, goalText: string, stats: SessionSt
       <button id="goal-edit" class="icon-btn" title="목표 수정">수정</button>
     </div>
     <p class="label">${driftLabel}</p>
-    <div class="dots">${dots}<span class="count">${Math.min(state.streak, state.streak_threshold)} / ${state.streak_threshold}</span></div>
+    ${driftMeter}
     <p class="hint">${driftHint}</p>
     <div class="cards">
       <div class="card"><p class="k">관측</p><p class="v">${stats ? stats.observations : "–"}</p></div>
@@ -360,8 +368,33 @@ function renderSettings(settings: Settings): void {
         <span>${controller.label}</span><small>${controller.hint}</small>
       </button>`,
   ).join("")
-  const thresholdLabel = settings.controller.type === "window" ? "이탈 횟수" : "연속 횟수"
-  const windowDisabled = settings.controller.type === "window" ? "" : "disabled"
+  const controllerControls =
+    settings.controller.type === "alignment"
+      ? `
+    <div class="setrow">
+      <span class="grow">평활 α</span>
+      <input id="controller-alpha" class="number" type="number" min="0" max="0.99" step="0.01"
+        value="${settings.controller.alignment_alpha}" />
+    </div>
+    <div class="setrow">
+      <span class="grow">개입 θ</span>
+      <input id="controller-low" class="number" type="number" min="0" max="1" step="0.01"
+        value="${settings.controller.theta_low}" />
+    </div>
+    <div class="setrow">
+      <span class="grow">회복 θ</span>
+      <input id="controller-high" class="number" type="number" min="0" max="1" step="0.01"
+        value="${settings.controller.theta_high}" />
+    </div>
+    <p class="subhint">A안은 관측별 관련도 r의 EWMA가 낮아지고, 회복 임계값을 넘기 전까지 같은 이탈 구간으로 봅니다.</p>`
+      : `
+    <div class="setrow">
+      <span class="grow">연속 횟수</span>
+      <input id="controller-k" class="number" type="number" min="1" max="20" step="1"
+        value="${settings.controller.k}" />
+      <span style="color: var(--muted);">회</span>
+    </div>
+    <p class="subhint">B안은 OK가 나오면 카운터를 0으로 돌리고, DRIFT가 연속으로 쌓일 때만 말합니다.</p>`
 
   root.innerHTML = `
     <div class="header">
@@ -372,19 +405,7 @@ function renderSettings(settings: Settings): void {
     <div class="pers">${personaCards}</div>
     <p class="label">개입 방식</p>
     <div class="seg">${controllerButtons}</div>
-    <div class="setrow">
-      <span class="grow">${thresholdLabel}</span>
-      <input id="controller-k" class="number" type="number" min="1" max="20" step="1"
-        value="${settings.controller.k}" />
-      <span style="color: var(--muted);">회</span>
-    </div>
-    <div class="setrow">
-      <span class="grow">최근 관측</span>
-      <input id="controller-window" class="number" type="number" min="1" max="50" step="1"
-        value="${settings.controller.window_size}" ${windowDisabled} />
-      <span style="color: var(--muted);">개</span>
-    </div>
-    <p class="subhint">A안은 최근 관측 안의 이탈 수, B안은 연속 이탈 수로 판단합니다.</p>
+    ${controllerControls}
     <div class="setrow">
       <span class="grow">소리 내어 말하기</span>
       <input id="voice-toggle" type="checkbox" ${settings.voice_enabled ? "checked" : ""} />
@@ -421,42 +442,38 @@ function renderSettings(settings: Settings): void {
     button.addEventListener("click", () => {
       const type = button.dataset.controller as ControllerType | undefined
       if (!type || type === settings.controller.type) return
-      void applySettings({
-        controller: {
-          type,
-          window_size: type === "window" ? Math.max(settings.controller.window_size, settings.controller.k) : settings.controller.window_size,
-        },
-      })
+      void applySettings({ controller: { type } })
     })
   })
   const updateControllerK = (event: Event) => {
     const k = Number.parseInt((event.target as HTMLInputElement).value, 10)
     if (!Number.isFinite(k) || k < 1) return
-    void applySettings({
-      controller: {
-        k,
-        window_size:
-          settings.controller.type === "window"
-            ? Math.max(settings.controller.window_size, k)
-            : settings.controller.window_size,
-      },
-    })
+    void applySettings({ controller: { k } })
   }
   document.getElementById("controller-k")?.addEventListener("input", updateControllerK)
   document.getElementById("controller-k")?.addEventListener("change", updateControllerK)
 
-  const updateControllerWindow = (event: Event) => {
-    const windowSize = Number.parseInt((event.target as HTMLInputElement).value, 10)
-    if (!Number.isFinite(windowSize) || windowSize < 1) return
-    void applySettings({
-      controller: {
-        window_size: windowSize,
-        k: settings.controller.type === "window" ? Math.min(settings.controller.k, windowSize) : settings.controller.k,
-      },
-    })
+  const updateControllerAlpha = (event: Event) => {
+    const value = Number.parseFloat((event.target as HTMLInputElement).value)
+    if (!Number.isFinite(value) || value < 0 || value > 0.99) return
+    void applySettings({ controller: { alignment_alpha: value } })
   }
-  document.getElementById("controller-window")?.addEventListener("input", updateControllerWindow)
-  document.getElementById("controller-window")?.addEventListener("change", updateControllerWindow)
+  const updateControllerLow = (event: Event) => {
+    const value = Number.parseFloat((event.target as HTMLInputElement).value)
+    if (!Number.isFinite(value) || value < 0 || value >= settings.controller.theta_high) return
+    void applySettings({ controller: { theta_low: value } })
+  }
+  const updateControllerHigh = (event: Event) => {
+    const value = Number.parseFloat((event.target as HTMLInputElement).value)
+    if (!Number.isFinite(value) || value > 1 || value <= settings.controller.theta_low) return
+    void applySettings({ controller: { theta_high: value } })
+  }
+  document.getElementById("controller-alpha")?.addEventListener("input", updateControllerAlpha)
+  document.getElementById("controller-alpha")?.addEventListener("change", updateControllerAlpha)
+  document.getElementById("controller-low")?.addEventListener("input", updateControllerLow)
+  document.getElementById("controller-low")?.addEventListener("change", updateControllerLow)
+  document.getElementById("controller-high")?.addEventListener("input", updateControllerHigh)
+  document.getElementById("controller-high")?.addEventListener("change", updateControllerHigh)
   document.getElementById("voice-toggle")?.addEventListener("change", (event) => {
     void applySettings({ voice_enabled: (event.target as HTMLInputElement).checked })
   })

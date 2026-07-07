@@ -125,6 +125,8 @@ def _apply_snooze(request: Request, session_id: str) -> datetime:
         obs_count=state.obs_count,
         last_intervention_ts=state.last_intervention_ts,
         snoozed_until=snoozed_until,
+        alignment_score=state.alignment_score,
+        drift_latched=state.drift_latched,
         ts=now,
     )
     return snoozed_until

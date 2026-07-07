@@ -59,7 +59,9 @@ relevance:
 controller:
   type: "streak"
   k: 3
-  window_size: 5
+  alignment_alpha: 0.85
+  theta_low: 0.15
+  theta_high: 0.30
   cooldown_seconds: 300
   snooze_seconds: 1800
   coldstart_observations: 5
