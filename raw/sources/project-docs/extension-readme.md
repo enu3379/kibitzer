@@ -33,6 +33,24 @@ For development rebuilds:
 npm run watch
 ```
 
+## Icons
+
+The live toolbar icon source is `icons/icon-128.svg`. Regenerate transparent
+PNGs with:
+
+```bash
+python ../../scripts/gen_extension_icons.py
+```
+
+Design variants live under `icons/variants/` and can be regenerated with:
+
+```bash
+python ../../scripts/gen_icon_variants.py
+```
+
+The macOS menu bar app also reads `icons/icon-128.png` as its base artwork, so
+Chrome and menu bar surfaces stay visually aligned.
+
 ## Load In Chrome
 
 1. Open `chrome://extensions`.

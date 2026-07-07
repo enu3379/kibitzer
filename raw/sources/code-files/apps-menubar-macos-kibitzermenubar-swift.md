@@ -53,13 +53,14 @@ enum KibitzerMode: String {
 final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
     private let rootURL: URL
     private let healthURL = URL(string: "http://127.0.0.1:8765/health")!
-    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let statusItem = NSStatusBar.system.statusItem(withLength: 28)
     private let menu = NSMenu()
     private let statusMenuItem = NSMenuItem(title: "Kibitzer: starting", action: nil, keyEquivalent: "")
     private let startServerMenuItem = NSMenuItem(title: "Start server", action: #selector(startServerClicked), keyEquivalent: "s")
     private let refreshMenuItem = NSMenuItem(title: "Refresh status", action: #selector(refreshClicked), keyEquivalent: "r")
     private let openHealthMenuItem = NSMenuItem(title: "Open health", action: #selector(openHealthClicked), keyEquivalent: "h")
     private let openLogsMenuItem = NSMenuItem(title: "Open logs", action: #selector(openLogsClicked), keyEquivalent: "l")
+    private var baseIconImage: NSImage?
     private var timer: Timer?
     private var attemptedAutostart = false
 
@@ -85,6 +86,9 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
         let quitItem = NSMenuItem(title: "Quit Kibitzer Menu Bar", action: #selector(quitClicked), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
+        statusItem.button?.imagePosition = .imageOnly
+        statusItem.button?.imageScaling = .scaleProportionallyDown
+        statusItem.button?.setAccessibilityLabel("Kibitzer")
         statusItem.menu = menu
         render(mode: .unknown)
     }
@@ -124,11 +128,67 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
         statusMenuItem.title = "Kibitzer: \(mode.label)"
         startServerMenuItem.isEnabled = mode == .dead
         statusItem.button?.toolTip = "Kibitzer: \(mode.label)"
-        statusItem.button?.attributedTitle = renderStatusTitle(mode: mode)
+        if let image = renderStatusIcon(mode: mode) {
+            statusItem.length = 28
+            statusItem.button?.image = image
+            statusItem.button?.attributedTitle = NSAttributedString(string: "")
+        } else {
+            statusItem.length = NSStatusItem.variableLength
+            statusItem.button?.image = nil
+            statusItem.button?.attributedTitle = renderStatusTitle(mode: mode)
+        }
+    }
+
+    private func renderStatusIcon(mode: KibitzerMode) -> NSImage? {
+        guard let baseIcon = loadBaseIcon() else { return nil }
+        let canvasSize = NSSize(width: 22, height: 22)
+        let iconRect = NSRect(x: 1, y: 2, width: 18, height: 18)
+        let dotRect = NSRect(x: 14.5, y: 1.5, width: 6.5, height: 6.5)
+        let haloRect = dotRect.insetBy(dx: -1.5, dy: -1.5)
+        let image = NSImage(size: canvasSize)
+
+        image.lockFocus()
+        NSGraphicsContext.current?.imageInterpolation = .high
+        let iconAlpha: CGFloat = mode == .dead ? 0.45 : 1.0
+        baseIcon.draw(
+            in: iconRect,
+            from: NSRect(origin: .zero, size: baseIcon.size),
+            operation: .sourceOver,
+            fraction: iconAlpha
+        )
+        NSColor.windowBackgroundColor.withAlphaComponent(0.92).setFill()
+        NSBezierPath(ovalIn: haloRect).fill()
+        mode.color.setFill()
+        NSBezierPath(ovalIn: dotRect).fill()
+        image.unlockFocus()
+
+        image.isTemplate = false
+        return image
+    }
+
+    private func loadBaseIcon() -> NSImage? {
+        if let baseIconImage = baseIconImage {
+            return baseIconImage
+        }
+
+        let candidates = [
+            rootURL.appendingPathComponent("apps/extension/icons/icon-128.png"),
+            rootURL.appendingPathComponent("apps/extension/dist/icons/icon-128.png"),
+        ]
+
+        for iconURL in candidates {
+            if let image = NSImage(contentsOf: iconURL) {
+                image.isTemplate = false
+                baseIconImage = image
+                return image
+            }
+        }
+
+        return nil
     }
 
     private func renderStatusTitle(mode: KibitzerMode) -> NSAttributedString {
-        // Placeholder only: Claude-owned artwork can replace this text treatment.
+        // Fallback for source checkouts that do not have the shared icon assets.
         let title = NSMutableAttributedString(
             string: "K ",
             attributes: [
