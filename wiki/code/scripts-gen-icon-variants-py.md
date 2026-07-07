@@ -96,6 +96,8 @@ def sample_monitor_template(x: float, y: float):
     """Single-color template glyph matching monitor-mono.svg."""
     if _in_circle(x, y, 52, 56, 8) or _in_circle(x, y, 76, 56, 8):
         return None
+    if _in_round_rect(x, y, 18, 67, 92, 4, 2):
+        return None
     if (
         _in_circle(x, y, 64, 69, 32)
         or _in_round_rect(x, y, 18, 69, 92, 38, 5)
