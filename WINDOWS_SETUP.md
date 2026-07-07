@@ -73,13 +73,16 @@ Copy the example env file:
 Copy-Item .env.example .env
 ```
 
-Fill `ollama1` and `ollama2` in `.env`. For local model routing, copy:
+Fill `ollama1` and `ollama2` in `.env` with your Ollama Cloud API keys
+(one-time — every later start picks them up automatically). For model
+routing, copy:
 
 ```powershell
 Copy-Item configs\experiment-models.example.yaml configs\models.local.yaml
 ```
 
-Edit `configs\models.local.yaml` for your local or cloud endpoint. The real
+Edit `configs\models.local.yaml` if you want different models (Ollama Cloud
+`gemma4:e4b` / `gemma4:31b` by default; self-hosted Ollama also works). The real
 `.env` file and `configs\models.local.yaml` are ignored by git. If provider
 settings are incomplete, Kibitzer still runs with local Tier 0 scoring and
 fallback messages; the server records provider degradation when a goal-backed

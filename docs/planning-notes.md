@@ -112,8 +112,11 @@ uses a light rim instead.
 ### D3 — Goal-enrichment LLM call → OPEN
 
 The audit plan adds one cheap LLM call at goal declaration to derive positive
-goal phrases. To stay local-first (like Tier 1), run it on local Ollama? Only the
-goal text leaves the call site; no page content. Leaning local.
+goal phrases. Only the goal text leaves the call site; no page content.
+Direction update (2026-07-08, user): the stack runs on **Ollama Cloud** (tiers
+use gemma4:e4b / gemma4:31b there) — drop the local-first framing; the
+enrichment call should ride the same Tier 1 cloud provider. OPEN only on
+prompt/shape, not on where it runs.
 
 ### D4 — Replay CLI scope → OPEN
 
