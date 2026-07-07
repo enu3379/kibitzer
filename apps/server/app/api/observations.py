@@ -275,9 +275,10 @@ def _maybe_create_celebration(
     if not candidate or not current.goal:
         return None
 
-    return_minutes = max(0, int((observation.ts - candidate.drift_started_at).total_seconds()) // 60)
+    return_seconds = max(0, int((observation.ts - candidate.drift_started_at).total_seconds()))
+    return_minutes = return_seconds // 60  # template placeholder stays whole minutes
     config = request.app.state.config.celebration
-    if return_minutes < config.min_drift_minutes:
+    if return_seconds < config.min_drift_minutes * 60:
         return None
     if candidate.last_celebration_ts:
         elapsed = (observation.ts - candidate.last_celebration_ts).total_seconds()

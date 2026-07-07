@@ -110,7 +110,8 @@ class QuietHoursConfig(BaseModel):
 
 
 class CelebrationConfig(BaseModel):
-    min_drift_minutes: int = Field(default=3, ge=0)
+    # Fractional minutes allowed (0.5 = 30s); the gate compares in seconds.
+    min_drift_minutes: float = Field(default=3, ge=0)
     cooldown_seconds: int = Field(default=300, ge=0)
 
 
