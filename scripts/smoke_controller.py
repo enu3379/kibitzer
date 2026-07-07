@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import sqlite3
+import sys
+import tempfile
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from apps.server.app.config import AppConfig, ControllerConfig, ServerConfig, Tier1Config
+from apps.server.app.main import create_app
+from apps.server.app.storage.sqlite import SQLiteStore
+
+
+def assert_true(condition: bool, message: str) -> None:
+    if not condition:
+        raise AssertionError(message)
+
+
+def post_drift(client: TestClient, index: int) -> dict[str, object]:
+    return client.post(
+        "/observations/browser-nav",
+        json={
+            "source": "browser_nav",
+            "payload": {
+                "url": f"https://example.com/bread-{index}",
+                "title": f"Sourdough bread recipe {index}",
+            },
+        },
+    ).json()
+
+
+def main() -> int:
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "kibitzer.sqlite3"
+        app = create_app(
+            config=AppConfig(
+                server=ServerConfig(db_path=str(db_path)),
+                tier1=Tier1Config(enabled=False),
+                controller=ControllerConfig(k=2, coldstart_observations=1, cooldown_seconds=3600),
+            ),
+            store=SQLiteStore(db_path),
+        )
+        with TestClient(app) as client:
+            session_id = client.post("/sessions").json()["id"]
+            client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
+            first = post_drift(client, 1)
+            second = post_drift(client, 2)
+            third = post_drift(client, 3)
+
+        assert_true(first["action"] == "none", "first drift should not request excerpt")
+        assert_true(second["action"] == "request_excerpt", "second drift should request excerpt")
+        assert_true(third["action"] == "none", "cooldown should block immediate repeated request")
+
+        with sqlite3.connect(db_path) as conn:
+            event_count = conn.execute(
+                "SELECT COUNT(*) FROM event_log WHERE event_type = 'intervention.request_excerpt'"
+            ).fetchone()[0]
+            state = conn.execute("SELECT streak, obs_count, last_intervention_ts FROM controller_states WHERE session_id = ?", (session_id,)).fetchone()
+        assert_true(event_count == 1, "request excerpt event should be logged once")
+        assert_true(state[0] == 1 and state[1] == 3 and state[2] is not None, "controller state should persist cooldown state")
+
+    print("PASS success scenario: drift streak produced request_excerpt")
+    print("PASS failure scenario: cooldown blocked repeated request")
+    print("PASS state scenario: controller state persisted")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except AssertionError as exc:
+        print(f"FAIL {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc

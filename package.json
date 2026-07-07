@@ -1,0 +1,9 @@
+{
+  "name": "kibitzer-workspace",
+  "private": true,
+  "scripts": {
+    "extension:build": "npm --prefix apps/extension run build",
+    "extension:test": "npm --prefix apps/extension run test"
+  }
+}
+

@@ -1,0 +1,84 @@
+server:
+  host: "127.0.0.1"
+  port: 8765
+  db_path: "./data/kibitzer.sqlite3"
+
+embedding:
+  provider: "hash_cpu"
+  model: "token-hash-v2"
+  device: "cpu"
+  forbid_gpu: true
+  batch_size: 8
+  normalize: true
+  dimensions: 256
+
+tier1:
+  enabled: true
+  # Local Ollama (gemma4:e4b) through the experiment models file: no API cost,
+  # titles never leave the machine. timeout_seconds caps hot-path latency and
+  # deliberately overrides the generation-oriented timeout in the models file;
+  # a timeout falls back to the Tier 0 verdict and is logged.
+  provider: "experiment"
+  base_url: "${TIER1_BASE_URL}"
+  api_key_env: "TIER1_API_KEY"
+  model: "cheap-classifier"
+  timeout_seconds: 10
+  recent_observations: 5
+  experiment_models_file: "%KIBITZER_EXPERIMENT_MODELS_FILE%"
+  experiment_model_key: "gemma4"
+  send:
+    title: true
+    url_host: true
+    url_path: false
+    recent_titles: true
+    page_excerpt: false
+
+tier2:
+  enabled: true
+  provider: "experiment"
+  base_url: "${TIER2_BASE_URL}"
+  api_key_env: "TIER2_API_KEY"
+  fallback_api_key_env: "TIER2_FALLBACK_API_KEY"
+  model: "gemma4:31b"
+  timeout_seconds: 180
+  recent_observations: 5
+  excerpt_char_limit: 3000
+  max_output_tokens: 512
+  experiment_models_file: "%KIBITZER_EXPERIMENT_MODELS_FILE%"
+  experiment_model_key: "ollama_cloud_gemma4_31b"
+
+relevance:
+  # Calibrated 2026-07-05 on a real Korean session: CJK-bigram hash embedding put
+  # on-goal titles at >= 0.207 and off-goal titles at <= 0.0. Provisional until
+  # the replay CLI enables systematic tuning. Misses are acceptable; false
+  # positives are not, so the threshold sits below the observed on-goal minimum.
+  tau_ok: 0.15
+  beta: 0.85
+  anchor_window: 10
+  exemplar_cap: 20
+
+controller:
+  type: "streak"
+  k: 3
+  cooldown_seconds: 300
+  snooze_seconds: 1800
+  coldstart_observations: 5
+
+privacy:
+  sensitive_domains_file: "configs/sensitive_domains.yaml"
+  strip_query: true
+  hash_url_path: true
+
+delivery:
+  channel: "chrome_notification"
+  persona: "dry_kibitzer"
+  personas_file: "configs/personas.yaml"
+  max_sentences: 2
+  voice:
+    enabled: false
+    voice: "Yuna"
+    rate: 175
+  quiet_hours:
+    enabled: false
+    start: "09:00"
+    end: "18:00"

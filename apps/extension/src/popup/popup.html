@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>Kibitzer</title>
+    <style>
+      :root {
+        --bg: #ffffff;
+        --card: #f4f4f5;
+        --text: #18181b;
+        --muted: #71717a;
+        --border: #e4e4e7;
+        --accent: #2563eb;
+        --green-bg: #dcfce7;
+        --green-tx: #166534;
+        --blue-bg: #dbeafe;
+        --blue-tx: #1e40af;
+        --amber: #d97706;
+        --amber-bg: #fef3c7;
+        --amber-tx: #92400e;
+        --red-bg: #fee2e2;
+        --red-tx: #991b1b;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #202124;
+          --card: #2d2e31;
+          --text: #e8eaed;
+          --muted: #9aa0a6;
+          --border: #3c4043;
+          --accent: #8ab4f8;
+          --green-bg: #1e3a2a;
+          --green-tx: #81c995;
+          --blue-bg: #1e2a47;
+          --blue-tx: #8ab4f8;
+          --amber: #fbbc04;
+          --amber-bg: #3d3222;
+          --amber-tx: #fdd663;
+          --red-bg: #46201f;
+          --red-tx: #f28b82;
+        }
+      }
+      body {
+        width: 320px;
+        margin: 0;
+        font-family: system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        font-size: 14px;
+        line-height: 1.45;
+      }
+      .wrap { padding: 14px 16px 16px; }
+      .header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+      .header img { width: 20px; height: 20px; border-radius: 5px; }
+      .header .name { font-weight: 600; font-size: 15px; flex: 1; }
+      .pill { font-size: 12px; padding: 2px 10px; border-radius: 999px; white-space: nowrap; }
+      .pill.green { background: var(--green-bg); color: var(--green-tx); }
+      .pill.blue { background: var(--blue-bg); color: var(--blue-tx); }
+      .pill.amber { background: var(--amber-bg); color: var(--amber-tx); }
+      .pill.red { background: var(--red-bg); color: var(--red-tx); }
+      .pill.gray { background: var(--card); color: var(--muted); }
+      .label { font-size: 12px; color: var(--muted); margin: 0 0 4px; }
+      .goal-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 12px; }
+      .goal-text { flex: 1; margin: 0; font-size: 14px; font-weight: 500; word-break: keep-all; }
+      .icon-btn { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 13px; padding: 2px 4px; }
+      .icon-btn:hover { color: var(--text); }
+      .dots { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+      .dot { width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid var(--border); box-sizing: border-box; }
+      .dot.filled { background: var(--amber); border-color: var(--amber); }
+      .dots .count { font-size: 12px; color: var(--muted); margin-left: 2px; }
+      .hint { font-size: 12px; color: var(--muted); margin: 0 0 12px; }
+      .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+      .card { background: var(--card); border-radius: 8px; padding: 8px 10px; }
+      .card .k { font-size: 12px; color: var(--muted); margin: 0; }
+      .card .v { font-size: 18px; font-weight: 600; margin: 2px 0 0; }
+      .btn-row { display: flex; gap: 8px; }
+      button.btn {
+        flex: 1; padding: 7px 8px; font-size: 13px; font-family: inherit;
+        border: 1px solid var(--border); border-radius: 7px;
+        background: var(--bg); color: var(--text); cursor: pointer;
+      }
+      button.btn:hover { background: var(--card); }
+      button.btn:disabled { opacity: 0.5; cursor: default; }
+      button.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      @media (prefers-color-scheme: dark) {
+        button.btn.primary { color: #202124; }
+      }
+      input.goal-input {
+        width: 100%; box-sizing: border-box; padding: 8px 10px; margin-bottom: 8px;
+        font-size: 14px; font-family: inherit;
+        border: 1px solid var(--border); border-radius: 7px;
+        background: var(--bg); color: var(--text);
+      }
+      input.goal-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+      .pers { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+      .pcard {
+        border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+        cursor: pointer; display: flex; align-items: baseline; gap: 8px; background: var(--bg);
+      }
+      .pcard:hover { background: var(--card); }
+      .pcard.sel { border-color: var(--accent); outline: 1px solid var(--accent); }
+      .pcard .pname { font-size: 13px; font-weight: 600; }
+      .pcard .phint { font-size: 12px; color: var(--muted); margin-left: auto; text-align: right; }
+      .setrow {
+        display: flex; align-items: center; gap: 8px; padding: 9px 0;
+        border-top: 1px solid var(--border); font-size: 13px;
+      }
+      .setrow .grow { flex: 1; }
+      .setrow input[type="checkbox"] { accent-color: var(--accent); }
+      input.time {
+        font: inherit; font-size: 12px; padding: 3px 5px; width: 62px;
+        border: 1px solid var(--border); border-radius: 6px;
+        background: var(--bg); color: var(--text);
+      }
+      input.number {
+        font: inherit; font-size: 12px; padding: 3px 5px; width: 58px;
+        border: 1px solid var(--border); border-radius: 6px;
+        background: var(--bg); color: var(--text);
+      }
+      .subhint { font-size: 12px; color: var(--muted); margin: 0 0 10px; }
+      .rows { border-top: 1px solid var(--border); margin-bottom: 12px; }
+      .row { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+      .row .k { color: var(--muted); }
+      .bar { height: 6px; border-radius: 3px; background: var(--card); overflow: hidden; margin: 4px 0 12px; }
+      .bar .fill { height: 100%; background: var(--accent); }
+      .center-note { text-align: center; color: var(--muted); font-size: 13px; padding: 18px 0; }
+      .stack > * + * { margin-top: 0; }
+    </style>
+  </head>
+  <body>
+    <main id="root" class="wrap"></main>
+    <script type="module" src="./popup.js"></script>
+  </body>
+</html>

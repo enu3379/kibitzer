@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import sqlite3
+import sys
+import tempfile
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from fastapi.testclient import TestClient
+
+from apps.server.app.config import AppConfig, ControllerConfig, ServerConfig, Tier1Config, Tier2Config
+from apps.server.app.main import create_app
+from apps.server.app.providers.judges.base import Tier1Result, Tier2Result
+from apps.server.app.schemas import Verdict
+from apps.server.app.storage.sqlite import SQLiteStore
+
+FIXTURE = Path(__file__).parent / "fixtures" / "tier2_smoke_cases.json"
+
+
+@dataclass
+class ScriptedTier2Provider:
+    result: Tier2Result
+    payloads: list[dict[str, object]] = field(default_factory=list)
+
+    async def classify_tier1(self, payload: dict[str, object]) -> Tier1Result:
+        return Tier1Result(verdict=Verdict.DRIFT, reason="unused")
+
+    async def confirm_tier2(self, payload: dict[str, object]) -> Tier2Result:
+        self.payloads.append(payload)
+        return self.result
+
+
+def assert_true(condition: bool, message: str) -> None:
+    if not condition:
+        raise AssertionError(message)
+
+
+def load_cases() -> list[dict[str, Any]]:
+    return json.loads(FIXTURE.read_text())
+
+
+def run_case(case: dict[str, Any]) -> str:
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "kibitzer.sqlite3"
+        provider: ScriptedTier2Provider | None = None
+        tier2_enabled = case["mode"] != "fallback"
+        if tier2_enabled:
+            provider = ScriptedTier2Provider(
+                Tier2Result(confirm_drift=bool(case["provider_confirm"]), message=case["provider_message"])
+            )
+
+        app = create_app(
+            config=AppConfig(
+                server=ServerConfig(db_path=str(db_path)),
+                tier1=Tier1Config(enabled=False),
+                tier2=Tier2Config(enabled=tier2_enabled, excerpt_char_limit=160, recent_observations=4),
+                controller=ControllerConfig(k=1, coldstart_observations=1, cooldown_seconds=0),
+            ),
+            store=SQLiteStore(db_path),
+            tier2_provider=provider,
+        )
+        with TestClient(app) as client:
+            client.post("/sessions")
+            client.post("/sessions/current/goal", json={"raw_text": case["goal"]})
+            first = client.post(
+                "/observations/browser-nav",
+                json={
+                    "source": "browser_nav",
+                    "payload": {
+                        "url": case["url"],
+                        "title": case["title"],
+                    },
+                },
+            ).json()
+            assert_true(first["action"] == "request_excerpt", f"{case['id']}: expected request_excerpt")
+
+            final = client.post(
+                f"/observations/{first['observation_id']}/excerpt",
+                json={"title": case["title"], "text": case["excerpt"]},
+            ).json()
+
+        assert_true(final["action"] == case["expected_action"], f"{case['id']}: expected {case['expected_action']}, got {final}")
+        if case["expected_action"] == "notify":
+            assert_true(final.get("message"), f"{case['id']}: notify must include message")
+            assert_true(final.get("intervention_id", "").startswith("int_"), f"{case['id']}: notify must create intervention")
+        else:
+            assert_true(final.get("intervention_id") is None, f"{case['id']}: cancel must not create intervention")
+
+        if provider:
+            assert_true(len(provider.payloads) == 1, f"{case['id']}: provider should be called once")
+            payload_json = json.dumps(provider.payloads[0], ensure_ascii=False)
+            assert_true("?token=" not in payload_json, f"{case['id']}: raw query leaked to provider payload")
+            assert_true(len(str(provider.payloads[0]["page_excerpt"])) <= 160, f"{case['id']}: excerpt limit failed")
+
+        secret_marker = case["excerpt"].split()[-1]
+        with sqlite3.connect(db_path) as conn:
+            event_payloads = "\n".join(row[0] for row in conn.execute("SELECT payload_json FROM event_log").fetchall())
+            intervention_count = conn.execute("SELECT COUNT(*) FROM interventions").fetchone()[0]
+        assert_true(secret_marker not in event_payloads, f"{case['id']}: raw excerpt marker persisted")
+        expected_interventions = 1 if case["expected_action"] == "notify" else 0
+        assert_true(intervention_count == expected_interventions, f"{case['id']}: intervention count mismatch")
+
+        return str(final["action"])
+
+
+def main() -> int:
+    cases = load_cases()
+    counts: dict[str, int] = {"notify": 0, "none": 0}
+    failures: list[str] = []
+
+    for case in cases:
+        try:
+            action = run_case(case)
+            counts[action] = counts.get(action, 0) + 1
+        except Exception as exc:
+            failures.append(f"{case.get('id', '<unknown>')}: {exc}")
+
+    if failures:
+        print("FAIL Tier2 dataset smoke")
+        for failure in failures:
+            print(f" - {failure}")
+        return 1
+
+    print(f"PASS Tier2 dataset smoke: {len(cases)} cases")
+    print(f"PASS notify scenarios: {counts.get('notify', 0)}")
+    print(f"PASS cancel scenarios: {counts.get('none', 0)}")
+    print("PASS privacy checks: query strings and raw excerpt markers were not persisted")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,89 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import yaml
+from pydantic import BaseModel, ConfigDict, Field
+
+from ..storage.sqlite import GoalRecord, ObservationRecord
+
+
+TIER2_SYSTEM_PROMPT = (
+    "You are Kibitzer, a quiet browser drift guard. Decide whether the current page is truly "
+    "off-goal after reading the minimized payload and page excerpt. Return strict JSON only: "
+    '{"confirm_drift":true|false,"message":"<=2 short Korean sentences if true, else empty string"}. '
+    "Confirm drift only when the excerpt is not useful for the declared goal."
+)
+
+
+class PersonaVoice(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    voice: str | None = None
+    rate: int | None = None
+
+
+class Persona(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    name: str = ""
+    style_prompt: str = ""
+    fallback_templates: list[str] = Field(default_factory=list)
+    celebrate_templates: list[str] = Field(default_factory=list)
+    voice: PersonaVoice | None = None
+    max_sentences: int | None = None
+
+
+class PersonaSet(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    version: int = 1
+    default: str | None = None
+    personas: dict[str, Persona] = Field(default_factory=dict)
+
+
+def load_personas(path: str | Path) -> PersonaSet:
+    data = yaml.safe_load(Path(path).expanduser().read_text(encoding="utf-8")) or {}
+    return PersonaSet.model_validate(data)
+
+
+def compose_tier2_system_prompt(persona: Persona) -> str:
+    style_prompt = persona.style_prompt.strip()
+    if not style_prompt:
+        return TIER2_SYSTEM_PROMPT
+    return f"{TIER2_SYSTEM_PROMPT}\n\nPersona style layer:\n{style_prompt}"
+
+
+def resolve_persona(
+    persona_set: PersonaSet | None,
+    settings: dict[str, Any],
+    config_persona: str | None,
+) -> Persona | None:
+    if not persona_set:
+        return None
+    for key in (settings.get("persona"), config_persona, persona_set.default):
+        if isinstance(key, str) and key in persona_set.personas:
+            return persona_set.personas[key]
+    return None
+
+
+def format_persona_fallback(
+    persona: Persona | None,
+    goal: GoalRecord,
+    observation: ObservationRecord,
+    nag_count: int,
+) -> str | None:
+    if not persona or not persona.fallback_templates:
+        return None
+    template = persona.fallback_templates[max(0, nag_count - 1) % len(persona.fallback_templates)]
+    values = {
+        "goal": goal.raw_text,
+        "title": observation.title or observation.url_host or "현재 페이지",
+        "host": observation.url_host or "현재 페이지",
+        "nag_count": str(nag_count),
+    }
+    try:
+        return template.format(**values)
+    except Exception:
+        return None

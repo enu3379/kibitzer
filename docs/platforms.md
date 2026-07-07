@@ -1,0 +1,49 @@
+# Platform Strategy
+
+Kibitzer should remain one GitHub repository for macOS and Windows.
+
+## Shared Code
+
+Keep these paths platform-neutral:
+
+- `apps/server/`: FastAPI server, controller, storage, provider wiring.
+- `apps/extension/`: Chrome MV3 extension and popup UI.
+- `configs/`: checked-in defaults and privacy lists.
+- `docs/`, `wiki/`, `raw/sources/`: project knowledge and LLM Wiki context.
+- `pyproject.toml` and `apps/extension/package.json`: shared dependency
+  definitions.
+
+## Platform-specific Surface
+
+Put operating-system differences at the edges:
+
+- `scripts/windows_*.ps1`: Windows setup, run, and test entrypoints.
+- `scripts/macos_*.sh`: macOS setup and run entrypoints.
+- `WINDOWS_SETUP.md` and `MACOS_SETUP.md`: OS-specific install notes.
+- Future installers should live under `packaging/windows/` and
+  `packaging/macos/`.
+
+Avoid branching application logic by OS unless the dependency is genuinely
+native. Prefer a small adapter module over duplicated server or extension code.
+
+## Local State
+
+Never commit:
+
+- `.env` or API keys.
+- `configs/models.local.yaml`.
+- `.venv`, `node_modules`, `apps/extension/dist`.
+- `data/` and SQLite databases.
+- Local agent settings and run logs.
+
+Use `.env.example` and `configs/experiment-models.example.yaml` as templates.
+
+## CI Shape
+
+When GitHub Actions is added, use a matrix across:
+
+- `windows-latest`
+- `macos-latest`
+
+Each OS should install Python dependencies, install extension dependencies, run
+the Python tests, and run the extension typecheck/build.

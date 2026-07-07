@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Kibitzer">
+  <circle cx="64" cy="64" r="55" fill="#f9fafb" stroke="#1f2937" stroke-width="9"/>
+  <path d="M36 70c13-27 43-27 56 0" fill="none" stroke="#1f2937" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="45" cy="52" r="8" fill="#1f2937"/>
+  <circle cx="83" cy="52" r="8" fill="#1f2937"/>
+  <path d="M40 94h48" fill="none" stroke="#10b981" stroke-width="11" stroke-linecap="round"/>
+</svg>

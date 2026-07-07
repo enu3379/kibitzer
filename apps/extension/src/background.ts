@@ -1,0 +1,241 @@
+import { extractPageExcerpt } from "./content/readabilityExtract"
+import {
+  FeedbackKind,
+  PageInfo,
+  PageExcerpt,
+  PipelineResult,
+  getSessionState,
+  postBrowserNav,
+  postDeliveryReport,
+  postFeedback,
+  postObservationExcerpt,
+} from "./lib/api"
+import { shouldDropUrl } from "./lib/domainFilter"
+
+const DEBOUNCE_MS = 1500
+const EXCERPT_LIMIT = 3500
+const NOTIFICATION_ICON = "icons/icon-128.png"
+const BADGE_ALARM = "kibitzer-badge-refresh"
+// Chrome notifications support at most 2 action buttons; creating with 3 throws
+// and the notification never appears. "accepted" maps to clicking the body.
+const NOTIFICATION_BUTTONS: FeedbackKind[] = ["related", "snooze"]
+const FEEDBACK_BUTTON_TITLES: Record<FeedbackKind, string> = {
+  related: "목표와 관련 있어요",
+  accepted: "잘 잡았어요",
+  snooze: "30분 조용히",
+}
+const timers = new Map<number, number>()
+const pendingNotifications = new Map<string, { interventionId: string; observationId: string }>()
+
+function scheduleTabObservation(tabId: number): void {
+  const existing = timers.get(tabId)
+  if (existing) {
+    clearTimeout(existing)
+  }
+  const timer = globalThis.setTimeout(async () => {
+    timers.delete(tabId)
+    const tab = await getTab(tabId)
+    if (!tab) return
+    if (!tab.active || !tab.url) return
+    if (shouldDropUrl(tab.url)) return
+    const result = await postBrowserNav({
+      url: tab.url,
+      title: tab.title ?? "",
+      tab_id: tab.id,
+    })
+    await handlePipelineResult(tabId, result)
+    void refreshBadge()
+  }, DEBOUNCE_MS)
+  timers.set(tabId, timer)
+}
+
+async function getTab(tabId: number): Promise<chrome.tabs.Tab | null> {
+  try {
+    return await chrome.tabs.get(tabId)
+  } catch {
+    return null
+  }
+}
+
+function clearTabTimer(tabId: number): void {
+  const timer = timers.get(tabId)
+  if (!timer) return
+  clearTimeout(timer)
+  timers.delete(tabId)
+}
+
+async function handlePipelineResult(tabId: number, result: PipelineResult | null): Promise<void> {
+  if (result?.action !== "request_excerpt" || !result.observation_id) return
+  const excerpt = await extractFromTab(tabId)
+  if (!excerpt) return
+  const finalResult = await postObservationExcerpt(result.observation_id, excerpt)
+  if (finalResult?.action === "notify" && finalResult.message) {
+    await showNotification(finalResult)
+  }
+}
+
+async function extractFromTab(tabId: number): Promise<PageExcerpt | null> {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: extractPageExcerpt,
+      args: [EXCERPT_LIMIT],
+    })
+    return results[0]?.result ?? null
+  } catch {
+    return null
+  }
+}
+
+async function showNotification(result: PipelineResult): Promise<void> {
+  if (!result.intervention_id || !result.observation_id || !result.message) return
+  const silent = (result as PipelineResult & { silent?: boolean }).silent === true
+  if (silent) {
+    void postDeliveryReport(result.intervention_id, true)
+    void refreshBadge()
+    return
+  }
+  const notificationId = `kibitzer:${result.intervention_id}`
+  pendingNotifications.set(notificationId, {
+    interventionId: result.intervention_id,
+    observationId: result.observation_id,
+  })
+  try {
+    await chrome.notifications.create(notificationId, {
+      type: "basic",
+      iconUrl: chrome.runtime.getURL(NOTIFICATION_ICON),
+      title: "Kibitzer",
+      message: result.message,
+      contextMessage: pageLabel(result.page),
+      buttons: NOTIFICATION_BUTTONS.map((kind) => ({ title: FEEDBACK_BUTTON_TITLES[kind] })),
+      priority: 2,
+      requireInteraction: true,
+    })
+    void postDeliveryReport(result.intervention_id, true)
+    void playNotificationSound()
+  } catch (error) {
+    pendingNotifications.delete(notificationId)
+    console.error("kibitzer: notification create failed", error)
+    void postDeliveryReport(result.intervention_id, false, String(error))
+  }
+}
+
+function pageLabel(page: PageInfo | null | undefined): string | undefined {
+  const host = page?.host?.trim()
+  const title = page?.title?.trim()
+  if (host && title) return `${host} - ${title}`
+  return title || host || undefined
+}
+
+async function playNotificationSound(): Promise<void> {
+  try {
+    const contexts = await chrome.runtime.getContexts({
+      contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
+    })
+    if (contexts.length === 0) {
+      await chrome.offscreen.createDocument({
+        url: "offscreen/offscreen.html",
+        reasons: [chrome.offscreen.Reason.AUDIO_PLAYBACK],
+        justification: "Play a short chime when a drift notification is shown.",
+      })
+    }
+    await chrome.runtime.sendMessage({ type: "kibitzer:play-sound" })
+  } catch (error) {
+    console.error("kibitzer: notification sound failed", error)
+  }
+}
+
+async function refreshBadge(): Promise<void> {
+  const result = await getSessionState()
+  if (result.kind === "unreachable") {
+    await setBadge("?", "#5f5e5a")
+    return
+  }
+  if (result.kind === "no_session" || !result.state.has_goal) {
+    await setBadge("!", "#ba7517")
+    return
+  }
+  if (result.state.pending_intervention) {
+    await setBadge("1", "#a32d2d")
+    return
+  }
+  if (result.state.tracking === "snoozed") {
+    await setBadge("zZ", "#185fa5")
+    return
+  }
+  await setBadge("", "#5f5e5a")
+}
+
+async function setBadge(text: string, color: string): Promise<void> {
+  await chrome.action.setBadgeText({ text })
+  if (text) {
+    await chrome.action.setBadgeBackgroundColor({ color })
+  }
+}
+
+async function initBadge(): Promise<void> {
+  await chrome.alarms.create(BADGE_ALARM, { periodInMinutes: 1 })
+  await refreshBadge()
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  void initBadge()
+})
+
+chrome.runtime.onStartup.addListener(() => {
+  void initBadge()
+})
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === BADGE_ALARM) void refreshBadge()
+})
+
+chrome.runtime.onMessage.addListener((message: { type?: string } | undefined) => {
+  if (message?.type === "kibitzer:refresh-badge") void refreshBadge()
+})
+
+chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) => {
+  void submitNotificationFeedback(notificationId, NOTIFICATION_BUTTONS[buttonIndex])
+})
+
+chrome.notifications.onClicked.addListener((notificationId) => {
+  void submitNotificationFeedback(notificationId, "accepted")
+})
+
+chrome.notifications.onClosed.addListener((notificationId) => {
+  pendingNotifications.delete(notificationId)
+})
+
+async function submitNotificationFeedback(
+  notificationId: string,
+  kind: FeedbackKind | undefined,
+): Promise<void> {
+  const metadata = pendingNotifications.get(notificationId)
+  if (!metadata || !kind) return
+  await postFeedback({
+    kind,
+    intervention_id: metadata.interventionId,
+    observation_id: metadata.observationId,
+  })
+  pendingNotifications.delete(notificationId)
+  await chrome.notifications.clear(notificationId)
+  void refreshBadge()
+}
+
+chrome.webNavigation.onCommitted.addListener((details) => {
+  if (details.frameId === 0) scheduleTabObservation(details.tabId)
+})
+
+chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
+  if (details.frameId === 0) scheduleTabObservation(details.tabId)
+})
+
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  scheduleTabObservation(activeInfo.tabId)
+})
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  clearTabTimer(tabId)
+})
+
+void refreshBadge()

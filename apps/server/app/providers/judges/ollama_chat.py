@@ -1,0 +1,97 @@
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+
+import httpx
+
+from .base import Tier1Result, Tier2Result
+from .openai_compatible import parse_tier1_json, parse_tier2_json
+
+
+@dataclass(frozen=True)
+class OllamaChatJudgeProvider:
+    api_url: str
+    api_key: str
+    model: str
+    timeout_seconds: float = 120
+    fallback_api_key: str | None = None
+    max_output_tokens: int = 512
+
+    async def classify_tier1(self, payload: dict[str, object]) -> Tier1Result:
+        response = await self._post_chat(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "Classify whether the current browser navigation is aligned with the user's declared "
+                        "goal. Return strict JSON only: "
+                        '{"verdict":"ok|drift","reason":"<10 words>"}.'
+                    ),
+                },
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ]
+        )
+        return parse_tier1_json(_message_content(response))
+
+    async def confirm_tier2(
+        self,
+        payload: dict[str, object],
+        system_prompt: str | None = None,
+    ) -> Tier2Result:
+        response = await self._post_chat(
+            [
+                {
+                    "role": "system",
+                    "content": system_prompt or (
+                        "You are Kibitzer, a quiet browser drift guard. Decide whether the page excerpt is "
+                        "truly off-goal. Return strict JSON only: "
+                        '{"confirm_drift":true|false,"message":"<=2 short Korean sentences if true, else empty string"}.'
+                    ),
+                },
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ]
+        )
+        return parse_tier2_json(_message_content(response))
+
+    async def _post_chat(self, messages: list[dict[str, str]]) -> dict[str, object]:
+        request_body: dict[str, object] = {
+            "model": self.model,
+            "messages": messages,
+            "stream": False,
+            "format": "json",
+            "options": {"temperature": 0, "num_predict": self.max_output_tokens},
+        }
+        api_keys = [self.api_key]
+        if self.fallback_api_key:
+            api_keys.append(self.fallback_api_key)
+
+        last_response: httpx.Response | None = None
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            for index, api_key in enumerate(api_keys):
+                response = await client.post(
+                    self.api_url,
+                    headers={"authorization": f"Bearer {api_key}", "content-type": "application/json"},
+                    json=request_body,
+                )
+                last_response = response
+                if response.status_code in {401, 403, 429} and index + 1 < len(api_keys):
+                    continue
+                response.raise_for_status()
+                return response.json()
+
+        assert last_response is not None
+        last_response.raise_for_status()
+        return last_response.json()
+
+
+def _message_content(response: dict[str, object]) -> str:
+    message = response.get("message")
+    if isinstance(message, dict):
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+    response_text = response.get("response")
+    if isinstance(response_text, str):
+        return response_text
+    raise ValueError("Ollama response did not include message content")

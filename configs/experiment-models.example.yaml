@@ -1,0 +1,20 @@
+# Copy this file to configs/models.local.yaml and edit it for your machine.
+# The keys match configs/default.yaml.
+
+gemma4:
+  # Local Ollama example. Install Ollama for Windows and pull a model first,
+  # then replace the model name below if needed.
+  api_url: "http://127.0.0.1:11434/api/chat"
+  api_style: "ollama"
+  ollama_model: "llama3.2:3b"
+  timeout_sec: 10
+  max_output_tokens: 128
+
+ollama_cloud_gemma4_31b:
+  # Local default for Windows packaging. You can replace this with a cloud
+  # Ollama/OpenAI-compatible endpoint and set TIER2_API_KEY if required.
+  api_url: "http://127.0.0.1:11434/api/chat"
+  api_style: "ollama"
+  ollama_model: "llama3.2:3b"
+  timeout_sec: 60
+  max_output_tokens: 512

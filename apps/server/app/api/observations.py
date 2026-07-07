@@ -1,0 +1,257 @@
+from fastapi import APIRouter, HTTPException, Request
+
+from ..core.controller_flow import apply_controller
+from ..core.delivery import clamp_notification_message
+from ..core.normalization import browser_nav_embedding_text, normalize_browser_nav
+from ..core.personas import (
+    Persona,
+    compose_tier2_system_prompt,
+    format_persona_fallback,
+    resolve_persona,
+)
+from ..core.relevance import tier0_score
+from ..core.runtime_settings import effective_controller_config, quiet_hours_active, runtime_settings
+from ..core.tier1_payload import build_tier1_payload
+from ..core.tier2_payload import build_tier2_payload, fallback_drift_message
+from ..core.voice import speak
+from ..providers.judges.base import Tier2Result
+from ..privacy.domain_filter import SensitiveDomainRules, drop_decision_for_url
+from ..schemas import PageExcerpt, PageInfo, PipelineAction, PipelineResult, RawObservation, Verdict
+from ..storage.sqlite import SQLiteStore
+
+router = APIRouter()
+
+
+def _store(request: Request) -> SQLiteStore:
+    return request.app.state.store
+
+
+def _sensitive_domain_rules(request: Request) -> SensitiveDomainRules:
+    return request.app.state.sensitive_domain_rules
+
+
+@router.post("/observations/browser-nav", response_model=PipelineResult)
+async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineResult:
+    current = _store(request).get_current_session()
+    session_id = current.session.id if current else None
+
+    decision = drop_decision_for_url(str(raw.payload.url), _sensitive_domain_rules(request))
+    if decision.should_drop:
+        _store(request).record_dropped_observation(
+            session_id=session_id,
+            source=raw.source,
+            url_host=decision.host,
+            reason=decision.reason or "sensitive_domain",
+            ts=raw.ts,
+        )
+        return PipelineResult(action=PipelineAction.NONE)
+
+    if not current:
+        return PipelineResult(action=PipelineAction.NONE)
+
+    observation = normalize_browser_nav(raw, current.session.id)
+    if current.goal:
+        vectors = await request.app.state.embedding_provider.embed([browser_nav_embedding_text(observation)])
+        observation.features.emb = vectors[0]
+        observation.features.r0 = tier0_score(
+            emb=observation.features.emb,
+            exemplars=current.goal.exemplars,
+            anchor=_store(request).anchor_value(
+                current.session.id,
+                request.app.state.config.relevance.anchor_window,
+            ),
+            beta=request.app.state.config.relevance.beta,
+        )
+        observation.features.r_final = observation.features.r0
+        observation.features.tier_reached = 0
+        observation.verdict = (
+            Verdict.OK if observation.features.r0 >= request.app.state.config.relevance.tau_ok else Verdict.DRIFT
+        )
+        if observation.verdict == Verdict.DRIFT and request.app.state.tier1_provider:
+            recent = _store(request).recent_observation_summaries(
+                current.session.id,
+                request.app.state.config.tier1.recent_observations,
+            )
+            payload = build_tier1_payload(current.goal, observation, recent, request.app.state.config.tier1)
+            try:
+                result = await request.app.state.tier1_provider.classify_tier1(payload)
+            except Exception as exc:
+                # Tier 1 is best-effort: on provider failure keep the Tier 0 verdict.
+                _store(request).record_tier1_provider_error(
+                    session_id=current.session.id,
+                    observation_id=observation.id,
+                    error_type=type(exc).__name__,
+                    ts=observation.ts,
+                )
+            else:
+                observation.verdict = result.verdict
+                observation.features.tier_reached = 1
+                _store(request).record_tier1_result(
+                    session_id=current.session.id,
+                    observation_id=observation.id,
+                    verdict=result.verdict.value,
+                    reason=result.reason,
+                    ts=observation.ts,
+                )
+    _store(request).record_observation(observation)
+    return apply_controller(
+        _store(request),
+        effective_controller_config(request.app.state.config, _store(request)),
+        observation,
+    )
+
+
+@router.post("/observations/{observation_id}/excerpt", response_model=PipelineResult)
+async def confirm_observation_excerpt(
+    request: Request,
+    observation_id: str,
+    excerpt: PageExcerpt,
+) -> PipelineResult:
+    store = _store(request)
+    current = store.get_current_session()
+    observation = store.get_observation(observation_id)
+    if not current or not current.goal or not observation or observation.session_id != current.session.id:
+        raise HTTPException(status_code=404, detail="observation not found")
+
+    verdict = Verdict(observation.verdict) if observation.verdict else None
+    if verdict != Verdict.DRIFT:
+        return PipelineResult(
+            action=PipelineAction.NONE,
+            observation_id=observation.id,
+            verdict=verdict,
+            page=_page_info(observation),
+        )
+
+    recent = store.recent_observation_summaries(
+        observation.session_id,
+        request.app.state.config.tier2.recent_observations,
+    )
+    payload = build_tier2_payload(current.goal, observation, recent, excerpt, request.app.state.config.tier2)
+    _inject_nagging_context(store, payload, observation.session_id, observation.url_host)
+    settings = runtime_settings(request.app.state.config, store)
+    persona = resolve_persona(
+        getattr(request.app.state, "persona_set", None),
+        settings,
+        request.app.state.config.delivery.persona,
+    )
+    system_prompt = compose_tier2_system_prompt(persona) if persona else None
+    result = await _confirm_tier2(
+        request,
+        observation.session_id,
+        observation.id,
+        payload,
+        system_prompt=system_prompt,
+        persona=persona,
+    )
+    max_sentences = (
+        persona.max_sentences
+        if persona and persona.max_sentences is not None
+        else request.app.state.config.delivery.max_sentences
+    )
+    message = clamp_notification_message(
+        result.message or fallback_drift_message(current.goal, observation),
+        max_sentences,
+    )
+
+    store.record_tier2_result(
+        session_id=observation.session_id,
+        observation_id=observation.id,
+        confirm_drift=result.confirm_drift,
+        message=message if result.confirm_drift else result.message,
+    )
+
+    if not result.confirm_drift:
+        return PipelineResult(action=PipelineAction.NONE, observation_id=observation.id, verdict=verdict)
+
+    intervention_id = store.create_intervention(observation.session_id, observation.id, message)
+    silent = _handle_delivery_side_effects(
+        request,
+        observation.session_id,
+        intervention_id,
+        message,
+        settings,
+        persona,
+    )
+    return PipelineResult(
+        action=PipelineAction.NOTIFY,
+        observation_id=observation.id,
+        verdict=verdict,
+        message=message,
+        intervention_id=intervention_id,
+        silent=silent,
+        page=_page_info(observation),
+    )
+
+
+def _page_info(observation) -> PageInfo:
+    return PageInfo(host=observation.url_host, title=observation.title)
+
+
+async def _confirm_tier2(
+    request: Request,
+    session_id: str,
+    observation_id: str,
+    payload: dict[str, object],
+    system_prompt: str | None = None,
+    persona: Persona | None = None,
+) -> Tier2Result:
+    provider = request.app.state.tier2_provider
+    if provider:
+        try:
+            return await provider.confirm_tier2(payload, system_prompt=system_prompt)
+        except Exception as exc:
+            _store(request).record_tier2_provider_error(session_id, observation_id, type(exc).__name__)
+    current = _store(request).get_current_session()
+    observation = _store(request).get_observation(observation_id)
+    if current and current.goal and observation:
+        nag_count = _store(request).nag_count_today(session_id) + 1
+        message = format_persona_fallback(persona, current.goal, observation, nag_count)
+        return Tier2Result(
+            confirm_drift=True,
+            message=message or fallback_drift_message(current.goal, observation),
+        )
+    return Tier2Result(confirm_drift=False, message=None)
+
+
+def _inject_nagging_context(
+    store: SQLiteStore,
+    payload: dict[str, object],
+    session_id: str,
+    current_host: str | None,
+) -> None:
+    previous_host = store.latest_intervention_observation_host(session_id)
+    payload["nagging_context"] = {
+        "nag_count_today": store.nag_count_today(session_id),
+        "last_nag_ignored": store.last_intervention_ignored(session_id),
+        "drift_minutes": store.minutes_since_last_ok(session_id),
+        "repeat_host": bool(current_host and previous_host and current_host == previous_host),
+    }
+
+
+def _handle_delivery_side_effects(
+    request: Request,
+    session_id: str,
+    intervention_id: str,
+    message: str,
+    settings: dict[str, object],
+    persona: Persona | None,
+) -> bool:
+    store = _store(request)
+    try:
+        silent = quiet_hours_active(settings["quiet_hours"])
+    except Exception:
+        silent = False
+
+    if silent:
+        store.record_delivery_suppressed_quiet_hours(session_id, intervention_id)
+        return True
+
+    if settings.get("voice_enabled"):
+        voice = request.app.state.config.delivery.voice.voice
+        rate = request.app.state.config.delivery.voice.rate
+        if persona and persona.voice:
+            voice = persona.voice.voice or voice
+            rate = persona.voice.rate or rate
+        speak(message, voice, rate)
+        store.record_voice_spoken(session_id, intervention_id)
+    return False

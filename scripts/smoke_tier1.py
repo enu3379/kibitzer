@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import sqlite3
+import sys
+import tempfile
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from apps.server.app.config import AppConfig, ServerConfig
+from apps.server.app.main import create_app
+from apps.server.app.providers.judges.base import Tier1Result
+from apps.server.app.schemas import Verdict
+from apps.server.app.storage.sqlite import SQLiteStore
+
+
+@dataclass
+class FakeTier1Provider:
+    result: Tier1Result
+    payloads: list[dict[str, object]] = field(default_factory=list)
+
+    async def classify_tier1(self, payload: dict[str, object]) -> Tier1Result:
+        self.payloads.append(payload)
+        return self.result
+
+
+def assert_true(condition: bool, message: str) -> None:
+    if not condition:
+        raise AssertionError(message)
+
+
+def main() -> int:
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "kibitzer.sqlite3"
+        provider = FakeTier1Provider(Tier1Result(verdict=Verdict.OK, reason="normal subtopic"))
+        app = create_app(
+            config=AppConfig(server=ServerConfig(db_path=str(db_path))),
+            store=SQLiteStore(db_path),
+            tier1_provider=provider,
+        )
+        with TestClient(app) as client:
+            session_id = client.post("/sessions").json()["id"]
+            client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
+            response = client.post(
+                "/observations/browser-nav",
+                json={
+                    "source": "browser_nav",
+                    "payload": {
+                        "url": "https://example.com/design/palette?secret=1",
+                        "title": "Product design palette",
+                    },
+                },
+            )
+
+        assert_true(response.json()["verdict"] == "OK", "fake Tier 1 should reclassify as OK")
+        assert_true(len(provider.payloads) == 1, "Tier 1 should be called once")
+        payload = provider.payloads[0]
+        payload_json = json.dumps(payload)
+        assert_true(payload["current"] == {"title": "Product design palette", "url_host": "example.com"}, "payload current fields mismatch")
+        assert_true("secret" not in payload_json, "Tier 1 payload must not include query strings")
+        assert_true("design/palette" not in payload_json, "Tier 1 payload must not include URL paths")
+
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT verdict, tier_reached FROM observations WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            event = conn.execute("SELECT payload_json FROM event_log WHERE event_type = 'tier1.classified'").fetchone()[0]
+        assert_true(row == ("OK", 1), "observation should be stored with Tier 1 OK verdict")
+        assert_true("normal subtopic" in event, "Tier 1 event should record reason")
+
+    print("PASS success scenario: Tier 1 reclassified Tier 0 drift as OK")
+    print("PASS payload scenario: Tier 1 received minimized fields only")
+    print("PASS event scenario: Tier 1 verdict and reason recorded")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except AssertionError as exc:
+        print(f"FAIL {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc

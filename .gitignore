@@ -1,0 +1,17 @@
+data/
+.env
+.env.*
+!.env.example
+configs/models.local.yaml
+.claude/
+.agents/
+.llm-wiki/runs/
+__pycache__/
+.pytest_cache/
+.venv/
+*.egg-info/
+node_modules/
+dist/
+build/
+*.sqlite3
+*.db
