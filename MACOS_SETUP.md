@@ -60,6 +60,27 @@ bash scripts/macos_uninstall_launch_agent.sh
 
 LaunchAgent logs are written under `data/logs/`.
 
+## Optional Menu Bar Status
+
+Install the macOS menu bar status item so the server state is visible next to
+the clock:
+
+```bash
+bash scripts/macos_install_menu_bar_agent.sh
+```
+
+The menu bar item polls `GET /health`: red means unreachable, gray means idle,
+green means active, and yellow means unknown. The current icon treatment is a
+placeholder; final menu bar artwork is tracked separately.
+
+Remove the menu bar item with:
+
+```bash
+bash scripts/macos_uninstall_menu_bar_agent.sh
+```
+
+Menu bar logs are written under `data/logs/`.
+
 ## Optional AI Provider Setup
 
 Copy the example env file:

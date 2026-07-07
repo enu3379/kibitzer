@@ -12,6 +12,10 @@ Project maintenance scripts live here.
 - `macos_setup.sh` / `macos_run_server.sh`: macOS setup and server run.
 - `macos_install_launch_agent.sh` / `macos_uninstall_launch_agent.sh`: optional
   macOS login autostart for the idle daemon server.
+- `macos_build_menu_bar.sh` / `macos_run_menu_bar.sh`: build and run the macOS
+  menu bar status item.
+- `macos_install_menu_bar_agent.sh` / `macos_uninstall_menu_bar_agent.sh`:
+  optional macOS login autostart for the menu bar status item.
 
 The application code is shared across operating systems. Keep platform
 differences in these entrypoints unless a native adapter is unavoidable.
