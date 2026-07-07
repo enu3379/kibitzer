@@ -2,14 +2,18 @@ from fastapi import APIRouter, HTTPException, Request
 
 from ..core.controller_flow import apply_controller
 from ..core.delivery import clamp_notification_message
-from ..core.normalization import browser_nav_embedding_text, normalize_browser_nav
+from ..core.normalization import (
+    browser_nav_embedding_text,
+    normalize_browser_nav,
+    strip_repeated_title_suffix,
+)
 from ..core.personas import (
     Persona,
     compose_tier2_system_prompt,
     format_persona_fallback,
     resolve_persona,
 )
-from ..core.relevance import tier0_score
+from ..core.relevance import tier0_score_parts
 from ..core.runtime_settings import effective_controller_config, quiet_hours_active, runtime_settings
 from ..core.runtime_resources import RuntimeResources
 from ..core.tier1_payload import build_tier1_payload
@@ -57,9 +61,13 @@ async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineR
     observation = normalize_browser_nav(raw, current.session.id)
     if current.goal:
         runtime = _runtime(request)
-        vectors = await runtime.embedding_provider().embed([browser_nav_embedding_text(observation)])
+        embedding_text = strip_repeated_title_suffix(
+            browser_nav_embedding_text(observation),
+            _store(request).recent_titles_for_host(str(observation.payload.get("url_host") or "")),
+        )
+        vectors = await runtime.embedding_provider().embed([embedding_text])
         observation.features.emb = vectors[0]
-        observation.features.r0 = tier0_score(
+        score = tier0_score_parts(
             emb=observation.features.emb,
             exemplars=current.goal.exemplars,
             anchor=_store(request).anchor_value(
@@ -68,6 +76,8 @@ async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineR
             ),
             beta=request.app.state.config.relevance.beta,
         )
+        observation.features.r0 = score.score
+        observation.features.exemplar_score = score.exemplar_score
         observation.features.r_final = observation.features.r0
         observation.features.tier_reached = 0
         observation.verdict = (
@@ -100,6 +110,13 @@ async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineR
                     reason=result.reason,
                     ts=observation.ts,
                 )
+        # Anchor admission guard: only pages with genuine goal affinity — direct
+        # exemplar similarity, or an LLM-vetted OK — may steer the anchor. An OK
+        # that rode the anchor alone keeps its verdict but gets no vote.
+        observation.features.anchor_eligible = (
+            score.exemplar_score >= request.app.state.config.relevance.anchor_epsilon
+            or (observation.verdict == Verdict.OK and (observation.features.tier_reached or 0) >= 1)
+        )
     _store(request).record_observation(observation)
     return apply_controller(
         _store(request),

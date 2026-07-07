@@ -32,6 +32,35 @@ def browser_nav_embedding_text(observation: Observation) -> str:
     return str(observation.payload.get("title") or "").strip()
 
 
+# Rightmost-match separators for the near-universal SEO title template
+# "<page> <sep> <site name>". Space-padded so hyphenated words survive.
+_TITLE_SUFFIX_SEPARATORS = (" - ", " | ", " · ", " :: ", " – ", " — ")
+_SUFFIX_REPEATS_REQUIRED = 2
+
+
+def strip_repeated_title_suffix(title: str, previous_titles: list[str]) -> str:
+    """Drop a trailing "<sep> <site name>" segment the host repeats on every page.
+
+    Site-name furniture ("- 나무위키", "| LG전자") dominates bigram similarity for
+    short Korean titles: one furniture-carrying page admitted into the OK anchor
+    whitelists the whole platform. The suffix is only dropped when the same
+    trailing segment ends enough *previous* titles from the same host, so
+    legitimate one-off segments survive.
+    """
+    stripped = title.strip()
+    cut = -1
+    for separator in _TITLE_SUFFIX_SEPARATORS:
+        cut = max(cut, stripped.rfind(separator))
+    if cut <= 0:
+        return stripped
+    suffix = stripped[cut:]
+    core = stripped[:cut].strip()
+    if len(core) < 2:
+        return stripped
+    repeats = sum(1 for previous in previous_titles if previous and previous.strip().endswith(suffix))
+    return core if repeats >= _SUFFIX_REPEATS_REQUIRED else stripped
+
+
 def _hash_path(path: str) -> str:
     normalized = path or "/"
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()

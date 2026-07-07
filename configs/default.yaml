@@ -55,6 +55,11 @@ relevance:
   beta: 0.85
   anchor_window: 10
   exemplar_cap: 20
+  # Anchor admission guard (2026-07-08, from the LG그램 session audit): pages
+  # whose OK came only from anchor similarity (exemplar score < epsilon) keep
+  # the OK verdict but are excluded from the anchor, so one borderline OK can
+  # no longer whitelist a whole platform. Tune via the replay CLI later.
+  anchor_epsilon: 0.05
 
 controller:
   type: "streak"
