@@ -105,7 +105,15 @@ async function handlePipelineResult(
   result: PipelineResult | null,
   observation: { url: string; startedAt: number },
 ): Promise<void> {
-  if (result?.action !== "request_excerpt" || !result.observation_id) return
+  if (!result?.observation_id) return
+  // Celebrations arrive directly on the browser-nav response (no excerpt round
+  // trip). Show only if the user is still on the page they returned to.
+  if (result.action === "notify" && result.kind === "celebration" && result.message) {
+    if (!(await tabStillOnObservedPage(tabId, observation.url))) return
+    await showNotification(result, tabId)
+    return
+  }
+  if (result.action !== "request_excerpt") return
   const remainingDwellMs = TIER2_DWELL_MS - (Date.now() - observation.startedAt)
   if (remainingDwellMs > 0) {
     await delay(remainingDwellMs)
