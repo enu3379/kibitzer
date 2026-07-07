@@ -6,6 +6,8 @@ Project maintenance scripts live here.
 
 - `windows_setup.ps1` / `windows_run_server.ps1`: Windows setup and server run.
 - `macos_setup.sh` / `macos_run_server.sh`: macOS setup and server run.
+- `macos_install_launch_agent.sh` / `macos_uninstall_launch_agent.sh`: optional
+  macOS login autostart for the idle daemon server.
 
 The application code is shared across operating systems. Keep platform
 differences in these entrypoints unless a native adapter is unavoidable.

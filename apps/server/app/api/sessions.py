@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from ..core.runtime_settings import effective_controller_config
+from ..core.runtime_resources import RuntimeResources
 from ..storage.sqlite import NoActiveSessionError, SessionStatsRecord, SQLiteStore
 
 router = APIRouter()
@@ -83,8 +84,12 @@ def _store(request: Request) -> SQLiteStore:
     return request.app.state.store
 
 
+def _runtime(request: Request) -> RuntimeResources:
+    return request.app.state.runtime
+
+
 async def _embed_goal(request: Request, text: str) -> list[float]:
-    vectors = await request.app.state.embedding_provider.embed([text])
+    vectors = await _runtime(request).embedding_provider().embed([text])
     return vectors[0]
 
 
@@ -216,6 +221,7 @@ async def end_current_session(request: Request) -> SessionStatsResponse:
         session = store.end_current_session()
     except NoActiveSessionError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    _runtime(request).enter_idle("session_end")
     return _stats_response(store.session_stats(session.id))
 
 
@@ -239,9 +245,12 @@ def _stats_response(stats: SessionStatsRecord) -> SessionStatsResponse:
 
 @router.post("/sessions/current/goal", response_model=GoalResponse)
 async def set_current_goal(request: Request, body: GoalRequest) -> GoalResponse:
+    store = _store(request)
+    if not store.get_current_session():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no active session")
     try:
         exemplar = await _embed_goal(request, body.raw_text)
-        goal = _store(request).set_current_goal(body.raw_text, body.keywords, exemplar)
+        goal = store.set_current_goal(body.raw_text, body.keywords, exemplar)
     except NoActiveSessionError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
