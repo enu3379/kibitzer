@@ -16,6 +16,7 @@ Related: [[code-map-pages]] [[extension-background-worker-module]] [[chrome-exte
 import { extractPageExcerpt } from "./content/readabilityExtract"
 import {
   FeedbackKind,
+  PageInfo,
   PageExcerpt,
   PipelineResult,
   getSessionState,
@@ -26,7 +27,8 @@ import {
 } from "./lib/api"
 import { shouldDropUrl } from "./lib/domainFilter"
 
-const DEBOUNCE_MS = 1500
+const OBSERVATION_DWELL_MS = 5000
+const TIER2_DWELL_MS = 10000
 const EXCERPT_LIMIT = 3500
 const NOTIFICATION_ICON = "icons/icon-128.png"
 const BADGE_ALARM = "kibitzer-badge-refresh"
@@ -38,38 +40,107 @@ const FEEDBACK_BUTTON_TITLES: Record<FeedbackKind, string> = {
   accepted: "잘 잡았어요",
   snooze: "30분 조용히",
 }
-const timers = new Map<number, number>()
+interface PendingTabObservation {
+  token: number
+  url: string
+  startedAt: number
+  timer: number
+}
+
+let nextObservationToken = 0
+const pendingTabObservations = new Map<number, PendingTabObservation>()
 const pendingNotifications = new Map<string, { interventionId: string; observationId: string }>()
 
-function scheduleTabObservation(tabId: number): void {
-  const existing = timers.get(tabId)
-  if (existing) {
-    clearTimeout(existing)
+function scheduleTabObservation(tabId: number, observedUrl?: string): void {
+  clearTabTimer(tabId)
+  const token = ++nextObservationToken
+  const startedAt = Date.now()
+  if (observedUrl) {
+    scheduleDwellCheck(tabId, token, observedUrl, startedAt)
+    return
+  }
+
+  pendingTabObservations.set(tabId, { token, url: "", startedAt, timer: 0 })
+  void getTab(tabId).then((tab) => {
+    const pending = pendingTabObservations.get(tabId)
+    if (!pending || pending.token !== token) return
+    if (!tab?.active || !tab.url || shouldDropUrl(tab.url)) {
+      pendingTabObservations.delete(tabId)
+      return
+    }
+    scheduleDwellCheck(tabId, token, tab.url, startedAt)
+  })
+}
+
+function scheduleDwellCheck(tabId: number, token: number, url: string, startedAt: number): void {
+  if (shouldDropUrl(url)) {
+    pendingTabObservations.delete(tabId)
+    return
   }
   const timer = globalThis.setTimeout(async () => {
-    timers.delete(tabId)
-    const tab = await chrome.tabs.get(tabId)
-    if (!tab.active || !tab.url) return
-    if (shouldDropUrl(tab.url)) return
+    const pending = pendingTabObservations.get(tabId)
+    if (!pending || pending.token !== token) return
+    pendingTabObservations.delete(tabId)
+    const tab = await getTab(tabId)
+    if (!tab) return
+    if (!tab.active || tab.url !== url) return
+    if (shouldDropUrl(url)) return
     const result = await postBrowserNav({
-      url: tab.url,
+      url,
       title: tab.title ?? "",
       tab_id: tab.id,
     })
-    await handlePipelineResult(tabId, result)
+    await handlePipelineResult(tabId, result, { url, startedAt })
     void refreshBadge()
-  }, DEBOUNCE_MS)
-  timers.set(tabId, timer)
+  }, OBSERVATION_DWELL_MS)
+  pendingTabObservations.set(tabId, { token, url, startedAt, timer })
 }
 
-async function handlePipelineResult(tabId: number, result: PipelineResult | null): Promise<void> {
+async function getTab(tabId: number): Promise<chrome.tabs.Tab | null> {
+  try {
+    return await chrome.tabs.get(tabId)
+  } catch {
+    return null
+  }
+}
+
+function clearTabTimer(tabId: number): void {
+  const pending = pendingTabObservations.get(tabId)
+  if (!pending) return
+  clearTimeout(pending.timer)
+  pendingTabObservations.delete(tabId)
+}
+
+async function handlePipelineResult(
+  tabId: number,
+  result: PipelineResult | null,
+  observation: { url: string; startedAt: number },
+): Promise<void> {
   if (result?.action !== "request_excerpt" || !result.observation_id) return
+  const remainingDwellMs = TIER2_DWELL_MS - (Date.now() - observation.startedAt)
+  if (remainingDwellMs > 0) {
+    await delay(remainingDwellMs)
+  }
+  if (!(await tabStillOnObservedPage(tabId, observation.url))) return
   const excerpt = await extractFromTab(tabId)
   if (!excerpt) return
+  if (!(await tabStillOnObservedPage(tabId, observation.url))) return
   const finalResult = await postObservationExcerpt(result.observation_id, excerpt)
   if (finalResult?.action === "notify" && finalResult.message) {
+    if (!(await tabStillOnObservedPage(tabId, observation.url))) return
     await showNotification(finalResult)
   }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    globalThis.setTimeout(resolve, ms)
+  })
+}
+
+async function tabStillOnObservedPage(tabId: number, url: string): Promise<boolean> {
+  const tab = await getTab(tabId)
+  return Boolean(tab?.active && tab.url === url)
 }
 
 async function extractFromTab(tabId: number): Promise<PageExcerpt | null> {
@@ -104,6 +175,7 @@ async function showNotification(result: PipelineResult): Promise<void> {
       iconUrl: chrome.runtime.getURL(NOTIFICATION_ICON),
       title: "Kibitzer",
       message: result.message,
+      contextMessage: pageLabel(result.page),
       buttons: NOTIFICATION_BUTTONS.map((kind) => ({ title: FEEDBACK_BUTTON_TITLES[kind] })),
       priority: 2,
       requireInteraction: true,
@@ -115,6 +187,13 @@ async function showNotification(result: PipelineResult): Promise<void> {
     console.error("kibitzer: notification create failed", error)
     void postDeliveryReport(result.intervention_id, false, String(error))
   }
+}
+
+function pageLabel(page: PageInfo | null | undefined): string | undefined {
+  const host = page?.host?.trim()
+  const title = page?.title?.trim()
+  if (host && title) return `${host} - ${title}`
+  return title || host || undefined
 }
 
 async function playNotificationSound(): Promise<void> {
@@ -213,15 +292,19 @@ async function submitNotificationFeedback(
 }
 
 chrome.webNavigation.onCommitted.addListener((details) => {
-  if (details.frameId === 0) scheduleTabObservation(details.tabId)
+  if (details.frameId === 0) scheduleTabObservation(details.tabId, details.url)
 })
 
 chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
-  if (details.frameId === 0) scheduleTabObservation(details.tabId)
+  if (details.frameId === 0) scheduleTabObservation(details.tabId, details.url)
 })
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
   scheduleTabObservation(activeInfo.tabId)
+})
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  clearTabTimer(tabId)
 })
 
 void refreshBadge()

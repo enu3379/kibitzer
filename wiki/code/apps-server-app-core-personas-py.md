@@ -59,7 +59,7 @@ class PersonaSet(BaseModel):
 
 
 def load_personas(path: str | Path) -> PersonaSet:
-    data = yaml.safe_load(Path(path).expanduser().read_text()) or {}
+    data = yaml.safe_load(Path(path).expanduser().read_text(encoding="utf-8")) or {}
     return PersonaSet.model_validate(data)
 
 

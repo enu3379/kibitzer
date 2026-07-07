@@ -55,7 +55,17 @@ Copy-Item configs\experiment-models.example.yaml configs\models.local.yaml
 Edit `configs\models.local.yaml` for your local or cloud endpoint. The real
 `.env` file and `configs\models.local.yaml` are ignored by git. If provider
 settings are incomplete, Kibitzer still runs with local Tier 0 scoring and
-fallback messages; startup logs will mention provider degradation.
+fallback messages; the server records provider degradation when a goal-backed
+session first activates those providers.
+
+## Planned Autostart and Tray
+
+Windows startup registration and tray status are not implemented yet. The plan is
+tracked in [docs/windows-idle-tray-plan.md](docs/windows-idle-tray-plan.md):
+
+- start the same local server at login in idle mode;
+- show `dead` / `idle` / `active` through a system tray icon;
+- keep the Chrome extension badge focused on extension-to-server reachability.
 
 ## Notes
 

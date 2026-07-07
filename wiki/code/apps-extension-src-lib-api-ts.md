@@ -27,6 +27,13 @@ export interface PipelineResult {
   verdict?: "OK" | "DRIFT" | null
   message?: string | null
   intervention_id?: string | null
+  page?: PageInfo | null
+  silent?: boolean
+}
+
+export interface PageInfo {
+  host?: string | null
+  title?: string | null
 }
 
 export interface PageExcerpt {
@@ -65,8 +72,12 @@ export interface SessionState {
   session_id: string
   has_goal: boolean
   tracking: "coldstart" | "tracking" | "snoozed" | "cooldown"
+  controller_type: ControllerType
   streak: number
   streak_threshold: number
+  alignment_score?: number | null
+  theta_low?: number | null
+  theta_high?: number | null
   obs_count: number
   coldstart_observations: number
   snoozed_until?: string | null
@@ -182,22 +193,87 @@ export interface QuietHours {
   end: string
 }
 
+export interface Cooldown {
+  enabled: boolean
+  seconds: number
+}
+
+export type ControllerType = "streak" | "alignment"
+
+export interface ControllerSettings {
+  type: ControllerType
+  k: number
+  alignment_alpha: number
+  theta_low: number
+  theta_high: number
+}
+
 export interface Settings {
   persona: string
   voice_enabled: boolean
+  controller: ControllerSettings
+  cooldown: Cooldown
   quiet_hours: QuietHours
 }
 
 export interface SettingsPatch {
   persona?: string
   voice_enabled?: boolean
+  controller?: Partial<ControllerSettings>
+  cooldown?: Partial<Cooldown>
   quiet_hours?: Partial<QuietHours>
+}
+
+function normalizeSettings(value: Partial<Settings>): Settings {
+  const rawController = (value.controller ?? {}) as Partial<ControllerSettings>
+  const rawCooldown = (value.cooldown ?? {}) as Partial<Cooldown>
+  const rawQuietHours = (value.quiet_hours ?? {}) as Partial<QuietHours>
+  const rawType = String(rawController.type ?? "")
+  const controllerType: ControllerType = rawType === "alignment" || rawType === "window" ? "alignment" : "streak"
+  const k = clampInt(rawController.k, 3, 1, 20)
+  const alignmentAlpha = clampFloat(rawController.alignment_alpha, 0.85, 0, 0.99)
+  const thetaLow = clampFloat(rawController.theta_low, 0.15, 0, 1)
+  const thetaHigh = Math.max(thetaLow + 0.01, clampFloat(rawController.theta_high, 0.3, 0, 1))
+
+  return {
+    persona: typeof value.persona === "string" ? value.persona : "dry_kibitzer",
+    voice_enabled: Boolean(value.voice_enabled),
+    controller: {
+      type: controllerType,
+      k,
+      alignment_alpha: alignmentAlpha,
+      theta_low: thetaLow,
+      theta_high: Math.min(1, thetaHigh),
+    },
+    cooldown: {
+      enabled: Boolean(rawCooldown.enabled),
+      seconds: clampInt(rawCooldown.seconds, 0, 0, 86400),
+    },
+    quiet_hours: {
+      enabled: Boolean(rawQuietHours.enabled),
+      start: typeof rawQuietHours.start === "string" ? rawQuietHours.start : "09:00",
+      end: typeof rawQuietHours.end === "string" ? rawQuietHours.end : "18:00",
+    },
+  }
+}
+
+function clampInt(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.min(max, Math.max(min, Math.trunc(parsed)))
+}
+
+function clampFloat(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = typeof value === "number" ? value : Number.parseFloat(String(value))
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.min(max, Math.max(min, parsed))
 }
 
 export async function getSettings(): Promise<Settings | null> {
   const response = await fetch(`${SERVER_BASE_URL}/settings`).catch(() => null)
   if (!response?.ok) return null
-  return response.json() as Promise<Settings>
+  const body = (await response.json()) as Partial<Settings>
+  return normalizeSettings(body)
 }
 
 export async function putSettings(patch: SettingsPatch): Promise<Settings | null> {
@@ -207,7 +283,8 @@ export async function putSettings(patch: SettingsPatch): Promise<Settings | null
     body: JSON.stringify(patch),
   }).catch(() => null)
   if (!response?.ok) return null
-  return response.json() as Promise<Settings>
+  const body = (await response.json()) as Partial<Settings>
+  return normalizeSettings(body)
 }
 
 export async function getSessionState(): Promise<SessionStateResult> {

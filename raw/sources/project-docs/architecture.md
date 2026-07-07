@@ -10,6 +10,7 @@ Chrome Extension
 
 Local Server
   session state
+  idle/active runtime mode
   observation pipeline
   provider orchestration
   controller state
@@ -34,11 +35,24 @@ The server owns:
 
 The extension owns no durable state. This follows Chrome MV3 service-worker constraints and keeps replay deterministic.
 
+## Runtime Modes
+
+The local server is intended to be safe to start at login:
+
+```text
+idle    health/session APIs are available; judging resources are cold
+active  a goal-backed session has initialized embeddings and judge providers
+```
+
+`GET /health` exposes the current mode. macOS uses a LaunchAgent to start the
+idle server at login; Windows startup and tray status are planned as a platform
+adapter over the same endpoint.
+
 ## Observation Flow
 
 ```text
 browser event
-  -> extension debounce
+  -> extension dwell gate
   -> sensitive-domain pre-drop
   -> POST /observations/browser-nav
   -> normalize
@@ -80,4 +94,3 @@ The extension should not infer policy from verdicts. It follows the action field
 - `SourceAdapter`
 
 Stage 0 implements only the browser source and Chrome notification delivery.
-

@@ -73,6 +73,11 @@ class PipelineAction(StrEnum):
     NOTIFY = "notify"
 
 
+class PageInfo(BaseModel):
+    host: str | None = None
+    title: str | None = None
+
+
 class PipelineResult(BaseModel):
     action: PipelineAction
     observation_id: str | None = None
@@ -80,6 +85,7 @@ class PipelineResult(BaseModel):
     message: str | None = None
     intervention_id: str | None = None
     silent: bool = False
+    page: PageInfo | None = None
 
 
 class PageExcerpt(BaseModel):

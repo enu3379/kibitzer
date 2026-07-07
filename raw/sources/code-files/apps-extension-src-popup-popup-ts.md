@@ -14,6 +14,7 @@ Related: [[code-map-pages]] [[extension-background-worker-module]] [[chrome-exte
 
 ```ts
 import {
+  ControllerType,
   FeedbackKind,
   PendingIntervention,
   SessionState,
@@ -45,6 +46,11 @@ const PERSONAS: { key: string; name: string; hint: string }[] = [
   { key: "chungcheong", name: "느긋한 이웃", hint: "말을 아끼는 함축 화법" },
   { key: "kyoto", name: "교토식 안주인", hint: "칭찬으로 포장한 지적" },
   { key: "quiet_coach", name: "조용한 코치", hint: "수치심 없는 리다이렉트" },
+]
+
+const CONTROLLERS: { type: ControllerType; label: string; hint: string }[] = [
+  { type: "alignment", label: "A안", hint: "EWMA" },
+  { type: "streak", label: "B안", hint: "연속 이탈" },
 ]
 
 const root = document.getElementById("root") as HTMLElement
@@ -87,6 +93,11 @@ function formatDuration(totalSeconds: number): string {
 function formatRatio(ratio: number | null | undefined): string {
   if (ratio === null || ratio === undefined) return "–"
   return `${Math.round(ratio * 100)}%`
+}
+
+function formatScore(score: number | null | undefined): string {
+  if (score === null || score === undefined) return "–"
+  return score.toFixed(2)
 }
 
 function header(pillLabel: string, pillTone: string): string {
@@ -150,6 +161,7 @@ function renderSetup(sessionExists: boolean, currentGoal = ""): void {
   })
   document.getElementById("goal-cancel")?.addEventListener("click", () => {
     editing = false
+    settingsOpen = false
     void refresh()
   })
 }
@@ -188,10 +200,18 @@ function renderDashboard(state: SessionState, goalText: string, stats: SessionSt
     state.tracking === "coldstart"
       ? `워밍업 ${Math.min(state.obs_count, state.coldstart_observations)}/${state.coldstart_observations}`
       : pill.label
+  const isAlignment = state.controller_type === "alignment"
   const dots = Array.from({ length: state.streak_threshold }, (_, index) =>
     `<span class="dot${index < state.streak ? " filled" : ""}"></span>`,
   ).join("")
   const snoozed = state.tracking === "snoozed"
+  const driftLabel = isAlignment ? "누적 정렬도" : "연속 이탈"
+  const driftMeter = isAlignment
+    ? `<div class="scoreline"><span>A<sub>t</sub></span><strong>${formatScore(state.alignment_score)}</strong></div>`
+    : `<div class="dots">${dots}<span class="count">${Math.min(state.streak, state.streak_threshold)} / ${state.streak_threshold}</span></div>`
+  const driftHint = isAlignment
+    ? `정렬도 ${formatScore(state.theta_low)} 미만이면 말하고, ${formatScore(state.theta_high)} 초과면 회복으로 봅니다.`
+    : `${state.streak_threshold}회 연속 이탈 시에만 한 번 말을 겁니다.`
 
   const pending = state.pending_intervention
   const pendingCard = pending
@@ -217,9 +237,9 @@ function renderDashboard(state: SessionState, goalText: string, stats: SessionSt
       <p class="goal-text">${esc(goalText)}</p>
       <button id="goal-edit" class="icon-btn" title="목표 수정">수정</button>
     </div>
-    <p class="label">드리프트 누적</p>
-    <div class="dots">${dots}<span class="count">${Math.min(state.streak, state.streak_threshold)} / ${state.streak_threshold}</span></div>
-    <p class="hint">${state.streak_threshold}회 연속 이탈 시에만 한 번 말을 겁니다.</p>
+    <p class="label">${driftLabel}</p>
+    ${driftMeter}
+    <p class="hint">${driftHint}</p>
     <div class="cards">
       <div class="card"><p class="k">관측</p><p class="v">${stats ? stats.observations : "–"}</p></div>
       <div class="card"><p class="k">목표 관련</p><p class="v">${stats ? formatRatio(stats.related_ratio) : "–"}</p></div>
@@ -334,7 +354,13 @@ async function openSettings(): Promise<void> {
     schedulePoll()
     return
   }
-  renderSettings(settings)
+  try {
+    renderSettings(settings)
+  } catch {
+    settingsOpen = false
+    renderUnreachable()
+    schedulePoll()
+  }
 }
 
 function closeSettings(): void {
@@ -350,6 +376,40 @@ function renderSettings(settings: Settings): void {
       <span class="phint">${esc(persona.hint)}</span>
     </div>`,
   ).join("")
+  const controllerButtons = CONTROLLERS.map(
+    (controller) => `
+      <button class="segbtn${controller.type === settings.controller.type ? " sel" : ""}"
+        data-controller="${controller.type}">
+        <span>${controller.label}</span><small>${controller.hint}</small>
+      </button>`,
+  ).join("")
+  const controllerControls =
+    settings.controller.type === "alignment"
+      ? `
+    <div class="setrow">
+      <span class="grow">평활 α</span>
+      <input id="controller-alpha" class="number" type="number" min="0" max="0.99" step="0.01"
+        value="${settings.controller.alignment_alpha}" />
+    </div>
+    <div class="setrow">
+      <span class="grow">개입 θ</span>
+      <input id="controller-low" class="number" type="number" min="0" max="1" step="0.01"
+        value="${settings.controller.theta_low}" />
+    </div>
+    <div class="setrow">
+      <span class="grow">회복 θ</span>
+      <input id="controller-high" class="number" type="number" min="0" max="1" step="0.01"
+        value="${settings.controller.theta_high}" />
+    </div>
+    <p class="subhint">A안은 관측별 관련도 r의 EWMA가 낮아지고, 회복 임계값을 넘기 전까지 같은 이탈 구간으로 봅니다.</p>`
+      : `
+    <div class="setrow">
+      <span class="grow">연속 횟수</span>
+      <input id="controller-k" class="number" type="number" min="1" max="20" step="1"
+        value="${settings.controller.k}" />
+      <span style="color: var(--muted);">회</span>
+    </div>
+    <p class="subhint">B안은 OK가 나오면 카운터를 0으로 돌리고, DRIFT가 연속으로 쌓일 때만 말합니다.</p>`
 
   root.innerHTML = `
     <div class="header">
@@ -358,11 +418,22 @@ function renderSettings(settings: Settings): void {
     </div>
     <p class="label">페르소나</p>
     <div class="pers">${personaCards}</div>
+    <p class="label">개입 방식</p>
+    <div class="seg">${controllerButtons}</div>
+    ${controllerControls}
     <div class="setrow">
       <span class="grow">소리 내어 말하기</span>
       <input id="voice-toggle" type="checkbox" ${settings.voice_enabled ? "checked" : ""} />
     </div>
-    <p class="subhint">개입 순간 macOS 음성이 메시지를 읽어줍니다.</p>
+    <p class="subhint">음성 기능은 현재 macOS say 기반이며 Windows 패키지에서는 기본적으로 꺼져 있습니다.</p>
+    <div class="setrow">
+      <span class="grow">쿨다운</span>
+      <input id="cooldown-seconds" class="number" type="number" min="0" step="30"
+        value="${settings.cooldown.seconds}" ${settings.cooldown.enabled ? "" : "disabled"} />
+      <span style="color: var(--muted);">초</span>
+      <input id="cooldown-toggle" type="checkbox" ${settings.cooldown.enabled ? "checked" : ""} />
+    </div>
+    <p class="subhint">꺼두면 테스트 중 같은 흐름에서도 다음 훈수를 바로 받을 수 있습니다.</p>
     <div class="setrow">
       <span class="grow">조용한 시간</span>
       <input id="quiet-start" class="time" type="time" value="${esc(settings.quiet_hours.start)}"
@@ -382,8 +453,53 @@ function renderSettings(settings: Settings): void {
       if (key && key !== settings.persona) void applySettings({ persona: key })
     })
   })
+  root.querySelectorAll<HTMLElement>(".segbtn").forEach((button) => {
+    button.addEventListener("click", () => {
+      const type = button.dataset.controller as ControllerType | undefined
+      if (!type || type === settings.controller.type) return
+      void applySettings({ controller: { type } })
+    })
+  })
+  const updateControllerK = (event: Event) => {
+    const k = Number.parseInt((event.target as HTMLInputElement).value, 10)
+    if (!Number.isFinite(k) || k < 1) return
+    void applySettings({ controller: { k } })
+  }
+  document.getElementById("controller-k")?.addEventListener("input", updateControllerK)
+  document.getElementById("controller-k")?.addEventListener("change", updateControllerK)
+
+  const updateControllerAlpha = (event: Event) => {
+    const value = Number.parseFloat((event.target as HTMLInputElement).value)
+    if (!Number.isFinite(value) || value < 0 || value > 0.99) return
+    void applySettings({ controller: { alignment_alpha: value } })
+  }
+  const updateControllerLow = (event: Event) => {
+    const value = Number.parseFloat((event.target as HTMLInputElement).value)
+    if (!Number.isFinite(value) || value < 0 || value >= settings.controller.theta_high) return
+    void applySettings({ controller: { theta_low: value } })
+  }
+  const updateControllerHigh = (event: Event) => {
+    const value = Number.parseFloat((event.target as HTMLInputElement).value)
+    if (!Number.isFinite(value) || value > 1 || value <= settings.controller.theta_low) return
+    void applySettings({ controller: { theta_high: value } })
+  }
+  document.getElementById("controller-alpha")?.addEventListener("input", updateControllerAlpha)
+  document.getElementById("controller-alpha")?.addEventListener("change", updateControllerAlpha)
+  document.getElementById("controller-low")?.addEventListener("input", updateControllerLow)
+  document.getElementById("controller-low")?.addEventListener("change", updateControllerLow)
+  document.getElementById("controller-high")?.addEventListener("input", updateControllerHigh)
+  document.getElementById("controller-high")?.addEventListener("change", updateControllerHigh)
   document.getElementById("voice-toggle")?.addEventListener("change", (event) => {
     void applySettings({ voice_enabled: (event.target as HTMLInputElement).checked })
+  })
+  document.getElementById("cooldown-toggle")?.addEventListener("change", (event) => {
+    void applySettings({ cooldown: { enabled: (event.target as HTMLInputElement).checked } })
+  })
+  document.getElementById("cooldown-seconds")?.addEventListener("change", (event) => {
+    const seconds = Number.parseInt((event.target as HTMLInputElement).value, 10)
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      void applySettings({ cooldown: { seconds } })
+    }
   })
   document.getElementById("quiet-toggle")?.addEventListener("change", (event) => {
     void applySettings({ quiet_hours: { enabled: (event.target as HTMLInputElement).checked } })

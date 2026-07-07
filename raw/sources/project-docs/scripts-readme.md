@@ -2,11 +2,22 @@
 
 Project maintenance scripts live here.
 
+## Platform entrypoints
+
+- `windows_setup.ps1` / `windows_run_server.ps1`: Windows setup and server run.
+- `macos_setup.sh` / `macos_run_server.sh`: macOS setup and server run.
+- `macos_install_launch_agent.sh` / `macos_uninstall_launch_agent.sh`: optional
+  macOS login autostart for the idle daemon server.
+
+The application code is shared across operating systems. Keep platform
+differences in these entrypoints unless a native adapter is unavoidable.
+
 ## `sync-llm-wiki-sources.sh`
 
-Refreshes symlinks under `raw/sources/project-docs/` for stable project documents.
+Refreshes copied snapshots under `raw/sources/project-docs/` for stable project documents.
 
-This lets LLM Wiki watch and ingest documentation without duplicating canonical files.
+This lets LLM Wiki ingest documentation while canonical files stay in the repo
+root, `docs/`, and module README locations.
 
 The script intentionally does not expose every source code file. Code is summarized through folder README files and curated wiki pages to avoid noisy graph output.
 Dependency/build folders such as `node_modules`, `dist`, and `build` are pruned.

@@ -37,7 +37,7 @@ class DropDecision:
 
 def load_sensitive_domain_rules(path: str | Path) -> SensitiveDomainRules:
     config_path = Path(path)
-    data = yaml.safe_load(config_path.read_text()) if config_path.exists() else {}
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
     return SensitiveDomainRules(
         blocked_hosts=list(data.get("blocked_hosts") or []),
         blocked_host_keywords=list(data.get("blocked_host_keywords") or []),

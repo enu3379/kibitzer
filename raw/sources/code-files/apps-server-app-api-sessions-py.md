@@ -18,6 +18,8 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from ..core.runtime_settings import effective_controller_config
+from ..core.runtime_resources import RuntimeResources
 from ..storage.sqlite import NoActiveSessionError, SessionStatsRecord, SQLiteStore
 
 router = APIRouter()
@@ -59,8 +61,12 @@ class SessionStateResponse(BaseModel):
     session_id: str
     has_goal: bool
     tracking: str
+    controller_type: str
     streak: int
     streak_threshold: int
+    alignment_score: float | None = None
+    theta_low: float | None = None
+    theta_high: float | None = None
     obs_count: int
     coldstart_observations: int
     snoozed_until: str | None = None
@@ -97,8 +103,12 @@ def _store(request: Request) -> SQLiteStore:
     return request.app.state.store
 
 
+def _runtime(request: Request) -> RuntimeResources:
+    return request.app.state.runtime
+
+
 async def _embed_goal(request: Request, text: str) -> list[float]:
-    vectors = await request.app.state.embedding_provider.embed([text])
+    vectors = await _runtime(request).embedding_provider().embed([text])
     return vectors[0]
 
 
@@ -143,9 +153,19 @@ async def get_current_state(request: Request) -> SessionStateResponse:
     if not current:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no active session")
 
-    controller_config = request.app.state.config.controller
+    controller_config = effective_controller_config(request.app.state.config, store)
     state = store.get_controller_state(current.session.id)
     now = datetime.now(timezone.utc)
+    drift_score = state.streak
+    drift_threshold = controller_config.k
+    alignment_score = None
+    theta_low = None
+    theta_high = None
+    if controller_config.type == "alignment":
+        drift_threshold = 1
+        alignment_score = state.alignment_score
+        theta_low = controller_config.theta_low
+        theta_high = controller_config.theta_high
 
     cooldown_until = None
     if state.last_intervention_ts:
@@ -168,8 +188,12 @@ async def get_current_state(request: Request) -> SessionStateResponse:
         session_id=current.session.id,
         has_goal=current.goal is not None,
         tracking=tracking,
-        streak=state.streak,
-        streak_threshold=controller_config.k,
+        controller_type=controller_config.type,
+        streak=drift_score,
+        streak_threshold=drift_threshold,
+        alignment_score=alignment_score,
+        theta_low=theta_low,
+        theta_high=theta_high,
         obs_count=state.obs_count,
         coldstart_observations=controller_config.coldstart_observations,
         snoozed_until=state.snoozed_until.isoformat() if snoozed else None,
@@ -217,6 +241,8 @@ async def snooze_current_session(request: Request, body: SnoozeRequest | None = 
         obs_count=state.obs_count,
         last_intervention_ts=state.last_intervention_ts,
         snoozed_until=snoozed_until,
+        alignment_score=state.alignment_score,
+        drift_latched=state.drift_latched,
         ts=now,
     )
     store.record_session_snoozed(session_id, snoozed_until, source="api", ts=now)
@@ -230,6 +256,7 @@ async def end_current_session(request: Request) -> SessionStatsResponse:
         session = store.end_current_session()
     except NoActiveSessionError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    _runtime(request).enter_idle("session_end")
     return _stats_response(store.session_stats(session.id))
 
 
@@ -253,9 +280,12 @@ def _stats_response(stats: SessionStatsRecord) -> SessionStatsResponse:
 
 @router.post("/sessions/current/goal", response_model=GoalResponse)
 async def set_current_goal(request: Request, body: GoalRequest) -> GoalResponse:
+    store = _store(request)
+    if not store.get_current_session():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no active session")
     try:
         exemplar = await _embed_goal(request, body.raw_text)
-        goal = _store(request).set_current_goal(body.raw_text, body.keywords, exemplar)
+        goal = store.set_current_goal(body.raw_text, body.keywords, exemplar)
     except NoActiveSessionError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:

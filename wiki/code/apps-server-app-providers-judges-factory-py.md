@@ -165,7 +165,7 @@ def _resolve_experiment_model_settings(
     if not path.exists():
         return None
 
-    data = yaml.safe_load(path.read_text()) or {}
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     model_config = data.get(model_key)
     if not isinstance(model_config, dict):
         return None

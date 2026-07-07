@@ -15,13 +15,21 @@ Related: [[code-map-pages]] [[extension-background-worker-module]] [[chrome-exte
 ```js
 import { build, context } from "esbuild"
 import { cpSync, mkdirSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 
 const watch = process.argv.includes("--watch")
+const extensionRoot = dirname(fileURLToPath(import.meta.url))
+const distDir = join(extensionRoot, "dist")
 
 const options = {
-  entryPoints: ["src/background.ts", "src/popup/popup.ts", "src/offscreen/offscreen.ts"],
-  outdir: "dist",
-  outbase: "src",
+  entryPoints: [
+    join(extensionRoot, "src/background.ts"),
+    join(extensionRoot, "src/popup/popup.ts"),
+    join(extensionRoot, "src/offscreen/offscreen.ts"),
+  ],
+  outdir: distDir,
+  outbase: join(extensionRoot, "src"),
   bundle: true,
   format: "esm",
   target: "chrome120",
@@ -30,13 +38,13 @@ const options = {
 }
 
 function copyStatic() {
-  mkdirSync("dist/popup", { recursive: true })
-  mkdirSync("dist/offscreen", { recursive: true })
-  cpSync("manifest.json", "dist/manifest.json")
-  cpSync("src/popup/popup.html", "dist/popup/popup.html")
-  cpSync("src/offscreen/offscreen.html", "dist/offscreen/offscreen.html")
-  cpSync("src/offscreen/ding.wav", "dist/offscreen/ding.wav")
-  cpSync("icons", "dist/icons", { recursive: true })
+  mkdirSync(join(distDir, "popup"), { recursive: true })
+  mkdirSync(join(distDir, "offscreen"), { recursive: true })
+  cpSync(join(extensionRoot, "manifest.json"), join(distDir, "manifest.json"))
+  cpSync(join(extensionRoot, "src/popup/popup.html"), join(distDir, "popup/popup.html"))
+  cpSync(join(extensionRoot, "src/offscreen/offscreen.html"), join(distDir, "offscreen/offscreen.html"))
+  cpSync(join(extensionRoot, "src/offscreen/ding.wav"), join(distDir, "offscreen/ding.wav"))
+  cpSync(join(extensionRoot, "icons"), join(distDir, "icons"), { recursive: true })
 }
 
 if (watch) {

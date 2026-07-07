@@ -14,17 +14,16 @@ embedding:
 
 tier1:
   enabled: true
-  # Local Ollama (gemma4:e4b) through the experiment models file: no API cost,
-  # titles never leave the machine. timeout_seconds caps hot-path latency and
-  # deliberately overrides the generation-oriented timeout in the models file;
-  # a timeout falls back to the Tier 0 verdict and is logged.
+  # Windows package default: resolve local or cloud model settings through
+  # KIBITZER_EXPERIMENT_MODELS_FILE instead of the original Mac-only path.
+  # If the env var is not set, Tier 1 degrades to the Tier 0 verdict.
   provider: "experiment"
   base_url: "${TIER1_BASE_URL}"
-  api_key_env: "TIER1_API_KEY"
+  api_key_env: "ollama1"
   model: "cheap-classifier"
   timeout_seconds: 10
   recent_observations: 5
-  experiment_models_file: "%KIBITZER_EXPERIMENT_MODELS_FILE%"
+  experiment_models_file: "configs/models.local.yaml"
   experiment_model_key: "gemma4"
   send:
     title: true
@@ -37,14 +36,14 @@ tier2:
   enabled: true
   provider: "experiment"
   base_url: "${TIER2_BASE_URL}"
-  api_key_env: "TIER2_API_KEY"
-  fallback_api_key_env: "TIER2_FALLBACK_API_KEY"
+  api_key_env: "ollama2"
+  fallback_api_key_env: null
   model: "gemma4:31b"
   timeout_seconds: 180
   recent_observations: 5
   excerpt_char_limit: 3000
   max_output_tokens: 512
-  experiment_models_file: "%KIBITZER_EXPERIMENT_MODELS_FILE%"
+  experiment_models_file: "configs/models.local.yaml"
   experiment_model_key: "ollama_cloud_gemma4_31b"
 
 relevance:
@@ -60,6 +59,9 @@ relevance:
 controller:
   type: "streak"
   k: 3
+  alignment_alpha: 0.85
+  theta_low: 0.15
+  theta_high: 0.30
   cooldown_seconds: 300
   snooze_seconds: 1800
   coldstart_observations: 5

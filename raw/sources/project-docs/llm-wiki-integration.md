@@ -43,13 +43,14 @@ raw/sources/
 .llm-wiki/
 ```
 
-Stable project docs are exposed to LLM Wiki through symlinks under:
+Stable project docs are exposed to LLM Wiki as copied snapshots under:
 
 ```text
 raw/sources/project-docs/
 ```
 
-This avoids duplicate content. The canonical files remain in the repo root and `docs/`.
+The canonical files remain in the repo root and `docs/`; do not edit the
+snapshots directly.
 
 Run this after adding durable docs or folder README files:
 
@@ -87,7 +88,9 @@ The intended loop is:
 3. Use `node scripts/llm-wiki-search.mjs "<query>" <topK>` for project lookup.
 4. Manually ingest selected durable docs only when the wiki summary/graph should be updated.
 
-If Source Watch is explicitly enabled later, existing symlinked document changes can be detected by LLM Wiki. Keep auto-ingest off unless the token/cost tradeoff is intentional.
+If Source Watch is explicitly enabled later, refresh document snapshots before
+ingest so LLM Wiki sees the current canonical docs. Keep auto-ingest off unless
+the token/cost tradeoff is intentional.
 
 If a new document is added outside `raw/sources/`, it must be exposed first. Use `scripts/sync-llm-wiki-sources.sh` for durable docs and README files.
 

@@ -7,7 +7,7 @@ Embedding must be local CPU-only in Stage 0. CUDA, Metal, DirectML, and GPU-spec
 Tier 1 and Tier 2 both support OpenAI-compatible chat completions, Ollama `/api/chat`
 providers, and the `experiment` models-file indirection. A tier that is enabled but
 cannot resolve credentials degrades to the lower tier's verdict and records a
-`provider.degraded` event at startup. A per-call Tier 1 failure keeps the Tier 0
+`provider.degraded` event when the runtime first activates. A per-call Tier 1 failure keeps the Tier 0
 verdict and records `tier1.provider_error`; it never fails the observation request.
 
 ## Stage 0 Defaults

@@ -14,10 +14,11 @@ Related: [[code-map-pages]]
 
 ```python
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+from pydantic import BaseModel, Field, model_validator
 
 
 class ServerConfig(BaseModel):
@@ -80,11 +81,20 @@ class Tier2Config(BaseModel):
 
 
 class ControllerConfig(BaseModel):
-    type: str = "streak"
-    k: int = 3
+    type: Literal["streak", "alignment"] = "streak"
+    k: int = Field(default=3, ge=1, le=20)
+    alignment_alpha: float = Field(default=0.85, ge=0.0, le=0.99)
+    theta_low: float = Field(default=0.15, ge=0.0, le=1.0)
+    theta_high: float = Field(default=0.3, ge=0.0, le=1.0)
     cooldown_seconds: int = 300
     snooze_seconds: int = 1800
     coldstart_observations: int = 5
+
+    @model_validator(mode="after")
+    def _validate_alignment_thresholds(self) -> "ControllerConfig":
+        if self.theta_low >= self.theta_high:
+            raise ValueError("theta_low must be lower than theta_high")
+        return self
 
 
 class PrivacyConfig(BaseModel):
@@ -127,8 +137,9 @@ class AppConfig(BaseModel):
 
 
 def load_config(path: str | Path = "configs/default.yaml") -> AppConfig:
+    load_dotenv(Path(".env"), override=False)
     config_path = Path(path)
-    data = yaml.safe_load(config_path.read_text()) if config_path.exists() else {}
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
     return AppConfig(
         raw=data or {},
         **{

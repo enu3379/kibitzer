@@ -18,10 +18,11 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from ..schemas import Observation
 
@@ -81,6 +82,8 @@ class ControllerStateRecord:
     obs_count: int
     last_intervention_ts: datetime | None
     snoozed_until: datetime | None
+    alignment_score: float | None
+    drift_latched: bool
     updated_at: datetime
 
 
@@ -678,7 +681,8 @@ class SQLiteStore:
             self._ensure_schema(conn)
             row = conn.execute(
                 """
-                SELECT session_id, streak, obs_count, last_intervention_ts, snoozed_until, updated_at
+                SELECT session_id, streak, obs_count, last_intervention_ts, snoozed_until,
+                       alignment_score, drift_latched, updated_at
                 FROM controller_states
                 WHERE session_id = ?
                 """,
@@ -697,7 +701,8 @@ class SQLiteStore:
                 )
                 row = conn.execute(
                     """
-                    SELECT session_id, streak, obs_count, last_intervention_ts, snoozed_until, updated_at
+                    SELECT session_id, streak, obs_count, last_intervention_ts, snoozed_until,
+                           alignment_score, drift_latched, updated_at
                     FROM controller_states
                     WHERE session_id = ?
                     """,
@@ -712,6 +717,8 @@ class SQLiteStore:
         obs_count: int,
         last_intervention_ts: datetime | None,
         snoozed_until: datetime | None,
+        alignment_score: float | None = None,
+        drift_latched: bool = False,
         ts: datetime | None = None,
     ) -> ControllerStateRecord:
         now = ts or _utc_now()
@@ -720,14 +727,17 @@ class SQLiteStore:
             conn.execute(
                 """
                 INSERT INTO controller_states (
-                    session_id, streak, obs_count, last_intervention_ts, snoozed_until, updated_at
+                    session_id, streak, obs_count, last_intervention_ts, snoozed_until,
+                    alignment_score, drift_latched, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET
                     streak = excluded.streak,
                     obs_count = excluded.obs_count,
                     last_intervention_ts = excluded.last_intervention_ts,
                     snoozed_until = excluded.snoozed_until,
+                    alignment_score = excluded.alignment_score,
+                    drift_latched = excluded.drift_latched,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -736,6 +746,8 @@ class SQLiteStore:
                     obs_count,
                     last_intervention_ts.isoformat() if last_intervention_ts else None,
                     snoozed_until.isoformat() if snoozed_until else None,
+                    alignment_score,
+                    1 if drift_latched else 0,
                     now.isoformat(),
                 ),
             )
@@ -748,6 +760,8 @@ class SQLiteStore:
                     "obs_count": obs_count,
                     "last_intervention_ts": last_intervention_ts.isoformat() if last_intervention_ts else None,
                     "snoozed_until": snoozed_until.isoformat() if snoozed_until else None,
+                    "alignment_score": alignment_score,
+                    "drift_latched": drift_latched,
                 },
                 now,
             )
@@ -757,6 +771,8 @@ class SQLiteStore:
             obs_count=obs_count,
             last_intervention_ts=last_intervention_ts,
             snoozed_until=snoozed_until,
+            alignment_score=alignment_score,
+            drift_latched=drift_latched,
             updated_at=now,
         )
 
@@ -1083,11 +1099,42 @@ class SQLiteStore:
             for row in reversed(rows)
         ]
 
-    def _connect(self) -> sqlite3.Connection:
+    def recent_verdicts(
+        self,
+        session_id: str,
+        limit: int,
+        after: datetime | None = None,
+    ) -> list[str]:
+        after_text = after.isoformat() if after else None
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                """
+                SELECT verdict
+                FROM observations
+                WHERE session_id = ?
+                  AND verdict IS NOT NULL
+                  AND (? IS NULL OR ts > ?)
+                ORDER BY ts DESC, id DESC
+                LIMIT ?
+                """,
+                (session_id, after_text, after_text, limit),
+            ).fetchall()
+        return [row["verdict"] for row in reversed(rows)]
+
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
-        return conn
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _ensure_schema(self, conn: sqlite3.Connection) -> None:
         conn.executescript(
@@ -1136,6 +1183,8 @@ class SQLiteStore:
                 obs_count INTEGER NOT NULL DEFAULT 0,
                 last_intervention_ts TEXT,
                 snoozed_until TEXT,
+                alignment_score REAL,
+                drift_latched INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
             );
 
@@ -1177,6 +1226,7 @@ class SQLiteStore:
             """
         )
         self._ensure_observation_columns(conn)
+        self._ensure_controller_columns(conn)
 
     def _append_event(
         self,
@@ -1233,6 +1283,8 @@ class SQLiteStore:
             obs_count=row["obs_count"],
             last_intervention_ts=_parse_dt(row["last_intervention_ts"]) if row["last_intervention_ts"] else None,
             snoozed_until=_parse_dt(row["snoozed_until"]) if row["snoozed_until"] else None,
+            alignment_score=row["alignment_score"],
+            drift_latched=bool(row["drift_latched"]),
             updated_at=_parse_dt(row["updated_at"]),
         )
 
@@ -1240,6 +1292,13 @@ class SQLiteStore:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(observations)").fetchall()}
         if "tab_id" not in columns:
             conn.execute("ALTER TABLE observations ADD COLUMN tab_id INTEGER")
+
+    def _ensure_controller_columns(self, conn: sqlite3.Connection) -> None:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(controller_states)").fetchall()}
+        if "alignment_score" not in columns:
+            conn.execute("ALTER TABLE controller_states ADD COLUMN alignment_score REAL")
+        if "drift_latched" not in columns:
+            conn.execute("ALTER TABLE controller_states ADD COLUMN drift_latched INTEGER NOT NULL DEFAULT 0")
 
     def _enforce_goal_exemplar_cap(self, conn: sqlite3.Connection, session_id: str, cap: int) -> None:
         rows = conn.execute(
