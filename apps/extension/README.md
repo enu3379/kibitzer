@@ -52,7 +52,7 @@ npm run watch
 - send feedback button clicks to the server
 - popup for declaring the goal and viewing session state, streak, and stats
 - popup snooze / resume / end-session controls with an end-of-session summary
-- toolbar badge: `!` no session or goal, `zZ` snoozed, `?` server unreachable, empty while tracking
+- toolbar status dot (small pip at the icon's top-right, drawn onto the icon; the native text badge is disabled): orange = no session/goal, red = pending nudge, blue = snoozed, gray = server unreachable, none = tracking cleanly
 
 ## Non-responsibilities
 

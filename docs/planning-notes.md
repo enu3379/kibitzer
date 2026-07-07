@@ -1,0 +1,151 @@
+# Planning Notes — Claude ↔ User
+
+Living working doc. Unlike `progress.md` (a log of completed work) and
+`roadmap-fun-layer.md` (the master product plan), this file is where Claude and
+the user think out loud and record decisions as they are made. Edit freely from
+both sides; keep the "Open decisions" statuses current.
+
+Last updated: 2026-07-07.
+
+## Where the project actually is (verified 2026-07-07)
+
+Two tracks ran in parallel since the P0 persona engine landed:
+
+| Track | Item | State |
+|---|---|---|
+| A. Fun layer | P0 persona engine + voice + quiet hours + popup settings | ✅ merged |
+| | P1 attachment loop (celebration, "5분만", custom personas, report, transparency) | ⬜ not started |
+| B. Runtime / OS | idle daemon + macOS LaunchAgent (PR #1) | ✅ merged |
+| | controllers A안 (alignment/EWMA) + B안 (streak), settings-configurable | ✅ merged |
+| | dwell gating (observe 5s / excerpt 10s) | ✅ merged |
+| | Windows startup tray (PR #2) | ✅ merged |
+| | macOS menu bar status item | 🔶 local commit `6d7d222`, unpushed |
+| New (doc only) | `judgment-audit-plan.md` — detection-quality overhaul | 📋 designed, not built |
+
+Baseline: 68 server tests green; server runs in idle daemon mode.
+
+Doc drift to clean up later: progress.md's latest entry still says the Windows
+tray is unimplemented (it is merged), and the menu bar work is not in progress.md
+yet.
+
+## The pivot: trust before more personality
+
+`judgment-audit-plan.md` came out of a real dogfooding session (goal
+"국내 여행지 탐색", 118 observations) and documents systematic FALSE OKs on
+multi-purpose platforms: overseas Airbnb listings and Naver shopping/webtoon
+passed Tier 0 as OK; one `관련 있어요` on a generic platform title whitelisted the
+whole platform. The roadmap's hard precondition is explicit — false-positive
+nagging cannot be saved by humor; trust features outrank personality features.
+
+Critical-path insight: the whole audit plan is gated on the **Replay CLI**
+(long-deferred WP10). Its Step 0 is "label the log and build histograms," which
+needs a replay harness. So the Replay CLI is the true unlock.
+
+## Open decisions
+
+### D1 — Sequencing → RESOLVED (2026-07-07)
+
+Replay CLI is the critical path (it unblocks the judgment audit). In parallel,
+Claude prepares P1 "return celebration" only — it is pure templates, adds no new
+detection logic, and carries zero false-positive risk, so it gives delight
+without touching the trust spine. The rest of P1 (report, transparency) waits
+until the audit reshapes the exemplar/anchor structures.
+
+### D2 — macOS menu bar visual → RESOLVED (2026-07-07)
+
+The current Swift renders a colored dot (red/gray/green/yellow) — exactly the
+"Windows-like, tone-mismatched" look the user rejected. New direction: a
+monochrome macOS **template** glyph (auto-tints for light/dark, RunCat / Claude /
+Codex style) distilled from the KIBITZER face, plus a status **dot whose
+brightness (alpha) and pulse encode state — no color**. Feasibility confirmed:
+template images preserve alpha under system tint, and a RunCat-style timer drives
+the pulse. Claude owns the glyph geometry + state spec; the Swift wiring is the
+follow-up. State → dot mapping is in the design section below.
+
+**Icon mark resolved (2026-07-07):** the old "KIBITZER face" (ring + brow + eyes +
+green mouth) read as a frown/moustache at small sizes — the brow sat below the
+eyes. Replaced by a new **"peek-over-monitor" kibitzer**: a dark head peeking from
+behind a green monitor, a light rim separating head from screen, two hands draped
+over the top edge, eyes cresting above. This is now the shipped **extension
+toolbar icon** (`icon-128.svg` + regenerated PNG set via `gen_extension_icons.py`).
+A **wall** variant (peek over a ledge) is kept as an alternate under
+`apps/extension/icons/variants/` (color + menubar-mono SVGs, both rendered by
+`scripts/gen_icon_variants.py`). For the menubar **template** glyph, reuse
+`variants/monitor-mono.svg` but cut the rim as a **transparent slit** — head and
+screen are the same ink in mono, so a solid rim would merge them; the color icon
+uses a light rim instead.
+
+### D3 — Goal-enrichment LLM call → OPEN
+
+The audit plan adds one cheap LLM call at goal declaration to derive positive
+goal phrases. To stay local-first (like Tier 1), run it on local Ollama? Only the
+goal text leaves the call site; no page content. Leaning local.
+
+### D4 — Replay CLI scope → OPEN
+
+The audit plan needs replay to *re-simulate learning* (goal seeding, exemplar /
+anchor / negative updates), not just replay stored `r0`. That is bigger than
+WP10's original scope. Agree the larger scope before handing to Codex.
+
+### D5 — Developer diagnostics view → OPEN
+
+The audit plan (Open Q3) wants the popup to show `r0` / tier / audit trigger /
+title-quality during the calibration era. Build a hidden dev view now?
+
+### D6 — Extension distribution → DECIDED (deferred, 2026-07-07)
+
+`dist/` and `node_modules/` are gitignored (correctly — the repo ships source, not
+a built bundle), so sharing today is dev-only: clone → `npm install` →
+`npm run build` → Load unpacked `apps/extension/dist`. CI already builds this on
+macOS + Windows. When wider sharing is needed, go **option 1**: have CI zip `dist/`
+and attach it to a GitHub Release on tag, so a non-builder can download
+`kibitzer-extension.zip`, unzip, and Load unpacked. Deferred — not building now.
+Rejected: committing `dist/` (git churn). Chrome Web Store stays a later option for
+true end-user distribution.
+
+## Work buckets
+
+**Codex (server / OS):** [Replay CLI] → goal enrichment → title-quality gate →
+Tier 0 OK audit routing → negative-exemplar logging; plus P1 plumbing
+(celebration path, `break` feedback, `GET /personas`, report API, `tier1_reason`
+column); plus finish distribution (menu bar push/merge, Windows daemon parity, extension
+release zip via CI → GitHub Releases per D6).
+
+**Claude (design / copy):** celebration templates (done this round) → menu bar
+glyph + dot spec (this round) → session report view → "왜?" transparency → dev
+diagnostics view → goal-enrichment & Tier 1 strict prompts (joint copy).
+
+## Design section: menu bar states
+
+Monochrome template glyph + status dot to its right. Dot brightness = alpha;
+the attention state gets a gentle breathing pulse. No color at all.
+
+| `/health` mode | Glyph | Dot | Reading |
+|---|---|---|---|
+| dead (server down) | dim ~35% | none | disconnected |
+| idle (up, no session) | full | steady, dim ~40% | awake, resting |
+| active (goal-backed) | full | bright ~100%, slow breathing pulse | watching |
+| unknown | full | steady, mid ~65% | responding, mode unclear |
+
+The menu bar knows only `/health` mode, never drift/session state — that stays in
+the extension badge.
+
+## Log
+
+- 2026-07-07: Initial synthesis captured; D1 and D2 resolved (above). Claude
+  expanded `celebrate_templates` to 6 lines/persona and updated the P1 handoff
+  with the celebration firing + randomness rule. Menu bar mockup delivered for D2.
+- 2026-07-07: Extension icon redesigned to the "peek-over-monitor" mark and
+  shipped (`icon-128.svg` + PNG set + `gen_extension_icons.py` geometry updated).
+  Wall variant saved as alternate; `scripts/gen_icon_variants.py` added to render
+  both. Menubar-mono transparent-slit note recorded under D2.
+- 2026-07-07: Extension distribution approach chosen and deferred — see D6
+  (CI-built `dist/` zip attached to GitHub Releases; not building yet).
+- 2026-07-07: Toolbar status reworked — native text badge (covered the mark, and
+  Chrome fixes its size/position) disabled; status is now a small top-right dot
+  composited onto the icon via `OffscreenCanvas` + `setIcon` (orange = no goal,
+  red = pending, blue = snoozed, gray = unreachable, none while tracking), with a
+  text-badge fallback if drawing ever fails.
+- 2026-07-07: Menubar-mono SVGs (monitor + wall) got the transparent separation
+  slit actually implemented (was spec-only under D2) — head/screen read apart at
+  large + retina; softens toward true 18px, where eyes + silhouette carry it.

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Kibitzer">
+  <!-- macOS menubar template glyph: single colour, hands dropped for small-size clarity.
+       Eyes AND a thin transparent slit along the monitor's top edge are punched out,
+       so head and screen read as separate even when tinted one colour. -->
+  <defs>
+    <mask id="cut">
+      <rect width="128" height="128" fill="#fff"/>
+      <circle cx="52" cy="56" r="8" fill="#000"/>
+      <circle cx="76" cy="56" r="8" fill="#000"/>
+      <rect x="18" y="67" width="92" height="4" rx="2" fill="#000"/>
+    </mask>
+  </defs>
+  <g fill="#1F2937" mask="url(#cut)">
+    <circle cx="64" cy="69" r="32"/>
+    <rect x="18" y="69" width="92" height="38" rx="5"/>
+    <rect x="59" y="107" width="10" height="7"/>
+    <rect x="49" y="113" width="31" height="5" rx="2"/>
+  </g>
+</svg>

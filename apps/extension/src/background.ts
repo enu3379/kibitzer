@@ -199,32 +199,96 @@ async function playNotificationSound(): Promise<void> {
   }
 }
 
-async function refreshBadge(): Promise<void> {
-  const result = await getSessionState()
-  if (result.kind === "unreachable") {
-    await setBadge("?", "#5f5e5a")
-    return
-  }
-  if (result.kind === "no_session" || !result.state.has_goal) {
-    await setBadge("!", "#ba7517")
-    return
-  }
-  if (result.state.pending_intervention) {
-    await setBadge("1", "#a32d2d")
-    return
-  }
-  if (result.state.tracking === "snoozed") {
-    await setBadge("zZ", "#185fa5")
-    return
-  }
-  await setBadge("", "#5f5e5a")
+type BadgeStatus = "unreachable" | "no_goal" | "pending" | "snoozed" | "tracking"
+
+// Status → small top-right dot colour drawn onto the icon (null = clean icon, no dot).
+// Replaces Chrome's native text badge, whose size/position we cannot control and
+// which covered too much of the mark.
+const STATUS_DOT_COLOR: Record<BadgeStatus, string | null> = {
+  unreachable: "#5f5e5a",
+  no_goal: "#ba7517",
+  pending: "#a32d2d",
+  snoozed: "#185fa5",
+  tracking: null,
 }
 
-async function setBadge(text: string, color: string): Promise<void> {
-  await chrome.action.setBadgeText({ text })
-  if (text) {
-    await chrome.action.setBadgeBackgroundColor({ color })
+// Native-badge text, used only as a fallback if custom icon drawing ever fails.
+const STATUS_BADGE_FALLBACK: Record<BadgeStatus, { text: string; color: string }> = {
+  unreachable: { text: "?", color: "#5f5e5a" },
+  no_goal: { text: "!", color: "#ba7517" },
+  pending: { text: "1", color: "#a32d2d" },
+  snoozed: { text: "z", color: "#185fa5" },
+  tracking: { text: "", color: "#5f5e5a" },
+}
+
+const ACTION_ICON_SIZES = [16, 32] as const
+let baseIconBitmaps: Map<number, ImageBitmap> | null = null
+let lastAppliedStatus: BadgeStatus | null = null
+
+async function loadBaseIconBitmaps(): Promise<Map<number, ImageBitmap>> {
+  if (baseIconBitmaps) return baseIconBitmaps
+  const map = new Map<number, ImageBitmap>()
+  for (const size of ACTION_ICON_SIZES) {
+    const blob = await (await fetch(chrome.runtime.getURL(`icons/icon-${size}.png`))).blob()
+    map.set(size, await createImageBitmap(blob))
   }
+  baseIconBitmaps = map
+  return map
+}
+
+function drawStatusDot(ctx: OffscreenCanvasRenderingContext2D, size: number, color: string): void {
+  const r = Math.max(2.4, size * 0.17)
+  const inset = size * 0.07
+  const cx = size - r - inset
+  const cy = r + inset
+  ctx.beginPath()
+  ctx.arc(cx, cy, r, 0, Math.PI * 2)
+  ctx.fillStyle = color
+  ctx.fill()
+  ctx.lineWidth = Math.max(1, size * 0.06)
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.92)" // thin ring separates the pip from icon + toolbar
+  ctx.stroke()
+}
+
+async function applyStatusIcon(status: BadgeStatus): Promise<void> {
+  const color = STATUS_DOT_COLOR[status]
+  try {
+    const bases = await loadBaseIconBitmaps()
+    const imageData: Record<number, ImageData> = {}
+    for (const size of ACTION_ICON_SIZES) {
+      const canvas = new OffscreenCanvas(size, size)
+      const ctx = canvas.getContext("2d")
+      if (!ctx) throw new Error("no 2d context")
+      ctx.clearRect(0, 0, size, size)
+      const base = bases.get(size)
+      if (base) ctx.drawImage(base, 0, 0, size, size)
+      if (color) drawStatusDot(ctx, size, color)
+      imageData[size] = ctx.getImageData(0, 0, size, size)
+    }
+    await chrome.action.setIcon({ imageData })
+    await chrome.action.setBadgeText({ text: "" }) // ensure the native badge stays off
+  } catch (error) {
+    console.error("kibitzer: status icon draw failed, using text badge", error)
+    const fallback = STATUS_BADGE_FALLBACK[status]
+    await chrome.action.setBadgeText({ text: fallback.text })
+    if (fallback.text) await chrome.action.setBadgeBackgroundColor({ color: fallback.color })
+  }
+}
+
+async function computeBadgeStatus(): Promise<BadgeStatus> {
+  const result = await getSessionState()
+  if (result.kind === "unreachable") return "unreachable"
+  if (result.kind === "no_session" || !result.state.has_goal) return "no_goal"
+  if (result.state.pending_intervention) return "pending"
+  if (result.state.tracking === "snoozed") return "snoozed"
+  return "tracking"
+}
+
+async function refreshBadge(): Promise<void> {
+  const status = await computeBadgeStatus()
+  if (status === lastAppliedStatus) return
+  lastAppliedStatus = status
+  await applyStatusIcon(status)
 }
 
 async function initBadge(): Promise<void> {

@@ -1,9 +1,13 @@
-"""Rasterize the Kibitzer face icon to transparent PNGs.
+"""Rasterize the Kibitzer icon to transparent PNGs.
 
 macOS `qlmanage` bakes an opaque white background into SVG thumbnails, which
 made the toolbar icon render as a white square. This script draws the same
 geometry as apps/extension/icons/icon-128.svg (the design source of truth)
 with real alpha, using only the standard library.
+
+The mark is the "peek-over-monitor" kibitzer: a dark head peeking from behind a
+green monitor, a light rim separating the two, hands draped over the top edge,
+and eyes cresting above the screen. Keep this geometry in sync with icon-128.svg.
 
 Usage: python scripts/gen_extension_icons.py
 Writes icon-{16,32,48,128}.png into apps/extension/icons/.
@@ -11,7 +15,6 @@ Writes icon-{16,32,48,128}.png into apps/extension/icons/.
 
 from __future__ import annotations
 
-import math
 import struct
 import zlib
 from pathlib import Path
@@ -24,63 +27,37 @@ INK = (0x1F, 0x29, 0x37)
 FACE = (0xF9, 0xFA, 0xFB)
 GREEN = (0x10, 0xB9, 0x81)
 
-# Geometry in the 128x128 SVG coordinate space.
-FACE_CENTER = (64.0, 64.0)
-FACE_RADIUS = 55.0
-RING_HALF = 4.5  # stroke-width 9
-BROW = ((36.0, 70.0), (49.0, 43.0), (79.0, 43.0), (92.0, 70.0))  # cubic bezier
-BROW_HALF = 6.0  # stroke-width 12
-EYES = ((45.0, 52.0), (83.0, 52.0))
-EYE_RADIUS = 8.0
-SMILE = ((40.0, 94.0), (88.0, 94.0))
-SMILE_HALF = 5.5  # stroke-width 11
+
+def _in_circle(x: float, y: float, cx: float, cy: float, r: float) -> bool:
+    return (x - cx) ** 2 + (y - cy) ** 2 <= r * r
 
 
-def _bezier_points(p0, p1, p2, p3, steps: int = 64):
-    points = []
-    for i in range(steps + 1):
-        t = i / steps
-        u = 1 - t
-        x = u**3 * p0[0] + 3 * u**2 * t * p1[0] + 3 * u * t**2 * p2[0] + t**3 * p3[0]
-        y = u**3 * p0[1] + 3 * u**2 * t * p1[1] + 3 * u * t**2 * p2[1] + t**3 * p3[1]
-        points.append((x, y))
-    return points
-
-
-BROW_POLYLINE = _bezier_points(*BROW)
-
-
-def _dist_to_segment(px, py, ax, ay, bx, by) -> float:
-    dx, dy = bx - ax, by - ay
-    length_sq = dx * dx + dy * dy
-    if length_sq == 0:
-        return math.hypot(px - ax, py - ay)
-    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / length_sq))
-    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
-
-
-def _dist_to_polyline(px, py, points) -> float:
-    best = math.inf
-    for (ax, ay), (bx, by) in zip(points, points[1:]):
-        best = min(best, _dist_to_segment(px, py, ax, ay, bx, by))
-    return best
+def _in_round_rect(x, y, rx, ry, w, h, r) -> bool:
+    """Rounded-rect hit test: rx,ry = top-left corner, r = corner radius."""
+    if x < rx or x > rx + w or y < ry or y > ry + h:
+        return False
+    qx = min(max(x, rx + r), rx + w - r)
+    qy = min(max(y, ry + r), ry + h - r)
+    return (x - qx) ** 2 + (y - qy) ** 2 <= r * r
 
 
 def _sample(x: float, y: float):
     """Color at a point in 128-space, painter's order top-down. None = transparent."""
-    center_dist = math.hypot(x - FACE_CENTER[0], y - FACE_CENTER[1])
-    if center_dist > FACE_RADIUS + RING_HALF:
-        return None
-    if _dist_to_segment(x, y, *SMILE[0], *SMILE[1]) <= SMILE_HALF:
-        return GREEN
-    for ex, ey in EYES:
-        if math.hypot(x - ex, y - ey) <= EYE_RADIUS:
-            return INK
-    if _dist_to_polyline(x, y, BROW_POLYLINE) <= BROW_HALF:
-        return INK
-    if abs(center_dist - FACE_RADIUS) <= RING_HALF:
-        return INK
-    return FACE
+    if _in_round_rect(x, y, 30, 64, 15, 13, 6.5) or _in_round_rect(x, y, 83, 64, 15, 13, 6.5):
+        return INK  # hands draped over the top edge
+    if _in_circle(x, y, 52, 56, 8) or _in_circle(x, y, 76, 56, 8):
+        return FACE  # eyes cresting above the screen
+    if (
+        _in_round_rect(x, y, 18, 69, 92, 38, 5)
+        or _in_round_rect(x, y, 59, 107, 10, 7, 0)
+        or _in_round_rect(x, y, 49, 113, 31, 5, 2)
+    ):
+        return GREEN  # monitor screen + neck + foot
+    if _in_round_rect(x, y, 16, 67, 96, 42, 7):
+        return FACE  # light rim separating the screen from the head
+    if _in_circle(x, y, 64, 69, 32):
+        return INK  # head hidden behind the monitor
+    return None
 
 
 def render(size: int) -> list[bytes]:
