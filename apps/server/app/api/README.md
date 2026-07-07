@@ -8,11 +8,15 @@ HTTP handlers live here. They should be thin:
 
 Do not put relevance, controller, or provider policy in API handlers.
 
-Current Stage 0 handlers:
+Current handlers:
 
-- `POST /sessions`
-- `GET /sessions/current`
-- `POST /sessions/current/goal`
-- `POST /observations/browser-nav`
-- `POST /observations/{observation_id}/excerpt`
-- `POST /feedback`
+- `GET /health` (mode + tier provider status)
+- `POST /sessions`, `GET /sessions/current`, `GET /sessions/current/state`,
+  `GET /sessions/current/stats`
+- `POST /sessions/current/goal`, `POST /sessions/current/snooze`,
+  `POST /sessions/current/end`
+- `GET /sessions/current/report`, `GET /reports/daily`
+- `GET /personas`
+- `GET|PUT /settings`
+- `POST /observations/browser-nav`, `POST /observations/{observation_id}/excerpt`
+- `POST /feedback`, `POST /interventions/{intervention_id}/delivery`

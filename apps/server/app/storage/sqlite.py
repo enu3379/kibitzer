@@ -4,8 +4,8 @@ import json
 import sqlite3
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from dataclasses import dataclass, field
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -52,6 +52,7 @@ class ObservationRecord:
     features: dict[str, Any]
     verdict: str | None
     tier_reached: int | None
+    tier1_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,7 @@ class InterventionRecord:
     ts: datetime
     message: str
     status: str
+    tier1_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -99,12 +101,78 @@ class SessionStatsRecord:
     top_drift_count: int
 
 
+@dataclass(frozen=True)
+class ReturnCandidateRecord:
+    drift_started_at: datetime
+    drift_confirmed_at: datetime
+    last_celebration_ts: datetime | None
+    last_celebration_template: str | None
+
+
+@dataclass(frozen=True)
+class ReportHourBucketRecord:
+    hour: str
+    observations: int
+    ok: int
+    drift: int
+    related_ratio: float | None
+
+
+@dataclass(frozen=True)
+class DriftHostRecord:
+    host: str
+    count: int
+
+
+@dataclass(frozen=True)
+class OkStretchRecord:
+    start: datetime
+    end: datetime
+    minutes: int
+
+
+@dataclass(frozen=True)
+class JudgmentReasonRecord:
+    observation_id: str
+    ts: datetime
+    verdict: str | None
+    url_host: str | None
+    title: str | None
+    tier_reached: int | None
+    tier1_reason: str | None
+
+
+@dataclass(frozen=True)
+class SessionReportRecord:
+    scope: str
+    session_id: str | None
+    date: str | None
+    started_at: datetime | None
+    ended_at: datetime | None
+    duration_seconds: int
+    observations: int
+    ok: int
+    drift: int
+    unjudged: int
+    related_ratio: float | None
+    hourly_related_ratio: list[ReportHourBucketRecord] = field(default_factory=list)
+    top_drift_hosts: list[DriftHostRecord] = field(default_factory=list)
+    longest_ok_stretch: OkStretchRecord | None = None
+    intervention_status_counts: dict[str, int] = field(default_factory=dict)
+    feedback_counts: dict[str, int] = field(default_factory=dict)
+    judgments: list[JudgmentReasonRecord] = field(default_factory=list)
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
 def _parse_dt(value: str) -> datetime:
     return datetime.fromisoformat(value)
+
+
+def _stretch_seconds(start: datetime, end: datetime | None) -> float:
+    return (end - start).total_seconds() if end else 0.0
 
 
 class SQLiteStore:
@@ -246,15 +314,108 @@ class SQLiteStore:
             top_drift_count=int(top_drift_row["n"]) if top_drift_row else 0,
         )
 
+    def session_report(self, session_id: str) -> SessionReportRecord:
+        stats = self.session_stats(session_id)
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            observation_rows = conn.execute(
+                """
+                SELECT id, ts, verdict, url_host, title, tier_reached, tier1_reason
+                FROM observations
+                WHERE session_id = ?
+                ORDER BY ts ASC, id ASC
+                """,
+                (session_id,),
+            ).fetchall()
+            intervention_rows = conn.execute(
+                """
+                SELECT status, COUNT(*) AS n
+                FROM interventions
+                WHERE session_id = ?
+                GROUP BY status
+                """,
+                (session_id,),
+            ).fetchall()
+            feedback_rows = conn.execute(
+                """
+                SELECT kind, COUNT(*) AS n
+                FROM feedback
+                WHERE session_id = ?
+                GROUP BY kind
+                """,
+                (session_id,),
+            ).fetchall()
+
+        return self._report_from_rows(
+            scope="session",
+            session_id=session_id,
+            report_date=None,
+            started_at=stats.started_at,
+            ended_at=stats.ended_at,
+            observation_rows=observation_rows,
+            intervention_rows=intervention_rows,
+            feedback_rows=feedback_rows,
+        )
+
+    def daily_report(self, report_date: date) -> SessionReportRecord:
+        local_start = datetime.combine(report_date, time.min).astimezone()
+        local_end = local_start + timedelta(days=1)
+        start_utc = local_start.astimezone(timezone.utc).isoformat()
+        end_utc = local_end.astimezone(timezone.utc).isoformat()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            observation_rows = conn.execute(
+                """
+                SELECT id, ts, verdict, url_host, title, tier_reached, tier1_reason
+                FROM observations
+                WHERE ts >= ? AND ts < ?
+                ORDER BY ts ASC, id ASC
+                """,
+                (start_utc, end_utc),
+            ).fetchall()
+            intervention_rows = conn.execute(
+                """
+                SELECT status, COUNT(*) AS n
+                FROM interventions
+                WHERE ts >= ? AND ts < ?
+                GROUP BY status
+                """,
+                (start_utc, end_utc),
+            ).fetchall()
+            feedback_rows = conn.execute(
+                """
+                SELECT kind, COUNT(*) AS n
+                FROM feedback
+                WHERE ts >= ? AND ts < ?
+                GROUP BY kind
+                """,
+                (start_utc, end_utc),
+            ).fetchall()
+
+        return self._report_from_rows(
+            scope="daily",
+            session_id=None,
+            report_date=report_date.isoformat(),
+            started_at=local_start,
+            ended_at=local_end,
+            observation_rows=observation_rows,
+            intervention_rows=intervention_rows,
+            feedback_rows=feedback_rows,
+        )
+
     def latest_unhandled_intervention(self, session_id: str) -> InterventionRecord | None:
         with self._connect() as conn:
             self._ensure_schema(conn)
             row = conn.execute(
                 """
-                SELECT id, session_id, observation_id, ts, message, status
+                SELECT interventions.id, interventions.session_id, interventions.observation_id,
+                       interventions.ts, interventions.message, interventions.status,
+                       observations.tier1_reason
                 FROM interventions
-                WHERE session_id = ? AND status IN ('pending', 'delivered', 'delivery_failed')
-                ORDER BY ts DESC, id DESC
+                LEFT JOIN observations ON observations.id = interventions.observation_id
+                WHERE interventions.session_id = ?
+                  AND interventions.status IN ('pending', 'delivered', 'delivery_failed')
+                ORDER BY interventions.ts DESC, interventions.id DESC
                 LIMIT 1
                 """,
                 (session_id,),
@@ -324,6 +485,109 @@ class SQLiteStore:
             return None
         seconds = max(0, int((_utc_now() - _parse_dt(row["ts"])).total_seconds()))
         return seconds // 60
+
+    def note_attachment_observation(
+        self,
+        session_id: str,
+        verdict: str | None,
+        ts: datetime,
+        drift_confirmed: bool,
+    ) -> ReturnCandidateRecord | None:
+        if verdict not in {"OK", "DRIFT"}:
+            return None
+
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute(
+                """
+                SELECT drift_started_at, drift_confirmed_at, last_celebration_ts,
+                       last_celebration_template
+                FROM attachment_states
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+            drift_started_at = _parse_dt(row["drift_started_at"]) if row and row["drift_started_at"] else None
+            drift_confirmed_at = _parse_dt(row["drift_confirmed_at"]) if row and row["drift_confirmed_at"] else None
+            last_celebration_ts = _parse_dt(row["last_celebration_ts"]) if row and row["last_celebration_ts"] else None
+            last_template = row["last_celebration_template"] if row else None
+
+            candidate = None
+            if verdict == "DRIFT":
+                drift_started_at = drift_started_at or ts
+                if drift_confirmed and drift_confirmed_at is None:
+                    drift_confirmed_at = ts
+            else:
+                if drift_started_at and drift_confirmed_at:
+                    candidate = ReturnCandidateRecord(
+                        drift_started_at=drift_started_at,
+                        drift_confirmed_at=drift_confirmed_at,
+                        last_celebration_ts=last_celebration_ts,
+                        last_celebration_template=last_template,
+                    )
+                drift_started_at = None
+                drift_confirmed_at = None
+
+            conn.execute(
+                """
+                INSERT INTO attachment_states (
+                    session_id, drift_started_at, drift_confirmed_at,
+                    last_celebration_ts, last_celebration_template, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    drift_started_at = excluded.drift_started_at,
+                    drift_confirmed_at = excluded.drift_confirmed_at,
+                    last_celebration_ts = excluded.last_celebration_ts,
+                    last_celebration_template = excluded.last_celebration_template,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    session_id,
+                    drift_started_at.isoformat() if drift_started_at else None,
+                    drift_confirmed_at.isoformat() if drift_confirmed_at else None,
+                    last_celebration_ts.isoformat() if last_celebration_ts else None,
+                    last_template,
+                    ts.isoformat(),
+                ),
+            )
+        return candidate
+
+    def record_celebration_delivered(
+        self,
+        session_id: str,
+        observation_id: str,
+        return_minutes: int,
+        template: str,
+        ts: datetime | None = None,
+    ) -> None:
+        now = ts or _utc_now()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            conn.execute(
+                """
+                INSERT INTO attachment_states (
+                    session_id, drift_started_at, drift_confirmed_at,
+                    last_celebration_ts, last_celebration_template, updated_at
+                )
+                VALUES (?, NULL, NULL, ?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    last_celebration_ts = excluded.last_celebration_ts,
+                    last_celebration_template = excluded.last_celebration_template,
+                    updated_at = excluded.updated_at
+                """,
+                (session_id, now.isoformat(), template, now.isoformat()),
+            )
+            self._append_event(
+                conn,
+                session_id,
+                "celebration.delivered",
+                {
+                    "observation_id": observation_id,
+                    "return_minutes": return_minutes,
+                },
+                now,
+            )
 
     def record_delivery_report(
         self,
@@ -538,9 +802,9 @@ class SQLiteStore:
                 """
                 INSERT INTO observations (
                     id, session_id, ts, source, url_host, url_path_hash, title, tab_id,
-                    features_json, verdict, tier_reached
+                    features_json, verdict, tier_reached, tier1_reason
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     observation.id,
@@ -554,6 +818,7 @@ class SQLiteStore:
                     json.dumps(features),
                     observation.verdict.value if observation.verdict else None,
                     observation.features.tier_reached,
+                    observation.tier1_reason,
                 ),
             )
             self._append_event(
@@ -580,6 +845,7 @@ class SQLiteStore:
             features=features,
             verdict=observation.verdict.value if observation.verdict else None,
             tier_reached=observation.features.tier_reached,
+            tier1_reason=observation.tier1_reason,
         )
 
     def record_dropped_observation(
@@ -616,6 +882,10 @@ class SQLiteStore:
         now = ts or _utc_now()
         with self._connect() as conn:
             self._ensure_schema(conn)
+            conn.execute(
+                "UPDATE observations SET tier1_reason = ? WHERE id = ? AND session_id = ?",
+                (reason, observation_id, session_id),
+            )
             self._append_event(
                 conn,
                 session_id,
@@ -859,9 +1129,12 @@ class SQLiteStore:
             self._ensure_schema(conn)
             row = conn.execute(
                 """
-                SELECT id, session_id, observation_id, ts, message, status
+                SELECT interventions.id, interventions.session_id, interventions.observation_id,
+                       interventions.ts, interventions.message, interventions.status,
+                       observations.tier1_reason
                 FROM interventions
-                WHERE id = ?
+                LEFT JOIN observations ON observations.id = interventions.observation_id
+                WHERE interventions.id = ?
                 """,
                 (intervention_id,),
             ).fetchone()
@@ -904,7 +1177,7 @@ class SQLiteStore:
             row = conn.execute(
                 """
                 SELECT id, session_id, ts, source, url_host, url_path_hash, title, tab_id,
-                       features_json, verdict, tier_reached
+                       features_json, verdict, tier_reached, tier1_reason
                 FROM observations
                 WHERE id = ?
                 """,
@@ -1024,7 +1297,7 @@ class SQLiteStore:
             rows = conn.execute(
                 """
                 SELECT id, session_id, ts, source, url_host, url_path_hash, title, tab_id,
-                       features_json, verdict, tier_reached
+                       features_json, verdict, tier_reached, tier1_reason
                 FROM observations
                 WHERE session_id = ?
                 ORDER BY ts ASC, id ASC
@@ -1129,6 +1402,138 @@ class SQLiteStore:
             ).fetchall()
         return [row["verdict"] for row in reversed(rows)]
 
+    def _report_from_rows(
+        self,
+        scope: str,
+        session_id: str | None,
+        report_date: str | None,
+        started_at: datetime | None,
+        ended_at: datetime | None,
+        observation_rows: list[sqlite3.Row],
+        intervention_rows: list[sqlite3.Row],
+        feedback_rows: list[sqlite3.Row],
+    ) -> SessionReportRecord:
+        observations = len(observation_rows)
+        ok = sum(1 for row in observation_rows if row["verdict"] == "OK")
+        drift = sum(1 for row in observation_rows if row["verdict"] == "DRIFT")
+        judged = ok + drift
+        unjudged = observations - judged
+        related_ratio = (ok / judged) if judged else None
+
+        hourly = self._hourly_related_ratio(observation_rows)
+        top_hosts = self._top_drift_hosts(observation_rows)
+        longest_ok = self._longest_ok_stretch(observation_rows)
+        intervention_counts = {row["status"]: int(row["n"]) for row in intervention_rows}
+        feedback_counts = {row["kind"]: int(row["n"]) for row in feedback_rows}
+        judgments = [
+            JudgmentReasonRecord(
+                observation_id=row["id"],
+                ts=_parse_dt(row["ts"]),
+                verdict=row["verdict"],
+                url_host=row["url_host"],
+                title=row["title"],
+                tier_reached=row["tier_reached"],
+                tier1_reason=row["tier1_reason"],
+            )
+            for row in observation_rows
+        ]
+
+        if started_at and ended_at:
+            end_bound = ended_at
+        elif started_at:
+            end_bound = _utc_now()
+        else:
+            end_bound = None
+        duration_seconds = (
+            max(0, int((end_bound - started_at).total_seconds()))
+            if started_at and end_bound
+            else 0
+        )
+
+        return SessionReportRecord(
+            scope=scope,
+            session_id=session_id,
+            date=report_date,
+            started_at=started_at,
+            ended_at=ended_at,
+            duration_seconds=duration_seconds,
+            observations=observations,
+            ok=ok,
+            drift=drift,
+            unjudged=unjudged,
+            related_ratio=related_ratio,
+            hourly_related_ratio=hourly,
+            top_drift_hosts=top_hosts,
+            longest_ok_stretch=longest_ok,
+            intervention_status_counts=intervention_counts,
+            feedback_counts=feedback_counts,
+            judgments=judgments,
+        )
+
+    def _hourly_related_ratio(self, rows: list[sqlite3.Row]) -> list[ReportHourBucketRecord]:
+        buckets: dict[str, dict[str, int]] = {}
+        for row in rows:
+            local_hour = _parse_dt(row["ts"]).astimezone().replace(minute=0, second=0, microsecond=0)
+            key = local_hour.isoformat()
+            bucket = buckets.setdefault(key, {"observations": 0, "ok": 0, "drift": 0})
+            bucket["observations"] += 1
+            if row["verdict"] == "OK":
+                bucket["ok"] += 1
+            elif row["verdict"] == "DRIFT":
+                bucket["drift"] += 1
+
+        records: list[ReportHourBucketRecord] = []
+        for hour in sorted(buckets):
+            bucket = buckets[hour]
+            judged = bucket["ok"] + bucket["drift"]
+            records.append(
+                ReportHourBucketRecord(
+                    hour=hour,
+                    observations=bucket["observations"],
+                    ok=bucket["ok"],
+                    drift=bucket["drift"],
+                    related_ratio=(bucket["ok"] / judged) if judged else None,
+                )
+            )
+        return records
+
+    def _top_drift_hosts(self, rows: list[sqlite3.Row]) -> list[DriftHostRecord]:
+        counts: dict[str, int] = {}
+        for row in rows:
+            if row["verdict"] != "DRIFT" or not row["url_host"]:
+                continue
+            counts[row["url_host"]] = counts.get(row["url_host"], 0) + 1
+        return [
+            DriftHostRecord(host=host, count=count)
+            for host, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:3]
+        ]
+
+    def _longest_ok_stretch(self, rows: list[sqlite3.Row]) -> OkStretchRecord | None:
+        best_start: datetime | None = None
+        best_end: datetime | None = None
+        current_start: datetime | None = None
+        current_end: datetime | None = None
+
+        for row in rows:
+            ts = _parse_dt(row["ts"])
+            if row["verdict"] == "OK":
+                current_start = current_start or ts
+                current_end = ts
+                if best_start is None or _stretch_seconds(current_start, current_end) > _stretch_seconds(best_start, best_end):
+                    best_start = current_start
+                    best_end = current_end
+                continue
+            current_start = None
+            current_end = None
+
+        if best_start is None or best_end is None:
+            return None
+        return OkStretchRecord(
+            start=best_start,
+            end=best_end,
+            minutes=max(0, int((best_end - best_start).total_seconds()) // 60),
+        )
+
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.db_path)
@@ -1227,6 +1632,15 @@ class SQLiteStore:
                 updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS attachment_states (
+                session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+                drift_started_at TEXT,
+                drift_confirmed_at TEXT,
+                last_celebration_ts TEXT,
+                last_celebration_template TEXT,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE UNIQUE INDEX IF NOT EXISTS idx_feedback_once_intervention_kind
             ON feedback(intervention_id, kind)
             WHERE intervention_id IS NOT NULL;
@@ -1271,6 +1685,7 @@ class SQLiteStore:
             features=json.loads(row["features_json"]),
             verdict=row["verdict"],
             tier_reached=row["tier_reached"],
+            tier1_reason=row["tier1_reason"],
         )
 
     def _intervention_from_row(self, row: sqlite3.Row) -> InterventionRecord:
@@ -1281,6 +1696,7 @@ class SQLiteStore:
             ts=_parse_dt(row["ts"]),
             message=row["message"],
             status=row["status"],
+            tier1_reason=row["tier1_reason"],
         )
 
     def _controller_state_from_row(self, row: sqlite3.Row) -> ControllerStateRecord:
@@ -1299,6 +1715,8 @@ class SQLiteStore:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(observations)").fetchall()}
         if "tab_id" not in columns:
             conn.execute("ALTER TABLE observations ADD COLUMN tab_id INTEGER")
+        if "tier1_reason" not in columns:
+            conn.execute("ALTER TABLE observations ADD COLUMN tier1_reason TEXT")
 
     def _ensure_controller_columns(self, conn: sqlite3.Connection) -> None:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(controller_states)").fetchall()}

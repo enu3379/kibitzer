@@ -29,6 +29,7 @@ function copyStatic() {
   cpSync(join(extensionRoot, "src/popup/popup.html"), join(distDir, "popup/popup.html"))
   cpSync(join(extensionRoot, "src/offscreen/offscreen.html"), join(distDir, "offscreen/offscreen.html"))
   cpSync(join(extensionRoot, "src/offscreen/ding.wav"), join(distDir, "offscreen/ding.wav"))
+  cpSync(join(extensionRoot, "src/offscreen/celebrate.wav"), join(distDir, "offscreen/celebrate.wav"))
   cpSync(join(extensionRoot, "icons"), join(distDir, "icons"), { recursive: true })
 }
 

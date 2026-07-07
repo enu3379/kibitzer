@@ -38,6 +38,43 @@ class PersonaTest(unittest.TestCase):
         self.assertIn('"confirm_drift":true|false', prompt)
         self.assertIn("Use a concise style.", prompt)
 
+    def test_load_personas_merges_user_file_and_skips_invalid_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = Path(tmp) / "personas.yaml"
+            user_path = Path(tmp) / "user-personas.yaml"
+            base_path.write_text(
+                yaml.safe_dump(
+                    {
+                        "version": 1,
+                        "default": "base",
+                        "personas": {
+                            "base": {"name": "Base", "style_prompt": "Base style."},
+                            "shared": {"name": "Base Shared", "style_prompt": "Old."},
+                        },
+                    }
+                )
+            )
+            user_path.write_text(
+                yaml.safe_dump(
+                    {
+                        "default": "custom",
+                        "personas": {
+                            "shared": {"name": "User Shared", "style_prompt": "New."},
+                            "custom": {"name": "Custom", "celebrate_templates": ["Back to {goal}."]},
+                            "broken": {"name": "Broken", "celebrate_templates": "not-a-list"},
+                        },
+                    }
+                )
+            )
+
+            persona_set = load_personas(base_path, user_path=user_path)
+
+        self.assertEqual(persona_set.default, "custom")
+        self.assertEqual(persona_set.personas["shared"].name, "User Shared")
+        self.assertIn("base", persona_set.personas)
+        self.assertIn("custom", persona_set.personas)
+        self.assertNotIn("broken", persona_set.personas)
+
 
 if __name__ == "__main__":
     unittest.main()

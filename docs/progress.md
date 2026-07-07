@@ -1,5 +1,43 @@
 # Progress
 
+## 2026-07-08 P1 Attachment Loop Plumbing
+
+Completed:
+
+- Implemented P1 attachment-loop server plumbing:
+  - return celebrations after confirmed drift -> real OK return, with
+    `celebration.min_drift_minutes`, `celebration.cooldown_seconds`, quiet-hours
+    suppression, random persona `celebrate_templates`, and no immediate repeat;
+  - `break` feedback kind for "5분만", using `break.duration_seconds` and
+    marking interventions as `break`;
+  - custom persona merge from `configs/personas.yaml` plus
+    `~/.kibitzer/personas.yaml`, with invalid custom entries skipped;
+  - `GET /personas`;
+  - `GET /sessions/current/report` and `GET /reports/daily?date=YYYY-MM-DD`;
+  - persisted `observations.tier1_reason`, exposed in pending interventions and
+    report judgments.
+- Extended the extension plumbing:
+  - `PipelineResult.kind` supports `intervention` vs `celebration`;
+  - celebration toasts render without feedback buttons and do not create
+    intervention rows;
+  - intervention toasts route `related` / `break` / `snooze`;
+  - legacy system notification fallback uses `related` / `break` within Chrome's
+    2-button limit.
+- Added [P1 Claude Design/Copy Follow-Up](handoff-p1-claude-design.md) for
+  celebration styling, break button copy/layout, persona selector UI, report UI,
+  and "왜?" transparency affordances.
+
+Verified:
+
+- `.venv/bin/python -m pytest apps/server/tests -q` -> `90 passed`.
+- `npm --prefix apps/extension run build` -> passed.
+
+Current boundary:
+
+- Server contracts and extension mechanics for P1 are in place.
+- Popup report/persona/transparency UI and final Korean copy/style remain
+  Claude-owned follow-up work.
+
 ## 2026-07-07 Daily Wrap
 
 Completed:
@@ -485,3 +523,24 @@ Next:
 - Human check: reload the extension, open the popup → 설정, switch persona, and
   browse to hear/see the new voice in a real intervention.
 - Execute P1 after P0 soak (Codex).
+
+## 2026-07-08 P1 Design Layer, Celebration Chime, and Doc Reconciliation
+
+- Claude completed the P1 design handoff: celebration toast styling (happy-arc
+  eyes, buttonless — also fixed the `[hidden]` vs `display:flex` bug that was
+  showing feedback buttons on celebrations), `5분만` copy + button order, popup
+  personas from `GET /personas`, pending-card "왜?" (tier1_reason) toggle, and
+  the popup 리포트 view over `/sessions/current/report`.
+- Fixed celebration delivery end-to-end: results returned on the browser-nav
+  response were dropped by `handlePipelineResult`; the server was logging
+  `celebration.delivered` with nothing displayed. Celebration gate is
+  temporarily 0.5 min (dogfooding; target 3), and celebrations now play a soft
+  two-note chime (`offscreen/celebrate.wav`) distinct from the nag ding.
+- Doc reconciliation pass (supersedes stale claims in earlier entries): Windows
+  startup + tray and the macOS menu bar status item are MERGED (the 2026-07-06
+  "planned but not implemented" line below is outdated); delivery is the
+  in-page toast with system notifications as fallback; tier judging runs on
+  Ollama Cloud (nemotron-3-super / minimax-m3) with `.env` keys and 3-key
+  rotation — the 2026-07-06 "Tier 1 Enabled (Local Ollama)" entry is history,
+  not current state. READMEs, SETUP guides, platforms/architecture docs, and
+  the docs index were aligned with the code in the same pass.

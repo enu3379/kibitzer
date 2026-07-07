@@ -253,6 +253,7 @@ class Tier1ApiTest(unittest.TestCase):
         observations = store.list_observations(session_id)
         self.assertEqual(observations[-1].verdict, "OK")
         self.assertEqual(observations[-1].tier_reached, 1)
+        self.assertEqual(observations[-1].tier1_reason, "normal subtopic")
         with closing(sqlite3.connect(self.db_path)) as conn:
             event = conn.execute(
                 "SELECT payload_json FROM event_log WHERE event_type = 'tier1.classified'"

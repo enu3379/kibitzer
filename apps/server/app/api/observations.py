@@ -1,5 +1,8 @@
+import random
+
 from fastapi import APIRouter, HTTPException, Request
 
+from ..config import ControllerConfig
 from ..core.controller_flow import apply_controller
 from ..core.delivery import clamp_notification_message
 from ..core.normalization import (
@@ -10,6 +13,7 @@ from ..core.normalization import (
 from ..core.personas import (
     Persona,
     compose_tier2_system_prompt,
+    format_celebration_template,
     format_persona_fallback,
     resolve_persona,
 )
@@ -21,8 +25,8 @@ from ..core.tier2_payload import build_tier2_payload, fallback_drift_message
 from ..core.voice import speak
 from ..providers.judges.base import Tier2Result
 from ..privacy.domain_filter import SensitiveDomainRules, drop_decision_for_url
-from ..schemas import PageExcerpt, PageInfo, PipelineAction, PipelineResult, RawObservation, Verdict
-from ..storage.sqlite import SQLiteStore
+from ..schemas import PageExcerpt, PageInfo, PipelineAction, PipelineResult, PipelineResultKind, RawObservation, Verdict
+from ..storage.sqlite import ControllerStateRecord, CurrentSessionRecord, ReturnCandidateRecord, SQLiteStore
 
 router = APIRouter()
 
@@ -102,6 +106,7 @@ async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineR
                 )
             else:
                 observation.verdict = result.verdict
+                observation.tier1_reason = result.reason
                 observation.features.tier_reached = 1
                 _store(request).record_tier1_result(
                     session_id=current.session.id,
@@ -117,12 +122,28 @@ async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineR
             score.exemplar_score >= request.app.state.config.relevance.anchor_epsilon
             or (observation.verdict == Verdict.OK and (observation.features.tier_reached or 0) >= 1)
         )
-    _store(request).record_observation(observation)
-    return apply_controller(
-        _store(request),
-        effective_controller_config(request.app.state.config, _store(request)),
-        observation,
+    store = _store(request)
+    controller_config = effective_controller_config(request.app.state.config, store)
+    controller_state_before = store.get_controller_state(observation.session_id)
+    drift_confirmed = _drift_confirmed_after_observation(
+        controller_config,
+        controller_state_before,
+        observation.verdict,
+        observation.features.r_final,
     )
+    store.record_observation(observation)
+    result = apply_controller(store, controller_config, observation)
+    return_candidate = store.note_attachment_observation(
+        observation.session_id,
+        observation.verdict.value if observation.verdict else None,
+        observation.ts,
+        drift_confirmed,
+    )
+    if result.action == PipelineAction.NONE:
+        celebration = _maybe_create_celebration(request, current, observation, return_candidate)
+        if celebration:
+            return celebration
+    return result
 
 
 @router.post("/observations/{observation_id}/excerpt", response_model=PipelineResult)
@@ -208,7 +229,98 @@ async def confirm_observation_excerpt(
 
 
 def _page_info(observation) -> PageInfo:
-    return PageInfo(host=observation.url_host, title=observation.title)
+    payload = getattr(observation, "payload", {}) or {}
+    return PageInfo(
+        host=getattr(observation, "url_host", None) or payload.get("url_host"),
+        title=getattr(observation, "title", None) or payload.get("title"),
+    )
+
+
+def _drift_confirmed_after_observation(
+    config: ControllerConfig,
+    state: ControllerStateRecord,
+    verdict: Verdict | None,
+    r: float | None,
+) -> bool:
+    if verdict != Verdict.DRIFT:
+        return False
+    obs_count = state.obs_count + 1
+    if obs_count < config.coldstart_observations:
+        return False
+    if config.type == "alignment":
+        score = _next_alignment_score(config, state, verdict, r)
+        return state.drift_latched or score < config.theta_low
+    return state.streak + 1 >= config.k
+
+
+def _next_alignment_score(
+    config: ControllerConfig,
+    state: ControllerStateRecord,
+    verdict: Verdict,
+    r: float | None,
+) -> float:
+    if r is None:
+        r = 1.0 if verdict == Verdict.OK else 0.0
+    alpha = min(0.99, max(0.0, config.alignment_alpha))
+    previous = float(r) if state.alignment_score is None else state.alignment_score
+    return alpha * previous + (1.0 - alpha) * float(r)
+
+
+def _maybe_create_celebration(
+    request: Request,
+    current: CurrentSessionRecord,
+    observation,
+    candidate: ReturnCandidateRecord | None,
+) -> PipelineResult | None:
+    if not candidate or not current.goal:
+        return None
+
+    return_seconds = max(0, int((observation.ts - candidate.drift_started_at).total_seconds()))
+    return_minutes = return_seconds // 60  # template placeholder stays whole minutes
+    config = request.app.state.config.celebration
+    if return_seconds < config.min_drift_minutes * 60:
+        return None
+    if candidate.last_celebration_ts:
+        elapsed = (observation.ts - candidate.last_celebration_ts).total_seconds()
+        if elapsed < config.cooldown_seconds:
+            return None
+
+    settings = runtime_settings(request.app.state.config, _store(request))
+    try:
+        if quiet_hours_active(settings["quiet_hours"]):
+            return None
+    except Exception:
+        pass
+
+    persona = resolve_persona(
+        getattr(request.app.state, "persona_set", None),
+        settings,
+        request.app.state.config.delivery.persona,
+    )
+    templates = list(persona.celebrate_templates) if persona else []
+    if not templates:
+        return None
+    choices = [template for template in templates if template != candidate.last_celebration_template]
+    template = random.choice(choices or templates)
+    message = format_celebration_template(template, current.goal, return_minutes)
+    if not message:
+        return None
+
+    _store(request).record_celebration_delivered(
+        observation.session_id,
+        observation.id,
+        return_minutes,
+        template,
+        ts=observation.ts,
+    )
+    return PipelineResult(
+        action=PipelineAction.NOTIFY,
+        kind=PipelineResultKind.CELEBRATION,
+        observation_id=observation.id,
+        verdict=observation.verdict,
+        message=message,
+        page=_page_info(observation),
+    )
 
 
 async def _confirm_tier2(

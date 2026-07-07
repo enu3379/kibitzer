@@ -57,7 +57,11 @@ def create_app(
 
 def _load_persona_set(config: AppConfig, logger: logging.Logger):
     try:
-        persona_set = load_personas(config.delivery.personas_file)
+        persona_set = load_personas(
+            config.delivery.personas_file,
+            user_path=config.delivery.custom_personas_file,
+            logger=logger,
+        )
     except Exception as exc:
         logger.warning(
             "Persona file %s could not be loaded (%s); using built-in Tier 2 prompt",

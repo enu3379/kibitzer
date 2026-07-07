@@ -75,8 +75,24 @@ class SettingsPatch(BaseModel):
     quiet_hours: QuietHoursPatch | None = None
 
 
+class PersonaSummaryResponse(BaseModel):
+    key: str
+    name: str
+
+
 def _store(request: Request) -> SQLiteStore:
     return request.app.state.store
+
+
+@router.get("/personas", response_model=list[PersonaSummaryResponse])
+async def list_personas(request: Request) -> list[PersonaSummaryResponse]:
+    persona_set = getattr(request.app.state, "persona_set", None)
+    if not persona_set:
+        return []
+    return [
+        PersonaSummaryResponse(key=key, name=persona.name or key)
+        for key, persona in persona_set.personas.items()
+    ]
 
 
 @router.get("/settings", response_model=SettingsResponse)

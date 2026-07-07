@@ -19,13 +19,15 @@ const EXCERPT_LIMIT = 3500
 const NOTIFICATION_ICON = "icons/icon-128.png"
 const BADGE_ALARM = "kibitzer-badge-refresh"
 const TOAST_AUTO_DISMISS_MS = 25000
+const TOAST_CELEBRATION_AUTO_DISMISS_MS = 9000
 // Chrome notifications support at most 2 action buttons; creating with 3 throws
 // and the notification never appears. "accepted" maps to clicking the body.
-const NOTIFICATION_BUTTONS: FeedbackKind[] = ["related", "snooze"]
+const NOTIFICATION_BUTTONS: FeedbackKind[] = ["related", "break"]
 const FEEDBACK_BUTTON_TITLES: Record<FeedbackKind, string> = {
   related: "목표와 관련 있어요",
   accepted: "잘 잡았어요",
   snooze: "30분 조용히",
+  break: "5분만",
 }
 interface PendingTabObservation {
   token: number
@@ -103,7 +105,15 @@ async function handlePipelineResult(
   result: PipelineResult | null,
   observation: { url: string; startedAt: number },
 ): Promise<void> {
-  if (result?.action !== "request_excerpt" || !result.observation_id) return
+  if (!result?.observation_id) return
+  // Celebrations arrive directly on the browser-nav response (no excerpt round
+  // trip). Show only if the user is still on the page they returned to.
+  if (result.action === "notify" && result.kind === "celebration" && result.message) {
+    if (!(await tabStillOnObservedPage(tabId, observation.url))) return
+    await showNotification(result, tabId)
+    return
+  }
+  if (result.action !== "request_excerpt") return
   const remainingDwellMs = TIER2_DWELL_MS - (Date.now() - observation.startedAt)
   if (remainingDwellMs > 0) {
     await delay(remainingDwellMs)
@@ -144,18 +154,25 @@ async function extractFromTab(tabId: number): Promise<PageExcerpt | null> {
 }
 
 async function showNotification(result: PipelineResult, tabId?: number): Promise<void> {
-  if (!result.intervention_id || !result.observation_id || !result.message) return
+  if (!result.observation_id || !result.message) return
+  const kind = result.kind ?? "intervention"
+  const celebration = kind === "celebration"
+  if (!celebration && !result.intervention_id) return
   const silent = (result as PipelineResult & { silent?: boolean }).silent === true
   if (silent) {
-    void postDeliveryReport(result.intervention_id, true)
+    if (result.intervention_id) void postDeliveryReport(result.intervention_id, true)
     void refreshBadge()
     return
   }
-  const notificationId = `kibitzer:${result.intervention_id}`
-  pendingNotifications.set(notificationId, {
-    interventionId: result.intervention_id,
-    observationId: result.observation_id,
-  })
+  const notificationId = celebration
+    ? `kibitzer:celebration:${result.observation_id}`
+    : `kibitzer:${result.intervention_id}`
+  if (!celebration && result.intervention_id) {
+    pendingNotifications.set(notificationId, {
+      interventionId: result.intervention_id,
+      observationId: result.observation_id,
+    })
+  }
 
   // Preferred surface: an in-page toast on the drifting tab. It bypasses OS
   // notification settings (macOS banners were silently swallowed) and keeps the
@@ -170,12 +187,19 @@ async function showNotification(result: PipelineResult, tabId?: number): Promise
             notificationId,
             message: result.message,
             contextLabel: pageLabel(result.page) ?? null,
-            autoDismissMs: TOAST_AUTO_DISMISS_MS,
+            autoDismissMs: celebration ? TOAST_CELEBRATION_AUTO_DISMISS_MS : TOAST_AUTO_DISMISS_MS,
+            kind,
           },
         ],
       })
-      void postDeliveryReport(result.intervention_id, true)
-      void playNotificationSound()
+      if (!celebration && result.intervention_id) {
+        void postDeliveryReport(result.intervention_id, true)
+        void playNotificationSound()
+      }
+      if (celebration) {
+        void playNotificationSound("celebrate")
+      }
+      void refreshBadge()
       return
     } catch (error) {
       // Non-injectable surface (chrome:// pages, web store, PDF viewer) —
@@ -185,22 +209,35 @@ async function showNotification(result: PipelineResult, tabId?: number): Promise
   }
 
   try {
-    await chrome.notifications.create(notificationId, {
+    const options: chrome.notifications.NotificationOptions<true> = {
       type: "basic",
       iconUrl: chrome.runtime.getURL(NOTIFICATION_ICON),
       title: "Kibitzer",
       message: result.message,
       contextMessage: pageLabel(result.page),
-      buttons: NOTIFICATION_BUTTONS.map((kind) => ({ title: FEEDBACK_BUTTON_TITLES[kind] })),
-      priority: 2,
-      requireInteraction: true,
+      priority: celebration ? 0 : 2,
+      requireInteraction: !celebration,
+    }
+    if (!celebration) {
+      options.buttons = NOTIFICATION_BUTTONS.map((buttonKind) => ({ title: FEEDBACK_BUTTON_TITLES[buttonKind] }))
+    }
+    await chrome.notifications.create(notificationId, {
+      ...options,
     })
-    void postDeliveryReport(result.intervention_id, true)
-    void playNotificationSound()
+    if (!celebration && result.intervention_id) {
+      void postDeliveryReport(result.intervention_id, true)
+      void playNotificationSound()
+    }
+    if (celebration) {
+      void playNotificationSound("celebrate")
+    }
+    void refreshBadge()
   } catch (error) {
     pendingNotifications.delete(notificationId)
     console.error("kibitzer: notification create failed", error)
-    void postDeliveryReport(result.intervention_id, false, String(error))
+    if (!celebration && result.intervention_id) {
+      void postDeliveryReport(result.intervention_id, false, String(error))
+    }
   }
 }
 
@@ -211,7 +248,7 @@ function pageLabel(page: PageInfo | null | undefined): string | undefined {
   return title || host || undefined
 }
 
-async function playNotificationSound(): Promise<void> {
+async function playNotificationSound(sound: "ding" | "celebrate" = "ding"): Promise<void> {
   try {
     const contexts = await chrome.runtime.getContexts({
       contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
@@ -223,7 +260,7 @@ async function playNotificationSound(): Promise<void> {
         justification: "Play a short chime when a drift notification is shown.",
       })
     }
-    await chrome.runtime.sendMessage({ type: "kibitzer:play-sound" })
+    await chrome.runtime.sendMessage({ type: "kibitzer:play-sound", sound })
   } catch (error) {
     console.error("kibitzer: notification sound failed", error)
   }
@@ -343,7 +380,7 @@ chrome.runtime.onMessage.addListener(
     if (message?.type === "kibitzer:refresh-badge") void refreshBadge()
     if (message?.type === "kibitzer:toast-feedback" && message.notificationId) {
       const kind = message.kind
-      if (kind === "related" || kind === "accepted" || kind === "snooze") {
+      if (kind === "related" || kind === "accepted" || kind === "snooze" || kind === "break") {
         void submitNotificationFeedback(message.notificationId, kind)
       } else {
         // dismissed / timeout: no feedback signal, just stop tracking it.

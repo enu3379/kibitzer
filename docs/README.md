@@ -16,6 +16,17 @@ Read these in order when starting work:
 12. [Idle Daemon Plan](idle-daemon-plan.md)
 13. [macOS Menu Bar Plan](macos-menu-bar-plan.md)
 14. [Windows Idle Tray Plan](windows-idle-tray-plan.md)
+15. [Platforms](platforms.md)
+16. [Fun-Layer Roadmap](roadmap-fun-layer.md)
+17. [Planning Notes (living decision log)](planning-notes.md)
+
+Handoffs (delegated work specs):
+
+- [P0 Persona Engine](handoff-p0-persona-engine.md)
+- [P1 Attachment Loop](handoff-p1-attachment-loop.md)
+- [P1 Claude Design Follow-up](handoff-p1-claude-design.md)
+- [P2 Distribution](handoff-p2-distribution.md)
+- [Extension Bundling](handoff-extension-bundling.md)
 
 ## Stage Boundaries
 

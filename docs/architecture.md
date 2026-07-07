@@ -45,8 +45,8 @@ active  a goal-backed session has initialized embeddings and judge providers
 ```
 
 `GET /health` exposes the current mode. macOS uses a LaunchAgent to start the
-idle server at login; Windows startup and tray status are planned as a platform
-adapter over the same endpoint.
+idle server at login; Windows startup and tray status are implemented as a
+platform adapter over the same endpoint.
 
 ## Observation Flow
 

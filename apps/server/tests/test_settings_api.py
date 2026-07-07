@@ -102,6 +102,13 @@ class SettingsApiTest(unittest.TestCase):
             400,
         )
 
+    def test_personas_endpoint_lists_available_personas(self) -> None:
+        personas = self.client.get("/personas").json()
+        keys = {persona["key"] for persona in personas}
+        self.assertIn("dry_kibitzer", keys)
+        self.assertIn("quiet_coach", keys)
+        self.assertTrue(all(persona["name"] for persona in personas))
+
 
 if __name__ == "__main__":
     unittest.main()

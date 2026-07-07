@@ -94,10 +94,14 @@ async def submit_feedback(request: Request, feedback: FeedbackRequest) -> Feedba
             snoozed_until = _apply_snooze(request, intervention.session_id)
             status = "snoozed"
             store.update_intervention_status(intervention.id, status)
+        elif feedback.kind == FeedbackKind.BREAK:
+            snoozed_until = _apply_break(request, intervention.session_id)
+            status = "break"
+            store.update_intervention_status(intervention.id, status)
     else:
         if feedback.kind == FeedbackKind.RELATED:
             exemplar_count = store.goal_exemplar_count(intervention.session_id)
-        if feedback.kind == FeedbackKind.SNOOZE:
+        if feedback.kind in {FeedbackKind.SNOOZE, FeedbackKind.BREAK}:
             snoozed_until = store.get_controller_state(intervention.session_id).snoozed_until
         refreshed = store.get_intervention(intervention.id)
         status = refreshed.status if refreshed else status
@@ -115,10 +119,28 @@ async def submit_feedback(request: Request, feedback: FeedbackRequest) -> Feedba
 
 
 def _apply_snooze(request: Request, session_id: str) -> datetime:
+    return _apply_silence(
+        request,
+        session_id,
+        duration_seconds=request.app.state.config.controller.snooze_seconds,
+        source="feedback",
+    )
+
+
+def _apply_break(request: Request, session_id: str) -> datetime:
+    return _apply_silence(
+        request,
+        session_id,
+        duration_seconds=request.app.state.config.intentional_break.duration_seconds,
+        source="break",
+    )
+
+
+def _apply_silence(request: Request, session_id: str, duration_seconds: int, source: str) -> datetime:
     store = _store(request)
     state = store.get_controller_state(session_id)
     now = datetime.now(timezone.utc)
-    snoozed_until = now + timedelta(seconds=request.app.state.config.controller.snooze_seconds)
+    snoozed_until = now + timedelta(seconds=duration_seconds)
     store.save_controller_state(
         session_id=session_id,
         streak=state.streak,
@@ -129,4 +151,5 @@ def _apply_snooze(request: Request, session_id: str) -> datetime:
         drift_latched=state.drift_latched,
         ts=now,
     )
+    store.record_session_snoozed(session_id, snoozed_until, source=source, ts=now)
     return snoozed_until

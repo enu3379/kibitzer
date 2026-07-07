@@ -7,9 +7,11 @@ Stage 0 is intentionally narrow:
 - Chrome navigation observations only.
 - One active session has one declared goal.
 - Embedding is local CPU-only.
-- Tier 1 and Tier 2 use configurable commercial low-cost / stronger OpenAI-compatible APIs.
+- Tier 1 and Tier 2 use configurable judge APIs — Ollama Cloud by default
+  (OpenAI-compatible endpoints also supported).
 - Raw page body is requested only immediately before an intervention.
-- All interventions are notifications. The app never blocks browsing or typing.
+- All interventions are non-blocking: an in-page toast on the drifting tab
+  (system notifications only as a fallback). The app never blocks browsing or typing.
 
 ## Core Contract
 
@@ -49,8 +51,8 @@ ignored by git.
 
 ```text
 Embedding  local CPU-only provider, no CUDA requirement
-Tier 1     cheap OpenAI-compatible classifier API
-Tier 2     stronger OpenAI-compatible confirmation/message API
+Tier 1     fast cloud classifier (Ollama Cloud; OpenAI-compatible supported)
+Tier 2     stronger cloud confirmation/message judge (Ollama Cloud)
 Storage    SQLite
 Server     Python + FastAPI
 Extension  TypeScript MV3
@@ -102,10 +104,12 @@ auto-ingest stay disabled to avoid surprise LLM spend.
 
 The Stage 0 loop is implemented end to end: sessions and declared goals,
 dwell-gated browser navigation intake, privacy gates, CPU-only Tier 0,
-Tier 1/Tier 2 judging, the controller/request-excerpt handshake, Chrome
-notifications with feedback, popup controls/settings, and a session lifecycle
-API (state, stats, snooze, end). The local server now starts in idle mode and
-activates judging resources only when a goal-backed session starts; macOS can
-run that idle server at login with a LaunchAgent. Next steps are Windows startup
-and tray status, then the Work Package 10 replay CLI. See
+Tier 1/Tier 2 judging, the controller/request-excerpt handshake, in-page toast
+delivery with feedback (system notifications as fallback), popup
+controls/settings/reports, the P1 attachment loop (return celebration, "5분만"
+break, custom personas, report APIs, judgment transparency), and a session
+lifecycle API (state, stats, snooze, end). The local server starts in idle mode
+and activates judging resources only when a goal-backed session starts; macOS
+runs it at login via LaunchAgent, Windows via the startup tray. The next step is
+the Work Package 10 replay CLI (gated on the D4 scope decision). See
 [docs/progress.md](docs/progress.md) for the detailed log.
