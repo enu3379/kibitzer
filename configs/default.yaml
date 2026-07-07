@@ -28,7 +28,7 @@ tier1:
   timeout_seconds: 10
   recent_observations: 5
   experiment_models_file: "configs/models.local.yaml"
-  experiment_model_key: "gemma4"
+  experiment_model_key: "tier1_fast"
   send:
     title: true
     url_host: true
@@ -43,13 +43,13 @@ tier2:
   api_key_env: "ollama2"
   fallback_api_key_env: "ollama3"
   api_key_pool_envs: ["ollama2", "ollama3", "ollama1"]
-  model: "gemma4:31b"
+  model: "minimax-m3"
   timeout_seconds: 180
   recent_observations: 5
   excerpt_char_limit: 3000
   max_output_tokens: 512
   experiment_models_file: "configs/models.local.yaml"
-  experiment_model_key: "ollama_cloud_gemma4_31b"
+  experiment_model_key: "tier2_judge"
 
 relevance:
   # Calibrated 2026-07-05 on a real Korean session: CJK-bigram hash embedding put

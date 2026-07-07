@@ -82,7 +82,7 @@ Copy-Item configs\experiment-models.example.yaml configs\models.local.yaml
 ```
 
 Edit `configs\models.local.yaml` if you want different models (Ollama Cloud
-`gemma3:4b` / `gemma4:31b` by default; self-hosted Ollama also works). The real
+`nemotron-3-super` / `minimax-m3` by default; self-hosted Ollama also works). The real
 `.env` file and `configs\models.local.yaml` are ignored by git. If provider
 settings are incomplete, Kibitzer still runs with local Tier 0 scoring and
 fallback messages; the server records provider degradation when a goal-backed

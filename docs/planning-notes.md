@@ -115,7 +115,7 @@ uses a light rim instead.
 The audit plan adds one cheap LLM call at goal declaration to derive positive
 goal phrases. Only the goal text leaves the call site; no page content.
 Direction update (2026-07-08, user): the stack runs on **Ollama Cloud** (tiers
-use gemma3:4b / gemma4:31b there) — drop the local-first framing; the
+use nemotron-3-super / minimax-m3 there — newest free-tier models by live probe) — drop the local-first framing; the
 enrichment call should ride the same Tier 1 cloud provider. OPEN only on
 prompt/shape, not on where it runs.
 
