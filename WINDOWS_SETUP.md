@@ -38,6 +38,31 @@ Then load the Chrome extension:
 3. Click Load unpacked.
 4. Select `apps\extension\dist`.
 
+## Optional Login Autostart
+
+Install a current-user Startup shortcut so the server starts at Windows logon in
+idle mode and shows a taskbar tray icon:
+
+```powershell
+.\scripts\windows_install_startup_app.ps1
+```
+
+The server responds to health checks while idle, but judging providers are
+initialized only after a goal-backed session starts. Check the mode with:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8765/health
+```
+
+Remove the Startup shortcut with:
+
+```powershell
+.\scripts\windows_uninstall_startup_app.ps1
+```
+
+Startup logs are written under `data\logs\`. The tray icon polls
+`GET /health`: red means unreachable, gray means idle, and green means active.
+
 ## Optional AI Provider Setup
 
 Copy the example env file:
