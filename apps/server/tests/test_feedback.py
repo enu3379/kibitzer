@@ -2,12 +2,14 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import closing
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from apps.server.app.config import (
     AppConfig,
+    BreakConfig,
     ControllerConfig,
     RelevanceConfig,
     ServerConfig,
@@ -28,13 +30,14 @@ class FeedbackApiTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmpdir.cleanup()
 
-    def _client(self, exemplar_cap: int = 20) -> TestClient:
+    def _client(self, exemplar_cap: int = 20, break_duration_seconds: int = 300) -> TestClient:
         config = AppConfig(
             server=ServerConfig(db_path=str(self.db_path)),
             tier1=Tier1Config(enabled=False),
             tier2=Tier2Config(enabled=False),
             relevance=RelevanceConfig(exemplar_cap=exemplar_cap),
             controller=ControllerConfig(k=1, coldstart_observations=1, cooldown_seconds=0, snooze_seconds=900),
+            intentional_break=BreakConfig(duration_seconds=break_duration_seconds),
         )
         client = TestClient(create_app(config=config, store=self.store))
         client.__enter__()
@@ -157,6 +160,32 @@ class FeedbackApiTest(unittest.TestCase):
         self.assertEqual(next_drift["verdict"], "DRIFT")
         self.assertEqual(next_drift["action"], "none")
         self.assertIsNotNone(self.store.get_controller_state(session_id).snoozed_until)
+
+    def test_break_feedback_uses_five_minute_silence_and_marks_break(self) -> None:
+        client = self._client(break_duration_seconds=300)
+        try:
+            session_id = self._start_goal(client)
+            notification = self._notify(client)
+            before = datetime.now(timezone.utc)
+            feedback = client.post(
+                "/feedback",
+                json={
+                    "kind": "break",
+                    "intervention_id": notification["intervention_id"],
+                    "observation_id": notification["observation_id"],
+                },
+            ).json()
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertEqual(feedback["intervention_status"], "break")
+        self.assertIsNotNone(feedback["snoozed_until"])
+        snoozed_until = datetime.fromisoformat(feedback["snoozed_until"])
+        delta = (snoozed_until - before).total_seconds()
+        self.assertGreater(delta, 290)
+        self.assertLess(delta, 310)
+        self.assertEqual(self.store.get_intervention(notification["intervention_id"]).status, "break")
+        self.assertEqual(self.store.get_controller_state(session_id).snoozed_until, snoozed_until)
 
     def test_accepted_feedback_marks_intervention(self) -> None:
         client = self._client()

@@ -3,12 +3,16 @@ import {
   FeedbackKind,
   HealthTiers,
   PendingIntervention,
+  PersonaSummary,
+  SessionReport,
   SessionState,
   SessionStats,
   Settings,
   createSession,
   getCurrentSession,
   getHealthTiers,
+  getPersonas,
+  getSessionReport,
   getSessionState,
   getSessionStats,
   getSettings,
@@ -27,12 +31,19 @@ const TRACKING_PILLS: Record<SessionState["tracking"], { label: string; tone: st
   cooldown: { label: "쿨다운", tone: "amber" },
 }
 
-// Same-owner duplication with configs/personas.yaml until P1 ships GET /personas.
-const PERSONAS: { key: string; name: string; hint: string }[] = [
-  { key: "dry_kibitzer", name: "건조한 훈수꾼", hint: "영국식 무표정 반어" },
-  { key: "chungcheong", name: "느긋한 이웃", hint: "말을 아끼는 함축 화법" },
-  { key: "kyoto", name: "교토식 안주인", hint: "칭찬으로 포장한 지적" },
-  { key: "quiet_coach", name: "조용한 코치", hint: "수치심 없는 리다이렉트" },
+// Personas come from GET /personas (built-ins + ~/.kibitzer merges). Hints are
+// UI copy the server does not carry; unknown/custom personas get no hint.
+const PERSONA_HINTS: Record<string, string> = {
+  dry_kibitzer: "영국식 무표정 반어",
+  chungcheong: "말을 아끼는 함축 화법",
+  kyoto: "칭찬으로 포장한 지적",
+  quiet_coach: "수치심 없는 리다이렉트",
+}
+const FALLBACK_PERSONAS: PersonaSummary[] = [
+  { key: "dry_kibitzer", name: "건조한 훈수꾼" },
+  { key: "chungcheong", name: "느긋한 이웃" },
+  { key: "kyoto", name: "교토식 안주인" },
+  { key: "quiet_coach", name: "조용한 코치" },
 ]
 
 const CONTROLLERS: { type: ControllerType; label: string; hint: string }[] = [
@@ -45,7 +56,9 @@ const root = document.getElementById("root") as HTMLElement
 let editing = false
 let summary: SessionStats | null = null
 let settingsOpen = false
+let reportOpen = false
 let pollTimer: number | undefined
+let personaCache: PersonaSummary[] = FALLBACK_PERSONAS
 
 function esc(text: string): string {
   return text.replace(
@@ -97,7 +110,7 @@ function header(pillLabel: string, pillTone: string): string {
 }
 
 async function refresh(): Promise<void> {
-  if (editing || summary || settingsOpen) return
+  if (editing || summary || settingsOpen || reportOpen) return
   const result = await getSessionState()
   if (result.kind === "unreachable") {
     renderUnreachable()
@@ -218,13 +231,22 @@ function renderDashboard(
     : ""
 
   const pending = state.pending_intervention
+  const whyToggle = pending?.tier1_reason
+    ? `
+      <button id="why-toggle" style="border: 0; background: none; padding: 0; margin: 0 0 8px; font-size: 11px; color: var(--amber-tx); opacity: .75; cursor: pointer; text-decoration: underline;">왜?</button>
+      <p id="why-reason" hidden style="margin: 0 0 8px; font-size: 11.5px; color: var(--amber-tx); opacity: .85;">판정 근거: ${esc(pending.tier1_reason)}</p>`
+    : ""
   const pendingCard = pending
     ? `
     <div style="background: var(--amber-bg); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px;">
-      <p style="margin: 0 0 8px; font-size: 13px; color: var(--amber-tx);">${esc(pending.message)}</p>
-      <div class="btn-row">
+      <p style="margin: 0 0 ${pending.tier1_reason ? "4px" : "8px"}; font-size: 13px; color: var(--amber-tx);">${esc(pending.message)}</p>
+      ${whyToggle}
+      <div class="btn-row" style="margin-bottom: 6px;">
         <button id="fb-related" class="btn" style="font-size: 12px;">관련 있어요</button>
         <button id="fb-accepted" class="btn" style="font-size: 12px;">잘 잡았어요</button>
+      </div>
+      <div class="btn-row">
+        <button id="fb-break" class="btn" style="font-size: 12px;">5분만</button>
         <button id="fb-snooze" class="btn" style="font-size: 12px;">30분 조용히</button>
       </div>
     </div>`
@@ -232,7 +254,8 @@ function renderDashboard(
 
   root.innerHTML = `
     ${header(pillLabel, pill.tone)}
-    <div style="display: flex; justify-content: flex-end; margin: -8px 0 6px;">
+    <div style="display: flex; justify-content: flex-end; gap: 8px; margin: -8px 0 6px;">
+      <button id="open-report" class="icon-btn">리포트</button>
       <button id="open-settings" class="icon-btn">설정</button>
     </div>
     ${degradedNote}
@@ -262,11 +285,20 @@ function renderDashboard(
     }
     bindFeedback("fb-related", "related")
     bindFeedback("fb-accepted", "accepted")
+    bindFeedback("fb-break", "break")
     bindFeedback("fb-snooze", "snooze")
+    document.getElementById("why-toggle")?.addEventListener("click", () => {
+      const reason = document.getElementById("why-reason")
+      if (reason) reason.hidden = !reason.hidden
+    })
   }
 
   document.getElementById("open-settings")?.addEventListener("click", () => {
     void openSettings()
+  })
+
+  document.getElementById("open-report")?.addEventListener("click", () => {
+    void openReport()
   })
 
   document.getElementById("goal-edit")?.addEventListener("click", () => {
@@ -319,6 +351,111 @@ async function endSession(): Promise<void> {
   renderSummary(stats)
 }
 
+async function openReport(): Promise<void> {
+  reportOpen = true
+  stopPoll()
+  const report = await getSessionReport()
+  if (!report) {
+    reportOpen = false
+    renderUnreachable()
+    schedulePoll()
+    return
+  }
+  renderReport(report)
+}
+
+function closeReport(): void {
+  reportOpen = false
+  void refresh()
+}
+
+function formatClock(iso: string): string {
+  const date = new Date(iso)
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
+}
+
+function renderReport(report: SessionReport): void {
+  const ratio = report.related_ratio ?? null
+
+  // Hourly focus strip: one slim bar per bucket, height = related ratio.
+  const buckets = report.hourly_related_ratio
+  const hourBars = buckets.length
+    ? buckets
+        .map((bucket) => {
+          const r = bucket.related_ratio
+          const height = r === null || r === undefined ? 0 : Math.max(8, Math.round(r * 100))
+          const empty = bucket.observations === 0
+          const hour = formatClock(bucket.hour)
+          const title = empty ? `${hour} · 관측 없음` : `${hour} · ${formatRatio(r)} (${bucket.observations}회)`
+          const bar = empty
+            ? `<div style="width: 100%; height: 4px; background: var(--line, #d1d5db); opacity: .5; border-radius: 2px;"></div>`
+            : `<div style="width: 100%; height: ${height}%; min-height: 4px; background: #10B981; opacity: ${0.45 + 0.55 * (r ?? 0)}; border-radius: 2px;"></div>`
+          return `<div title="${esc(title)}" style="flex: 1; height: 44px; display: flex; align-items: flex-end;">${bar}</div>`
+        })
+        .join("")
+    : `<p class="subhint" style="margin: 0;">아직 시간대별 데이터가 없어요.</p>`
+  const hourRange = buckets.length
+    ? `<div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); margin-top: 2px;"><span>${formatClock(buckets[0].hour)}</span><span>${formatClock(buckets[buckets.length - 1].hour)}</span></div>`
+    : ""
+
+  const stretch = report.longest_ok_stretch
+  const stretchRow = stretch
+    ? `<div class="row"><span class="k">최장 집중</span><span>${stretch.minutes}분 (${formatClock(stretch.start)}–${formatClock(stretch.end)})</span></div>`
+    : ""
+
+  const feedback = report.feedback_counts
+  const feedbackParts = [
+    feedback.accepted ? `수락 ${feedback.accepted}` : "",
+    feedback.related ? `관련 ${feedback.related}` : "",
+    feedback.break ? `5분만 ${feedback.break}` : "",
+    feedback.snooze ? `스누즈 ${feedback.snooze}` : "",
+  ].filter(Boolean)
+  const interventionTotal = Object.values(report.intervention_status_counts).reduce((a, b) => a + b, 0)
+  const feedbackRow = interventionTotal
+    ? `<div class="row"><span class="k">훈수</span><span>${interventionTotal}회${feedbackParts.length ? ` · ${feedbackParts.join(" · ")}` : ""}</span></div>`
+    : ""
+
+  const driftHosts = report.top_drift_hosts
+    .slice(0, 3)
+    .map((h) => `<div class="row"><span class="k" style="overflow: hidden; text-overflow: ellipsis;">${esc(h.host)}</span><span>${h.count}회</span></div>`)
+    .join("")
+
+  // Recent judgment reasons — the "왜?" history (tier1-reviewed entries first).
+  const reasons = report.judgments
+    .filter((j) => j.tier1_reason)
+    .slice(-3)
+    .reverse()
+    .map(
+      (j) => `
+      <div style="margin-bottom: 6px;">
+        <p style="margin: 0; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${esc(j.title ?? j.url_host ?? "")}</p>
+        <p style="margin: 0; font-size: 11.5px;">${j.verdict === "DRIFT" ? "이탈" : "관련"} — ${esc(j.tier1_reason ?? "")}</p>
+      </div>`,
+    )
+    .join("")
+
+  root.innerHTML = `
+    <div class="header">
+      <button id="report-back" class="icon-btn" title="대시보드로">←</button>
+      <span class="name">오늘 리포트</span>
+    </div>
+    <p class="label">목표 관련 시간</p>
+    <div class="bar"><div class="fill" style="width: ${ratio === null ? 0 : Math.round(ratio * 100)}%"></div></div>
+    <p class="label">시간대별 집중</p>
+    <div style="display: flex; gap: 3px; align-items: flex-end;">${hourBars}</div>
+    ${hourRange}
+    <div class="rows" style="margin-top: 10px;">
+      <div class="row"><span class="k">세션 시간</span><span>${formatDuration(report.duration_seconds)}</span></div>
+      <div class="row"><span class="k">관측</span><span>${report.observations}회 · 관련 ${report.ok} · 이탈 ${report.drift}</span></div>
+      ${stretchRow}
+      ${feedbackRow}
+    </div>
+    ${driftHosts ? `<p class="label">자주 샌 곳</p><div class="rows">${driftHosts}</div>` : ""}
+    ${reasons ? `<p class="label">최근 판정 근거</p>${reasons}` : ""}`
+
+  document.getElementById("report-back")?.addEventListener("click", closeReport)
+}
+
 function renderSummary(stats: SessionStats): void {
   const interventionText = stats.interventions
     ? `${stats.interventions}회 · 수락 ${stats.interventions_accepted}회`
@@ -352,15 +489,16 @@ function renderSummary(stats: SessionStats): void {
 async function openSettings(): Promise<void> {
   settingsOpen = true
   stopPoll()
-  const settings = await getSettings()
+  const [settings, personas] = await Promise.all([getSettings(), getPersonas()])
   if (!settings) {
     settingsOpen = false
     renderUnreachable()
     schedulePoll()
     return
   }
+  if (personas.length) personaCache = personas
   try {
-    renderSettings(settings)
+    renderSettings(settings, personaCache)
   } catch {
     settingsOpen = false
     renderUnreachable()
@@ -373,14 +511,16 @@ function closeSettings(): void {
   void refresh()
 }
 
-function renderSettings(settings: Settings): void {
-  const personaCards = PERSONAS.map(
-    (persona) => `
-    <div class="pcard${persona.key === settings.persona ? " sel" : ""}" data-persona="${persona.key}">
+function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
+  const personaCards = personas
+    .map(
+      (persona) => `
+    <div class="pcard${persona.key === settings.persona ? " sel" : ""}" data-persona="${esc(persona.key)}">
       <span class="pname">${esc(persona.name)}</span>
-      <span class="phint">${esc(persona.hint)}</span>
+      <span class="phint">${esc(PERSONA_HINTS[persona.key] ?? "사용자 정의")}</span>
     </div>`,
-  ).join("")
+    )
+    .join("")
   const controllerButtons = CONTROLLERS.map(
     (controller) => `
       <button class="segbtn${controller.type === settings.controller.type ? " sel" : ""}"
@@ -525,7 +665,7 @@ async function applySettings(patch: Parameters<typeof putSettings>[0]): Promise<
     schedulePoll()
     return
   }
-  renderSettings(updated)
+  renderSettings(updated, personaCache)
 }
 
 void refresh()

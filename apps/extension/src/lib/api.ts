@@ -8,6 +8,7 @@ export interface BrowserNavPayload {
 
 export interface PipelineResult {
   action: "none" | "request_excerpt" | "notify"
+  kind?: "intervention" | "celebration"
   observation_id?: string | null
   verdict?: "OK" | "DRIFT" | null
   message?: string | null
@@ -26,7 +27,7 @@ export interface PageExcerpt {
   text: string
 }
 
-export type FeedbackKind = "related" | "accepted" | "snooze"
+export type FeedbackKind = "related" | "accepted" | "snooze" | "break"
 
 export interface FeedbackPayload {
   kind: FeedbackKind
@@ -51,6 +52,7 @@ export interface PendingIntervention {
   message: string
   ts: string
   status: string
+  tier1_reason?: string | null
 }
 
 export interface SessionState {
@@ -92,6 +94,11 @@ export interface GoalInfo {
 export interface CurrentSession {
   session: SessionInfo
   goal?: GoalInfo | null
+}
+
+export interface PersonaSummary {
+  key: string
+  name: string
 }
 
 export interface SessionStats {
@@ -141,6 +148,12 @@ export async function getSessionStats(): Promise<SessionStats | null> {
   const response = await fetch(`${SERVER_BASE_URL}/sessions/current/stats`).catch(() => null)
   if (!response?.ok) return null
   return response.json() as Promise<SessionStats>
+}
+
+export async function getPersonas(): Promise<PersonaSummary[]> {
+  const response = await fetch(`${SERVER_BASE_URL}/personas`).catch(() => null)
+  if (!response?.ok) return []
+  return response.json() as Promise<PersonaSummary[]>
 }
 
 export async function postSessionSnooze(durationSeconds?: number): Promise<SnoozeResult | null> {
@@ -331,4 +344,59 @@ export async function getHealthTiers(): Promise<HealthTiers | null> {
   if (!response?.ok) return null
   const body = (await response.json()) as { tiers?: HealthTiers }
   return body.tiers ?? null
+}
+
+export interface ReportHourBucket {
+  hour: string
+  observations: number
+  ok: number
+  drift: number
+  related_ratio?: number | null
+}
+
+export interface ReportDriftHost {
+  host: string
+  count: number
+}
+
+export interface ReportOkStretch {
+  start: string
+  end: string
+  minutes: number
+}
+
+export interface ReportJudgment {
+  observation_id: string
+  ts: string
+  verdict?: string | null
+  url_host?: string | null
+  title?: string | null
+  tier_reached?: number | null
+  tier1_reason?: string | null
+}
+
+export interface SessionReport {
+  scope: string
+  session_id?: string | null
+  date?: string | null
+  started_at?: string | null
+  ended_at?: string | null
+  duration_seconds: number
+  observations: number
+  ok: number
+  drift: number
+  unjudged: number
+  related_ratio?: number | null
+  hourly_related_ratio: ReportHourBucket[]
+  top_drift_hosts: ReportDriftHost[]
+  longest_ok_stretch?: ReportOkStretch | null
+  intervention_status_counts: Record<string, number>
+  feedback_counts: Record<string, number>
+  judgments: ReportJudgment[]
+}
+
+export async function getSessionReport(): Promise<SessionReport | null> {
+  const response = await fetch(`${SERVER_BASE_URL}/sessions/current/report`).catch(() => null)
+  if (!response?.ok) return null
+  return response.json() as Promise<SessionReport>
 }

@@ -1,11 +1,11 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from ..core.runtime_settings import effective_controller_config
 from ..core.runtime_resources import RuntimeResources
-from ..storage.sqlite import NoActiveSessionError, SessionStatsRecord, SQLiteStore
+from ..storage.sqlite import NoActiveSessionError, SessionReportRecord, SessionStatsRecord, SQLiteStore
 
 router = APIRouter()
 
@@ -40,6 +40,7 @@ class PendingInterventionResponse(BaseModel):
     message: str
     ts: str
     status: str
+    tier1_reason: str | None = None
 
 
 class SessionStateResponse(BaseModel):
@@ -82,6 +83,55 @@ class SessionStatsResponse(BaseModel):
     interventions_accepted: int
     top_drift_host: str | None = None
     top_drift_count: int
+
+
+class HourBucketResponse(BaseModel):
+    hour: str
+    observations: int
+    ok: int
+    drift: int
+    related_ratio: float | None = None
+
+
+class DriftHostResponse(BaseModel):
+    host: str
+    count: int
+
+
+class OkStretchResponse(BaseModel):
+    start: str
+    end: str
+    minutes: int
+
+
+class JudgmentReasonResponse(BaseModel):
+    observation_id: str
+    ts: str
+    verdict: str | None = None
+    url_host: str | None = None
+    title: str | None = None
+    tier_reached: int | None = None
+    tier1_reason: str | None = None
+
+
+class SessionReportResponse(BaseModel):
+    scope: str
+    session_id: str | None = None
+    date: str | None = None
+    started_at: str | None = None
+    ended_at: str | None = None
+    duration_seconds: int
+    observations: int
+    ok: int
+    drift: int
+    unjudged: int
+    related_ratio: float | None = None
+    hourly_related_ratio: list[HourBucketResponse]
+    top_drift_hosts: list[DriftHostResponse]
+    longest_ok_stretch: OkStretchResponse | None = None
+    intervention_status_counts: dict[str, int]
+    feedback_counts: dict[str, int]
+    judgments: list[JudgmentReasonResponse]
 
 
 def _store(request: Request) -> SQLiteStore:
@@ -189,6 +239,7 @@ async def get_current_state(request: Request) -> SessionStateResponse:
             message=pending.message,
             ts=pending.ts.isoformat(),
             status=pending.status,
+            tier1_reason=pending.tier1_reason,
         )
         if pending
         else None,
@@ -202,6 +253,20 @@ async def get_current_stats(request: Request) -> SessionStatsResponse:
     if not current:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no active session")
     return _stats_response(store.session_stats(current.session.id))
+
+
+@router.get("/sessions/current/report", response_model=SessionReportResponse)
+async def get_current_report(request: Request) -> SessionReportResponse:
+    store = _store(request)
+    current = store.get_current_session()
+    if not current:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no active session")
+    return _report_response(store.session_report(current.session.id))
+
+
+@router.get("/reports/daily", response_model=SessionReportResponse)
+async def get_daily_report(request: Request, date: date) -> SessionReportResponse:
+    return _report_response(_store(request).daily_report(date))
 
 
 @router.post("/sessions/current/snooze", response_model=SnoozeResponse)
@@ -260,6 +325,59 @@ def _stats_response(stats: SessionStatsRecord) -> SessionStatsResponse:
         interventions_accepted=stats.interventions_accepted,
         top_drift_host=stats.top_drift_host,
         top_drift_count=stats.top_drift_count,
+    )
+
+
+def _report_response(report: SessionReportRecord) -> SessionReportResponse:
+    return SessionReportResponse(
+        scope=report.scope,
+        session_id=report.session_id,
+        date=report.date,
+        started_at=report.started_at.isoformat() if report.started_at else None,
+        ended_at=report.ended_at.isoformat() if report.ended_at else None,
+        duration_seconds=report.duration_seconds,
+        observations=report.observations,
+        ok=report.ok,
+        drift=report.drift,
+        unjudged=report.unjudged,
+        related_ratio=report.related_ratio,
+        hourly_related_ratio=[
+            HourBucketResponse(
+                hour=bucket.hour,
+                observations=bucket.observations,
+                ok=bucket.ok,
+                drift=bucket.drift,
+                related_ratio=bucket.related_ratio,
+            )
+            for bucket in report.hourly_related_ratio
+        ],
+        top_drift_hosts=[
+            DriftHostResponse(host=host.host, count=host.count)
+            for host in report.top_drift_hosts
+        ],
+        longest_ok_stretch=(
+            OkStretchResponse(
+                start=report.longest_ok_stretch.start.isoformat(),
+                end=report.longest_ok_stretch.end.isoformat(),
+                minutes=report.longest_ok_stretch.minutes,
+            )
+            if report.longest_ok_stretch
+            else None
+        ),
+        intervention_status_counts=report.intervention_status_counts,
+        feedback_counts=report.feedback_counts,
+        judgments=[
+            JudgmentReasonResponse(
+                observation_id=judgment.observation_id,
+                ts=judgment.ts.isoformat(),
+                verdict=judgment.verdict,
+                url_host=judgment.url_host,
+                title=judgment.title,
+                tier_reached=judgment.tier_reached,
+                tier1_reason=judgment.tier1_reason,
+            )
+            for judgment in report.judgments
+        ],
     )
 
 

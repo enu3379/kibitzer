@@ -1,5 +1,43 @@
 # Progress
 
+## 2026-07-08 P1 Attachment Loop Plumbing
+
+Completed:
+
+- Implemented P1 attachment-loop server plumbing:
+  - return celebrations after confirmed drift -> real OK return, with
+    `celebration.min_drift_minutes`, `celebration.cooldown_seconds`, quiet-hours
+    suppression, random persona `celebrate_templates`, and no immediate repeat;
+  - `break` feedback kind for "5분만", using `break.duration_seconds` and
+    marking interventions as `break`;
+  - custom persona merge from `configs/personas.yaml` plus
+    `~/.kibitzer/personas.yaml`, with invalid custom entries skipped;
+  - `GET /personas`;
+  - `GET /sessions/current/report` and `GET /reports/daily?date=YYYY-MM-DD`;
+  - persisted `observations.tier1_reason`, exposed in pending interventions and
+    report judgments.
+- Extended the extension plumbing:
+  - `PipelineResult.kind` supports `intervention` vs `celebration`;
+  - celebration toasts render without feedback buttons and do not create
+    intervention rows;
+  - intervention toasts route `related` / `break` / `snooze`;
+  - legacy system notification fallback uses `related` / `break` within Chrome's
+    2-button limit.
+- Added [P1 Claude Design/Copy Follow-Up](handoff-p1-claude-design.md) for
+  celebration styling, break button copy/layout, persona selector UI, report UI,
+  and "왜?" transparency affordances.
+
+Verified:
+
+- `.venv/bin/python -m pytest apps/server/tests -q` -> `90 passed`.
+- `npm --prefix apps/extension run build` -> passed.
+
+Current boundary:
+
+- Server contracts and extension mechanics for P1 are in place.
+- Popup report/persona/transparency UI and final Korean copy/style remain
+  Claude-owned follow-up work.
+
 ## 2026-07-07 Daily Wrap
 
 Completed:

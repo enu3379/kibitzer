@@ -45,6 +45,7 @@ class Observation(BaseModel):
     payload: dict[str, Any]
     features: ObservationFeatures = Field(default_factory=ObservationFeatures)
     verdict: Verdict | None = None
+    tier1_reason: str | None = None
 
 
 class Goal(BaseModel):
@@ -60,6 +61,11 @@ class PipelineAction(StrEnum):
     NOTIFY = "notify"
 
 
+class PipelineResultKind(StrEnum):
+    INTERVENTION = "intervention"
+    CELEBRATION = "celebration"
+
+
 class PageInfo(BaseModel):
     host: str | None = None
     title: str | None = None
@@ -67,6 +73,7 @@ class PageInfo(BaseModel):
 
 class PipelineResult(BaseModel):
     action: PipelineAction
+    kind: PipelineResultKind = PipelineResultKind.INTERVENTION
     observation_id: str | None = None
     verdict: Verdict | None = None
     message: str | None = None
@@ -84,6 +91,7 @@ class FeedbackKind(StrEnum):
     RELATED = "related"
     ACCEPTED = "accepted"
     SNOOZE = "snooze"
+    BREAK = "break"
 
 
 class FeedbackRequest(BaseModel):

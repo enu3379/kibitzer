@@ -76,6 +76,13 @@ controller:
   snooze_seconds: 1800
   coldstart_observations: 5
 
+celebration:
+  min_drift_minutes: 3
+  cooldown_seconds: 300
+
+break:
+  duration_seconds: 300
+
 privacy:
   sensitive_domains_file: "configs/sensitive_domains.yaml"
   strip_query: true
@@ -85,6 +92,7 @@ delivery:
   channel: "chrome_notification"
   persona: "dry_kibitzer"
   personas_file: "configs/personas.yaml"
+  custom_personas_file: "~/.kibitzer/personas.yaml"
   max_sentences: 2
   voice:
     enabled: false

@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -62,15 +62,18 @@ class SessionLifecycleApiTest(unittest.TestCase):
         verdict: Verdict | None,
         url_host: str = "example.com",
         title: str = "Example page",
+        ts: datetime | None = None,
+        tier1_reason: str | None = None,
     ) -> str:
         observation = Observation(
             id=f"obs_{uuid.uuid4().hex}",
-            ts=datetime.now(timezone.utc),
+            ts=ts or datetime.now(timezone.utc),
             session_id=session_id,
             source=Source.BROWSER_NAV,
             payload={"url_host": url_host, "title": title},
             features=ObservationFeatures(emb=[0.5], tier_reached=0),
             verdict=verdict,
+            tier1_reason=tier1_reason,
         )
         self.store.record_observation(observation)
         return observation.id
@@ -201,7 +204,12 @@ class SessionLifecycleApiTest(unittest.TestCase):
         client.post("/sessions/current/goal", json={"raw_text": "Plan a trip to Finland"})
         self.assertIsNone(client.get("/sessions/current/state").json()["pending_intervention"])
 
-        observation_id = self._seed_observation(session_id, Verdict.DRIFT, url_host="youtube.com")
+        observation_id = self._seed_observation(
+            session_id,
+            Verdict.DRIFT,
+            url_host="youtube.com",
+            tier1_reason="unrelated video",
+        )
         intervention_id = self.store.create_intervention(session_id, observation_id, "Drift detected.")
         client.post(f"/interventions/{intervention_id}/delivery", json={"ok": True})
 
@@ -209,6 +217,7 @@ class SessionLifecycleApiTest(unittest.TestCase):
         self.assertEqual(pending["intervention_id"], intervention_id)
         self.assertEqual(pending["message"], "Drift detected.")
         self.assertEqual(pending["status"], "delivered")
+        self.assertEqual(pending["tier1_reason"], "unrelated video")
 
         client.post(
             "/feedback",
@@ -254,6 +263,62 @@ class SessionLifecycleApiTest(unittest.TestCase):
         self.assertEqual(client.get("/sessions/current").status_code, 404)
         self.assertEqual(client.get("/sessions/current/state").status_code, 404)
         self.assertEqual(client.post("/sessions/current/end").status_code, 404)
+
+    def test_report_aggregates_session_and_daily_detail(self) -> None:
+        client = self._client()
+        session_id = client.post("/sessions").json()["id"]
+        client.post("/sessions/current/goal", json={"raw_text": "Plan a trip to Finland"})
+        local_base = datetime.now().astimezone().replace(hour=10, minute=0, second=0, microsecond=0)
+        base = local_base.astimezone(timezone.utc)
+
+        self._seed_observation(session_id, Verdict.OK, url_host="visitfinland.com", ts=base)
+        self._seed_observation(session_id, Verdict.OK, url_host="docs.example.com", ts=base + timedelta(minutes=10))
+        first_drift = self._seed_observation(
+            session_id,
+            Verdict.DRIFT,
+            url_host="youtube.com",
+            ts=base + timedelta(hours=1),
+            tier1_reason="video detour",
+        )
+        self._seed_observation(session_id, Verdict.DRIFT, url_host="reddit.com", ts=base + timedelta(hours=1, minutes=5))
+        self._seed_observation(session_id, Verdict.DRIFT, url_host="youtube.com", ts=base + timedelta(hours=1, minutes=10))
+        self._seed_observation(session_id, Verdict.OK, url_host="visitfinland.com", ts=base + timedelta(hours=2))
+
+        first_intervention = self.store.create_intervention(session_id, first_drift, "Drift detected.", ts=base + timedelta(hours=1))
+        second_intervention = self.store.create_intervention(
+            session_id,
+            first_drift,
+            "Still drift.",
+            ts=base + timedelta(hours=1, minutes=10),
+        )
+        self.store.update_intervention_status(first_intervention, "accepted")
+        self.store.update_intervention_status(second_intervention, "break")
+        self.store.record_feedback_once(session_id, "accepted", first_intervention, first_drift)
+        self.store.record_feedback_once(session_id, "break", second_intervention, first_drift)
+
+        report = client.get("/sessions/current/report").json()
+        daily = client.get(f"/reports/daily?date={base.astimezone().date().isoformat()}").json()
+
+        self.assertEqual(report["scope"], "session")
+        self.assertEqual(report["session_id"], session_id)
+        self.assertEqual(report["observations"], 6)
+        self.assertEqual(report["ok"], 3)
+        self.assertEqual(report["drift"], 3)
+        self.assertEqual(report["top_drift_hosts"][0], {"host": "youtube.com", "count": 2})
+        self.assertEqual(report["longest_ok_stretch"]["minutes"], 10)
+        self.assertEqual(report["intervention_status_counts"]["accepted"], 1)
+        self.assertEqual(report["intervention_status_counts"]["break"], 1)
+        self.assertEqual(report["feedback_counts"]["accepted"], 1)
+        self.assertEqual(report["feedback_counts"]["break"], 1)
+        reasons = {
+            judgment["observation_id"]: judgment["tier1_reason"]
+            for judgment in report["judgments"]
+        }
+        self.assertEqual(reasons[first_drift], "video detour")
+        self.assertGreaterEqual(len(report["hourly_related_ratio"]), 3)
+        self.assertEqual(daily["scope"], "daily")
+        self.assertEqual(daily["date"], base.astimezone().date().isoformat())
+        self.assertEqual(daily["observations"], 6)
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ from typing import Any, Literal
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ServerConfig(BaseModel):
@@ -109,22 +109,36 @@ class QuietHoursConfig(BaseModel):
     end: str = "18:00"
 
 
+class CelebrationConfig(BaseModel):
+    min_drift_minutes: int = Field(default=3, ge=0)
+    cooldown_seconds: int = Field(default=300, ge=0)
+
+
+class BreakConfig(BaseModel):
+    duration_seconds: int = Field(default=300, ge=0)
+
+
 class DeliveryConfig(BaseModel):
     channel: str = "chrome_notification"
     persona: str = "dry_kibitzer"
     personas_file: str = "configs/personas.yaml"
+    custom_personas_file: str = "~/.kibitzer/personas.yaml"
     max_sentences: int = 2
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     quiet_hours: QuietHoursConfig = Field(default_factory=QuietHoursConfig)
 
 
 class AppConfig(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     server: ServerConfig = Field(default_factory=ServerConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     relevance: RelevanceConfig = Field(default_factory=RelevanceConfig)
     tier1: Tier1Config = Field(default_factory=Tier1Config)
     tier2: Tier2Config = Field(default_factory=Tier2Config)
     controller: ControllerConfig = Field(default_factory=ControllerConfig)
+    celebration: CelebrationConfig = Field(default_factory=CelebrationConfig)
+    intentional_break: BreakConfig = Field(default_factory=BreakConfig, alias="break")
     privacy: PrivacyConfig = Field(default_factory=PrivacyConfig)
     delivery: DeliveryConfig = Field(default_factory=DeliveryConfig)
     raw: dict[str, Any] = Field(default_factory=dict)
@@ -139,6 +153,18 @@ def load_config(path: str | Path = "configs/default.yaml") -> AppConfig:
         **{
             k: v
             for k, v in (data or {}).items()
-            if k in {"server", "embedding", "relevance", "tier1", "tier2", "controller", "privacy", "delivery"}
+            if k
+            in {
+                "server",
+                "embedding",
+                "relevance",
+                "tier1",
+                "tier2",
+                "controller",
+                "celebration",
+                "break",
+                "privacy",
+                "delivery",
+            }
         },
     )
