@@ -11,6 +11,7 @@ from ..core.personas import (
 )
 from ..core.relevance import tier0_score
 from ..core.runtime_settings import effective_controller_config, quiet_hours_active, runtime_settings
+from ..core.runtime_resources import RuntimeResources
 from ..core.tier1_payload import build_tier1_payload
 from ..core.tier2_payload import build_tier2_payload, fallback_drift_message
 from ..core.voice import speak
@@ -28,6 +29,10 @@ def _store(request: Request) -> SQLiteStore:
 
 def _sensitive_domain_rules(request: Request) -> SensitiveDomainRules:
     return request.app.state.sensitive_domain_rules
+
+
+def _runtime(request: Request) -> RuntimeResources:
+    return request.app.state.runtime
 
 
 @router.post("/observations/browser-nav", response_model=PipelineResult)
@@ -51,7 +56,8 @@ async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineR
 
     observation = normalize_browser_nav(raw, current.session.id)
     if current.goal:
-        vectors = await request.app.state.embedding_provider.embed([browser_nav_embedding_text(observation)])
+        runtime = _runtime(request)
+        vectors = await runtime.embedding_provider().embed([browser_nav_embedding_text(observation)])
         observation.features.emb = vectors[0]
         observation.features.r0 = tier0_score(
             emb=observation.features.emb,
@@ -67,14 +73,15 @@ async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineR
         observation.verdict = (
             Verdict.OK if observation.features.r0 >= request.app.state.config.relevance.tau_ok else Verdict.DRIFT
         )
-        if observation.verdict == Verdict.DRIFT and request.app.state.tier1_provider:
+        tier1_provider = runtime.tier1_provider()
+        if observation.verdict == Verdict.DRIFT and tier1_provider:
             recent = _store(request).recent_observation_summaries(
                 current.session.id,
                 request.app.state.config.tier1.recent_observations,
             )
             payload = build_tier1_payload(current.goal, observation, recent, request.app.state.config.tier1)
             try:
-                result = await request.app.state.tier1_provider.classify_tier1(payload)
+                result = await tier1_provider.classify_tier1(payload)
             except Exception as exc:
                 # Tier 1 is best-effort: on provider failure keep the Tier 0 verdict.
                 _store(request).record_tier1_provider_error(
@@ -195,7 +202,7 @@ async def _confirm_tier2(
     system_prompt: str | None = None,
     persona: Persona | None = None,
 ) -> Tier2Result:
-    provider = request.app.state.tier2_provider
+    provider = _runtime(request).tier2_provider()
     if provider:
         try:
             return await provider.confirm_tier2(payload, system_prompt=system_prompt)

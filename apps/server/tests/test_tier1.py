@@ -158,7 +158,7 @@ class Tier1ResilienceAndFactoryTest(unittest.TestCase):
         self.assertEqual(provider.timeout_seconds, 10)
         self.assertEqual(provider.max_output_tokens, 128)
 
-    def test_startup_records_provider_degraded_event(self) -> None:
+    def test_activation_records_provider_degraded_event(self) -> None:
         store = SQLiteStore(self.db_path)
         config = AppConfig(
             server=ServerConfig(db_path=str(self.db_path)),
@@ -170,6 +170,15 @@ class Tier1ResilienceAndFactoryTest(unittest.TestCase):
             client = TestClient(create_app(config=config, store=store))
             client.__enter__()
             try:
+                with closing(sqlite3.connect(self.db_path)) as conn:
+                    startup_rows = conn.execute(
+                        "SELECT payload_json FROM event_log WHERE event_type = 'provider.degraded'"
+                    ).fetchall()
+                self.assertEqual(startup_rows, [])
+
+                client.post("/sessions")
+                client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
+
                 with closing(sqlite3.connect(self.db_path)) as conn:
                     rows = conn.execute(
                         "SELECT payload_json FROM event_log WHERE event_type = 'provider.degraded'"

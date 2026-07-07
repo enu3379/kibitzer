@@ -12,6 +12,7 @@ Read these in order when starting work:
 8. [Replay Harness](replay-harness.md)
 9. [LLM Wiki Integration](llm-wiki-integration.md)
 10. [Judgment Audit Plan](judgment-audit-plan.md)
+11. [Idle Daemon Plan](idle-daemon-plan.md)
 
 ## Stage Boundaries
 

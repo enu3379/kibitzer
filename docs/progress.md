@@ -1,5 +1,23 @@
 # Progress
 
+## 2026-07-07 macOS Idle Daemon
+
+Completed:
+
+- Added the idle daemon plan covering `dead` / `idle` / `active`, the single
+  process model, macOS LaunchAgent scope, and future Windows tray scope.
+- Added lazy server runtime resources so startup stays idle and provider setup
+  happens only after a goal-backed session starts.
+- Moved `provider.degraded` recording from server startup to first runtime
+  activation.
+- Added `GET /health` runtime mode reporting.
+- Added macOS LaunchAgent install/uninstall scripts for login autostart.
+
+Verified:
+
+- Runtime mode tests cover idle startup, activation on goal setting, return to
+  idle on session end, and failed goal requests staying idle.
+
 ## 2026-07-05 Status
 
 Kibitzer Stage 0 is implemented through Work Package 8.
@@ -292,6 +310,22 @@ Verified:
 - `62 passed` from `.venv/bin/python -m pytest apps/server/tests -q`.
 - `npm run build` passes in `apps/extension`.
 - `grep -c silent apps/extension/dist/background.js` returns `2`.
+
+## 2026-07-07 Dwell-Gated Judging
+
+Changed extension-side navigation handling so accidental short visits do not start
+judging:
+
+- Browser navigation observations are posted only after the active tab remains on
+  the same URL for 5 seconds, delaying Tier 0/Tier 1 work.
+- Tier 2 excerpt submission waits until the page has been active on the same URL
+  for 10 seconds total, so expensive confirmation does not run for brief visits.
+- The tab URL is rechecked before excerpt extraction, before excerpt submission,
+  and before notification display to avoid stale-page messages.
+
+Verified:
+
+- `npm --prefix apps/extension run build` passes.
 
 ## 2026-07-06 Persona Voice Redesign (Design Round)
 
