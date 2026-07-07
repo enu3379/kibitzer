@@ -8,7 +8,7 @@ Project maintenance scripts live here.
 - `windows_install_startup_app.ps1` / `windows_uninstall_startup_app.ps1`:
   optional Windows login autostart for the idle daemon server.
 - `windows_startup_tray.ps1`: Windows tray status surface for the autostarted
-  server; it uses the shared Chrome extension icon with a state dot overlay.
+  server; it uses the monochrome template icon with a state dot overlay.
 - `macos_setup.sh` / `macos_run_server.sh`: macOS setup and server run.
 - `macos_install_launch_agent.sh` / `macos_uninstall_launch_agent.sh`: optional
   macOS login autostart for the idle daemon server.

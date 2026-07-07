@@ -70,8 +70,8 @@ bash scripts/macos_install_menu_bar_agent.sh
 ```
 
 The menu bar item polls `GET /health`: red means unreachable, gray means idle,
-green means active, and yellow means unknown. It uses the shared Chrome
-extension icon with a small status dot overlay.
+green means active, and yellow means unknown. It uses the monochrome template
+icon so macOS handles light/dark menu bar tinting.
 
 Remove the menu bar item with:
 

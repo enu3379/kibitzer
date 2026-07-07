@@ -17,8 +17,9 @@ Related: [[code-map-pages]]
 
 Standalone and stdlib-only, mirroring scripts/gen_extension_icons.py. Geometry is
 in the 128x128 SVG coordinate space and matches the source SVGs under
-apps/extension/icons/variants/. Non-destructive: writes {variant}-{size}.png into
-that same variants/ folder and never touches the live icon-*.png.
+apps/extension/icons/variants/. Non-destructive: writes color
+{variant}-{size}.png and monochrome {variant}-template-{size}.png into that same
+variants/ folder and never touches the live icon-*.png.
 
 To promote a variant to the live toolbar icon, copy its color SVG over
 apps/extension/icons/icon-128.svg and port this geometry into
@@ -91,6 +92,32 @@ def sample_wall(x: float, y: float):
 VARIANTS = {"monitor": sample_monitor, "wall": sample_wall}
 
 
+def sample_monitor_template(x: float, y: float):
+    """Single-color template glyph matching monitor-mono.svg."""
+    if _in_circle(x, y, 52, 56, 8) or _in_circle(x, y, 76, 56, 8):
+        return None
+    if (
+        _in_circle(x, y, 64, 69, 32)
+        or _in_round_rect(x, y, 18, 69, 92, 38, 5)
+        or _in_round_rect(x, y, 59, 107, 10, 7, 0)
+        or _in_round_rect(x, y, 49, 113, 31, 5, 2)
+    ):
+        return INK
+    return None
+
+
+def sample_wall_template(x: float, y: float):
+    """Single-color template glyph matching wall-mono.svg."""
+    if _in_circle(x, y, 51, 60, 8) or _in_circle(x, y, 77, 60, 8):
+        return None
+    if _in_circle(x, y, 64, 74, 36) or _in_round_rect(x, y, 10, 74, 108, 38, 9):
+        return INK
+    return None
+
+
+TEMPLATE_VARIANTS = {"monitor": sample_monitor_template, "wall": sample_wall_template}
+
+
 def render(size: int, sampler) -> list[bytes]:
     scale = 128.0 / size
     step = 1.0 / SUBSAMPLES
@@ -143,6 +170,11 @@ def main() -> None:
     for name, sampler in VARIANTS.items():
         for size in SIZES:
             path = OUT / f"{name}-{size}.png"
+            write_png(path, size, render(size, sampler))
+            print(f"wrote {path} ({size}x{size})")
+    for name, sampler in TEMPLATE_VARIANTS.items():
+        for size in SIZES:
+            path = OUT / f"{name}-template-{size}.png"
             write_png(path, size, render(size, sampler))
             print(f"wrote {path} ({size}x{size})")
 

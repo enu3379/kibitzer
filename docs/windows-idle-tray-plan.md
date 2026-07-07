@@ -37,9 +37,11 @@ a scheduled task:
 
 Tray icon contract:
 
-- Base artwork comes from the shared Chrome extension icon, preferring
-  `apps\extension\icons\icon-128.png` and falling back to smaller source or
-  built `dist` PNGs.
+- Base artwork comes from the monochrome template icon, preferring
+  `apps\extension\icons\variants\monitor-template-128.png` and falling back to
+  smaller source or built `dist` template PNGs.
+- Windows tints the template alpha mask dark on light system themes and light on
+  dark system themes.
 - State overlay uses red for `dead`, gray for `idle`, green for `active`, and
   yellow for `unknown`.
 - The tray must not own judging state. It observes and controls the same server

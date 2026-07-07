@@ -7,10 +7,10 @@ This Swift menu bar app mirrors the Windows tray surface:
 - can kick the server LaunchAgent or fall back to `scripts/macos_run_server.sh`;
 - opens the health endpoint and logs folder from the menu.
 
-The status item uses the shared Chrome extension icon at
-`apps/extension/icons/icon-128.png` and overlays a small state dot. The extension
-icon remains the shared artwork source of truth; the menu bar app owns only the
-runtime state treatment.
+The status item uses the monochrome template icon at
+`apps/extension/icons/variants/monitor-template-128.png` and renders it as an
+AppKit template image so macOS handles light/dark menu bar tinting. The menu bar
+app owns only the runtime state dot.
 
 State colors:
 
@@ -19,8 +19,8 @@ State colors:
 - red: the server is unreachable;
 - yellow: the server responded with an unknown mode.
 
-If the icon asset is missing, the app falls back to a text-only `K` plus a
-colored dot so the runtime still remains usable from source checkouts.
+If the template icon asset is missing, the app falls back to a text-only `K`
+plus a colored dot so the runtime still remains usable from source checkouts.
 
 Build/run:
 

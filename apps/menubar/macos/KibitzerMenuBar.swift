@@ -38,7 +38,7 @@ enum KibitzerMode: String {
 final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
     private let rootURL: URL
     private let healthURL = URL(string: "http://127.0.0.1:8765/health")!
-    private let statusItem = NSStatusBar.system.statusItem(withLength: 28)
+    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private let statusMenuItem = NSMenuItem(title: "Kibitzer: starting", action: nil, keyEquivalent: "")
     private let startServerMenuItem = NSMenuItem(title: "Start server", action: #selector(startServerClicked), keyEquivalent: "s")
@@ -71,7 +71,7 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
         let quitItem = NSMenuItem(title: "Quit Kibitzer Menu Bar", action: #selector(quitClicked), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
-        statusItem.button?.imagePosition = .imageOnly
+        statusItem.button?.imagePosition = .imageLeft
         statusItem.button?.imageScaling = .scaleProportionallyDown
         statusItem.button?.setAccessibilityLabel("Kibitzer")
         statusItem.menu = menu
@@ -113,42 +113,15 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
         statusMenuItem.title = "Kibitzer: \(mode.label)"
         startServerMenuItem.isEnabled = mode == .dead
         statusItem.button?.toolTip = "Kibitzer: \(mode.label)"
-        if let image = renderStatusIcon(mode: mode) {
-            statusItem.length = 28
+        if let image = loadBaseIcon() {
+            statusItem.length = NSStatusItem.variableLength
             statusItem.button?.image = image
-            statusItem.button?.attributedTitle = NSAttributedString(string: "")
+            statusItem.button?.attributedTitle = renderStatusDot(mode: mode)
         } else {
             statusItem.length = NSStatusItem.variableLength
             statusItem.button?.image = nil
             statusItem.button?.attributedTitle = renderStatusTitle(mode: mode)
         }
-    }
-
-    private func renderStatusIcon(mode: KibitzerMode) -> NSImage? {
-        guard let baseIcon = loadBaseIcon() else { return nil }
-        let canvasSize = NSSize(width: 22, height: 22)
-        let iconRect = NSRect(x: 1, y: 2, width: 18, height: 18)
-        let dotRect = NSRect(x: 14.5, y: 1.5, width: 6.5, height: 6.5)
-        let haloRect = dotRect.insetBy(dx: -1.5, dy: -1.5)
-        let image = NSImage(size: canvasSize)
-
-        image.lockFocus()
-        NSGraphicsContext.current?.imageInterpolation = .high
-        let iconAlpha: CGFloat = mode == .dead ? 0.45 : 1.0
-        baseIcon.draw(
-            in: iconRect,
-            from: NSRect(origin: .zero, size: baseIcon.size),
-            operation: .sourceOver,
-            fraction: iconAlpha
-        )
-        NSColor.windowBackgroundColor.withAlphaComponent(0.92).setFill()
-        NSBezierPath(ovalIn: haloRect).fill()
-        mode.color.setFill()
-        NSBezierPath(ovalIn: dotRect).fill()
-        image.unlockFocus()
-
-        image.isTemplate = false
-        return image
     }
 
     private func loadBaseIcon() -> NSImage? {
@@ -157,13 +130,18 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
         }
 
         let candidates = [
-            rootURL.appendingPathComponent("apps/extension/icons/icon-128.png"),
-            rootURL.appendingPathComponent("apps/extension/dist/icons/icon-128.png"),
+            rootURL.appendingPathComponent("apps/extension/icons/variants/monitor-template-128.png"),
+            rootURL.appendingPathComponent("apps/extension/icons/variants/monitor-template-48.png"),
+            rootURL.appendingPathComponent("apps/extension/icons/variants/monitor-template-32.png"),
+            rootURL.appendingPathComponent("apps/extension/dist/icons/variants/monitor-template-128.png"),
+            rootURL.appendingPathComponent("apps/extension/dist/icons/variants/monitor-template-48.png"),
+            rootURL.appendingPathComponent("apps/extension/dist/icons/variants/monitor-template-32.png"),
         ]
 
         for iconURL in candidates {
             if let image = NSImage(contentsOf: iconURL) {
-                image.isTemplate = false
+                image.size = NSSize(width: 18, height: 18)
+                image.isTemplate = true
                 baseIconImage = image
                 return image
             }
@@ -172,8 +150,18 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
         return nil
     }
 
+    private func renderStatusDot(mode: KibitzerMode) -> NSAttributedString {
+        return NSAttributedString(
+            string: " ●",
+            attributes: [
+                .font: NSFont.menuBarFont(ofSize: 9),
+                .foregroundColor: mode.color,
+            ]
+        )
+    }
+
     private func renderStatusTitle(mode: KibitzerMode) -> NSAttributedString {
-        // Fallback for source checkouts that do not have the shared icon assets.
+        // Fallback for source checkouts that do not have the template icon assets.
         let title = NSMutableAttributedString(
             string: "K ",
             attributes: [

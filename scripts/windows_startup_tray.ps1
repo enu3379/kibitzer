@@ -7,12 +7,12 @@ $ErrorActionPreference = "Stop"
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $RunScript = Join-Path $Root "scripts\windows_run_server.ps1"
 $IconCandidates = @(
-  (Join-Path $Root "apps\extension\icons\icon-128.png"),
-  (Join-Path $Root "apps\extension\icons\icon-48.png"),
-  (Join-Path $Root "apps\extension\icons\icon-32.png"),
-  (Join-Path $Root "apps\extension\dist\icons\icon-128.png"),
-  (Join-Path $Root "apps\extension\dist\icons\icon-48.png"),
-  (Join-Path $Root "apps\extension\dist\icons\icon-32.png")
+  (Join-Path $Root "apps\extension\icons\variants\monitor-template-128.png"),
+  (Join-Path $Root "apps\extension\icons\variants\monitor-template-48.png"),
+  (Join-Path $Root "apps\extension\icons\variants\monitor-template-32.png"),
+  (Join-Path $Root "apps\extension\dist\icons\variants\monitor-template-128.png"),
+  (Join-Path $Root "apps\extension\dist\icons\variants\monitor-template-48.png"),
+  (Join-Path $Root "apps\extension\dist\icons\variants\monitor-template-32.png")
 )
 $HealthUrl = "http://127.0.0.1:8765/health"
 $LogDir = Join-Path $Root "data\logs"
@@ -90,31 +90,76 @@ function Get-KibitzerTrayIconPath {
   return $null
 }
 
+function Test-WindowsLightSystemTheme {
+  try {
+    $Theme = Get-ItemProperty `
+      -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" `
+      -Name "SystemUsesLightTheme" `
+      -ErrorAction Stop
+    return ([int]$Theme.SystemUsesLightTheme -ne 0)
+  }
+  catch {
+    return $false
+  }
+}
+
+function Get-KibitzerTrayGlyphColor {
+  if (Test-WindowsLightSystemTheme) {
+    return [System.Drawing.Color]::FromArgb(31, 41, 55)
+  }
+  return [System.Drawing.Color]::FromArgb(249, 250, 251)
+}
+
+function Get-KibitzerTrayHaloColor {
+  if (Test-WindowsLightSystemTheme) {
+    return [System.Drawing.Color]::FromArgb(249, 250, 251)
+  }
+  return [System.Drawing.Color]::FromArgb(31, 41, 55)
+}
+
 function New-KibitzerTrayIcon {
   param(
     [System.Drawing.Color]$Color
   )
 
   $IconPath = Get-KibitzerTrayIconPath
+  $GlyphColor = Get-KibitzerTrayGlyphColor
+  $HaloColor = Get-KibitzerTrayHaloColor
   $Bitmap = New-Object System.Drawing.Bitmap 32, 32
-  $BaseGraphics = [System.Drawing.Graphics]::FromImage($Bitmap)
-  $BaseGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-  $BaseGraphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-  $BaseGraphics.Clear([System.Drawing.Color]::Transparent)
+  $ClearGraphics = [System.Drawing.Graphics]::FromImage($Bitmap)
+  $ClearGraphics.Clear([System.Drawing.Color]::Transparent)
+  $ClearGraphics.Dispose()
 
   if ($IconPath) {
     $Source = [System.Drawing.Image]::FromFile($IconPath)
-    $BaseGraphics.DrawImage($Source, 2, 2, 26, 26)
+    $Mask = New-Object System.Drawing.Bitmap 26, 26
+    $MaskGraphics = [System.Drawing.Graphics]::FromImage($Mask)
+    $MaskGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $MaskGraphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $MaskGraphics.Clear([System.Drawing.Color]::Transparent)
+    $MaskGraphics.DrawImage($Source, 0, 0, 26, 26)
+    $MaskGraphics.Dispose()
+
+    for ($X = 0; $X -lt 26; $X++) {
+      for ($Y = 0; $Y -lt 26; $Y++) {
+        $Pixel = $Mask.GetPixel($X, $Y)
+        if ($Pixel.A -gt 0) {
+          $Tinted = [System.Drawing.Color]::FromArgb($Pixel.A, $GlyphColor.R, $GlyphColor.G, $GlyphColor.B)
+          $Bitmap.SetPixel($X + 2, $Y + 2, $Tinted)
+        }
+      }
+    }
+
+    $Mask.Dispose()
     $Source.Dispose()
   }
-  $BaseGraphics.Dispose()
 
   $Graphics = [System.Drawing.Graphics]::FromImage($Bitmap)
   $Graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
 
-  $Brush = New-Object System.Drawing.SolidBrush $Color
-  $HaloBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
-  $Pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White), 1
+  $Brush = New-Object System.Drawing.SolidBrush -ArgumentList @($Color)
+  $HaloBrush = New-Object System.Drawing.SolidBrush -ArgumentList @($HaloColor)
+  $Pen = New-Object System.Drawing.Pen -ArgumentList @($HaloColor, 1)
   $Graphics.FillEllipse($HaloBrush, 21, 21, 10, 10)
   $Graphics.FillEllipse($Brush, 22, 22, 8, 8)
   $Graphics.DrawEllipse($Pen, 22, 22, 8, 8)

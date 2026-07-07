@@ -42,8 +42,9 @@ Current prep implementation:
 - `scripts/macos_uninstall_menu_bar_agent.sh`
 
 The Swift app uses `NSStatusItem` directly, so it does not add a Python GUI
-dependency. It loads the shared Chrome extension icon from
-`apps/extension/icons/icon-128.png` and overlays a small state dot. If the icon
+dependency. It loads the monochrome template icon from
+`apps/extension/icons/variants/monitor-template-128.png`, marks it as an AppKit
+template image, and shows a small state dot next to it. If the template icon
 asset is unavailable in a source checkout, it falls back to a text-only `K ●`
 status item.
 
@@ -58,9 +59,10 @@ Claude owns the shared icon artwork. The runtime contract to preserve:
 
 Current visual contract:
 
-- base artwork source: `apps/extension/icons/icon-128.svg`;
-- menu bar runtime asset: `apps/extension/icons/icon-128.png`;
-- state overlay: gray idle, green active, red dead, yellow unknown.
+- native template source: `apps/extension/icons/variants/monitor-mono.svg`;
+- menu bar runtime asset: `apps/extension/icons/variants/monitor-template-128.png`;
+- macOS light/dark tinting: handled by `NSImage.isTemplate`;
+- state dot: gray idle, green active, red dead, yellow unknown.
 
 Open visual decisions are limited to final status-dot placement/treatment,
 tooltip/menu copy polish, and whether active should animate or remain static.

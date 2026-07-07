@@ -62,8 +62,8 @@ Remove the Startup shortcut with:
 
 Startup logs are written under `data\logs\`. The tray icon polls
 `GET /health`: red means unreachable, gray means idle, green means active, and
-yellow means unknown. It uses the shared Chrome extension icon with a small
-status dot overlay.
+yellow means unknown. It uses the monochrome template icon, tinted for the
+current Windows system theme, with a small status dot overlay.
 
 ## Optional AI Provider Setup
 

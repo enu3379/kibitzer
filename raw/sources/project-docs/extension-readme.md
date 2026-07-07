@@ -48,8 +48,10 @@ Design variants live under `icons/variants/` and can be regenerated with:
 python ../../scripts/gen_icon_variants.py
 ```
 
-The macOS menu bar app also reads `icons/icon-128.png` as its base artwork, so
-Chrome and menu bar surfaces stay visually aligned.
+Native status surfaces use the monochrome template assets generated under
+`icons/variants/`, especially `monitor-template-128.png`. macOS lets AppKit tint
+that template for light/dark menu bars; Windows tints the same alpha mask based
+on the system theme.
 
 ## Load In Chrome
 
