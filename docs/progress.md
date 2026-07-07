@@ -1,5 +1,23 @@
 # Progress
 
+## 2026-07-07 macOS Idle Daemon
+
+Completed:
+
+- Added the idle daemon plan covering `dead` / `idle` / `active`, the single
+  process model, macOS LaunchAgent scope, and future Windows tray scope.
+- Added lazy server runtime resources so startup stays idle and provider setup
+  happens only after a goal-backed session starts.
+- Moved `provider.degraded` recording from server startup to first runtime
+  activation.
+- Added `GET /health` runtime mode reporting.
+- Added macOS LaunchAgent install/uninstall scripts for login autostart.
+
+Verified:
+
+- Runtime mode tests cover idle startup, activation on goal setting, return to
+  idle on session end, and failed goal requests staying idle.
+
 ## 2026-07-05 Status
 
 Kibitzer Stage 0 is implemented through Work Package 8.
