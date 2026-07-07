@@ -22,14 +22,14 @@ embedding:
 tier1:
   provider: experiment
   experiment_models_file: configs/models.local.yaml
-  experiment_model_key: gemma4   # Ollama Cloud gemma4:e4b — fast hot-path classifier
+  experiment_model_key: tier1_fast   # Ollama Cloud nemotron-3-super — 2-3s hot-path classifier
   timeout_seconds: 10            # hot path: caps the models-file timeout
 
 tier2:
   provider: experiment
   experiment_models_file: configs/models.local.yaml
-  experiment_model_key: ollama_cloud_gemma4_31b   # Ollama Cloud gemma4:31b judge
-  model: gemma4:31b
+  experiment_model_key: tier2_judge   # Ollama Cloud minimax-m3 judge + Korean copywriter
+  model: minimax-m3
 ```
 
 ## Where model settings and keys live

@@ -98,7 +98,7 @@ cp configs/experiment-models.example.yaml configs/models.local.yaml
 ```
 
 Edit `configs/models.local.yaml` if you want different models (Ollama Cloud
-`gemma4:e4b` / `gemma4:31b` by default; self-hosted Ollama also works). The real
+`nemotron-3-super` / `minimax-m3` by default; self-hosted Ollama also works). The real
 `.env` file and `configs/models.local.yaml` are ignored by git.
 
 ## Notes

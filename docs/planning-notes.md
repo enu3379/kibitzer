@@ -67,8 +67,9 @@ A 6-minute live session failed in *both* directions, all at Tier 0
 guard: pages whose OK came only from the anchor path (exemplar score <
 `relevance.anchor_epsilon`, default 0.05) or that weren't LLM-vetted keep the OK
 verdict but are NOT admitted into the anchor — `features.anchor_eligible`,
-filtered in `recent_ok_embeddings`; (3) `models.local.yaml` restored (tier1 →
-gemma4:e4b, tier2 → gemma4:26b; live `/health` shows `tiers: active`) and tier
+filtered in `recent_ok_embeddings`; (3) `models.local.yaml` restored — Ollama Cloud, tier1 → gemma3:4b (e4b does
+not exist on cloud; caught by per-key probing), tier2 → gemma4:31b; live
+`/health` shows `tiers: active`, all three keys individually verified and tier
 degradation surfaced in `/health` + a popup warning ("판정 축소 모드").
 Regression test `test_drift_fixes.py` replays the 나무위키 chain end-to-end.
 Still deferred to the audit plan as scheduled — goal enrichment (D3) and
@@ -114,7 +115,7 @@ uses a light rim instead.
 The audit plan adds one cheap LLM call at goal declaration to derive positive
 goal phrases. Only the goal text leaves the call site; no page content.
 Direction update (2026-07-08, user): the stack runs on **Ollama Cloud** (tiers
-use gemma4:e4b / gemma4:31b there) — drop the local-first framing; the
+use nemotron-3-super / minimax-m3 there — newest free-tier models by live probe) — drop the local-first framing; the
 enrichment call should ride the same Tier 1 cloud provider. OPEN only on
 prompt/shape, not on where it runs.
 

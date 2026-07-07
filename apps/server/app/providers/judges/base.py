@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Iterator, Protocol
 
 from ...schemas import Verdict
 
@@ -26,3 +26,24 @@ class JudgeProvider(Protocol):
         system_prompt: str | None = None,
     ) -> Tier2Result:
         ...
+
+
+def ordered_api_keys(
+    pool: tuple[str, ...] | None,
+    primary: str,
+    fallback: str | None,
+    rotation: "Iterator[int]",
+) -> list[str]:
+    """Keys to try for one call, in order.
+
+    With a multi-key pool the starting key rotates per call so usage spreads
+    evenly across keys, and the remaining pool keys stay in line as fallbacks.
+    Without a pool the order is fixed: primary, then the optional fallback.
+    """
+    keys = [key for key in (pool or ()) if key]
+    if len(keys) > 1:
+        start = next(rotation) % len(keys)
+        return keys[start:] + keys[:start]
+    if keys:
+        return keys
+    return [primary] + ([fallback] if fallback else [])

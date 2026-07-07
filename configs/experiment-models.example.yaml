@@ -3,26 +3,31 @@
 # tier{1,2}.experiment_model_key.
 #
 # Default setup: Ollama Cloud (https://ollama.com). Put your API key in .env
-# ONCE (ollama1= / ollama2=, see .env.example) — every server start picks it up
-# automatically; keys never go in this file or in the repo.
-# Browse models at https://ollama.com/library and swap `ollama_model` freely.
+# ONCE (ollama1= / ollama2= / optional ollama3=, see .env.example) — every
+# server start picks it up automatically; keys never go in this file or repo.
+#
+# Picking models: browse https://ollama.com/library, but note many cloud models
+# are subscription-gated (HTTP 403 on the free tier). Verify with
+# GET https://ollama.com/api/tags and a 1-token chat probe before committing to
+# one. Reasoning models spend tokens thinking before the JSON answer — give
+# tier1 max_output_tokens headroom (>= 320) or replies come back empty.
 
-gemma4:
-  # Tier 1 hot-path classifier: small, fast model. The tier1 config timeout
-  # (10s) applies instead of timeout_sec here.
+tier1_fast:
+  # Tier 1 hot-path classifier: must answer well inside the 10s tier1 config
+  # timeout (timeout_sec here is ignored for tier1).
   api_url: "https://ollama.com/api/chat"
   api_style: "ollama"
-  ollama_model: "gemma4:e4b"
+  ollama_model: "nemotron-3-super"
   timeout_sec: 10
-  max_output_tokens: 128
+  max_output_tokens: 320
 
-ollama_cloud_gemma4_31b:
-  # Tier 2 precise judge.
+tier2_judge:
+  # Tier 2 precise judge + Korean message writer.
   api_url: "https://ollama.com/api/chat"
   api_style: "ollama"
-  ollama_model: "gemma4:31b"
+  ollama_model: "minimax-m3"
   timeout_sec: 120
-  max_output_tokens: 512
+  max_output_tokens: 640
 
 # Self-hosted Ollama also works (same api_style; local URLs need no API key),
 # as do OpenAI-compatible endpoints:

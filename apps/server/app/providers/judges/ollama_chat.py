@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from itertools import count
+from typing import Iterator
 
 import httpx
 
-from .base import Tier1Result, Tier2Result
+from .base import Tier1Result, Tier2Result, ordered_api_keys
 from .openai_compatible import parse_tier1_json, parse_tier2_json
 
 
@@ -17,6 +19,10 @@ class OllamaChatJudgeProvider:
     timeout_seconds: float = 120
     fallback_api_key: str | None = None
     max_output_tokens: int = 512
+    # Optional rotation pool: when set (>= 2 keys), each call starts from the
+    # next key in the pool and the rest queue up as fallbacks.
+    api_keys: tuple[str, ...] | None = None
+    _rotation: Iterator[int] = field(default_factory=count, init=False, repr=False, compare=False)
 
     async def classify_tier1(self, payload: dict[str, object]) -> Tier1Result:
         response = await self._post_chat(
@@ -62,9 +68,7 @@ class OllamaChatJudgeProvider:
             "format": "json",
             "options": {"temperature": 0, "num_predict": self.max_output_tokens},
         }
-        api_keys = [self.api_key]
-        if self.fallback_api_key:
-            api_keys.append(self.fallback_api_key)
+        api_keys = ordered_api_keys(self.api_keys, self.api_key, self.fallback_api_key, self._rotation)
 
         last_response: httpx.Response | None = None
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:

@@ -18,6 +18,7 @@ class _ResolvedJudgeSettings:
     api_url: str
     api_key: str
     fallback_api_key: str | None
+    api_keys: tuple[str, ...] | None
     model: str
     timeout_seconds: float
     max_output_tokens: int
@@ -33,6 +34,7 @@ def create_tier1_judge_provider(config: Tier1Config) -> JudgeProvider | None:
             model_key=config.experiment_model_key,
             api_key_env=config.api_key_env,
             fallback_api_key_env=config.fallback_api_key_env,
+            api_key_pool_envs=config.api_key_pool_envs,
             default_model=config.model,
             timeout_seconds=config.timeout_seconds,
             max_output_tokens=128,
@@ -74,6 +76,7 @@ def _build_judge(settings: _ResolvedJudgeSettings) -> JudgeProvider:
             base_url=settings.api_url,
             api_key=settings.api_key,
             fallback_api_key=settings.fallback_api_key,
+            api_keys=settings.api_keys,
             model=settings.model,
             timeout_seconds=settings.timeout_seconds,
             max_output_tokens=settings.max_output_tokens,
@@ -83,6 +86,7 @@ def _build_judge(settings: _ResolvedJudgeSettings) -> JudgeProvider:
             api_url=settings.api_url,
             api_key=settings.api_key,
             fallback_api_key=settings.fallback_api_key,
+            api_keys=settings.api_keys,
             model=settings.model,
             timeout_seconds=settings.timeout_seconds,
             max_output_tokens=settings.max_output_tokens,
@@ -114,6 +118,7 @@ def _resolve_direct_tier2_settings(config: Tier2Config) -> _ResolvedJudgeSetting
         api_url=api_url,
         api_key=api_key,
         fallback_api_key=fallback_api_key,
+        api_keys=None,
         model=config.model,
         timeout_seconds=config.timeout_seconds,
         max_output_tokens=config.max_output_tokens,
@@ -126,6 +131,7 @@ def _resolve_experiment_settings(config: Tier2Config) -> _ResolvedJudgeSettings 
         model_key=config.experiment_model_key,
         api_key_env=config.api_key_env,
         fallback_api_key_env=config.fallback_api_key_env,
+        api_key_pool_envs=config.api_key_pool_envs,
         default_model=config.model,
         timeout_seconds=config.timeout_seconds,
         max_output_tokens=config.max_output_tokens,
@@ -142,6 +148,7 @@ def _resolve_experiment_model_settings(
     timeout_seconds: float,
     max_output_tokens: int,
     use_model_file_timeout: bool,
+    api_key_pool_envs: list[str] | None = None,
 ) -> _ResolvedJudgeSettings | None:
     if not models_file or not model_key:
         return None
@@ -165,6 +172,11 @@ def _resolve_experiment_model_settings(
     fallback_api_key = (
         os.environ.get(fallback_api_key_env) if fallback_api_key_env else None
     ) or model_config.get("fallback_api_key")
+    # Rotation pool: resolve each env name; only meaningful with >= 2 keys.
+    pool = tuple(
+        key for key in (os.environ.get(env) or "" for env in (api_key_pool_envs or [])) if key
+    )
+    api_keys = pool if len(pool) > 1 else None
     resolved_timeout = (
         float(model_config.get("timeout_sec") or timeout_seconds)
         if use_model_file_timeout
@@ -181,6 +193,7 @@ def _resolve_experiment_model_settings(
         api_url=api_url,
         api_key=api_key,
         fallback_api_key=str(fallback_api_key) if fallback_api_key else None,
+        api_keys=api_keys,
         model=model,
         timeout_seconds=resolved_timeout,
         max_output_tokens=resolved_max_tokens,

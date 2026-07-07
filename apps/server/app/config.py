@@ -47,6 +47,9 @@ class Tier1Config(BaseModel):
     base_url: str = "${TIER1_BASE_URL}"
     api_key_env: str = "TIER1_API_KEY"
     fallback_api_key_env: str | None = None
+    # Optional rotation pool of env names; with >= 2 resolved keys each call
+    # starts from the next key and the rest act as fallbacks.
+    api_key_pool_envs: list[str] | None = None
     model: str = "cheap-classifier"
     timeout_seconds: float = 3
     recent_observations: int = 5
@@ -61,6 +64,7 @@ class Tier2Config(BaseModel):
     base_url: str = "${TIER2_BASE_URL}"
     api_key_env: str = "TIER2_API_KEY"
     fallback_api_key_env: str | None = "TIER2_FALLBACK_API_KEY"
+    api_key_pool_envs: list[str] | None = None
     model: str = "qwen3.5:27b"
     timeout_seconds: float = 8
     recent_observations: int = 5
