@@ -112,6 +112,8 @@ def sample_wall_template(x: float, y: float):
     """Single-color template glyph matching wall-mono.svg."""
     if _in_circle(x, y, 51, 60, 8) or _in_circle(x, y, 77, 60, 8):
         return None
+    if _in_round_rect(x, y, 10, 72, 108, 4, 2):
+        return None  # transparent separation slit
     if _in_circle(x, y, 64, 74, 36) or _in_round_rect(x, y, 10, 74, 108, 38, 9):
         return INK
     return None
@@ -169,16 +171,16 @@ def write_png(path: Path, size: int, rows: list[bytes]) -> None:
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    for name, sampler in VARIANTS.items():
-        for size in SIZES:
-            path = OUT / f"{name}-{size}.png"
-            write_png(path, size, render(size, sampler))
-            print(f"wrote {path} ({size}x{size})")
-    for name, sampler in TEMPLATE_VARIANTS.items():
-        for size in SIZES:
-            path = OUT / f"{name}-template-{size}.png"
-            write_png(path, size, render(size, sampler))
-            print(f"wrote {path} ({size}x{size})")
+
+    def render_variants(variants, filename_pattern: str) -> None:
+        for name, sampler in variants.items():
+            for size in SIZES:
+                path = OUT / filename_pattern.format(name=name, size=size)
+                write_png(path, size, render(size, sampler))
+                print(f"wrote {path} ({size}x{size})")
+
+    render_variants(VARIANTS, "{name}-{size}.png")
+    render_variants(TEMPLATE_VARIANTS, "{name}-template-{size}.png")
 
 
 if __name__ == "__main__":

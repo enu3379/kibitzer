@@ -52,7 +52,7 @@ enum KibitzerMode: String {
 
 final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
     private let rootURL: URL
-    private let healthURL = URL(string: "http://127.0.0.1:8765/health")!
+    private let healthURL: URL
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private let statusMenuItem = NSMenuItem(title: "Kibitzer: starting", action: nil, keyEquivalent: "")
@@ -61,11 +61,13 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
     private let openHealthMenuItem = NSMenuItem(title: "Open health", action: #selector(openHealthClicked), keyEquivalent: "h")
     private let openLogsMenuItem = NSMenuItem(title: "Open logs", action: #selector(openLogsClicked), keyEquivalent: "l")
     private var baseIconImage: NSImage?
+    private var baseIconLookupFailed = false
     private var timer: Timer?
     private var attemptedAutostart = false
 
     init(rootURL: URL) {
         self.rootURL = rootURL
+        self.healthURL = KibitzerMenuBarApp.makeHealthURL()
         super.init()
         configureMenu()
         updateStatus(autostartIfDead: true)
@@ -128,12 +130,12 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
         statusMenuItem.title = "Kibitzer: \(mode.label)"
         startServerMenuItem.isEnabled = mode == .dead
         statusItem.button?.toolTip = "Kibitzer: \(mode.label)"
+        statusItem.button?.setAccessibilityLabel("Kibitzer: \(mode.label)")
+        statusItem.length = NSStatusItem.variableLength
         if let image = loadBaseIcon() {
-            statusItem.length = NSStatusItem.variableLength
             statusItem.button?.image = image
             statusItem.button?.attributedTitle = renderStatusDot(mode: mode)
         } else {
-            statusItem.length = NSStatusItem.variableLength
             statusItem.button?.image = nil
             statusItem.button?.attributedTitle = renderStatusTitle(mode: mode)
         }
@@ -142,6 +144,9 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
     private func loadBaseIcon() -> NSImage? {
         if let baseIconImage = baseIconImage {
             return baseIconImage
+        }
+        if baseIconLookupFailed {
+            return nil
         }
 
         let candidates = [
@@ -162,6 +167,7 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
             }
         }
 
+        baseIconLookupFailed = true
         return nil
     }
 
@@ -197,28 +203,33 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
     }
 
     private func startServer() {
-        if kickstartServerLaunchAgent() {
+        kickstartServerLaunchAgent { [weak self] didKickstart in
+            guard let self else { return }
+            if !didKickstart {
+                self.startServerScriptFallback()
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                 self.updateStatus(autostartIfDead: false)
             }
-            return
-        }
-        startServerScriptFallback()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            self.updateStatus(autostartIfDead: false)
         }
     }
 
-    private func kickstartServerLaunchAgent() -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        process.arguments = ["kickstart", "-k", "gui/\(getuid())/com.kibitzer.server"]
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
-        } catch {
-            return false
+    private func kickstartServerLaunchAgent(completion: @escaping (Bool) -> Void) {
+        DispatchQueue.global(qos: .utility).async {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            process.arguments = ["kickstart", "-k", "gui/\(getuid())/com.kibitzer.server"]
+            do {
+                try process.run()
+                process.waitUntilExit()
+                DispatchQueue.main.async {
+                    completion(process.terminationStatus == 0)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    completion(false)
+                }
+            }
         }
     }
 
@@ -262,6 +273,12 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
     @objc private func quitClicked() {
         timer?.invalidate()
         NSApp.terminate(nil)
+    }
+
+    private static func makeHealthURL() -> URL {
+        let rawPort = ProcessInfo.processInfo.environment["KIBITZER_PORT"] ?? "8765"
+        let port = Int(rawPort).flatMap { (1...65535).contains($0) ? $0 : nil } ?? 8765
+        return URL(string: "http://127.0.0.1:\(port)/health")!
     }
 }
 

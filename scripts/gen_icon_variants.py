@@ -156,16 +156,16 @@ def write_png(path: Path, size: int, rows: list[bytes]) -> None:
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    for name, sampler in VARIANTS.items():
-        for size in SIZES:
-            path = OUT / f"{name}-{size}.png"
-            write_png(path, size, render(size, sampler))
-            print(f"wrote {path} ({size}x{size})")
-    for name, sampler in TEMPLATE_VARIANTS.items():
-        for size in SIZES:
-            path = OUT / f"{name}-template-{size}.png"
-            write_png(path, size, render(size, sampler))
-            print(f"wrote {path} ({size}x{size})")
+
+    def render_variants(variants, filename_pattern: str) -> None:
+        for name, sampler in variants.items():
+            for size in SIZES:
+                path = OUT / filename_pattern.format(name=name, size=size)
+                write_png(path, size, render(size, sampler))
+                print(f"wrote {path} ({size}x{size})")
+
+    render_variants(VARIANTS, "{name}-{size}.png")
+    render_variants(TEMPLATE_VARIANTS, "{name}-template-{size}.png")
 
 
 if __name__ == "__main__":

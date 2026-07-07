@@ -11,4 +11,4 @@ fi
 
 mkdir -p data
 
-exec ".venv/bin/python" -m uvicorn apps.server.app.main:app --host 127.0.0.1 --port 8765
+exec ".venv/bin/python" -m uvicorn apps.server.app.main:app --host 127.0.0.1 --port "${KIBITZER_PORT:-8765}"
