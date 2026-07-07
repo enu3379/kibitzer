@@ -1,20 +1,32 @@
-# Copy this file to configs/models.local.yaml and edit it for your machine.
-# The keys match configs/default.yaml.
+# Copy this file to configs/models.local.yaml and edit for your machine.
+# The top-level keys are referenced from configs/default.yaml via
+# tier{1,2}.experiment_model_key.
+#
+# Default setup: Ollama Cloud (https://ollama.com). Put your API key in .env
+# ONCE (ollama1= / ollama2=, see .env.example) — every server start picks it up
+# automatically; keys never go in this file or in the repo.
+# Browse models at https://ollama.com/library and swap `ollama_model` freely.
 
 gemma4:
-  # Local Ollama example. Install Ollama for Windows and pull a model first,
-  # then replace the model name below if needed.
-  api_url: "http://127.0.0.1:11434/api/chat"
+  # Tier 1 hot-path classifier: small, fast model. The tier1 config timeout
+  # (10s) applies instead of timeout_sec here.
+  api_url: "https://ollama.com/api/chat"
   api_style: "ollama"
-  ollama_model: "llama3.2:3b"
+  ollama_model: "gemma4:e4b"
   timeout_sec: 10
   max_output_tokens: 128
 
 ollama_cloud_gemma4_31b:
-  # Local default for Windows packaging. You can replace this with a cloud
-  # Ollama/OpenAI-compatible endpoint and set TIER2_API_KEY if required.
-  api_url: "http://127.0.0.1:11434/api/chat"
+  # Tier 2 precise judge.
+  api_url: "https://ollama.com/api/chat"
   api_style: "ollama"
-  ollama_model: "llama3.2:3b"
-  timeout_sec: 60
+  ollama_model: "gemma4:31b"
+  timeout_sec: 120
   max_output_tokens: 512
+
+# Self-hosted Ollama also works (same api_style; local URLs need no API key),
+# as do OpenAI-compatible endpoints:
+#   api_url: "https://api.example.com/v1/chat/completions"
+#   api_style: "openai"
+#   model_name: "some-model"
+#   api_key: ""   # or leave unset and use the .env variable

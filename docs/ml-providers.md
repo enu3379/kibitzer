@@ -21,16 +21,36 @@ embedding:
 
 tier1:
   provider: experiment
-  experiment_models_file: %KIBITZER_EXPERIMENT_MODELS_FILE%
-  experiment_model_key: gemma4   # local Ollama gemma4:e4b, zero API cost
+  experiment_models_file: configs/models.local.yaml
+  experiment_model_key: gemma4   # Ollama Cloud gemma4:e4b — fast hot-path classifier
   timeout_seconds: 10            # hot path: caps the models-file timeout
 
 tier2:
   provider: experiment
-  experiment_models_file: %KIBITZER_EXPERIMENT_MODELS_FILE%
-  experiment_model_key: ollama_cloud_gemma4_31b
+  experiment_models_file: configs/models.local.yaml
+  experiment_model_key: ollama_cloud_gemma4_31b   # Ollama Cloud gemma4:31b judge
   model: gemma4:31b
 ```
+
+## Where model settings and keys live
+
+Two gitignored files, set up once:
+
+- `configs/models.local.yaml` — endpoints and model names per tier. Template:
+  `configs/experiment-models.example.yaml` (Ollama Cloud by default; swap
+  `ollama_model` for anything in https://ollama.com/library).
+- `.env` — API keys only (`ollama1=` / `ollama2=`). Template: `.env.example`.
+  `load_dotenv` runs at config load, so every start mode — terminal, macOS
+  LaunchAgent, Windows tray — picks keys up with no per-run setup.
+
+Key resolution order per tier: environment variable named by `api_key_env`
+(from `.env` or the shell) → `api_key:` field in the models file → for
+`localhost`/`127.0.0.1` URLs a placeholder is injected (self-hosted Ollama
+ignores auth, so purely local setups need no key at all).
+
+If a tier cannot resolve, it degrades to the tier below, `/health` reports
+`tiers: {tierN: degraded}`, and the extension popup shows a
+"판정 축소 모드" warning — degradation is loud, not silent.
 
 ## Tier 0
 
@@ -86,7 +106,9 @@ It returns:
 
 If Tier 2 cancels, no notification is shown.
 
-The default local config reads the Ollama Cloud API URL, model name, primary API key, and fallback API key from the experiment project model file at runtime. Kibitzer does not copy those keys into this repository. Environment variables `TIER2_API_KEY` and `TIER2_FALLBACK_API_KEY` override the experiment file when present.
+The default config reads the Ollama Cloud API URL and model name from
+`configs/models.local.yaml` and the API keys from `.env` (see "Where model
+settings and keys live" above). Kibitzer never commits keys to this repository.
 
 Useful checks:
 
