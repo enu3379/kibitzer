@@ -196,6 +196,9 @@ async function showNotification(result: PipelineResult, tabId?: number): Promise
         void postDeliveryReport(result.intervention_id, true)
         void playNotificationSound()
       }
+      if (celebration) {
+        void playNotificationSound("celebrate")
+      }
       void refreshBadge()
       return
     } catch (error) {
@@ -225,6 +228,9 @@ async function showNotification(result: PipelineResult, tabId?: number): Promise
       void postDeliveryReport(result.intervention_id, true)
       void playNotificationSound()
     }
+    if (celebration) {
+      void playNotificationSound("celebrate")
+    }
     void refreshBadge()
   } catch (error) {
     pendingNotifications.delete(notificationId)
@@ -242,7 +248,7 @@ function pageLabel(page: PageInfo | null | undefined): string | undefined {
   return title || host || undefined
 }
 
-async function playNotificationSound(): Promise<void> {
+async function playNotificationSound(sound: "ding" | "celebrate" = "ding"): Promise<void> {
   try {
     const contexts = await chrome.runtime.getContexts({
       contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
@@ -254,7 +260,7 @@ async function playNotificationSound(): Promise<void> {
         justification: "Play a short chime when a drift notification is shown.",
       })
     }
-    await chrome.runtime.sendMessage({ type: "kibitzer:play-sound" })
+    await chrome.runtime.sendMessage({ type: "kibitzer:play-sound", sound })
   } catch (error) {
     console.error("kibitzer: notification sound failed", error)
   }

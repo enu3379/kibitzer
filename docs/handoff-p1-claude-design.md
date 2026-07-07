@@ -98,10 +98,16 @@ templates unless the template already asks for `{return_minutes}`.
 
 1. **Celebration toast**: the character's circle eyes curve into arcs (^ ^) — the
    dry observer's single expression change; no confetti, springier peek curve.
-   Kept: 9s auto-dismiss, no sound (praise must not interrupt), #79B7A0 accent,
-   no feedback buttons. Fixed a real bug: the buttons row used the `hidden`
-   attribute, which `.row { display: flex }` overrides — celebrations were
-   showing all three buttons. The row is now omitted from the markup entirely.
+   Kept: 9s auto-dismiss, #79B7A0 accent, no feedback buttons. Fixed a real bug:
+   the buttons row used the `hidden` attribute, which `.row { display: flex }`
+   overrides — celebrations were showing all three buttons. The row is now
+   omitted from the markup entirely.
+   Sound (revised 2026-07-08, user request): celebrations DO play a sound — a
+   soft two-note ascending chime (`offscreen/celebrate.wav`, E5→A5, quieter
+   than the nag ding), selected via the `sound` field on `kibitzer:play-sound`.
+   Also fixed en route: celebrations returned on the browser-nav response were
+   dropped by `handlePipelineResult` (only `request_excerpt` passed) — the
+   server logged `celebration.delivered` but nothing displayed.
 2. **Break copy/order**: `5분만` confirmed; toast order related → break → snooze
    (ascending silence duration); fallback 2-button set related + break kept.
 3. **Popup**: persona cards now come from `GET /personas` (custom personas get

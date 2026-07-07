@@ -19,14 +19,11 @@ Two tracks ran in parallel since the P0 persona engine landed:
 | | controllers A안 (alignment/EWMA) + B안 (streak), settings-configurable | ✅ merged |
 | | dwell gating (observe 5s / excerpt 10s) | ✅ merged |
 | | Windows startup tray (PR #2) | ✅ merged |
-| | macOS menu bar status item | 🔶 local commit `6d7d222`, unpushed |
-| New (doc only) | `judgment-audit-plan.md` — detection-quality overhaul | 📋 designed, not built |
+| | macOS menu bar status item | ✅ merged (PR #3); alpha-dot spec pending (backlog #5) |
+| | detection fixes + in-page toast + Ollama Cloud stack + key rotation | ✅ merged (PR #6–#9) |
+| New (doc only) | `judgment-audit-plan.md` — detection-quality overhaul | 📋 designed, gated on D4 |
 
 Baseline: 90 server tests green; server runs in idle daemon mode.
-
-Doc drift to clean up later: progress.md's latest entry still says the Windows
-tray is unimplemented (it is merged), and the menu bar work is not in progress.md
-yet.
 
 ## The pivot: trust before more personality
 
@@ -141,18 +138,40 @@ and attach it to a GitHub Release on tag, so a non-builder can download
 Rejected: committing `dist/` (git churn). Chrome Web Store stays a later option for
 true end-user distribution.
 
-## Work buckets
+## Backlog (consolidated 2026-07-08, post-P1)
 
-**Codex (server / OS):** [Replay CLI] → goal enrichment → title-quality gate →
-Tier 0 OK audit routing → negative-exemplar logging; plus finish distribution
-(menu bar push/merge, Windows daemon parity, extension release zip via CI →
-GitHub Releases per D6). P1 plumbing is implemented: celebration path, `break`
-feedback, `GET /personas`, report API, and `tier1_reason` column.
+P0 + P1 + detection fixes + Ollama Cloud stack are all shipped. What remains,
+in rough priority order:
 
-**Claude (design / copy):** celebration templates (done this round) → menu bar
-glyph + dot spec (this round) → P1 toast/report/persona-selector polish from
-`handoff-p1-claude-design.md` → "왜?" transparency → dev diagnostics view →
-goal-enrichment & Tier 1 strict prompts (joint copy).
+**Trust spine (the critical path):**
+1. **D4 — Replay CLI scope decision** (user + Claude) → then Codex handoff.
+   Everything in `judgment-audit-plan.md` is gated on this.
+2. **D3 — goal enrichment**: rides the Tier 1 cloud provider; OPEN only on
+   prompt/shape (joint copy, then Codex plumbing).
+3. Audit-plan chain after replay exists: title-quality gate → Tier 0 OK audit
+   routing → negative-exemplar logging → threshold tuning (`tau_ok`, `beta`,
+   `anchor_epsilon`) on replayed real sessions.
+4. **Tier 1 timeout watch**: 2026-07-08 live rate = 19 classified / 4
+   ReadTimeout (~17%) — nemotron-3-super's thinking sometimes blows the 10s
+   cap. Options when it annoys: raise tier1 timeout_seconds slightly, suppress
+   thinking via prompt, or re-probe for a faster free-tier model.
+
+**Product polish:**
+5. **Menu bar D2 finish**: Swift still renders the colored dot; implement the
+   alpha-brightness + breathing-pulse spec (design section below). Small,
+   Claude-ownable.
+6. **Celebration gate restore**: `celebration.min_drift_minutes` is 0.5 (30s)
+   for dogfooding — move back toward 3 once the loop feels validated.
+7. Persona live-tone tuning after real use (celebrate/nag lines that land
+   flat); D5 dev diagnostics view decision.
+8. **D6 — extension release zip** via CI → GitHub Releases (decided, deferred).
+
+**Known cosmetic/debt:**
+9. `{return_minutes}` renders "0분" for sub-minute returns — fine for
+   dry_kibitzer, review for other personas.
+10. progress.md is a running log with some stale early entries (e.g. the
+    2026-07-06 "Tier 1 = local Ollama" era) — history, not corrected, but new
+    entries should note supersessions.
 
 ## Design section: menu bar states
 
