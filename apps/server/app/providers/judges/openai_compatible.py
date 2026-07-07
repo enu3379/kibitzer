@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from itertools import count
+from typing import Iterator
 
 import httpx
 
 from ...schemas import Verdict
-from .base import Tier1Result, Tier2Result
+from .base import Tier1Result, Tier2Result, ordered_api_keys
 
 
 @dataclass(frozen=True)
@@ -17,6 +19,10 @@ class OpenAICompatibleJudgeProvider:
     timeout_seconds: float = 3
     fallback_api_key: str | None = None
     max_output_tokens: int = 512
+    # Optional rotation pool: when set (>= 2 keys), each call starts from the
+    # next key in the pool and the rest queue up as fallbacks.
+    api_keys: tuple[str, ...] | None = None
+    _rotation: Iterator[int] = field(default_factory=count, init=False, repr=False, compare=False)
 
     async def classify_tier1(self, payload: dict[str, object]) -> Tier1Result:
         request_body = {
@@ -57,9 +63,7 @@ class OpenAICompatibleJudgeProvider:
 
     async def _post_chat_completions(self, request_body: dict[str, object]) -> httpx.Response:
         url = _chat_completions_url(self.base_url)
-        api_keys = [self.api_key]
-        if self.fallback_api_key:
-            api_keys.append(self.fallback_api_key)
+        api_keys = ordered_api_keys(self.api_keys, self.api_key, self.fallback_api_key, self._rotation)
 
         last_response: httpx.Response | None = None
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:

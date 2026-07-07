@@ -21,6 +21,9 @@ tier1:
   base_url: "${TIER1_BASE_URL}"
   api_key_env: "ollama1"
   fallback_api_key_env: "ollama3"
+  # Rotate across all three keys per call; order offset from tier2 so the two
+  # tiers do not start on the same key.
+  api_key_pool_envs: ["ollama1", "ollama3", "ollama2"]
   model: "cheap-classifier"
   timeout_seconds: 10
   recent_observations: 5
@@ -39,6 +42,7 @@ tier2:
   base_url: "${TIER2_BASE_URL}"
   api_key_env: "ollama2"
   fallback_api_key_env: "ollama3"
+  api_key_pool_envs: ["ollama2", "ollama3", "ollama1"]
   model: "gemma4:31b"
   timeout_seconds: 180
   recent_observations: 5
