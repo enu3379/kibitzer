@@ -2,6 +2,8 @@ import {
   ControllerType,
   FeedbackKind,
   HealthTiers,
+  LatestObservation,
+  PageLabel,
   PendingIntervention,
   PersonaSummary,
   SessionReport,
@@ -11,12 +13,14 @@ import {
   createSession,
   getCurrentSession,
   getHealthTiers,
+  getLatestObservation,
   getPersonas,
   getSessionReport,
   getSessionState,
   getSessionStats,
   getSettings,
   postFeedback,
+  postObservationLabel,
   postSessionEnd,
   postSessionSnooze,
   putSettings,
@@ -53,12 +57,22 @@ const CONTROLLERS: { type: ControllerType; label: string; hint: string }[] = [
 
 const root = document.getElementById("root") as HTMLElement
 
+// Dev diagnostics is a display preference of this popup, not server state —
+// persisted in the extension page's localStorage (survives popup reopens).
+const DEV_DIAGNOSTICS_KEY = "kibitzer.devDiagnostics"
+
 let editing = false
 let summary: SessionStats | null = null
 let settingsOpen = false
 let reportOpen = false
 let pollTimer: number | undefined
 let personaCache: PersonaSummary[] = FALLBACK_PERSONAS
+let devDiagnostics = false
+try {
+  devDiagnostics = localStorage.getItem(DEV_DIAGNOSTICS_KEY) === "1"
+} catch {
+  // localStorage unavailable — leave diagnostics off.
+}
 
 function esc(text: string): string {
   return text.replace(
@@ -109,6 +123,15 @@ function header(pillLabel: string, pillTone: string): string {
     </div>`
 }
 
+async function getActiveTabId(): Promise<number | null> {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+    return tabs[0]?.id ?? null
+  } catch {
+    return null
+  }
+}
+
 async function refresh(): Promise<void> {
   if (editing || summary || settingsOpen || reportOpen) return
   const result = await getSessionState()
@@ -127,12 +150,14 @@ async function refresh(): Promise<void> {
     renderSetup(true)
     return
   }
-  const [current, stats, tiers] = await Promise.all([
+  const tabId = await getActiveTabId()
+  const [current, stats, tiers, page] = await Promise.all([
     getCurrentSession(),
     getSessionStats(),
     getHealthTiers(),
+    tabId === null ? Promise.resolve(null) : getLatestObservation(tabId),
   ])
-  renderDashboard(result.state, current?.goal?.raw_text ?? "", stats, tiers)
+  renderDashboard(result.state, current?.goal?.raw_text ?? "", stats, tiers, page)
   schedulePoll()
 }
 
@@ -198,11 +223,99 @@ async function submitGoal(sessionExists: boolean): Promise<void> {
   await refresh()
 }
 
+// ---- 지금 페이지 card (D5) ----
+// Pull-only: reports what the system believes about the page behind the popup
+// and takes page-fact labels ("이 페이지가 목표와 관련 있냐") — it never grades
+// the system and never prompts. `related` labels feed the exemplar path;
+// `drift` labels are record-only until D4 decides otherwise.
+
+const TIER_NAMES: Record<number, string> = {
+  0: "Tier 0 · 어휘 매칭",
+  1: "Tier 1 · LLM 재심",
+  2: "Tier 2 · 본문 확인",
+}
+
+function pageBelief(verdict: LatestObservation["verdict"]): { dot: string; text: string } {
+  if (verdict === "OK") return { dot: "ok", text: "관련 있다고 보는 중" }
+  if (verdict === "DRIFT") return { dot: "drift", text: "이탈로 보는 중" }
+  return { dot: "unknown", text: "아직 판단 전" }
+}
+
+// The 맞아/아니 prefix agrees or disagrees with the displayed belief, but the
+// label itself is always the page-fact ("관련 있다" / "이탈이다").
+function pageLabelButtons(page: LatestObservation): { related: string; drift: string } {
+  if (page.verdict === "OK") return { related: "맞아, 관련 있어", drift: "아니, 이탈이야" }
+  if (page.verdict === "DRIFT") return { related: "아니, 관련 있어", drift: "맞아, 이탈이야" }
+  return { related: "관련 있어", drift: "이탈이야" }
+}
+
+function pageDiagnosticsHtml(page: LatestObservation): string {
+  const features = page.features ?? {}
+  const tier = features.tier_reached
+  const tierName = tier === null || tier === undefined ? "–" : (TIER_NAMES[tier] ?? `Tier ${tier}`)
+  const anchor =
+    features.anchor_eligible === true ? "반영" : features.anchor_eligible === false ? "제외" : "–"
+  const reason = page.tier1_reason
+    ? `<p class="pc-reason">판정 근거: ${esc(page.tier1_reason)}</p>`
+    : ""
+  return `
+    <div class="pc-diag">
+      <div class="row"><span class="k">판정 단계</span><span>${tierName}</span></div>
+      <div class="row"><span class="k">r0 / τ</span><span>${formatScore(features.r0)} / ${formatScore(page.tau_ok)}</span></div>
+      <div class="row"><span class="k">예시 유사도</span><span>${formatScore(features.exemplar_score)}</span></div>
+      <div class="row"><span class="k">앵커 반영</span><span>${anchor}</span></div>
+    </div>
+    ${reason}`
+}
+
+function pageCardHtml(page: LatestObservation | null): string {
+  if (!page) {
+    return `
+    <p class="label">지금 페이지</p>
+    <div class="page-card">
+      <p class="pc-empty">이 탭은 아직 관측 전이에요</p>
+      <p class="pc-empty-hint">5초 이상 머문 일반 웹페이지만 봐요.</p>
+    </div>`
+  }
+  const belief = pageBelief(page.verdict)
+  const buttons = pageLabelButtons(page)
+  const labelNote =
+    page.label === "related"
+      ? `<p class="pc-note">관련 예시로 기억해요</p>`
+      : page.label === "drift"
+        ? `<p class="pc-note">이탈로 기록해뒀어요 — 판정 개선에 써요</p>`
+        : ""
+  const host = page.url_host ? ` · ${esc(page.url_host)}` : ""
+  return `
+    <p class="label">지금 페이지${host}</p>
+    <div class="page-card">
+      ${page.title ? `<p class="pc-title">${esc(page.title)}</p>` : ""}
+      <p class="pc-belief"><span class="pc-dot ${belief.dot}"></span>${belief.text}</p>
+      <div class="btn-row">
+        <button id="pl-related" class="btn${page.label === "related" ? " sel" : ""}">${buttons.related}</button>
+        <button id="pl-drift" class="btn${page.label === "drift" ? " sel" : ""}">${buttons.drift}</button>
+      </div>
+      ${labelNote}
+      ${devDiagnostics ? pageDiagnosticsHtml(page) : ""}
+    </div>`
+}
+
+async function submitPageLabel(page: LatestObservation, label: PageLabel): Promise<void> {
+  if (page.label === label) return
+  for (const id of ["pl-related", "pl-drift"]) {
+    const button = document.getElementById(id) as HTMLButtonElement | null
+    if (button) button.disabled = true
+  }
+  await postObservationLabel(page.observation_id, label)
+  await refresh()
+}
+
 function renderDashboard(
   state: SessionState,
   goalText: string,
   stats: SessionStats | null,
   tiers: HealthTiers | null = null,
+  page: LatestObservation | null = null,
 ): void {
   const pill = TRACKING_PILLS[state.tracking] ?? TRACKING_PILLS.tracking
   const pillLabel =
@@ -265,6 +378,7 @@ function renderDashboard(
       <p class="goal-text">${esc(goalText)}</p>
       <button id="goal-edit" class="icon-btn" title="목표 수정">수정</button>
     </div>
+    ${pageCardHtml(page)}
     <p class="label">${driftLabel}</p>
     ${driftMeter}
     <p class="hint">${driftHint}</p>
@@ -290,6 +404,15 @@ function renderDashboard(
     document.getElementById("why-toggle")?.addEventListener("click", () => {
       const reason = document.getElementById("why-reason")
       if (reason) reason.hidden = !reason.hidden
+    })
+  }
+
+  if (page) {
+    document.getElementById("pl-related")?.addEventListener("click", () => {
+      void submitPageLabel(page, "related")
+    })
+    document.getElementById("pl-drift")?.addEventListener("click", () => {
+      void submitPageLabel(page, "drift")
     })
   }
 
@@ -588,7 +711,12 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
         ${settings.quiet_hours.enabled ? "" : "disabled"} />
       <input id="quiet-toggle" type="checkbox" ${settings.quiet_hours.enabled ? "checked" : ""} />
     </div>
-    <p class="subhint">이 시간에는 알림·음성을 억제합니다. 억제된 잔소리도 팝업 카드에는 남습니다.</p>`
+    <p class="subhint">이 시간에는 알림·음성을 억제합니다. 억제된 잔소리도 팝업 카드에는 남습니다.</p>
+    <div class="setrow">
+      <span class="grow">개발자 진단</span>
+      <input id="dev-toggle" type="checkbox" ${devDiagnostics ? "checked" : ""} />
+    </div>
+    <p class="subhint">지금 페이지 카드에 판정 단계, r0/τ, 예시·앵커 수치와 판정 근거를 표시합니다.</p>`
 
   document.getElementById("settings-back")?.addEventListener("click", closeSettings)
 
@@ -654,6 +782,14 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
   })
   document.getElementById("quiet-end")?.addEventListener("change", (event) => {
     void applySettings({ quiet_hours: { end: (event.target as HTMLInputElement).value } })
+  })
+  document.getElementById("dev-toggle")?.addEventListener("change", (event) => {
+    devDiagnostics = (event.target as HTMLInputElement).checked
+    try {
+      localStorage.setItem(DEV_DIAGNOSTICS_KEY, devDiagnostics ? "1" : "0")
+    } catch {
+      // Preference simply won't survive the popup closing.
+    }
   })
 }
 

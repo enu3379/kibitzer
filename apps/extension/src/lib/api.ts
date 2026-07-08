@@ -46,6 +46,33 @@ export interface FeedbackResult {
   snoozed_until?: string | null
 }
 
+export type PageLabel = "related" | "drift"
+
+export interface LatestObservationFeatures {
+  r0?: number | null
+  exemplar_score?: number | null
+  anchor_eligible?: boolean | null
+  tier_reached?: number | null
+}
+
+export interface LatestObservation {
+  observation_id: string
+  title?: string | null
+  url_host?: string | null
+  verdict?: "OK" | "DRIFT" | null
+  features: LatestObservationFeatures
+  tier1_reason?: string | null
+  tau_ok?: number | null
+  label?: PageLabel | null
+}
+
+export interface PageLabelResult {
+  label_id: string
+  observation_id: string
+  label: PageLabel
+  exemplar_count?: number | null
+}
+
 export interface PendingIntervention {
   intervention_id: string
   observation_id?: string | null
@@ -317,6 +344,31 @@ export async function postFeedback(payload: FeedbackPayload): Promise<FeedbackRe
   })
   if (!response?.ok) return null
   return response.json() as Promise<FeedbackResult>
+}
+
+export async function getLatestObservation(tabId: number): Promise<LatestObservation | null> {
+  const response = await fetch(`${SERVER_BASE_URL}/observations/latest?tab_id=${encodeURIComponent(tabId)}`).catch(
+    () => {
+      return null
+    },
+  )
+  if (!response?.ok) return null
+  return response.json() as Promise<LatestObservation>
+}
+
+export async function postObservationLabel(
+  observationId: string,
+  label: PageLabel,
+): Promise<PageLabelResult | null> {
+  const response = await fetch(`${SERVER_BASE_URL}/observations/${observationId}/label`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ label }),
+  }).catch(() => {
+    return null
+  })
+  if (!response?.ok) return null
+  return response.json() as Promise<PageLabelResult>
 }
 
 export async function postObservationExcerpt(
