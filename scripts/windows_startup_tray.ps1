@@ -18,6 +18,17 @@ $HealthUrl = "http://127.0.0.1:8765/health"
 $LogDir = Join-Path $Root "data\logs"
 $TrayLog = Join-Path $LogDir "windows-startup-tray.log"
 $TrayPidFile = Join-Path $LogDir "windows-startup-tray.pid"
+$StartupErrLog = Join-Path $LogDir "windows-startup-app.err.log"
+$DefaultTimerInterval = [Math]::Max(1, $PollSeconds) * 1000
+$StartingTimerInterval = 1000
+$StartupTimeoutSeconds = 30
+$Script:StartingUntil = $null
+$Script:StartSource = $null
+$Script:StartProcess = $null
+$Script:StartStartedAt = $null
+$Script:NotifyIcon = $null
+$Script:StartItem = $null
+$Script:Timer = $null
 
 New-Item -ItemType Directory -Force $LogDir | Out-Null
 
@@ -67,18 +78,157 @@ function Get-KibitzerHealthStatus {
   }
 }
 
-function Start-KibitzerServer {
-  $Status = Get-KibitzerHealthStatus
-  if ($Status.Mode -ne "dead") {
-    return
-  }
-  if (-not (Test-Path (Join-Path $Root ".venv\Scripts\python.exe"))) {
+function Show-KibitzerBalloon {
+  param(
+    [string]$Text,
+    [string]$Kind = "Info"
+  )
+
+  if (-not $Script:NotifyIcon) {
     return
   }
 
-  $PowerShell = Get-WindowsPowerShell
+  $Icon = [System.Windows.Forms.ToolTipIcon]::Info
+  if ($Kind -eq "Warning") {
+    $Icon = [System.Windows.Forms.ToolTipIcon]::Warning
+  }
+  $Script:NotifyIcon.ShowBalloonTip(5000, "Kibitzer", $Text, $Icon)
+}
+
+function Set-KibitzerTrayText {
+  param([string]$Text)
+
+  if (-not $Script:NotifyIcon) {
+    return
+  }
+  if ($Text.Length -gt 63) {
+    $Text = $Text.Substring(0, 63)
+  }
+  $Script:NotifyIcon.Text = $Text
+}
+
+function Set-KibitzerStartingTray {
+  if ($Script:NotifyIcon) {
+    $Script:NotifyIcon.Icon = $TrayIcons.unknown
+    Set-KibitzerTrayText "Kibitzer: starting..."
+  }
+  if ($Script:StartItem) {
+    $Script:StartItem.Enabled = $false
+  }
+  if ($Script:Timer) {
+    $Script:Timer.Interval = $StartingTimerInterval
+  }
+}
+
+function Clear-KibitzerStartingState {
+  $Script:StartingUntil = $null
+  $Script:StartSource = $null
+  $Script:StartProcess = $null
+  $Script:StartStartedAt = $null
+  if ($Script:StartItem) {
+    $Script:StartItem.Enabled = $true
+  }
+  if ($Script:Timer) {
+    $Script:Timer.Interval = $DefaultTimerInterval
+  }
+}
+
+function Get-KibitzerStartElapsedSeconds {
+  if (-not $Script:StartStartedAt) {
+    return 0
+  }
+  return [Math]::Round(((Get-Date) - $Script:StartStartedAt).TotalSeconds, 1)
+}
+
+function Write-KibitzerStartupErrTail {
+  if (-not (Test-Path $StartupErrLog)) {
+    Write-TrayLog "app err tail: missing $StartupErrLog"
+    return
+  }
+
+  Write-TrayLog "app err tail:"
+  try {
+    Get-Content -LiteralPath $StartupErrLog -Tail 5 -ErrorAction Stop | ForEach-Object {
+      Write-TrayLog "app.err: $_"
+    }
+  }
+  catch {
+    Write-TrayLog "app err tail read failed: $($_.Exception.Message)"
+  }
+}
+
+function Fail-KibitzerStartingState {
+  param([string]$Outcome)
+
+  $Source = $Script:StartSource
+  $Elapsed = Get-KibitzerStartElapsedSeconds
+  $Extra = ""
+  if ($Outcome -eq "wrapper-exited" -and $Script:StartProcess) {
+    try {
+      $Extra = " exit=$($Script:StartProcess.ExitCode)"
+    }
+    catch {
+      $Extra = ""
+    }
+  }
+
+  Write-TrayLog "start source=$Source outcome=$Outcome$Extra after ${Elapsed}s"
+  Write-KibitzerStartupErrTail
+  Clear-KibitzerStartingState
+  Show-KibitzerBalloon "Server failed to start. See data\logs\windows-startup-app.err.log (menu > Open logs)." "Warning"
+  Update-KibitzerTray
+}
+
+function Start-KibitzerServer {
+  param([string]$Source = "menu")
+
+  $Status = Get-KibitzerHealthStatus
+  if ($Status.Mode -ne "dead") {
+    Write-TrayLog "start source=$Source skipped: health=$($Status.Mode)"
+    return
+  }
+  if ($Script:StartingUntil) {
+    Write-TrayLog "start source=$Source skipped: already-starting"
+    return
+  }
+
+  $Python = Join-Path $Root ".venv\Scripts\python.exe"
+  if (-not (Test-Path $Python)) {
+    Write-TrayLog "start source=$Source outcome=precondition-failed: python-venv-missing"
+    Show-KibitzerBalloon "Python venv not found. Run scripts\windows_setup.ps1 first." "Warning"
+    return
+  }
+  if (-not (Test-Path $RunScript)) {
+    Write-TrayLog "start source=$Source outcome=precondition-failed: run-script-missing"
+    Show-KibitzerBalloon "Run script not found. Check scripts\windows_run_server.ps1." "Warning"
+    return
+  }
+
+  try {
+    $PowerShell = Get-WindowsPowerShell
+  }
+  catch {
+    Write-TrayLog "start source=$Source outcome=precondition-failed: powershell-missing $($_.Exception.Message)"
+    Show-KibitzerBalloon "Windows PowerShell not found. See data\logs (menu > Open logs)." "Warning"
+    return
+  }
+
   $Arguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $RunScript + '" -LogToFile'
-  Start-Process -FilePath $PowerShell -ArgumentList $Arguments -WorkingDirectory $Root -WindowStyle Hidden
+  try {
+    $Process = Start-Process -FilePath $PowerShell -ArgumentList $Arguments -WorkingDirectory $Root -WindowStyle Hidden -PassThru -ErrorAction Stop
+  }
+  catch {
+    Write-TrayLog "start source=$Source outcome=precondition-failed: spawn-failed $($_.Exception.Message)"
+    Show-KibitzerBalloon "Server failed to start. See data\logs (menu > Open logs)." "Warning"
+    return
+  }
+
+  $Script:StartingUntil = (Get-Date).AddSeconds($StartupTimeoutSeconds)
+  $Script:StartSource = $Source
+  $Script:StartProcess = $Process
+  $Script:StartStartedAt = Get-Date
+  Write-TrayLog "start source=$Source spawned pid=$($Process.Id)"
+  Set-KibitzerStartingTray
 }
 
 function Get-KibitzerTrayIconPath {
@@ -180,8 +330,6 @@ Add-Type -AssemblyName System.Drawing
 
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
-Start-KibitzerServer
-
 $TrayIcons = @{
   active = New-KibitzerTrayIcon ([System.Drawing.Color]::FromArgb(40, 170, 95))
   idle = New-KibitzerTrayIcon ([System.Drawing.Color]::FromArgb(145, 145, 145))
@@ -193,36 +341,78 @@ $NotifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $NotifyIcon.Text = "Kibitzer: starting"
 $NotifyIcon.Icon = $TrayIcons.unknown
 $NotifyIcon.Visible = $true
+$Script:NotifyIcon = $NotifyIcon
 
 $Menu = New-Object System.Windows.Forms.ContextMenuStrip
 $RefreshItem = $Menu.Items.Add("Refresh status")
 $StartItem = $Menu.Items.Add("Start server")
 $OpenHealthItem = $Menu.Items.Add("Open health")
+$OpenLogsItem = $Menu.Items.Add("Open logs")
 $ExitItem = $Menu.Items.Add("Exit tray")
+$Script:StartItem = $StartItem
 $NotifyIcon.ContextMenuStrip = $Menu
 
-function Update-KibitzerTray {
-  $Status = Get-KibitzerHealthStatus
+function Set-KibitzerTrayStatus {
+  param($Status)
+
   $IconKey = if ($TrayIcons.ContainsKey($Status.IconKey)) { $Status.IconKey } else { "unknown" }
   $NotifyIcon.Icon = $TrayIcons[$IconKey]
-  $NotifyIcon.Text = $Status.Text
+  Set-KibitzerTrayText $Status.Text
+}
+
+function Resolve-KibitzerStartingState {
+  $Status = Get-KibitzerHealthStatus
+  if ($Status.Mode -ne "dead") {
+    $Source = $Script:StartSource
+    $Elapsed = Get-KibitzerStartElapsedSeconds
+    Write-TrayLog "start source=$Source outcome=health-ok after ${Elapsed}s"
+    Clear-KibitzerStartingState
+    Set-KibitzerTrayStatus $Status
+    if ($Source -eq "menu") {
+      Show-KibitzerBalloon "Kibitzer server is running." "Info"
+    }
+    return
+  }
+
+  if ($Script:StartProcess -and $Script:StartProcess.HasExited) {
+    Fail-KibitzerStartingState "wrapper-exited"
+    return
+  }
+
+  if ((Get-Date) -gt $Script:StartingUntil) {
+    Fail-KibitzerStartingState "timeout"
+    return
+  }
+
+  Set-KibitzerStartingTray
+}
+
+function Update-KibitzerTray {
+  if ($Script:StartingUntil) {
+    Resolve-KibitzerStartingState
+    return
+  }
+
+  $Status = Get-KibitzerHealthStatus
+  Set-KibitzerTrayStatus $Status
 }
 
 $RefreshItem.Add_Click({ Update-KibitzerTray })
 $StartItem.Add_Click({
-  Start-KibitzerServer
-  Start-Sleep -Milliseconds 500
-  Update-KibitzerTray
+  Start-KibitzerServer -Source "menu"
 })
 $OpenHealthItem.Add_Click({ Start-Process $HealthUrl })
+$OpenLogsItem.Add_Click({ Start-Process -FilePath explorer.exe -ArgumentList @($LogDir) })
 $ExitItem.Add_Click({ [System.Windows.Forms.Application]::Exit() })
 $NotifyIcon.Add_DoubleClick({ Start-Process $HealthUrl })
 
 $Timer = New-Object System.Windows.Forms.Timer
-$Timer.Interval = [Math]::Max(1, $PollSeconds) * 1000
+$Timer.Interval = $DefaultTimerInterval
+$Script:Timer = $Timer
 $Timer.Add_Tick({ Update-KibitzerTray })
 $Timer.Start()
 
+Start-KibitzerServer -Source "auto"
 Update-KibitzerTray
 
 [System.Windows.Forms.Application]::Run()

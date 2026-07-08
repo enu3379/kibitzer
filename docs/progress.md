@@ -544,3 +544,13 @@ Next:
   rotation — the 2026-07-06 "Tier 1 Enabled (Local Ollama)" entry is history,
   not current state. READMEs, SETUP guides, platforms/architecture docs, and
   the docs index were aligned with the code in the same pass.
+
+## 2026-07-08 Windows Tray Start Feedback
+
+- Reworked the Windows tray **Start server** path so it reports missing
+  prerequisites, shows a non-blocking yellow "starting..." state, and lets the
+  existing WinForms timer resolve success, wrapper exit, or timeout.
+- Added tray logging for each start attempt, success/failure outcomes, and the
+  last lines of `windows-startup-app.err.log` on boot failures.
+- Added an **Open logs** tray menu item and updated `WINDOWS_SETUP.md` so testers
+  know where to collect `windows-startup-tray.log` and server startup logs.
