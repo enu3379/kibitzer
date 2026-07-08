@@ -18,6 +18,7 @@ import {
   putSettings,
   setGoal,
 } from "../lib/api"
+import { ExplorationHistoryEntry, listExplorationHistory } from "../lib/history"
 
 const POLL_MS = 2000
 const TRACKING_PILLS: Record<SessionState["tracking"], { label: string; tone: string }> = {
@@ -45,6 +46,7 @@ const root = document.getElementById("root") as HTMLElement
 let editing = false
 let summary: SessionStats | null = null
 let settingsOpen = false
+let historyOpen = false
 let pollTimer: number | undefined
 
 function esc(text: string): string {
@@ -97,7 +99,7 @@ function header(pillLabel: string, pillTone: string): string {
 }
 
 async function refresh(): Promise<void> {
-  if (editing || summary || settingsOpen) return
+  if (editing || summary || settingsOpen || historyOpen) return
   const result = await getSessionState()
   if (result.kind === "unreachable") {
     renderUnreachable()
@@ -153,6 +155,7 @@ function renderSetup(sessionExists: boolean, currentGoal = ""): void {
   document.getElementById("goal-cancel")?.addEventListener("click", () => {
     editing = false
     settingsOpen = false
+    historyOpen = false
     void refresh()
   })
 }
@@ -232,7 +235,8 @@ function renderDashboard(
 
   root.innerHTML = `
     ${header(pillLabel, pill.tone)}
-    <div style="display: flex; justify-content: flex-end; margin: -8px 0 6px;">
+    <div style="display: flex; justify-content: flex-end; gap: 8px; margin: -8px 0 6px;">
+      <button id="open-history" class="icon-btn">탐색 기록</button>
       <button id="open-settings" class="icon-btn">설정</button>
     </div>
     ${degradedNote}
@@ -267,6 +271,9 @@ function renderDashboard(
 
   document.getElementById("open-settings")?.addEventListener("click", () => {
     void openSettings()
+  })
+  document.getElementById("open-history")?.addEventListener("click", () => {
+    void openHistory()
   })
 
   document.getElementById("goal-edit")?.addEventListener("click", () => {
@@ -319,6 +326,58 @@ async function endSession(): Promise<void> {
   renderSummary(stats)
 }
 
+async function openHistory(): Promise<void> {
+  historyOpen = true
+  settingsOpen = false
+  stopPoll()
+  const entries = await listExplorationHistory()
+  renderHistory(entries)
+}
+
+function closeHistory(): void {
+  historyOpen = false
+  void refresh()
+}
+
+function renderHistory(entries: ExplorationHistoryEntry[]): void {
+  const items = entries.length
+    ? entries.map(renderHistoryItem).join("")
+    : `<p class="center-note">아직 탐색 기록이 없습니다.</p>`
+
+  root.innerHTML = `
+    <div class="header">
+      <button id="history-back" class="icon-btn" title="대시보드로">←</button>
+      <span class="name">탐색 기록</span>
+    </div>
+    <div class="history-list">${items}</div>`
+
+  document.getElementById("history-back")?.addEventListener("click", closeHistory)
+}
+
+function renderHistoryItem(entry: ExplorationHistoryEntry): string {
+  const verdictClass = entry.verdict === "OK" ? " ok" : entry.verdict === "DRIFT" ? " drift" : ""
+  const ariaLabel =
+    entry.verdict === "OK" ? 'aria-label="목표 관련"' : entry.verdict === "DRIFT" ? 'aria-label="이탈"' : 'aria-hidden="true"'
+  return `
+    <div class="history-item">
+      <span class="history-light${verdictClass}" ${ariaLabel}></span>
+      <div class="history-main">
+        <div class="history-title">${esc(historyTitle(entry))}</div>
+        <div class="history-url">${esc(entry.url)}</div>
+      </div>
+    </div>`
+}
+
+function historyTitle(entry: ExplorationHistoryEntry): string {
+  const title = entry.title.trim()
+  if (title) return title
+  try {
+    return new URL(entry.url).hostname
+  } catch {
+    return "제목 없음"
+  }
+}
+
 function renderSummary(stats: SessionStats): void {
   const interventionText = stats.interventions
     ? `${stats.interventions}회 · 수락 ${stats.interventions_accepted}회`
@@ -351,6 +410,7 @@ function renderSummary(stats: SessionStats): void {
 
 async function openSettings(): Promise<void> {
   settingsOpen = true
+  historyOpen = false
   stopPoll()
   const settings = await getSettings()
   if (!settings) {
