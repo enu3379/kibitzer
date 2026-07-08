@@ -1,0 +1,43 @@
+name: 버그 리포트
+description: 재현 가능한 버그 신고
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: repro
+    attributes:
+      label: 재현 절차
+      description: 처음부터 순서대로. 선언한 목표, 방문한 페이지 흐름 등 세션 맥락도 함께.
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 기대 동작
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 실제 동작
+      description: 에러 메시지·서버 로그가 있으면 그대로 붙여넣기.
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: 환경
+      description: OS / Chrome 버전 / 커밋
+      placeholder: "macOS 15 / Chrome 138 / dev@8350523"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 스크린샷 · 로그
+      description: 서버 콘솔, chrome://extensions 서비스 워커 콘솔 (선택)
+    validations:
+      required: false
