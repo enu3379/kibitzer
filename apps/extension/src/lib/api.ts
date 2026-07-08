@@ -196,6 +196,11 @@ export interface Cooldown {
   seconds: number
 }
 
+export interface DwellSettings {
+  observation_seconds: number
+  tier2_seconds: number
+}
+
 export type ControllerType = "streak" | "alignment"
 
 export interface ControllerSettings {
@@ -211,6 +216,7 @@ export interface Settings {
   voice_enabled: boolean
   controller: ControllerSettings
   cooldown: Cooldown
+  dwell: DwellSettings
   quiet_hours: QuietHours
 }
 
@@ -219,12 +225,14 @@ export interface SettingsPatch {
   voice_enabled?: boolean
   controller?: Partial<ControllerSettings>
   cooldown?: Partial<Cooldown>
+  dwell?: Partial<DwellSettings>
   quiet_hours?: Partial<QuietHours>
 }
 
 function normalizeSettings(value: Partial<Settings>): Settings {
   const rawController = (value.controller ?? {}) as Partial<ControllerSettings>
   const rawCooldown = (value.cooldown ?? {}) as Partial<Cooldown>
+  const rawDwell = (value.dwell ?? {}) as Partial<DwellSettings>
   const rawQuietHours = (value.quiet_hours ?? {}) as Partial<QuietHours>
   const rawType = String(rawController.type ?? "")
   const controllerType: ControllerType = rawType === "alignment" || rawType === "window" ? "alignment" : "streak"
@@ -246,6 +254,10 @@ function normalizeSettings(value: Partial<Settings>): Settings {
     cooldown: {
       enabled: Boolean(rawCooldown.enabled),
       seconds: clampInt(rawCooldown.seconds, 0, 0, 86400),
+    },
+    dwell: {
+      observation_seconds: clampInt(rawDwell.observation_seconds, 5, 1, 300),
+      tier2_seconds: clampInt(rawDwell.tier2_seconds, 10, 1, 300),
     },
     quiet_hours: {
       enabled: Boolean(rawQuietHours.enabled),
