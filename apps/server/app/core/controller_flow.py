@@ -13,6 +13,7 @@ def apply_controller(
     store: SQLiteStore,
     config: ControllerConfig,
     observation: Observation,
+    now: datetime | None = None,
 ) -> PipelineResult:
     if observation.verdict is None:
         return PipelineResult(
@@ -48,7 +49,7 @@ def apply_controller(
             snoozed_until=state.snoozed_until,
         )
     controller.update(observation.verdict, observation.features.r_final)
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
 
     if controller.should_intervene(now):
         controller.on_intervened(now)

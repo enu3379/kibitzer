@@ -624,3 +624,32 @@ Verified:
 - Browser-preview harness (built popup.js + stubbed `chrome`/`fetch`): OK /
   DRIFT / unjudged / no-observation states, label click → POST → selected
   state + note, dev-toggle persistence, light + dark screenshots.
+
+## 2026-07-08 Replay CLI: Per-session deterministic re-simulation
+
+- Added `apps.server.app.replay` with an importable replay core and
+  `python -m apps.server.app.replay` CLI. The source SQLite DB is opened via
+  `mode=ro`; replay state (goal exemplars, anchor, controller state, and
+  would-request-excerpt actions) stays in memory.
+- Replay follows the logged event timeline: `goal.declared` resets the exemplar
+  seed, `goal.exemplar_added` appends the replayed observation embedding with
+  the configured cap, `session.snoozed` updates in-memory controller silence,
+  and `observation.recorded` re-runs title-furniture stripping, hash embedding,
+  Tier 0 score parts, recorded Tier 1 outcomes, anchor admission, and the
+  controller with `now=obs.ts`.
+- Added CLI support for `--list-sessions`, `--session` prefix resolution,
+  `--latest`, repeated `--override dotted.path=value`, `--full`, `--csv`, and
+  `--json`. `--live-tiers` is accepted only as a reserved follow-up flag; this
+  patch replays recorded tier outcomes by default.
+- Refactored `apply_controller(..., now=None)` so live behavior still uses the
+  wall clock while replay injects the observation timestamp.
+- Added deterministic replay tests for round-trip invariance through the API,
+  threshold counterfactuals, exemplar timeline effects, recorded Tier 1 plus
+  `tier1:no_recording`, and the read-only DB hash guarantee.
+
+Verified:
+
+- `.venv/bin/python -m pytest apps/server/tests -q` passes (98 tests).
+- `.venv/bin/python -m apps.server.app.replay --db ./data/kibitzer.sqlite3 --list-sessions`
+- `.venv/bin/python -m apps.server.app.replay --db ./data/kibitzer.sqlite3 --latest --full`
+- `.venv/bin/python -m apps.server.app.replay --db ./data/kibitzer.sqlite3 --latest --override relevance.tau_ok=0.2 --csv /tmp/kibitzer-replay-latest.csv --json /tmp/kibitzer-replay-latest.json`
