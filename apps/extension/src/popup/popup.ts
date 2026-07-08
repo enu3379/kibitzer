@@ -440,6 +440,19 @@ function renderSettings(settings: Settings): void {
     </div>
     <p class="subhint">꺼두면 테스트 중 같은 흐름에서도 다음 훈수를 바로 받을 수 있습니다.</p>
     <div class="setrow">
+      <span class="grow">판정 대기</span>
+      <input id="dwell-observation" class="number" type="number" min="1" max="300" step="1"
+        value="${settings.dwell.observation_seconds}" />
+      <span style="color: var(--muted);">초</span>
+    </div>
+    <div class="setrow">
+      <span class="grow">본문 확인 대기</span>
+      <input id="dwell-tier2" class="number" type="number" min="1" max="300" step="1"
+        value="${settings.dwell.tier2_seconds}" />
+      <span style="color: var(--muted);">초</span>
+    </div>
+    <p class="subhint">짧게 들른 페이지는 판정하지 않습니다. 본문 확인 대기는 Tier 2 요청 전에 같은 페이지에 머문 총 시간입니다.</p>
+    <div class="setrow">
       <span class="grow">조용한 시간</span>
       <input id="quiet-start" class="time" type="time" value="${esc(settings.quiet_hours.start)}"
         ${settings.quiet_hours.enabled ? "" : "disabled"} />
@@ -504,6 +517,18 @@ function renderSettings(settings: Settings): void {
     const seconds = Number.parseInt((event.target as HTMLInputElement).value, 10)
     if (Number.isFinite(seconds) && seconds >= 0) {
       void applySettings({ cooldown: { seconds } })
+    }
+  })
+  document.getElementById("dwell-observation")?.addEventListener("change", (event) => {
+    const seconds = Number.parseInt((event.target as HTMLInputElement).value, 10)
+    if (Number.isFinite(seconds) && seconds >= 1 && seconds <= 300) {
+      void applySettings({ dwell: { observation_seconds: seconds } })
+    }
+  })
+  document.getElementById("dwell-tier2")?.addEventListener("change", (event) => {
+    const seconds = Number.parseInt((event.target as HTMLInputElement).value, 10)
+    if (Number.isFinite(seconds) && seconds >= 1 && seconds <= 300) {
+      void applySettings({ dwell: { tier2_seconds: seconds } })
     }
   })
   document.getElementById("quiet-toggle")?.addEventListener("change", (event) => {

@@ -91,6 +91,11 @@ class ControllerConfig(BaseModel):
         return self
 
 
+class DwellConfig(BaseModel):
+    observation_seconds: int = Field(default=5, ge=1, le=300)
+    tier2_seconds: int = Field(default=10, ge=1, le=300)
+
+
 class PrivacyConfig(BaseModel):
     sensitive_domains_file: str = "configs/sensitive_domains.yaml"
     strip_query: bool = True
@@ -125,6 +130,7 @@ class AppConfig(BaseModel):
     tier1: Tier1Config = Field(default_factory=Tier1Config)
     tier2: Tier2Config = Field(default_factory=Tier2Config)
     controller: ControllerConfig = Field(default_factory=ControllerConfig)
+    dwell: DwellConfig = Field(default_factory=DwellConfig)
     privacy: PrivacyConfig = Field(default_factory=PrivacyConfig)
     delivery: DeliveryConfig = Field(default_factory=DeliveryConfig)
     raw: dict[str, Any] = Field(default_factory=dict)
@@ -139,6 +145,17 @@ def load_config(path: str | Path = "configs/default.yaml") -> AppConfig:
         **{
             k: v
             for k, v in (data or {}).items()
-            if k in {"server", "embedding", "relevance", "tier1", "tier2", "controller", "privacy", "delivery"}
+            if k
+            in {
+                "server",
+                "embedding",
+                "relevance",
+                "tier1",
+                "tier2",
+                "controller",
+                "dwell",
+                "privacy",
+                "delivery",
+            }
         },
     )

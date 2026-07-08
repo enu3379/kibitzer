@@ -52,6 +52,7 @@ class SettingsApiTest(unittest.TestCase):
             {"type": "streak", "k": 1, "alignment_alpha": 0.85, "theta_low": 0.15, "theta_high": 0.3},
         )
         self.assertEqual(defaults["cooldown"], {"enabled": False, "seconds": 0})
+        self.assertEqual(defaults["dwell"], {"observation_seconds": 5, "tier2_seconds": 10})
         self.assertEqual(defaults["quiet_hours"], {"enabled": False, "start": "09:00", "end": "18:00"})
 
         updated = self.client.put(
@@ -61,6 +62,7 @@ class SettingsApiTest(unittest.TestCase):
                 "voice_enabled": True,
                 "controller": {"type": "alignment", "k": 3, "alignment_alpha": 0.5, "theta_low": 0.25, "theta_high": 0.55},
                 "cooldown": {"enabled": True, "seconds": 30},
+                "dwell": {"observation_seconds": 3, "tier2_seconds": 6},
                 "quiet_hours": {"enabled": True, "start": "22:30", "end": "07:15"},
             },
         ).json()
@@ -72,6 +74,7 @@ class SettingsApiTest(unittest.TestCase):
             {"type": "alignment", "k": 3, "alignment_alpha": 0.5, "theta_low": 0.25, "theta_high": 0.55},
         )
         self.assertEqual(updated["cooldown"], {"enabled": True, "seconds": 30})
+        self.assertEqual(updated["dwell"], {"observation_seconds": 3, "tier2_seconds": 6})
         self.assertEqual(updated["quiet_hours"], {"enabled": True, "start": "22:30", "end": "07:15"})
         self.assertEqual(self.client.get("/settings").json(), updated)
 
@@ -84,7 +87,7 @@ class SettingsApiTest(unittest.TestCase):
             conn.close()
         self.assertEqual(
             json.loads(event)["keys"],
-            ["controller", "cooldown", "persona", "quiet_hours", "voice_enabled"],
+            ["controller", "cooldown", "dwell", "persona", "quiet_hours", "voice_enabled"],
         )
 
     def test_settings_validation(self) -> None:
@@ -95,6 +98,14 @@ class SettingsApiTest(unittest.TestCase):
         )
         self.assertEqual(
             self.client.put("/settings", json={"cooldown": {"seconds": -1}}).status_code,
+            422,
+        )
+        self.assertEqual(
+            self.client.put("/settings", json={"dwell": {"observation_seconds": 0}}).status_code,
+            422,
+        )
+        self.assertEqual(
+            self.client.put("/settings", json={"dwell": {"tier2_seconds": 301}}).status_code,
             422,
         )
         self.assertEqual(

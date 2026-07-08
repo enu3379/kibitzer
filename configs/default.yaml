@@ -76,6 +76,10 @@ controller:
   snooze_seconds: 1800
   coldstart_observations: 5
 
+dwell:
+  observation_seconds: 5
+  tier2_seconds: 10
+
 privacy:
   sensitive_domains_file: "configs/sensitive_domains.yaml"
   strip_query: true
