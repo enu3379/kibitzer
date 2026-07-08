@@ -544,3 +544,21 @@ Next:
   rotation — the 2026-07-06 "Tier 1 Enabled (Local Ollama)" entry is history,
   not current state. READMEs, SETUP guides, platforms/architecture docs, and
   the docs index were aligned with the code in the same pass.
+
+## 2026-07-09 Toast Redisplay
+
+- Implemented active-tab redisplay for pending intervention and celebration
+  toasts. The background worker now keeps toast metadata and reinjects the latest
+  pending toast after tab activation, top-frame load completion, or SPA URL
+  updates.
+- Delivery side effects stay single-shot: the first successful presentation
+  reports intervention delivery and plays the sound; redisplays are quiet. A
+  display token prevents stale hidden-tab timeout/dismiss events from clearing a
+  newer active-tab toast.
+- Verified by build/typecheck (`npm.cmd --prefix apps/extension run build`,
+  `npm.cmd --prefix apps/extension run typecheck`) and a manual browser check:
+  tab switching no longer makes the user miss a pending toast.
+- Known polish notes: toast card sizing can vary slightly by tab/site for an
+  unknown reason, and reinjection replays Kibitzer's entrance animation whenever
+  the user switches back and forth while a toast is pending. Both are accepted
+  for now.
