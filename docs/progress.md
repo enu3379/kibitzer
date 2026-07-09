@@ -624,3 +624,35 @@ Verified:
 - Browser-preview harness (built popup.js + stubbed `chrome`/`fetch`): OK /
   DRIFT / unjudged / no-observation states, label click → POST → selected
   state + note, dev-toggle persistence, light + dark screenshots.
+
+## 2026-07-09 Popup: Server-Offline Banner + Cached Dashboard (issue #11)
+
+- The popup no longer blanks out when the local server is unreachable (the
+  extension half of issue #11). Instead of the full-screen "연결 안 됨" note,
+  every screen keeps rendering: a red banner on top (`서버 연결 안 됨 — 추적을
+  사용할 수 없어요`), the header pill switches to `연결 안 됨`, and the 2s
+  poll keeps running so reconnection stays automatic.
+- The last successfully rendered dashboard (state + goal + stats) is cached in
+  popup localStorage (`kibitzer.lastSnapshot`) and shown read-only while
+  offline: server-dependent buttons (리포트/설정/수정/스누즈/세션 종료) are
+  disabled, the pending nag card is suppressed (it may have expired and its
+  feedback buttons need the server anyway), and the 지금 페이지 card shows
+  `서버에 연결되면 표시돼요`. The snapshot clears once the server reports the
+  captured session is gone (no session / no goal / session ended).
+- With no snapshot (fresh install), the goal setup screen renders under the
+  banner with 추적 시작 disabled; typed goal text survives both the reconnect
+  poll (offline re-renders are skipped while the view kind is unchanged) and
+  the offline→online transition.
+- All unreachable failure paths (goal submit, snooze, session end, report,
+  settings open/apply) now route through one handler instead of six copies of
+  the full-screen error.
+
+Verified:
+
+- `npm run build` in `apps/extension` (typecheck + bundle).
+- Browser-preview harness (built popup.js + stubbed `chrome` and a
+  mode-switchable `fetch`): offline-no-cache setup screen, typing survival
+  across ~18 poll cycles, offline→online auto-recovery to the live dashboard,
+  online→offline cached dashboard (banner, disabled controls, hidden nag
+  card), cold reopen while offline, light + dark screenshots, zero console
+  errors.
