@@ -56,6 +56,14 @@ class ObservationRecord:
 
 
 @dataclass(frozen=True)
+class PageLabelRecord:
+    id: str
+    observation_id: str
+    label: str
+    ts: datetime
+
+
+@dataclass(frozen=True)
 class ObservationSummary:
     title: str | None
     verdict: str | None
@@ -1185,6 +1193,71 @@ class SQLiteStore:
             ).fetchone()
         return self._observation_from_row(row) if row else None
 
+    def latest_observation_for_tab(self, session_id: str, tab_id: int) -> ObservationRecord | None:
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute(
+                """
+                SELECT id, session_id, ts, source, url_host, url_path_hash, title, tab_id,
+                       features_json, verdict, tier_reached, tier1_reason
+                FROM observations
+                WHERE session_id = ? AND tab_id = ?
+                ORDER BY ts DESC, id DESC
+                LIMIT 1
+                """,
+                (session_id, tab_id),
+            ).fetchone()
+        return self._observation_from_row(row) if row else None
+
+    def record_page_label(
+        self,
+        session_id: str,
+        observation_id: str,
+        label: str,
+        ts: datetime | None = None,
+    ) -> tuple[PageLabelRecord, str | None]:
+        now = ts or _utc_now()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            existing = conn.execute(
+                "SELECT id, label FROM page_labels WHERE observation_id = ?",
+                (observation_id,),
+            ).fetchone()
+            previous_label = existing["label"] if existing else None
+            label_id = existing["id"] if existing else f"pl_{uuid.uuid4().hex}"
+            conn.execute(
+                """
+                INSERT INTO page_labels (id, observation_id, label, ts)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(observation_id) DO UPDATE SET
+                    label = excluded.label,
+                    ts = excluded.ts
+                """,
+                (label_id, observation_id, label, now.isoformat()),
+            )
+            self._append_event(
+                conn,
+                session_id,
+                "page_label.recorded",
+                {
+                    "label_id": label_id,
+                    "observation_id": observation_id,
+                    "label": label,
+                    "previous_label": previous_label,
+                },
+                now,
+            )
+        return PageLabelRecord(id=label_id, observation_id=observation_id, label=label, ts=now), previous_label
+
+    def page_label_for_observation(self, observation_id: str) -> str | None:
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute(
+                "SELECT label FROM page_labels WHERE observation_id = ?",
+                (observation_id,),
+            ).fetchone()
+        return row["label"] if row else None
+
     def record_feedback_once(
         self,
         session_id: str,
@@ -1641,9 +1714,19 @@ class SQLiteStore:
                 updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS page_labels (
+                id TEXT PRIMARY KEY,
+                observation_id TEXT NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+                label TEXT NOT NULL CHECK (label IN ('related', 'drift')),
+                ts TEXT NOT NULL
+            );
+
             CREATE UNIQUE INDEX IF NOT EXISTS idx_feedback_once_intervention_kind
             ON feedback(intervention_id, kind)
             WHERE intervention_id IS NOT NULL;
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_page_labels_observation
+            ON page_labels(observation_id);
             """
         )
         self._ensure_observation_columns(conn)
