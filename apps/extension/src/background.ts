@@ -5,6 +5,7 @@ import {
   PageInfo,
   PageExcerpt,
   PipelineResult,
+  getSettings,
   getSessionState,
   postBrowserNav,
   postDeliveryReport,
@@ -13,8 +14,8 @@ import {
 } from "./lib/api"
 import { shouldDropUrl } from "./lib/domainFilter"
 
-const OBSERVATION_DWELL_MS = 5000
-const TIER2_DWELL_MS = 10000
+const DEFAULT_OBSERVATION_DWELL_MS = 5000
+const DEFAULT_TIER2_DWELL_MS = 10000
 const EXCERPT_LIMIT = 3500
 const NOTIFICATION_ICON = "icons/icon-128.png"
 const BADGE_ALARM = "kibitzer-badge-refresh"
@@ -34,6 +35,7 @@ interface PendingTabObservation {
   url: string
   startedAt: number
   timer: number
+  tier2DwellMs: number
 }
 
 let nextObservationToken = 0
@@ -44,12 +46,18 @@ function scheduleTabObservation(tabId: number, observedUrl?: string): void {
   clearTabTimer(tabId)
   const token = ++nextObservationToken
   const startedAt = Date.now()
+  pendingTabObservations.set(tabId, {
+    token,
+    url: "",
+    startedAt,
+    timer: 0,
+    tier2DwellMs: DEFAULT_TIER2_DWELL_MS,
+  })
   if (observedUrl) {
-    scheduleDwellCheck(tabId, token, observedUrl, startedAt)
+    void scheduleDwellCheck(tabId, token, observedUrl, startedAt)
     return
   }
 
-  pendingTabObservations.set(tabId, { token, url: "", startedAt, timer: 0 })
   void getTab(tabId).then((tab) => {
     const pending = pendingTabObservations.get(tabId)
     if (!pending || pending.token !== token) return
@@ -57,15 +65,18 @@ function scheduleTabObservation(tabId: number, observedUrl?: string): void {
       pendingTabObservations.delete(tabId)
       return
     }
-    scheduleDwellCheck(tabId, token, tab.url, startedAt)
+    void scheduleDwellCheck(tabId, token, tab.url, startedAt)
   })
 }
 
-function scheduleDwellCheck(tabId: number, token: number, url: string, startedAt: number): void {
+async function scheduleDwellCheck(tabId: number, token: number, url: string, startedAt: number): Promise<void> {
   if (shouldDropUrl(url)) {
     pendingTabObservations.delete(tabId)
     return
   }
+  const dwell = await loadDwellSettings()
+  const pendingBeforeTimer = pendingTabObservations.get(tabId)
+  if (!pendingBeforeTimer || pendingBeforeTimer.token !== token) return
   const timer = globalThis.setTimeout(async () => {
     const pending = pendingTabObservations.get(tabId)
     if (!pending || pending.token !== token) return
@@ -79,10 +90,33 @@ function scheduleDwellCheck(tabId: number, token: number, url: string, startedAt
       title: tab.title ?? "",
       tab_id: tab.id,
     })
-    await handlePipelineResult(tabId, result, { url, startedAt })
+    await handlePipelineResult(tabId, result, {
+      url,
+      startedAt,
+      tier2DwellMs: pending.tier2DwellMs,
+    })
     void refreshBadge()
-  }, OBSERVATION_DWELL_MS)
-  pendingTabObservations.set(tabId, { token, url, startedAt, timer })
+  }, dwell.observationDwellMs)
+  pendingTabObservations.set(tabId, {
+    token,
+    url,
+    startedAt,
+    timer,
+    tier2DwellMs: dwell.tier2DwellMs,
+  })
+}
+
+interface DwellTiming {
+  observationDwellMs: number
+  tier2DwellMs: number
+}
+
+async function loadDwellSettings(): Promise<DwellTiming> {
+  const settings = await getSettings()
+  return {
+    observationDwellMs: (settings?.dwell.observation_seconds ?? 5) * 1000,
+    tier2DwellMs: (settings?.dwell.tier2_seconds ?? 10) * 1000,
+  }
 }
 
 async function getTab(tabId: number): Promise<chrome.tabs.Tab | null> {
@@ -103,7 +137,7 @@ function clearTabTimer(tabId: number): void {
 async function handlePipelineResult(
   tabId: number,
   result: PipelineResult | null,
-  observation: { url: string; startedAt: number },
+  observation: { url: string; startedAt: number; tier2DwellMs: number },
 ): Promise<void> {
   if (!result?.observation_id) return
   // Celebrations arrive directly on the browser-nav response (no excerpt round
@@ -114,7 +148,7 @@ async function handlePipelineResult(
     return
   }
   if (result.action !== "request_excerpt") return
-  const remainingDwellMs = TIER2_DWELL_MS - (Date.now() - observation.startedAt)
+  const remainingDwellMs = observation.tier2DwellMs - (Date.now() - observation.startedAt)
   if (remainingDwellMs > 0) {
     await delay(remainingDwellMs)
   }

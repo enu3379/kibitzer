@@ -84,6 +84,9 @@ celebration:
 
 break:
   duration_seconds: 300
+dwell:
+  observation_seconds: 5
+  tier2_seconds: 10
 
 privacy:
   sensitive_domains_file: "configs/sensitive_domains.yaml"
