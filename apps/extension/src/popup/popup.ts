@@ -26,6 +26,7 @@ import {
   putSettings,
   setGoal,
 } from "../lib/api"
+import { ExplorationHistoryEntry, listExplorationHistory } from "../lib/history"
 
 const POLL_MS = 2000
 const TRACKING_PILLS: Record<SessionState["tracking"], { label: string; tone: string }> = {
@@ -76,6 +77,7 @@ let editing = false
 let summary: SessionStats | null = null
 let settingsOpen = false
 let reportOpen = false
+let historyOpen = false
 let pollTimer: number | undefined
 let personaCache: PersonaSummary[] = FALLBACK_PERSONAS
 let serverDown = false
@@ -178,7 +180,7 @@ async function getActiveTabId(): Promise<number | null> {
 }
 
 async function refresh(): Promise<void> {
-  if (editing || summary || settingsOpen || reportOpen) return
+  if (editing || summary || settingsOpen || reportOpen || historyOpen) return
   const result = await getSessionState()
   if (result.kind === "unreachable") {
     handleUnreachable()
@@ -275,6 +277,7 @@ function renderSetup(sessionExists: boolean, currentGoal = "", offline = false):
   document.getElementById("goal-cancel")?.addEventListener("click", () => {
     editing = false
     settingsOpen = false
+    historyOpen = false
     void refresh()
   })
 }
@@ -462,8 +465,9 @@ function renderDashboard(
     ${header(offline ? "연결 안 됨" : pillLabel, offline ? "red" : pill.tone)}
     ${offline ? offlineBannerHtml("아래는 마지막으로 본 상태예요. 서버가 켜지면 자동으로 이어가요.") : ""}
     <div style="display: flex; justify-content: flex-end; gap: 8px; margin: -8px 0 6px;">
-      <button id="open-report" class="icon-btn"${dis}>리포트</button>
-      <button id="open-settings" class="icon-btn"${dis}>설정</button>
+      <button id="open-report" class="icon-btn">리포트</button>
+      <button id="open-history" class="icon-btn">탐색 기록</button>
+      <button id="open-settings" class="icon-btn">설정</button>
     </div>
     ${degradedNote}
     ${pendingCard}
@@ -517,6 +521,9 @@ function renderDashboard(
   document.getElementById("open-report")?.addEventListener("click", () => {
     void openReport()
   })
+  document.getElementById("open-history")?.addEventListener("click", () => {
+    void openHistory()
+  })
 
   document.getElementById("goal-edit")?.addEventListener("click", () => {
     editing = true
@@ -567,8 +574,62 @@ async function endSession(): Promise<void> {
   renderSummary(stats)
 }
 
+async function openHistory(): Promise<void> {
+  historyOpen = true
+  settingsOpen = false
+  reportOpen = false
+  stopPoll()
+  const entries = await listExplorationHistory()
+  renderHistory(entries)
+}
+
+function closeHistory(): void {
+  historyOpen = false
+  void refresh()
+}
+
+function renderHistory(entries: ExplorationHistoryEntry[]): void {
+  const items = entries.length
+    ? entries.map(renderHistoryItem).join("")
+    : `<p class="center-note">아직 탐색 기록이 없습니다.</p>`
+
+  root.innerHTML = `
+    <div class="header">
+      <button id="history-back" class="icon-btn" title="대시보드로">←</button>
+      <span class="name">탐색 기록</span>
+    </div>
+    <div class="history-list">${items}</div>`
+
+  document.getElementById("history-back")?.addEventListener("click", closeHistory)
+}
+
+function renderHistoryItem(entry: ExplorationHistoryEntry): string {
+  const verdictClass = entry.verdict === "OK" ? " ok" : entry.verdict === "DRIFT" ? " drift" : ""
+  const ariaLabel =
+    entry.verdict === "OK" ? 'aria-label="목표 관련"' : entry.verdict === "DRIFT" ? 'aria-label="이탈"' : 'aria-hidden="true"'
+  return `
+    <div class="history-item">
+      <span class="history-light${verdictClass}" ${ariaLabel}></span>
+      <div class="history-main">
+        <div class="history-title">${esc(historyTitle(entry))}</div>
+        <div class="history-url">${esc(entry.url)}</div>
+      </div>
+    </div>`
+}
+
+function historyTitle(entry: ExplorationHistoryEntry): string {
+  const title = entry.title.trim()
+  if (title) return title
+  try {
+    return new URL(entry.url).hostname
+  } catch {
+    return "제목 없음"
+  }
+}
+
 async function openReport(): Promise<void> {
   reportOpen = true
+  historyOpen = false
   stopPoll()
   const report = await getSessionReport()
   if (!report) {
@@ -702,6 +763,7 @@ function renderSummary(stats: SessionStats): void {
 
 async function openSettings(): Promise<void> {
   settingsOpen = true
+  historyOpen = false
   stopPoll()
   const [settings, personas] = await Promise.all([getSettings(), getPersonas()])
   if (!settings) {

@@ -13,6 +13,11 @@ import {
   postObservationExcerpt,
 } from "./lib/api"
 import { shouldDropUrl } from "./lib/domainFilter"
+import {
+  ExplorationVerdict,
+  prependExplorationHistory,
+  updateExplorationHistory,
+} from "./lib/history"
 
 const DEFAULT_OBSERVATION_DWELL_MS = 5000
 const DEFAULT_TIER2_DWELL_MS = 10000
@@ -35,6 +40,7 @@ interface PendingTabObservation {
   url: string
   startedAt: number
   timer: number
+  historyId?: string
   tier2DwellMs: number
 }
 
@@ -75,21 +81,45 @@ async function scheduleDwellCheck(tabId: number, token: number, url: string, sta
     return
   }
   const dwell = await loadDwellSettings()
-  const pendingBeforeTimer = pendingTabObservations.get(tabId)
-  if (!pendingBeforeTimer || pendingBeforeTimer.token !== token) return
+  const pendingBeforeTab = pendingTabObservations.get(tabId)
+  if (!pendingBeforeTab || pendingBeforeTab.token !== token) return
+  const tab = await getTab(tabId)
+  const pending = pendingTabObservations.get(tabId)
+  if (!pending || pending.token !== token) return
+  if (!tab?.active) {
+    pendingTabObservations.delete(tabId)
+    return
+  }
+  const historyId = makeHistoryId(token)
+  await prependExplorationHistory({
+    id: historyId,
+    tabId,
+    url,
+    title: tab.url === url ? tab.title ?? "" : "",
+    startedAt,
+    observationDwellMs: dwell.observationDwellMs,
+    tier2DwellMs: dwell.tier2DwellMs,
+  })
+  const pendingAfterHistory = pendingTabObservations.get(tabId)
+  if (!pendingAfterHistory || pendingAfterHistory.token !== token) {
+    await finishHistoryEntry(historyId)
+    return
+  }
   const timer = globalThis.setTimeout(async () => {
     const pending = pendingTabObservations.get(tabId)
     if (!pending || pending.token !== token) return
     pendingTabObservations.delete(tabId)
     const tab = await getTab(tabId)
-    if (!tab) return
-    if (!tab.active || tab.url !== url) return
-    if (shouldDropUrl(url)) return
+    if (!tab || !tab.active || tab.url !== url || shouldDropUrl(url)) {
+      await finishHistoryEntry(pending.historyId)
+      return
+    }
     const result = await postBrowserNav({
       url,
       title: tab.title ?? "",
       tab_id: tab.id,
     })
+    await updateHistoryWithPipelineResult(pending.historyId, result, tab.title ?? "")
     await handlePipelineResult(tabId, result, {
       url,
       startedAt,
@@ -102,8 +132,13 @@ async function scheduleDwellCheck(tabId: number, token: number, url: string, sta
     url,
     startedAt,
     timer,
+    historyId,
     tier2DwellMs: dwell.tier2DwellMs,
   })
+}
+
+function makeHistoryId(token: number): string {
+  return `hist_${Date.now()}_${token}`
 }
 
 interface DwellTiming {
@@ -112,10 +147,17 @@ interface DwellTiming {
 }
 
 async function loadDwellSettings(): Promise<DwellTiming> {
-  const settings = await getSettings()
-  return {
-    observationDwellMs: (settings?.dwell.observation_seconds ?? 5) * 1000,
-    tier2DwellMs: (settings?.dwell.tier2_seconds ?? 10) * 1000,
+  try {
+    const settings = await getSettings()
+    return {
+      observationDwellMs: (settings?.dwell.observation_seconds ?? 5) * 1000,
+      tier2DwellMs: (settings?.dwell.tier2_seconds ?? 10) * 1000,
+    }
+  } catch {
+    return {
+      observationDwellMs: DEFAULT_OBSERVATION_DWELL_MS,
+      tier2DwellMs: DEFAULT_TIER2_DWELL_MS,
+    }
   }
 }
 
@@ -132,6 +174,33 @@ function clearTabTimer(tabId: number): void {
   if (!pending) return
   clearTimeout(pending.timer)
   pendingTabObservations.delete(tabId)
+  void finishHistoryEntry(pending.historyId)
+}
+
+function clearInactiveTabTimers(activeTabId: number): void {
+  for (const tabId of pendingTabObservations.keys()) {
+    if (tabId !== activeTabId) clearTabTimer(tabId)
+  }
+}
+
+async function finishHistoryEntry(historyId: string | undefined): Promise<void> {
+  if (!historyId) return
+  await updateExplorationHistory(historyId, { endedAt: Date.now() })
+}
+
+async function updateHistoryWithPipelineResult(
+  historyId: string | undefined,
+  result: PipelineResult | null,
+  title: string,
+): Promise<void> {
+  if (!historyId) return
+  const patch: { endedAt: number; title?: string; observationId?: string; verdict?: ExplorationVerdict } = {
+    endedAt: Date.now(),
+  }
+  if (title.trim()) patch.title = title
+  if (result?.observation_id) patch.observationId = result.observation_id
+  if (result?.verdict === "OK" || result?.verdict === "DRIFT") patch.verdict = result.verdict
+  await updateExplorationHistory(historyId, patch)
 }
 
 async function handlePipelineResult(
@@ -461,6 +530,7 @@ chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
 })
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
+  clearInactiveTabTimers(activeInfo.tabId)
   scheduleTabObservation(activeInfo.tabId)
 })
 
