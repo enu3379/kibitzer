@@ -26,6 +26,7 @@ const NOTIFICATION_ICON = "icons/icon-128.png"
 const BADGE_ALARM = "kibitzer-badge-refresh"
 const TOAST_AUTO_DISMISS_MS = 25000
 const TOAST_CELEBRATION_AUTO_DISMISS_MS = 9000
+const TOAST_REDISPLAY_WINDOW_MS = 60000
 // Chrome notifications support at most 2 action buttons; creating with 3 throws
 // and the notification never appears. "accepted" maps to clicking the body.
 const NOTIFICATION_BUTTONS: FeedbackKind[] = ["related", "break"]
@@ -44,9 +45,26 @@ interface PendingTabObservation {
   tier2DwellMs: number
 }
 
+type ToastKind = "intervention" | "celebration"
+
+interface PendingToast {
+  notificationId: string
+  kind: ToastKind
+  message: string
+  contextLabel: string | null
+  interventionId?: string
+  observationId: string
+  createdAt: number
+  expiresAt: number
+  displayToken: number
+  deliveryReported: boolean
+  autoDismissMs: number
+}
+
 let nextObservationToken = 0
+let nextToastDisplayToken = 0
 const pendingTabObservations = new Map<number, PendingTabObservation>()
-const pendingNotifications = new Map<string, { interventionId: string; observationId: string }>()
+const pendingToasts = new Map<string, PendingToast>()
 
 function scheduleTabObservation(tabId: number, observedUrl?: string): void {
   clearTabTimer(tabId)
@@ -258,7 +276,7 @@ async function extractFromTab(tabId: number): Promise<PageExcerpt | null> {
 
 async function showNotification(result: PipelineResult, tabId?: number): Promise<void> {
   if (!result.observation_id || !result.message) return
-  const kind = result.kind ?? "intervention"
+  const kind: ToastKind = result.kind === "celebration" ? "celebration" : "intervention"
   const celebration = kind === "celebration"
   if (!celebration && !result.intervention_id) return
   const silent = (result as PipelineResult & { silent?: boolean }).silent === true
@@ -270,78 +288,172 @@ async function showNotification(result: PipelineResult, tabId?: number): Promise
   const notificationId = celebration
     ? `kibitzer:celebration:${result.observation_id}`
     : `kibitzer:${result.intervention_id}`
-  if (!celebration && result.intervention_id) {
-    pendingNotifications.set(notificationId, {
-      interventionId: result.intervention_id,
-      observationId: result.observation_id,
-    })
+  const toast = rememberPendingToast(result, notificationId, kind)
+  if (!toast) return
+
+  if (tabId !== undefined && (await displayPendingToast(toast, tabId, true))) {
+    void refreshBadge()
+    return
   }
 
-  // Preferred surface: an in-page toast on the drifting tab. It bypasses OS
-  // notification settings (macOS banners were silently swallowed) and keeps the
-  // kibitzer in the page it is kibitzing.
-  if (tabId !== undefined) {
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        func: showKibitzerToast,
-        args: [
-          {
-            notificationId,
-            message: result.message,
-            contextLabel: pageLabel(result.page) ?? null,
-            autoDismissMs: celebration ? TOAST_CELEBRATION_AUTO_DISMISS_MS : TOAST_AUTO_DISMISS_MS,
-            kind,
-          },
-        ],
-      })
-      if (!celebration && result.intervention_id) {
-        void postDeliveryReport(result.intervention_id, true)
-        void playNotificationSound()
-      }
-      if (celebration) {
-        void playNotificationSound("celebrate")
-      }
-      void refreshBadge()
-      return
-    } catch (error) {
-      // Non-injectable surface (chrome:// pages, web store, PDF viewer) —
-      // fall back to the system notification below.
+  await showSystemNotificationFallback(toast)
+  void refreshBadge()
+}
+
+function rememberPendingToast(
+  result: PipelineResult,
+  notificationId: string,
+  kind: ToastKind,
+): PendingToast | null {
+  if (!result.observation_id || !result.message) return null
+  const now = Date.now()
+  const autoDismissMs = kind === "celebration" ? TOAST_CELEBRATION_AUTO_DISMISS_MS : TOAST_AUTO_DISMISS_MS
+  const toast: PendingToast = {
+    notificationId,
+    kind,
+    message: result.message,
+    contextLabel: pageLabel(result.page) ?? null,
+    interventionId: result.intervention_id ?? undefined,
+    observationId: result.observation_id,
+    createdAt: now,
+    expiresAt: now + Math.max(autoDismissMs, TOAST_REDISPLAY_WINDOW_MS),
+    displayToken: 0,
+    deliveryReported: false,
+    autoDismissMs,
+  }
+  pendingToasts.set(notificationId, toast)
+  return toast
+}
+
+async function displayPendingToast(toast: PendingToast, tabId: number, logFailure = false): Promise<boolean> {
+  const tab = await getTab(tabId)
+  if (!tab?.active || !tab.url || !isInjectablePageUrl(tab.url)) return false
+
+  const displayToken = ++nextToastDisplayToken
+  toast.displayToken = displayToken
+
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: showKibitzerToast,
+      args: [
+        {
+          notificationId: toast.notificationId,
+          displayToken,
+          message: toast.message,
+          contextLabel: toast.contextLabel,
+          autoDismissMs: toast.autoDismissMs,
+          kind: toast.kind,
+        },
+      ],
+    })
+    toast.expiresAt = Date.now() + Math.max(toast.autoDismissMs, TOAST_REDISPLAY_WINDOW_MS)
+    markToastPresented(toast)
+    return true
+  } catch (error) {
+    if (logFailure) {
+      // Non-injectable surface (chrome:// pages, web store, PDF viewer) falls
+      // back on first delivery and stays pending for a later active web page.
       console.warn("kibitzer: in-page toast failed, falling back", error)
     }
+    return false
   }
+}
 
+function isInjectablePageUrl(rawUrl: string): boolean {
+  let parsed: URL
+  try {
+    parsed = new URL(rawUrl)
+  } catch {
+    return false
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false
+  return !shouldDropUrl(rawUrl)
+}
+
+function markToastPresented(toast: PendingToast): void {
+  if (toast.deliveryReported) return
+  toast.deliveryReported = true
+  if (toast.kind === "intervention" && toast.interventionId) {
+    void postDeliveryReport(toast.interventionId, true)
+    void playNotificationSound()
+    return
+  }
+  if (toast.kind === "celebration") {
+    void playNotificationSound("celebrate")
+  }
+}
+
+async function showSystemNotificationFallback(toast: PendingToast): Promise<boolean> {
   try {
     const options: chrome.notifications.NotificationOptions<true> = {
       type: "basic",
       iconUrl: chrome.runtime.getURL(NOTIFICATION_ICON),
       title: "Kibitzer",
-      message: result.message,
-      contextMessage: pageLabel(result.page),
-      priority: celebration ? 0 : 2,
-      requireInteraction: !celebration,
+      message: toast.message,
+      contextMessage: toast.contextLabel ?? undefined,
+      priority: toast.kind === "celebration" ? 0 : 2,
+      requireInteraction: toast.kind !== "celebration",
     }
-    if (!celebration) {
+    if (toast.kind !== "celebration") {
       options.buttons = NOTIFICATION_BUTTONS.map((buttonKind) => ({ title: FEEDBACK_BUTTON_TITLES[buttonKind] }))
     }
-    await chrome.notifications.create(notificationId, {
+    await chrome.notifications.create(toast.notificationId, {
       ...options,
     })
-    if (!celebration && result.intervention_id) {
-      void postDeliveryReport(result.intervention_id, true)
-      void playNotificationSound()
-    }
-    if (celebration) {
-      void playNotificationSound("celebrate")
-    }
-    void refreshBadge()
+    markToastPresented(toast)
+    return true
   } catch (error) {
-    pendingNotifications.delete(notificationId)
     console.error("kibitzer: notification create failed", error)
-    if (!celebration && result.intervention_id) {
-      void postDeliveryReport(result.intervention_id, false, String(error))
+    return false
+  }
+}
+
+function latestPendingToast(): PendingToast | null {
+  pruneExpiredPendingToasts()
+  let latest: PendingToast | null = null
+  for (const toast of pendingToasts.values()) {
+    if (!latest || toast.createdAt > latest.createdAt) {
+      latest = toast
     }
   }
+  return latest
+}
+
+function pruneExpiredPendingToasts(): void {
+  const now = Date.now()
+  for (const [notificationId, toast] of pendingToasts) {
+    if (toast.expiresAt <= now) {
+      pendingToasts.delete(notificationId)
+    }
+  }
+}
+
+async function redisplayLatestPendingToast(tabId: number): Promise<void> {
+  const toast = latestPendingToast()
+  if (!toast) return
+  await displayPendingToast(toast, tabId)
+}
+
+async function dismissPendingToast(notificationId: string, displayToken?: number): Promise<void> {
+  const toast = pendingToasts.get(notificationId)
+  if (!toast) return
+  if (displayToken === undefined || displayToken !== toast.displayToken) return
+  pendingToasts.delete(notificationId)
+  await clearSystemNotification(notificationId)
+  void refreshBadge()
+}
+
+async function clearSystemNotification(notificationId: string): Promise<void> {
+  try {
+    await chrome.notifications.clear(notificationId)
+  } catch {
+    // The in-page path usually has no Chrome notification to clear.
+  }
+}
+
+function isFeedbackKind(kind: string | undefined): kind is FeedbackKind {
+  return kind === "related" || kind === "accepted" || kind === "snooze" || kind === "break"
 }
 
 function pageLabel(page: PageInfo | null | undefined): string | undefined {
@@ -479,15 +591,15 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 })
 
 chrome.runtime.onMessage.addListener(
-  (message: { type?: string; notificationId?: string; kind?: string } | undefined) => {
+  (message: { type?: string; notificationId?: string; kind?: string; displayToken?: number } | undefined) => {
     if (message?.type === "kibitzer:refresh-badge") void refreshBadge()
     if (message?.type === "kibitzer:toast-feedback" && message.notificationId) {
       const kind = message.kind
-      if (kind === "related" || kind === "accepted" || kind === "snooze" || kind === "break") {
+      if (isFeedbackKind(kind)) {
         void submitNotificationFeedback(message.notificationId, kind)
       } else {
         // dismissed / timeout: no feedback signal, just stop tracking it.
-        pendingNotifications.delete(message.notificationId)
+        void dismissPendingToast(message.notificationId, message.displayToken)
       }
     }
   },
@@ -502,22 +614,24 @@ chrome.notifications.onClicked.addListener((notificationId) => {
 })
 
 chrome.notifications.onClosed.addListener((notificationId) => {
-  pendingNotifications.delete(notificationId)
+  pendingToasts.delete(notificationId)
 })
 
 async function submitNotificationFeedback(
   notificationId: string,
   kind: FeedbackKind | undefined,
 ): Promise<void> {
-  const metadata = pendingNotifications.get(notificationId)
-  if (!metadata || !kind) return
-  await postFeedback({
-    kind,
-    intervention_id: metadata.interventionId,
-    observation_id: metadata.observationId,
-  })
-  pendingNotifications.delete(notificationId)
-  await chrome.notifications.clear(notificationId)
+  const toast = pendingToasts.get(notificationId)
+  if (!toast || !kind) return
+  if (toast.kind === "intervention" && toast.interventionId) {
+    await postFeedback({
+      kind,
+      intervention_id: toast.interventionId,
+      observation_id: toast.observationId,
+    })
+  }
+  pendingToasts.delete(notificationId)
+  await clearSystemNotification(notificationId)
   void refreshBadge()
 }
 
@@ -526,12 +640,20 @@ chrome.webNavigation.onCommitted.addListener((details) => {
 })
 
 chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
-  if (details.frameId === 0) scheduleTabObservation(details.tabId, details.url)
+  if (details.frameId === 0) {
+    scheduleTabObservation(details.tabId, details.url)
+    void redisplayLatestPendingToast(details.tabId)
+  }
+})
+
+chrome.webNavigation.onCompleted.addListener((details) => {
+  if (details.frameId === 0) void redisplayLatestPendingToast(details.tabId)
 })
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
   clearInactiveTabTimers(activeInfo.tabId)
   scheduleTabObservation(activeInfo.tabId)
+  void redisplayLatestPendingToast(activeInfo.tabId)
 })
 
 chrome.tabs.onRemoved.addListener((tabId) => {

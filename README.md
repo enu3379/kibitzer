@@ -10,8 +10,9 @@ Stage 0 is intentionally narrow:
 - Tier 1 and Tier 2 use configurable judge APIs — Ollama Cloud by default
   (OpenAI-compatible endpoints also supported).
 - Raw page body is requested only immediately before an intervention.
-- All interventions are non-blocking: an in-page toast on the drifting tab
-  (system notifications only as a fallback). The app never blocks browsing or typing.
+- All interventions are non-blocking: an in-page toast on the active browsing
+  surface, redisplayed while pending after tab switches (system notifications
+  only as a fallback). The app never blocks browsing or typing.
 
 ## Core Contract
 
@@ -105,7 +106,8 @@ auto-ingest stay disabled to avoid surprise LLM spend.
 The Stage 0 loop is implemented end to end: sessions and declared goals,
 dwell-gated browser navigation intake, privacy gates, CPU-only Tier 0,
 Tier 1/Tier 2 judging, the controller/request-excerpt handshake, in-page toast
-delivery with feedback (system notifications as fallback), popup
+delivery with feedback and active-tab redisplay (system notifications as
+fallback), popup
 controls/settings/reports, the P1 attachment loop (return celebration, "5분만"
 break, custom personas, report APIs, judgment transparency), and a session
 lifecycle API (state, stats, snooze, end). The local server starts in idle mode
