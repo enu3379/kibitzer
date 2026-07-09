@@ -51,6 +51,20 @@ def runtime_settings(config: AppConfig, store: SQLiteStore) -> dict[str, Any]:
             }
         )
 
+    dwell = {
+        "observation_seconds": config.dwell.observation_seconds,
+        "tier2_seconds": config.dwell.tier2_seconds,
+    }
+    stored_dwell = stored.get("dwell")
+    if isinstance(stored_dwell, dict):
+        dwell.update(
+            {
+                key: value
+                for key, value in stored_dwell.items()
+                if key in {"observation_seconds", "tier2_seconds"}
+            }
+        )
+
     quiet_hours = {
         "enabled": config.delivery.quiet_hours.enabled,
         "start": config.delivery.quiet_hours.start,
@@ -73,6 +87,7 @@ def runtime_settings(config: AppConfig, store: SQLiteStore) -> dict[str, Any]:
         ),
         "controller": controller,
         "cooldown": cooldown,
+        "dwell": dwell,
         "quiet_hours": quiet_hours,
     }
 

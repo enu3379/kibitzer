@@ -5,6 +5,7 @@ import {
   PageInfo,
   PageExcerpt,
   PipelineResult,
+  getSettings,
   getSessionState,
   postBrowserNav,
   postDeliveryReport,
@@ -18,8 +19,8 @@ import {
   updateExplorationHistory,
 } from "./lib/history"
 
-const OBSERVATION_DWELL_MS = 5000
-const TIER2_DWELL_MS = 10000
+const DEFAULT_OBSERVATION_DWELL_MS = 5000
+const DEFAULT_TIER2_DWELL_MS = 10000
 const EXCERPT_LIMIT = 3500
 const NOTIFICATION_ICON = "icons/icon-128.png"
 const BADGE_ALARM = "kibitzer-badge-refresh"
@@ -40,6 +41,7 @@ interface PendingTabObservation {
   startedAt: number
   timer: number
   historyId?: string
+  tier2DwellMs: number
 }
 
 let nextObservationToken = 0
@@ -50,7 +52,13 @@ function scheduleTabObservation(tabId: number, observedUrl?: string): void {
   clearTabTimer(tabId)
   const token = ++nextObservationToken
   const startedAt = Date.now()
-  pendingTabObservations.set(tabId, { token, url: "", startedAt, timer: 0 })
+  pendingTabObservations.set(tabId, {
+    token,
+    url: "",
+    startedAt,
+    timer: 0,
+    tier2DwellMs: DEFAULT_TIER2_DWELL_MS,
+  })
   if (observedUrl) {
     void scheduleDwellCheck(tabId, token, observedUrl, startedAt)
     return
@@ -96,6 +104,7 @@ async function scheduleDwellCheck(tabId: number, token: number, url: string, sta
     await finishHistoryEntry(historyId)
     return
   }
+  const dwell = await loadDwellSettings()
   const timer = globalThis.setTimeout(async () => {
     const pending = pendingTabObservations.get(tabId)
     if (!pending || pending.token !== token) return
@@ -111,14 +120,47 @@ async function scheduleDwellCheck(tabId: number, token: number, url: string, sta
       tab_id: tab.id,
     })
     await updateHistoryWithPipelineResult(pending.historyId, result, tab.title ?? "")
-    await handlePipelineResult(tabId, result, { url, startedAt })
+    await handlePipelineResult(tabId, result, {
+      url, 
+      startedAt,
+      
+      tier2DwellMs: pending.tier2DwellMs,
+    })
     void refreshBadge()
-  }, OBSERVATION_DWELL_MS)
-  pendingTabObservations.set(tabId, { token, url, startedAt, timer, historyId })
+  }, dwell.observationDwellMs)
+  pendingTabObservations.set(tabId, {
+    token,
+    url,
+    startedAt,
+    timer,
+    historyId,
+    observationDwellMs: dwell.observationDwellMs,
+    tier2DwellMs: dwell.tier2DwellMs,
+  })
 }
 
 function makeHistoryId(token: number): string {
   return `hist_${Date.now()}_${token}`
+  
+interface DwellTiming {
+  observationDwellMs: number
+  tier2DwellMs: number
+}
+
+async function loadDwellSettings(): Promise<DwellTiming> {
+  try {
+    const settings = await getSettings()
+    return {
+      observationDwellMs: (settings?.dwell.observation_seconds ?? 5) * 1000,
+      tier2DwellMs: (settings?.dwell.tier2_seconds ?? 10) * 1000,
+    }
+  } catch {
+    return {
+      observationDwellMs: DEFAULT_OBSERVATION_DWELL_MS,
+      tier2DwellMs: DEFAULT_TIER2_DWELL_MS,
+    }
+  }
+}
 }
 
 async function getTab(tabId: number): Promise<chrome.tabs.Tab | null> {
@@ -166,7 +208,7 @@ async function updateHistoryWithPipelineResult(
 async function handlePipelineResult(
   tabId: number,
   result: PipelineResult | null,
-  observation: { url: string; startedAt: number },
+  observation: { url: string; startedAt: number; tier2DwellMs: number },
 ): Promise<void> {
   if (!result?.observation_id) return
   // Celebrations arrive directly on the browser-nav response (no excerpt round
@@ -177,7 +219,7 @@ async function handlePipelineResult(
     return
   }
   if (result.action !== "request_excerpt") return
-  const remainingDwellMs = TIER2_DWELL_MS - (Date.now() - observation.startedAt)
+  const remainingDwellMs = observation.tier2DwellMs - (Date.now() - observation.startedAt)
   if (remainingDwellMs > 0) {
     await delay(remainingDwellMs)
   }

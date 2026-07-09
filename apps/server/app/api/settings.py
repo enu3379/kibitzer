@@ -22,6 +22,11 @@ class CooldownResponse(BaseModel):
     seconds: int
 
 
+class DwellResponse(BaseModel):
+    observation_seconds: int
+    tier2_seconds: int
+
+
 class ControllerResponse(BaseModel):
     type: Literal["streak", "alignment"]
     k: int
@@ -35,6 +40,7 @@ class SettingsResponse(BaseModel):
     voice_enabled: bool
     controller: ControllerResponse
     cooldown: CooldownResponse
+    dwell: DwellResponse
     quiet_hours: QuietHoursResponse
 
 
@@ -59,6 +65,11 @@ class CooldownPatch(BaseModel):
     seconds: int | None = Field(default=None, ge=0, le=86400)
 
 
+class DwellPatch(BaseModel):
+    observation_seconds: int | None = Field(default=None, ge=1, le=300)
+    tier2_seconds: int | None = Field(default=None, ge=1, le=300)
+
+
 class ControllerPatch(BaseModel):
     type: Literal["streak", "alignment", "window"] | None = None
     k: int | None = Field(default=None, ge=1, le=20)
@@ -72,6 +83,7 @@ class SettingsPatch(BaseModel):
     voice_enabled: bool | None = None
     controller: ControllerPatch | None = None
     cooldown: CooldownPatch | None = None
+    dwell: DwellPatch | None = None
     quiet_hours: QuietHoursPatch | None = None
 
 
@@ -123,6 +135,13 @@ async def update_settings(request: Request, body: SettingsPatch) -> SettingsResp
         cooldown.update(body.cooldown.model_dump(exclude_none=True))
         cooldown["seconds"] = int(cooldown["seconds"])
         partial["cooldown"] = cooldown
+
+    if body.dwell is not None:
+        dwell = dict(current["dwell"])
+        dwell.update(body.dwell.model_dump(exclude_none=True))
+        dwell["observation_seconds"] = int(dwell["observation_seconds"])
+        dwell["tier2_seconds"] = int(dwell["tier2_seconds"])
+        partial["dwell"] = dwell
 
     if body.quiet_hours is not None:
         quiet_hours = dict(current["quiet_hours"])
