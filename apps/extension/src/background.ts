@@ -80,6 +80,7 @@ async function scheduleDwellCheck(tabId: number, token: number, url: string, sta
     pendingTabObservations.delete(tabId)
     return
   }
+  const dwell = await loadDwellSettings()
   const pendingBeforeTab = pendingTabObservations.get(tabId)
   if (!pendingBeforeTab || pendingBeforeTab.token !== token) return
   const tab = await getTab(tabId)
@@ -96,15 +97,14 @@ async function scheduleDwellCheck(tabId: number, token: number, url: string, sta
     url,
     title: tab.url === url ? tab.title ?? "" : "",
     startedAt,
-    observationDwellMs: OBSERVATION_DWELL_MS,
-    tier2DwellMs: TIER2_DWELL_MS,
+    observationDwellMs: dwell.observationDwellMs,
+    tier2DwellMs: dwell.tier2DwellMs,
   })
   const pendingAfterHistory = pendingTabObservations.get(tabId)
   if (!pendingAfterHistory || pendingAfterHistory.token !== token) {
     await finishHistoryEntry(historyId)
     return
   }
-  const dwell = await loadDwellSettings()
   const timer = globalThis.setTimeout(async () => {
     const pending = pendingTabObservations.get(tabId)
     if (!pending || pending.token !== token) return
@@ -121,9 +121,8 @@ async function scheduleDwellCheck(tabId: number, token: number, url: string, sta
     })
     await updateHistoryWithPipelineResult(pending.historyId, result, tab.title ?? "")
     await handlePipelineResult(tabId, result, {
-      url, 
+      url,
       startedAt,
-      
       tier2DwellMs: pending.tier2DwellMs,
     })
     void refreshBadge()
@@ -134,14 +133,14 @@ async function scheduleDwellCheck(tabId: number, token: number, url: string, sta
     startedAt,
     timer,
     historyId,
-    observationDwellMs: dwell.observationDwellMs,
     tier2DwellMs: dwell.tier2DwellMs,
   })
 }
 
 function makeHistoryId(token: number): string {
   return `hist_${Date.now()}_${token}`
-  
+}
+
 interface DwellTiming {
   observationDwellMs: number
   tier2DwellMs: number
@@ -160,7 +159,6 @@ async function loadDwellSettings(): Promise<DwellTiming> {
       tier2DwellMs: DEFAULT_TIER2_DWELL_MS,
     }
   }
-}
 }
 
 async function getTab(tabId: number): Promise<chrome.tabs.Tab | null> {
