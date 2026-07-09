@@ -223,11 +223,11 @@ function rememberPendingToast(
 }
 
 async function displayPendingToast(toast: PendingToast, tabId: number, logFailure = false): Promise<boolean> {
-  const displayToken = ++nextToastDisplayToken
-  toast.displayToken = displayToken
-
   const tab = await getTab(tabId)
   if (!tab?.active || !tab.url || !isInjectablePageUrl(tab.url)) return false
+
+  const displayToken = ++nextToastDisplayToken
+  toast.displayToken = displayToken
 
   try {
     await chrome.scripting.executeScript({
