@@ -86,6 +86,7 @@
       }
       button.btn:hover { background: var(--card); }
       button.btn:disabled { opacity: 0.5; cursor: default; }
+      button.btn.sel { border-color: var(--accent); outline: 1px solid var(--accent); }
       button.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
       @media (prefers-color-scheme: dark) {
         button.btn.primary { color: #202124; }
@@ -132,6 +133,25 @@
         border: 1px solid var(--border); border-radius: 6px;
         background: var(--bg); color: var(--text);
       }
+      .page-card { background: var(--card); border-radius: 8px; padding: 9px 10px 10px; margin-bottom: 12px; }
+      .page-card button.btn { background: var(--bg); }
+      .page-card button.btn:hover { border-color: var(--muted); }
+      .pc-title {
+        margin: 0 0 3px; font-size: 12px; color: var(--muted);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .pc-belief { margin: 0 0 8px; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px; }
+      .pc-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+      .pc-dot.ok { background: #10b981; }
+      .pc-dot.drift { background: var(--amber); }
+      .pc-dot.unknown { background: var(--muted); opacity: 0.6; }
+      .pc-note { margin: 7px 0 0; font-size: 12px; color: var(--muted); }
+      .pc-empty { margin: 0; font-size: 13px; color: var(--muted); }
+      .pc-empty-hint { margin: 2px 0 0; font-size: 11.5px; color: var(--muted); opacity: 0.8; }
+      .pc-diag { margin-top: 9px; border-top: 1px solid var(--border); }
+      .pc-diag .row { font-size: 12px; padding: 5px 0; }
+      .pc-diag .row:last-child { border-bottom: none; padding-bottom: 0; }
+      .pc-reason { margin: 7px 0 0; font-size: 11.5px; color: var(--muted); }
       .subhint { font-size: 12px; color: var(--muted); margin: 0 0 10px; }
       .rows { border-top: 1px solid var(--border); margin-bottom: 12px; }
       .row { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
@@ -139,6 +159,10 @@
       .bar { height: 6px; border-radius: 3px; background: var(--card); overflow: hidden; margin: 4px 0 12px; }
       .bar .fill { height: 100%; background: var(--accent); }
       .center-note { text-align: center; color: var(--muted); font-size: 13px; padding: 18px 0; }
+      .offline-banner { background: var(--red-bg); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; }
+      .offline-banner .ob-title { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--red-tx); }
+      .offline-banner .ob-hint { margin: 3px 0 0; font-size: 11.5px; color: var(--red-tx); opacity: 0.85; }
+      .icon-btn:disabled { opacity: 0.45; pointer-events: none; }
       .stack > * + * { margin-top: 0; }
     </style>
   </head>
