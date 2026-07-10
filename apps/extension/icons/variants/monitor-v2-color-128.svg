@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Kibitzer">
+  <circle cx="64" cy="50" r="50" fill="#1F2937"></circle>
+  <circle cx="45" cy="36" r="12.5" fill="#F9FAFB"></circle>
+  <circle cx="83" cy="36" r="12.5" fill="#F9FAFB"></circle>
+  <rect x="0" y="52" width="128" height="58" rx="9" fill="#F9FAFB"></rect>
+  <rect x="4" y="56" width="120" height="50" rx="6" fill="#10B981"></rect>
+  <rect x="57" y="106" width="14" height="13" fill="#10B981"></rect>
+  <rect x="44" y="118" width="40" height="10" rx="3" fill="#10B981"></rect>
+  <rect x="11.5" y="48" width="23" height="20" rx="10" fill="#1F2937"></rect>
+  <rect x="93.5" y="48" width="23" height="20" rx="10" fill="#1F2937"></rect>
+</svg>
