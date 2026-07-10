@@ -361,7 +361,8 @@ export async function postFeedback(payload: FeedbackPayload): Promise<FeedbackRe
 export async function getLatestObservation(tabId: number, url: string): Promise<LatestObservation | null> {
   try {
     const parsed = new URL(url)
-    const pathBytes = new TextEncoder().encode(parsed.pathname || "/")
+    const location = `${parsed.pathname || "/"}${parsed.search}${parsed.hash}`
+    const pathBytes = new TextEncoder().encode(location)
     const pathDigest = await crypto.subtle.digest("SHA-256", pathBytes)
     const urlPathHash = Array.from(new Uint8Array(pathDigest), (byte) =>
       byte.toString(16).padStart(2, "0"),
