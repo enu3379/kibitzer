@@ -1,6 +1,8 @@
 import random
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 from ..config import ControllerConfig
 from ..core.controller_flow import apply_controller
@@ -26,9 +28,40 @@ from ..core.voice import speak
 from ..providers.judges.base import Tier2Result
 from ..privacy.domain_filter import SensitiveDomainRules, drop_decision_for_url
 from ..schemas import PageExcerpt, PageInfo, PipelineAction, PipelineResult, PipelineResultKind, RawObservation, Verdict
-from ..storage.sqlite import ControllerStateRecord, CurrentSessionRecord, ReturnCandidateRecord, SQLiteStore
+from ..storage.sqlite import ControllerStateRecord, CurrentSessionRecord, ObservationRecord, ReturnCandidateRecord, SQLiteStore
 
 router = APIRouter()
+
+
+class LatestObservationFeatures(BaseModel):
+    r0: float | None = None
+    exemplar_score: float | None = None
+    anchor_eligible: bool | None = None
+    tier_reached: int | None = None
+
+
+class LatestObservationResponse(BaseModel):
+    observation_id: str
+    title: str | None = None
+    url_host: str | None = None
+    verdict: str | None = None
+    features: LatestObservationFeatures
+    tier1_reason: str | None = None
+    # Display context for the popup page card: the Tier-0 threshold the r0
+    # feature was judged against, and the user's current page label (if any).
+    tau_ok: float | None = None
+    label: Literal["related", "drift"] | None = None
+
+
+class PageLabelRequest(BaseModel):
+    label: Literal["related", "drift"]
+
+
+class PageLabelResponse(BaseModel):
+    label_id: str
+    observation_id: str
+    label: Literal["related", "drift"]
+    exemplar_count: int | None = None
 
 
 def _store(request: Request) -> SQLiteStore:
@@ -41,6 +74,56 @@ def _sensitive_domain_rules(request: Request) -> SensitiveDomainRules:
 
 def _runtime(request: Request) -> RuntimeResources:
     return request.app.state.runtime
+
+
+@router.get("/observations/latest", response_model=LatestObservationResponse)
+async def latest_observation_for_tab(request: Request, tab_id: int) -> LatestObservationResponse:
+    store = _store(request)
+    current = store.get_current_session()
+    if not current:
+        raise HTTPException(status_code=404, detail="no active session")
+    observation = store.latest_observation_for_tab(current.session.id, tab_id)
+    if not observation:
+        raise HTTPException(status_code=404, detail="observation not found")
+    return _latest_observation_response(
+        observation,
+        tau_ok=request.app.state.config.relevance.tau_ok,
+        label=store.page_label_for_observation(observation.id),
+    )
+
+
+@router.post("/observations/{observation_id}/label", response_model=PageLabelResponse)
+async def label_observation(
+    request: Request,
+    observation_id: str,
+    body: PageLabelRequest,
+) -> PageLabelResponse:
+    store = _store(request)
+    current = store.get_current_session()
+    if not current:
+        raise HTTPException(status_code=404, detail="no active session")
+    observation = store.get_observation(observation_id)
+    if not observation or observation.session_id != current.session.id:
+        raise HTTPException(status_code=404, detail="observation not found")
+
+    if body.label == "related":
+        emb = observation.features.get("emb")
+        if not isinstance(emb, list) or not emb:
+            raise HTTPException(status_code=400, detail="observation has no embedding")
+
+    page_label, exemplar_count = store.record_page_label(
+        session_id=observation.session_id,
+        observation_id=observation.id,
+        label=body.label,
+        exemplar_cap=request.app.state.config.relevance.exemplar_cap,
+    )
+
+    return PageLabelResponse(
+        label_id=page_label.id,
+        observation_id=page_label.observation_id,
+        label=body.label,
+        exemplar_count=exemplar_count,
+    )
 
 
 @router.post("/observations/browser-nav", response_model=PipelineResult)
@@ -144,6 +227,29 @@ async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineR
         if celebration:
             return celebration
     return result
+
+
+def _latest_observation_response(
+    observation: ObservationRecord,
+    tau_ok: float | None = None,
+    label: str | None = None,
+) -> LatestObservationResponse:
+    features = observation.features
+    return LatestObservationResponse(
+        observation_id=observation.id,
+        title=observation.title,
+        url_host=observation.url_host,
+        verdict=observation.verdict,
+        features=LatestObservationFeatures(
+            r0=features.get("r0"),
+            exemplar_score=features.get("exemplar_score"),
+            anchor_eligible=features.get("anchor_eligible"),
+            tier_reached=features.get("tier_reached", observation.tier_reached),
+        ),
+        tier1_reason=observation.tier1_reason,
+        tau_ok=tau_ok,
+        label=label if label in ("related", "drift") else None,
+    )
 
 
 @router.post("/observations/{observation_id}/excerpt", response_model=PipelineResult)

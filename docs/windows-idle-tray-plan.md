@@ -38,7 +38,7 @@ a scheduled task:
 Tray icon contract:
 
 - Base artwork comes from the monochrome template icon, preferring
-  `apps\extension\icons\variants\monitor-template-128.png` and falling back to
+  `apps\extension\icons\variants\monitor-v1-mono-128.png` and falling back to
   smaller source or built `dist` template PNGs.
 - Windows tints the template alpha mask dark on light system themes and light on
   dark system themes.
@@ -52,8 +52,8 @@ Acceptance checks:
 - The Startup folder contains `Kibitzer Server.lnk`.
 - Logging out/in starts the tray process without a visible terminal.
 - `Invoke-RestMethod http://127.0.0.1:8765/health` returns `mode = idle`.
-- The tray context menu can refresh status, start the server, open health, and
-  quit the tray.
+- The tray context menu can refresh status, start the server, open logs, and
+  quit the tray. Start attempts show progress and failures in the status header.
 
 ## Future Work
 

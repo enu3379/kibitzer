@@ -1,5 +1,6 @@
 export interface ToastPayload {
   notificationId: string
+  displayToken: number
   message: string
   contextLabel: string | null
   autoDismissMs: number
@@ -101,6 +102,7 @@ export function showKibitzerToast(payload: ToastPayload): void {
       void chrome.runtime.sendMessage({
         type: "kibitzer:toast-feedback",
         notificationId: payload.notificationId,
+        displayToken: payload.displayToken,
         kind,
       })
     } catch {

@@ -1,5 +1,34 @@
 # Progress
 
+## 2026-07-08 Audit Step 0: Labeled Replay Corpus (Claude)
+
+Completed:
+
+- Labeled all 231 observations across the Mac DB's four real sessions
+  (LG그램 수리 33, 마인크래프트 23, 크리에이트모드 159+16) with page-fact
+  labels (`related`/`drift`) + `title_quality`, via a multi-agent workflow:
+  two independent labelers per chunk (verdicts hidden to avoid bias), an
+  adjudicator for disagreements — 226/231 inter-labeler agreement, 5
+  adjudicated, 0 human escalations.
+- Joined labels with deterministic replay scores (current code, default
+  config) and published the corpus + analysis to `docs/audit/step0/`
+  (labeled CSVs, confusion matrices, r0 histograms, τ/audit-band trade-off
+  curves, Tier-1 call-rate-over-time, full false-OK/false-DRIFT lists).
+- Key findings: Tier-0 false-DRIFT dominates (80/142 related pages under τ,
+  56%) driven by the cross-lingual Korean-goal ↔ English-title gap and
+  sub-topic vocabulary (related-r0 mass at 0.00); false-OK is 9/89 from
+  lexical collisions ("그램"⊂"킬로그램") and anchor proximity; no τ value
+  fixes both sides → D3 goal enrichment (with mandatory cross-lingual
+  phrases) promoted to the top of the trust-spine backlog;
+  `audit_ok_below` 0.30–0.35 supported by the false-OK distribution;
+  Tier-1 would-call rate does not decline within sessions (58–100%) —
+  baseline recorded for the audit plan's health metric.
+
+Verified:
+
+- Workflow: 17 agents, 0 errors; labels cover 231/231 rows exactly once.
+- Analysis reproducible from `docs/audit/step0/README.md` regenerate note.
+
 ## 2026-07-08 P1 Attachment Loop Plumbing
 
 Completed:
@@ -544,3 +573,134 @@ Next:
   rotation — the 2026-07-06 "Tier 1 Enabled (Local Ollama)" entry is history,
   not current state. READMEs, SETUP guides, platforms/architecture docs, and
   the docs index were aligned with the code in the same pass.
+
+
+## 2026-07-08 P1 Attachment Loop: Page Labels
+
+- Added the server-side always-on page verdict plumbing from
+  `docs/handoff-p1-attachment-loop.md`: `GET /observations/latest?tab_id=`
+  returns the current session's newest observation for that tab with verdict,
+  Tier 0 diagnostics, anchor eligibility, and `tier1_reason`.
+- Added observation-scoped `page_labels` storage plus
+  `POST /observations/{id}/label` for `related`/`drift`. Re-labels update the
+  single latest row; `related` labels add a goal exemplar through the existing
+  feedback learning path, while `drift` labels remain record-only.
+- Exposed matching extension API client types/functions for the Claude-owned
+  popup card work.
+
+Verified:
+
+- `.venv/bin/python -m pytest apps/server/tests` passes (93 tests).
+- `npm run build` in `apps/extension` passes.
+
+## 2026-07-08 D5 Popup: 지금 페이지 Card + Dev Diagnostics (Claude)
+
+- Popup dashboard now carries the always-on current-page card (D5 user layer),
+  between the goal and the drift meter: page title/host, what the system
+  currently believes (`관련 있다고 보는 중` / `이탈로 보는 중` / `아직 판단 전`
+  with a green/amber/gray dot), and the two page-fact label buttons. Button
+  copy agrees or disagrees with the displayed belief while always stating the
+  page-fact: OK → `맞아, 관련 있어`/`아니, 이탈이야`, DRIFT → `아니, 관련
+  있어`/`맞아, 이탈이야`, unjudged → prefix-free. After labeling: `관련 예시로
+  기억해요` / `이탈로 기록해뒀어요 — 판정 개선에 써요`, and the chosen button
+  stays highlighted (re-label = latest wins). Tabs with no observation get a
+  muted `이 탭은 아직 관측 전이에요` + dwell hint, no buttons. Pull-only per
+  the D5 guardrail — nothing prompts.
+- Dev layer behind a `개발자 진단` settings toggle (persisted in popup
+  `localStorage`, not server settings): 판정 단계 (`Tier 0 · 어휘 매칭` /
+  `Tier 1 · LLM 재심` / `Tier 2 · 본문 확인`), `r0 / τ`, 예시 유사도, 앵커
+  반영/제외, and the `판정 근거` (tier1_reason) sentence.
+- Two small additive fields on `GET /observations/latest` to feed that card
+  (Claude, outside the usual server boundary — flagged for Codex awareness):
+  `tau_ok` (the Tier-0 threshold r0 was judged against, for the `r0 / τ` row)
+  and `label` (current page label, so a reopened popup shows the already-saved
+  state instead of silently forgetting it). Storage getter
+  `page_label_for_observation` added; round-trip assertions extended in
+  `test_page_labels.py`.
+
+Verified:
+
+- `.venv/bin/python -m pytest apps/server/tests` passes (93 tests).
+- `npm run build` in `apps/extension` passes.
+- Browser-preview harness (built popup.js + stubbed `chrome`/`fetch`): OK /
+  DRIFT / unjudged / no-observation states, label click → POST → selected
+  state + note, dev-toggle persistence, light + dark screenshots.
+
+## 2026-07-08 Replay CLI: Per-session deterministic re-simulation
+
+- Added `apps.server.app.replay` with an importable replay core and
+  `python -m apps.server.app.replay` CLI. The source SQLite DB is opened via
+  `mode=ro`; replay state (goal exemplars, anchor, controller state, and
+  would-request-excerpt actions) stays in memory.
+- Replay follows the logged event timeline: `goal.declared` resets the exemplar
+  seed, `goal.exemplar_added` appends the replayed observation embedding with
+  the configured cap, `session.snoozed` updates in-memory controller silence,
+  and `observation.recorded` re-runs title-furniture stripping, hash embedding,
+  Tier 0 score parts, recorded Tier 1 outcomes, anchor admission, and the
+  controller with `now=obs.ts`.
+- Added CLI support for `--list-sessions`, `--session` prefix resolution,
+  `--latest`, repeated `--override dotted.path=value`, `--full`, `--csv`, and
+  `--json`. `--live-tiers` is accepted only as a reserved follow-up flag; this
+  patch replays recorded tier outcomes by default.
+- Refactored `apply_controller(..., now=None)` so live behavior still uses the
+  wall clock while replay injects the observation timestamp.
+- Added deterministic replay tests for round-trip invariance through the API,
+  threshold counterfactuals, exemplar timeline effects, recorded Tier 1 plus
+  `tier1:no_recording`, and the read-only DB hash guarantee.
+
+Verified:
+
+- `.venv/bin/python -m pytest apps/server/tests -q` passes (104 tests).
+- `.venv/bin/python -m apps.server.app.replay --db ./data/kibitzer.sqlite3 --list-sessions`
+- `.venv/bin/python -m apps.server.app.replay --db ./data/kibitzer.sqlite3 --latest --full`
+- `.venv/bin/python -m apps.server.app.replay --db ./data/kibitzer.sqlite3 --latest --override relevance.tau_ok=0.2 --csv /tmp/kibitzer-replay-latest.csv --json /tmp/kibitzer-replay-latest.json`
+
+## 2026-07-09 Popup: Server-Offline Banner + Cached Dashboard (issue #11)
+
+- The popup no longer blanks out when the local server is unreachable (the
+  extension half of issue #11). Instead of the full-screen "연결 안 됨" note,
+  every screen keeps rendering: a red banner on top (`서버 연결 안 됨 — 추적을
+  사용할 수 없어요`), the header pill switches to `연결 안 됨`, and the 2s
+  poll keeps running so reconnection stays automatic.
+- The last successfully rendered dashboard (state + goal + stats) is cached in
+  popup localStorage (`kibitzer.lastSnapshot`) and shown read-only while
+  offline: server-dependent buttons (리포트/설정/수정/스누즈/세션 종료) are
+  disabled, the pending nag card is suppressed (it may have expired and its
+  feedback buttons need the server anyway), and the 지금 페이지 card shows
+  `서버에 연결되면 표시돼요`. The snapshot clears once the server reports the
+  captured session is gone (no session / no goal / session ended).
+- With no snapshot (fresh install), the goal setup screen renders under the
+  banner with 추적 시작 disabled; typed goal text survives both the reconnect
+  poll (offline re-renders are skipped while the view kind is unchanged) and
+  the offline→online transition.
+- All unreachable failure paths (goal submit, snooze, session end, report,
+  settings open/apply) now route through one handler instead of six copies of
+  the full-screen error.
+
+Verified:
+
+- `npm run build` in `apps/extension` (typecheck + bundle).
+- Browser-preview harness (built popup.js + stubbed `chrome` and a
+  mode-switchable `fetch`): offline-no-cache setup screen, typing survival
+  across ~18 poll cycles, offline→online auto-recovery to the live dashboard,
+  online→offline cached dashboard (banner, disabled controls, hidden nag
+  card), cold reopen while offline, light + dark screenshots, zero console
+  errors.
+
+## 2026-07-09 Toast Redisplay
+
+- Implemented active-tab redisplay for pending intervention and celebration
+  toasts. The background worker now keeps toast metadata and reinjects the latest
+  pending toast after tab activation, top-frame load completion, or SPA URL
+  updates.
+- Delivery side effects stay single-shot: the first successful presentation
+  reports intervention delivery and plays the sound; redisplays are quiet. A
+  display token prevents stale hidden-tab timeout/dismiss events from clearing a
+  newer active-tab toast.
+- Verified by build/typecheck (`npm.cmd --prefix apps/extension run build`,
+  `npm.cmd --prefix apps/extension run typecheck`) and a manual browser check:
+  tab switching no longer makes the user miss a pending toast.
+- Known polish notes: toast card sizing can vary slightly by tab/site for an
+  unknown reason, and reinjection replays Kibitzer's entrance animation whenever
+  the user switches back and forth while a toast is pending. Both are accepted
+  for now.

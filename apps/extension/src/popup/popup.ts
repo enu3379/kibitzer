@@ -2,6 +2,8 @@ import {
   ControllerType,
   FeedbackKind,
   HealthTiers,
+  LatestObservation,
+  PageLabel,
   PendingIntervention,
   PersonaSummary,
   SessionReport,
@@ -11,17 +13,20 @@ import {
   createSession,
   getCurrentSession,
   getHealthTiers,
+  getLatestObservation,
   getPersonas,
   getSessionReport,
   getSessionState,
   getSessionStats,
   getSettings,
   postFeedback,
+  postObservationLabel,
   postSessionEnd,
   postSessionSnooze,
   putSettings,
   setGoal,
 } from "../lib/api"
+import { ExplorationHistoryEntry, listExplorationHistory } from "../lib/history"
 
 const POLL_MS = 2000
 const TRACKING_PILLS: Record<SessionState["tracking"], { label: string; tone: string }> = {
@@ -53,18 +58,74 @@ const CONTROLLERS: { type: ControllerType; label: string; hint: string }[] = [
 
 const root = document.getElementById("root") as HTMLElement
 
+// Dev diagnostics is a display preference of this popup, not server state —
+// persisted in the extension page's localStorage (survives popup reopens).
+const DEV_DIAGNOSTICS_KEY = "kibitzer.devDiagnostics"
+
+// Last successfully rendered dashboard, so the popup still opens (read-only)
+// while the local server is down. Cleared once the server says the session it
+// captured is gone.
+const LAST_SNAPSHOT_KEY = "kibitzer.lastSnapshot"
+
+interface DashboardSnapshot {
+  state: SessionState
+  goalText: string
+  stats: SessionStats | null
+}
+
 let editing = false
 let summary: SessionStats | null = null
 let settingsOpen = false
 let reportOpen = false
+let historyOpen = false
 let pollTimer: number | undefined
 let personaCache: PersonaSummary[] = FALLBACK_PERSONAS
+let serverDown = false
+// Which offline view is on screen; poll re-renders are skipped while it stays
+// the same so typing in the goal input survives the 2s reconnect poll.
+let offlineView: "setup" | "dashboard" | null = null
+let devDiagnostics = false
+try {
+  devDiagnostics = localStorage.getItem(DEV_DIAGNOSTICS_KEY) === "1"
+} catch {
+  // localStorage unavailable — leave diagnostics off.
+}
 
 function esc(text: string): string {
   return text.replace(
     /[&<>"']/g,
     (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch] ?? ch,
   )
+}
+
+function saveSnapshot(snapshot: DashboardSnapshot): void {
+  try {
+    localStorage.setItem(LAST_SNAPSHOT_KEY, JSON.stringify(snapshot))
+  } catch {
+    // Best-effort — offline mode just falls back to the setup screen.
+  }
+}
+
+function loadSnapshot(): DashboardSnapshot | null {
+  try {
+    const raw = localStorage.getItem(LAST_SNAPSHOT_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as DashboardSnapshot
+    if (!parsed || typeof parsed !== "object") return null
+    if (!parsed.state || typeof parsed.state.tracking !== "string") return null
+    if (typeof parsed.goalText !== "string") return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function clearSnapshot(): void {
+  try {
+    localStorage.removeItem(LAST_SNAPSHOT_KEY)
+  } catch {
+    // ignore
+  }
 }
 
 function schedulePoll(): void {
@@ -109,47 +170,97 @@ function header(pillLabel: string, pillTone: string): string {
     </div>`
 }
 
+async function getActiveTabId(): Promise<number | null> {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+    return tabs[0]?.id ?? null
+  } catch {
+    return null
+  }
+}
+
 async function refresh(): Promise<void> {
-  if (editing || summary || settingsOpen || reportOpen) return
+  if (editing || summary || settingsOpen || reportOpen || historyOpen) return
   const result = await getSessionState()
   if (result.kind === "unreachable") {
-    renderUnreachable()
-    schedulePoll()
+    handleUnreachable()
     return
   }
+  // Reconnect: carry over anything typed into the offline goal input before
+  // the online render replaces it.
+  const typedGoal = serverDown
+    ? ((document.getElementById("goal-input") as HTMLInputElement | null)?.value ?? "")
+    : ""
+  serverDown = false
+  offlineView = null
   if (result.kind === "no_session") {
+    clearSnapshot()
     stopPoll()
-    renderSetup(false)
+    renderSetup(false, typedGoal)
     return
   }
   if (!result.state.has_goal) {
+    clearSnapshot()
     stopPoll()
-    renderSetup(true)
+    renderSetup(true, typedGoal)
     return
   }
-  const [current, stats, tiers] = await Promise.all([
+  const tabId = await getActiveTabId()
+  const [current, stats, tiers, page] = await Promise.all([
     getCurrentSession(),
     getSessionStats(),
     getHealthTiers(),
+    tabId === null ? Promise.resolve(null) : getLatestObservation(tabId),
   ])
-  renderDashboard(result.state, current?.goal?.raw_text ?? "", stats, tiers)
+  const goalText = current?.goal?.raw_text ?? ""
+  saveSnapshot({ state: result.state, goalText, stats })
+  renderDashboard(result.state, goalText, stats, tiers, page)
   schedulePoll()
 }
 
-function renderUnreachable(): void {
-  root.innerHTML = `
-    ${header("연결 안 됨", "red")}
-    <p class="center-note">로컬 서버(127.0.0.1:8765)에 연결할 수 없어요.<br />서버를 켜면 자동으로 다시 연결합니다.</p>`
+// Server-down handling (issue #11): the popup keeps rendering — a red banner
+// on top, the last-seen dashboard (read-only) below, and the 2s poll keeps
+// running so reconnecting is automatic.
+function handleUnreachable(): void {
+  editing = false
+  settingsOpen = false
+  reportOpen = false
+  serverDown = true
+  renderOffline()
+  schedulePoll()
 }
 
-function renderSetup(sessionExists: boolean, currentGoal = ""): void {
+function offlineBannerHtml(hint: string): string {
+  return `
+    <div class="offline-banner">
+      <p class="ob-title">서버 연결 안 됨 — 추적을 사용할 수 없어요</p>
+      <p class="ob-hint">${esc(hint)}</p>
+    </div>`
+}
+
+function renderOffline(): void {
+  const snapshot = loadSnapshot()
+  if (snapshot) {
+    if (offlineView === "dashboard") return
+    offlineView = "dashboard"
+    renderDashboard(snapshot.state, snapshot.goalText, snapshot.stats, null, null, true)
+    return
+  }
+  if (offlineView === "setup") return
+  offlineView = "setup"
+  const typed = (document.getElementById("goal-input") as HTMLInputElement | null)?.value ?? ""
+  renderSetup(false, typed, true)
+}
+
+function renderSetup(sessionExists: boolean, currentGoal = "", offline = false): void {
   root.innerHTML = `
-    ${header("목표 없음", "amber")}
+    ${header(offline ? "연결 안 됨" : "목표 없음", offline ? "red" : "amber")}
+    ${offline ? offlineBannerHtml("서버가 켜지면 자동으로 다시 연결돼요.") : ""}
     <p class="label">오늘의 목표</p>
     <input id="goal-input" class="goal-input" type="text"
       placeholder="예: 핀란드 여행 일정 계획하기" value="${esc(currentGoal)}" />
     <div class="btn-row">
-      <button id="goal-submit" class="btn primary">추적 시작</button>
+      <button id="goal-submit" class="btn primary"${offline ? " disabled" : ""}>추적 시작</button>
       ${editing ? '<button id="goal-cancel" class="btn">취소</button>' : ""}
     </div>`
 
@@ -158,7 +269,7 @@ function renderSetup(sessionExists: boolean, currentGoal = ""): void {
   input.focus()
   input.setSelectionRange(input.value.length, input.value.length)
   input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") void submitGoal(sessionExists)
+    if (event.key === "Enter" && !serverDown) void submitGoal(sessionExists)
   })
   submit.addEventListener("click", () => {
     void submitGoal(sessionExists)
@@ -166,6 +277,7 @@ function renderSetup(sessionExists: boolean, currentGoal = ""): void {
   document.getElementById("goal-cancel")?.addEventListener("click", () => {
     editing = false
     settingsOpen = false
+    historyOpen = false
     void refresh()
   })
 }
@@ -182,19 +294,111 @@ async function submitGoal(sessionExists: boolean): Promise<void> {
   if (!sessionExists) {
     const session = await createSession()
     if (!session) {
-      renderUnreachable()
-      schedulePoll()
+      handleUnreachable()
       return
     }
   }
   const goal = await setGoal(text)
   if (!goal) {
-    renderUnreachable()
-    schedulePoll()
+    handleUnreachable()
     return
   }
   editing = false
   notifyBadge()
+  await refresh()
+}
+
+// ---- 지금 페이지 card (D5) ----
+// Pull-only: reports what the system believes about the page behind the popup
+// and takes page-fact labels ("이 페이지가 목표와 관련 있냐") — it never grades
+// the system and never prompts. `related` labels feed the exemplar path;
+// `drift` labels are record-only until D4 decides otherwise.
+
+const TIER_NAMES: Record<number, string> = {
+  0: "Tier 0 · 어휘 매칭",
+  1: "Tier 1 · LLM 재심",
+  2: "Tier 2 · 본문 확인",
+}
+
+function pageBelief(verdict: LatestObservation["verdict"]): { dot: string; text: string } {
+  if (verdict === "OK") return { dot: "ok", text: "관련 있다고 보는 중" }
+  if (verdict === "DRIFT") return { dot: "drift", text: "이탈로 보는 중" }
+  return { dot: "unknown", text: "아직 판단 전" }
+}
+
+// The 맞아/아니 prefix agrees or disagrees with the displayed belief, but the
+// label itself is always the page-fact ("관련 있다" / "이탈이다").
+function pageLabelButtons(page: LatestObservation): { related: string; drift: string } {
+  if (page.verdict === "OK") return { related: "맞아, 관련 있어", drift: "아니, 이탈이야" }
+  if (page.verdict === "DRIFT") return { related: "아니, 관련 있어", drift: "맞아, 이탈이야" }
+  return { related: "관련 있어", drift: "이탈이야" }
+}
+
+function pageDiagnosticsHtml(page: LatestObservation): string {
+  const features = page.features ?? {}
+  const tier = features.tier_reached
+  const tierName = tier === null || tier === undefined ? "–" : (TIER_NAMES[tier] ?? `Tier ${tier}`)
+  const anchor =
+    features.anchor_eligible === true ? "반영" : features.anchor_eligible === false ? "제외" : "–"
+  const reason = page.tier1_reason
+    ? `<p class="pc-reason">판정 근거: ${esc(page.tier1_reason)}</p>`
+    : ""
+  return `
+    <div class="pc-diag">
+      <div class="row"><span class="k">판정 단계</span><span>${tierName}</span></div>
+      <div class="row"><span class="k">r0 / τ</span><span>${formatScore(features.r0)} / ${formatScore(page.tau_ok)}</span></div>
+      <div class="row"><span class="k">예시 유사도</span><span>${formatScore(features.exemplar_score)}</span></div>
+      <div class="row"><span class="k">앵커 반영</span><span>${anchor}</span></div>
+    </div>
+    ${reason}`
+}
+
+function pageCardHtml(page: LatestObservation | null, offline = false): string {
+  if (offline) {
+    return `
+    <p class="label">지금 페이지</p>
+    <div class="page-card">
+      <p class="pc-empty">서버에 연결되면 표시돼요</p>
+    </div>`
+  }
+  if (!page) {
+    return `
+    <p class="label">지금 페이지</p>
+    <div class="page-card">
+      <p class="pc-empty">이 탭은 아직 관측 전이에요</p>
+      <p class="pc-empty-hint">5초 이상 머문 일반 웹페이지만 봐요.</p>
+    </div>`
+  }
+  const belief = pageBelief(page.verdict)
+  const buttons = pageLabelButtons(page)
+  const labelNote =
+    page.label === "related"
+      ? `<p class="pc-note">관련 예시로 기억해요</p>`
+      : page.label === "drift"
+        ? `<p class="pc-note">이탈로 기록해뒀어요 — 판정 개선에 써요</p>`
+        : ""
+  const host = page.url_host ? ` · ${esc(page.url_host)}` : ""
+  return `
+    <p class="label">지금 페이지${host}</p>
+    <div class="page-card">
+      ${page.title ? `<p class="pc-title">${esc(page.title)}</p>` : ""}
+      <p class="pc-belief"><span class="pc-dot ${belief.dot}"></span>${belief.text}</p>
+      <div class="btn-row">
+        <button id="pl-related" class="btn${page.label === "related" ? " sel" : ""}">${buttons.related}</button>
+        <button id="pl-drift" class="btn${page.label === "drift" ? " sel" : ""}">${buttons.drift}</button>
+      </div>
+      ${labelNote}
+      ${devDiagnostics ? pageDiagnosticsHtml(page) : ""}
+    </div>`
+}
+
+async function submitPageLabel(page: LatestObservation, label: PageLabel): Promise<void> {
+  if (page.label === label) return
+  for (const id of ["pl-related", "pl-drift"]) {
+    const button = document.getElementById(id) as HTMLButtonElement | null
+    if (button) button.disabled = true
+  }
+  await postObservationLabel(page.observation_id, label)
   await refresh()
 }
 
@@ -203,6 +407,8 @@ function renderDashboard(
   goalText: string,
   stats: SessionStats | null,
   tiers: HealthTiers | null = null,
+  page: LatestObservation | null = null,
+  offline = false,
 ): void {
   const pill = TRACKING_PILLS[state.tracking] ?? TRACKING_PILLS.tracking
   const pillLabel =
@@ -230,7 +436,9 @@ function renderDashboard(
     </div>`
     : ""
 
-  const pending = state.pending_intervention
+  // Offline renders come from the snapshot: the nag may have expired and its
+  // feedback buttons need the server anyway — don't resurrect it.
+  const pending = offline ? null : state.pending_intervention
   const whyToggle = pending?.tier1_reason
     ? `
       <button id="why-toggle" style="border: 0; background: none; padding: 0; margin: 0 0 8px; font-size: 11px; color: var(--amber-tx); opacity: .75; cursor: pointer; text-decoration: underline;">왜?</button>
@@ -252,10 +460,13 @@ function renderDashboard(
     </div>`
     : ""
 
+  const dis = offline ? " disabled" : ""
   root.innerHTML = `
-    ${header(pillLabel, pill.tone)}
+    ${header(offline ? "연결 안 됨" : pillLabel, offline ? "red" : pill.tone)}
+    ${offline ? offlineBannerHtml("아래는 마지막으로 본 상태예요. 서버가 켜지면 자동으로 이어가요.") : ""}
     <div style="display: flex; justify-content: flex-end; gap: 8px; margin: -8px 0 6px;">
       <button id="open-report" class="icon-btn">리포트</button>
+      <button id="open-history" class="icon-btn">탐색 기록</button>
       <button id="open-settings" class="icon-btn">설정</button>
     </div>
     ${degradedNote}
@@ -263,8 +474,9 @@ function renderDashboard(
     <p class="label">오늘의 목표</p>
     <div class="goal-row">
       <p class="goal-text">${esc(goalText)}</p>
-      <button id="goal-edit" class="icon-btn" title="목표 수정">수정</button>
+      <button id="goal-edit" class="icon-btn" title="목표 수정"${dis}>수정</button>
     </div>
+    ${pageCardHtml(page, offline)}
     <p class="label">${driftLabel}</p>
     ${driftMeter}
     <p class="hint">${driftHint}</p>
@@ -273,8 +485,8 @@ function renderDashboard(
       <div class="card"><p class="k">목표 관련</p><p class="v">${stats ? formatRatio(stats.related_ratio) : "–"}</p></div>
     </div>
     <div class="btn-row">
-      <button id="snooze-toggle" class="btn">${snoozed ? "지금 재개" : "30분 조용히"}</button>
-      <button id="session-end" class="btn">세션 종료</button>
+      <button id="snooze-toggle" class="btn"${dis}>${snoozed ? "지금 재개" : "30분 조용히"}</button>
+      <button id="session-end" class="btn"${dis}>세션 종료</button>
     </div>`
 
   if (pending) {
@@ -293,12 +505,24 @@ function renderDashboard(
     })
   }
 
+  if (page) {
+    document.getElementById("pl-related")?.addEventListener("click", () => {
+      void submitPageLabel(page, "related")
+    })
+    document.getElementById("pl-drift")?.addEventListener("click", () => {
+      void submitPageLabel(page, "drift")
+    })
+  }
+
   document.getElementById("open-settings")?.addEventListener("click", () => {
     void openSettings()
   })
 
   document.getElementById("open-report")?.addEventListener("click", () => {
     void openReport()
+  })
+  document.getElementById("open-history")?.addEventListener("click", () => {
+    void openHistory()
   })
 
   document.getElementById("goal-edit")?.addEventListener("click", () => {
@@ -330,8 +554,7 @@ async function submitInterventionFeedback(
 async function toggleSnooze(snoozed: boolean): Promise<void> {
   const result = snoozed ? await postSessionSnooze(0) : await postSessionSnooze()
   if (!result) {
-    renderUnreachable()
-    schedulePoll()
+    handleUnreachable()
     return
   }
   notifyBadge()
@@ -342,23 +565,75 @@ async function endSession(): Promise<void> {
   stopPoll()
   const stats = await postSessionEnd()
   if (!stats) {
-    renderUnreachable()
-    schedulePoll()
+    handleUnreachable()
     return
   }
+  clearSnapshot()
   summary = stats
   notifyBadge()
   renderSummary(stats)
 }
 
+async function openHistory(): Promise<void> {
+  historyOpen = true
+  settingsOpen = false
+  reportOpen = false
+  stopPoll()
+  const entries = await listExplorationHistory()
+  renderHistory(entries)
+}
+
+function closeHistory(): void {
+  historyOpen = false
+  void refresh()
+}
+
+function renderHistory(entries: ExplorationHistoryEntry[]): void {
+  const items = entries.length
+    ? entries.map(renderHistoryItem).join("")
+    : `<p class="center-note">아직 탐색 기록이 없습니다.</p>`
+
+  root.innerHTML = `
+    <div class="header">
+      <button id="history-back" class="icon-btn" title="대시보드로">←</button>
+      <span class="name">탐색 기록</span>
+    </div>
+    <div class="history-list">${items}</div>`
+
+  document.getElementById("history-back")?.addEventListener("click", closeHistory)
+}
+
+function renderHistoryItem(entry: ExplorationHistoryEntry): string {
+  const verdictClass = entry.verdict === "OK" ? " ok" : entry.verdict === "DRIFT" ? " drift" : ""
+  const ariaLabel =
+    entry.verdict === "OK" ? 'aria-label="목표 관련"' : entry.verdict === "DRIFT" ? 'aria-label="이탈"' : 'aria-hidden="true"'
+  return `
+    <div class="history-item">
+      <span class="history-light${verdictClass}" ${ariaLabel}></span>
+      <div class="history-main">
+        <div class="history-title">${esc(historyTitle(entry))}</div>
+        <div class="history-url">${esc(entry.url)}</div>
+      </div>
+    </div>`
+}
+
+function historyTitle(entry: ExplorationHistoryEntry): string {
+  const title = entry.title.trim()
+  if (title) return title
+  try {
+    return new URL(entry.url).hostname
+  } catch {
+    return "제목 없음"
+  }
+}
+
 async function openReport(): Promise<void> {
   reportOpen = true
+  historyOpen = false
   stopPoll()
   const report = await getSessionReport()
   if (!report) {
-    reportOpen = false
-    renderUnreachable()
-    schedulePoll()
+    handleUnreachable()
     return
   }
   renderReport(report)
@@ -488,21 +763,18 @@ function renderSummary(stats: SessionStats): void {
 
 async function openSettings(): Promise<void> {
   settingsOpen = true
+  historyOpen = false
   stopPoll()
   const [settings, personas] = await Promise.all([getSettings(), getPersonas()])
   if (!settings) {
-    settingsOpen = false
-    renderUnreachable()
-    schedulePoll()
+    handleUnreachable()
     return
   }
   if (personas.length) personaCache = personas
   try {
     renderSettings(settings, personaCache)
   } catch {
-    settingsOpen = false
-    renderUnreachable()
-    schedulePoll()
+    handleUnreachable()
   }
 }
 
@@ -580,6 +852,19 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
     </div>
     <p class="subhint">꺼두면 테스트 중 같은 흐름에서도 다음 훈수를 바로 받을 수 있습니다.</p>
     <div class="setrow">
+      <span class="grow">판정 대기</span>
+      <input id="dwell-observation" class="number" type="number" min="1" max="300" step="1"
+        value="${settings.dwell.observation_seconds}" />
+      <span style="color: var(--muted);">초</span>
+    </div>
+    <div class="setrow">
+      <span class="grow">본문 확인 대기</span>
+      <input id="dwell-tier2" class="number" type="number" min="1" max="300" step="1"
+        value="${settings.dwell.tier2_seconds}" />
+      <span style="color: var(--muted);">초</span>
+    </div>
+    <p class="subhint">짧게 들른 페이지는 판정하지 않습니다. 본문 확인 대기는 Tier 2 요청 전에 같은 페이지에 머문 총 시간입니다.</p>
+    <div class="setrow">
       <span class="grow">조용한 시간</span>
       <input id="quiet-start" class="time" type="time" value="${esc(settings.quiet_hours.start)}"
         ${settings.quiet_hours.enabled ? "" : "disabled"} />
@@ -588,7 +873,12 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
         ${settings.quiet_hours.enabled ? "" : "disabled"} />
       <input id="quiet-toggle" type="checkbox" ${settings.quiet_hours.enabled ? "checked" : ""} />
     </div>
-    <p class="subhint">이 시간에는 알림·음성을 억제합니다. 억제된 잔소리도 팝업 카드에는 남습니다.</p>`
+    <p class="subhint">이 시간에는 알림·음성을 억제합니다. 억제된 잔소리도 팝업 카드에는 남습니다.</p>
+    <div class="setrow">
+      <span class="grow">개발자 진단</span>
+      <input id="dev-toggle" type="checkbox" ${devDiagnostics ? "checked" : ""} />
+    </div>
+    <p class="subhint">지금 페이지 카드에 판정 단계, r0/τ, 예시·앵커 수치와 판정 근거를 표시합니다.</p>`
 
   document.getElementById("settings-back")?.addEventListener("click", closeSettings)
 
@@ -646,6 +936,18 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
       void applySettings({ cooldown: { seconds } })
     }
   })
+  document.getElementById("dwell-observation")?.addEventListener("change", (event) => {
+    const seconds = Number.parseInt((event.target as HTMLInputElement).value, 10)
+    if (Number.isFinite(seconds) && seconds >= 1 && seconds <= 300) {
+      void applySettings({ dwell: { observation_seconds: seconds } })
+    }
+  })
+  document.getElementById("dwell-tier2")?.addEventListener("change", (event) => {
+    const seconds = Number.parseInt((event.target as HTMLInputElement).value, 10)
+    if (Number.isFinite(seconds) && seconds >= 1 && seconds <= 300) {
+      void applySettings({ dwell: { tier2_seconds: seconds } })
+    }
+  })
   document.getElementById("quiet-toggle")?.addEventListener("change", (event) => {
     void applySettings({ quiet_hours: { enabled: (event.target as HTMLInputElement).checked } })
   })
@@ -655,14 +957,20 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
   document.getElementById("quiet-end")?.addEventListener("change", (event) => {
     void applySettings({ quiet_hours: { end: (event.target as HTMLInputElement).value } })
   })
+  document.getElementById("dev-toggle")?.addEventListener("change", (event) => {
+    devDiagnostics = (event.target as HTMLInputElement).checked
+    try {
+      localStorage.setItem(DEV_DIAGNOSTICS_KEY, devDiagnostics ? "1" : "0")
+    } catch {
+      // Preference simply won't survive the popup closing.
+    }
+  })
 }
 
 async function applySettings(patch: Parameters<typeof putSettings>[0]): Promise<void> {
   const updated = await putSettings(patch)
   if (!updated) {
-    settingsOpen = false
-    renderUnreachable()
-    schedulePoll()
+    handleUnreachable()
     return
   }
   renderSettings(updated, personaCache)

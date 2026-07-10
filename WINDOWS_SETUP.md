@@ -62,8 +62,10 @@ Remove the Startup shortcut with:
 
 Startup logs are written under `data\logs\`. The tray icon polls
 `GET /health`: red means unreachable, gray means idle, green means active, and
-yellow means unknown. It uses the monochrome template icon, tinted for the
-current Windows system theme, with a small status dot overlay.
+yellow means unknown or starting. The status header reports missing setup,
+startup failures, and timeouts; **Open logs** opens the folder containing the
+tray and server startup logs. The icon uses the monochrome template artwork,
+tinted for the current Windows system theme, with a small status dot overlay.
 
 ## Optional AI Provider Setup
 

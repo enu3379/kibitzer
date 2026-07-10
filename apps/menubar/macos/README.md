@@ -5,10 +5,10 @@ This Swift menu bar app mirrors the Windows tray surface:
 - polls `http://127.0.0.1:8765/health`;
 - shows `dead`, `idle`, `active`, or `unknown` in the macOS menu bar;
 - can kick the server LaunchAgent or fall back to `scripts/macos_run_server.sh`;
-- opens the health endpoint and logs folder from the menu.
+- opens the logs folder from the menu.
 
 The status item uses the monochrome template icon at
-`apps/extension/icons/variants/monitor-template-128.png` and renders it as an
+`apps/extension/icons/variants/monitor-v1-mono-128.png` and renders it as an
 AppKit template image so macOS handles light/dark menu bar tinting. The menu bar
 app owns only the runtime state dot.
 
