@@ -81,6 +81,31 @@ Parent plan: [roadmap-fun-layer.md](roadmap-fun-layer.md)
 - Expose in `pending_intervention` and the report API so the popup can answer
   "왜 이렇게 판단했어?".
 
+### 6. Always-on page verdict + labels (added 2026-07-08, resolves D5)
+
+Motivation: feedback is intervention-scoped today, so FALSE OKs — the worst
+failure class (silent misses) — can never be labeled. An always-available page
+card in the popup is the only supply of those labels, and the replay CLI (D4)
+scores against them.
+
+- `GET /observations/latest?tab_id=` → the newest observation for that tab:
+  `{observation_id, title, url_host, verdict, features: {r0, exemplar_score,
+  anchor_eligible, tier_reached}, tier1_reason}`. 404 when none.
+- New `page_labels` table: `(id, observation_id FK, label 'related'|'drift',
+  ts)` — observation-scoped, no intervention required. Re-labeling the same
+  observation replaces (latest wins). `POST /observations/{id}/label`.
+- Semantics: the user labels the PAGE ("목표와 관련 있다/이탈이다"), never
+  grades the system — the stored verdict + label yields the confusion matrix
+  for free.
+- Learning wiring: label `related` reuses the existing
+  `add_goal_exemplar_from_observation` path (same as related feedback).
+  Label `drift` is **record-only** — negative-exemplar learning is explicitly
+  deferred (D4) until replay shows it is needed.
+- Popup UI (current-page card + the two label buttons + the dev-mode
+  diagnostics view behind a settings toggle) and all copy are Claude's; this
+  handoff covers only the endpoint, table, and label→exemplar wiring.
+- Guardrail: the card is pull-only. Nothing may ever prompt the user to label.
+
 ## Boundaries
 
 Same ownership table as the roadmap: server plumbing + `background.ts` mechanics
