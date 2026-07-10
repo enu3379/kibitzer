@@ -14,17 +14,72 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
 New-Item -ItemType Directory -Force data | Out-Null
 $env:PYTHONUNBUFFERED = "1"
 
-$Python = ".\.venv\Scripts\python.exe"
+$Python = Join-Path $Root ".venv\Scripts\python.exe"
 $Arguments = @("-m", "uvicorn", "apps.server.app.main:app", "--host", "127.0.0.1", "--port", "8765")
+
+$StartInfo = New-Object System.Diagnostics.ProcessStartInfo
+$StartInfo.FileName = $Python
+$StartInfo.Arguments = $Arguments -join " "
+$StartInfo.WorkingDirectory = $Root.ToString()
+$StartInfo.UseShellExecute = $false
+$StartInfo.CreateNoWindow = [bool]$LogToFile
+
+$OutStream = $null
+$ErrStream = $null
+$OutCopyTask = $null
+$ErrCopyTask = $null
 
 if ($LogToFile) {
   $LogDir = Join-Path $Root "data\logs"
   New-Item -ItemType Directory -Force $LogDir | Out-Null
   $OutLog = Join-Path $LogDir "windows-startup-app.out.log"
   $ErrLog = Join-Path $LogDir "windows-startup-app.err.log"
-  & $Python @Arguments 1>> $OutLog 2>> $ErrLog
+  $StartInfo.RedirectStandardOutput = $true
+  $StartInfo.RedirectStandardError = $true
+  $OutStream = [System.IO.File]::Open($OutLog, "Append", "Write", "ReadWrite")
+  $ErrStream = [System.IO.File]::Open($ErrLog, "Append", "Write", "ReadWrite")
 }
-else {
-  & $Python @Arguments
+
+$ServerExitCode = 1
+$ServerProcess = New-Object System.Diagnostics.Process
+$ServerProcess.StartInfo = $StartInfo
+try {
+  # Windows PowerShell 5.1 promotes native stderr to PowerShell error records.
+  # Uvicorn writes normal INFO startup messages to stderr, so invoking it with
+  # the call operator under ErrorActionPreference=Stop aborts a healthy start.
+  # Use the .NET process API so native streams stay native and the actual exit
+  # code remains authoritative.
+  if (-not $ServerProcess.Start()) {
+    throw "Could not start the Kibitzer server process."
+  }
+
+  if ($LogToFile) {
+    $OutCopyTask = $ServerProcess.StandardOutput.BaseStream.CopyToAsync($OutStream)
+    $ErrCopyTask = $ServerProcess.StandardError.BaseStream.CopyToAsync($ErrStream)
+    while (-not $ServerProcess.WaitForExit(1000)) {
+      $OutStream.Flush()
+      $ErrStream.Flush()
+    }
+    [System.Threading.Tasks.Task]::WaitAll(
+      [System.Threading.Tasks.Task[]]@($OutCopyTask, $ErrCopyTask)
+    )
+    $OutStream.Flush()
+    $ErrStream.Flush()
+  }
+  else {
+    $ServerProcess.WaitForExit()
+  }
+
+  $ServerExitCode = $ServerProcess.ExitCode
 }
-exit $LASTEXITCODE
+finally {
+  if ($OutStream) {
+    $OutStream.Dispose()
+  }
+  if ($ErrStream) {
+    $ErrStream.Dispose()
+  }
+  $ServerProcess.Dispose()
+}
+
+exit $ServerExitCode
