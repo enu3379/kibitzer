@@ -1,13 +1,12 @@
-"""Rasterize the code-defined Kibitzer monitor icon to transparent PNGs.
+"""Rasterize the Kibitzer icon to transparent PNGs.
 
 macOS `qlmanage` bakes an opaque white background into SVG thumbnails, which
 made the toolbar icon render as a white square. This script draws the same
 geometry with real alpha, using only the standard library.
 
 Current live icons use stable
-apps/extension/icons/icon-{16,32,48,128}.{png,svg} filenames. They may be
-designer-provided assets or generated assets. Before running this script, make
-sure the code geometry below is the intended live design for every size.
+apps/extension/icons/icon-{16,32,48,128}.{png,svg} filenames. Before running
+this script, make sure the code geometry below is the intended live design for every size.
 
 Usage: python scripts/gen_extension_icons.py
 Writes icon-{16,32,48,128}.png into apps/extension/icons/, overwriting live PNGs.

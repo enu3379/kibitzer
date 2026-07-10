@@ -1,4 +1,4 @@
-"""Rasterize code-defined peek-over icon variants to transparent PNGs.
+"""Rasterize Kibitzer icon variants to transparent PNGs.
 
 Standalone and stdlib-only, mirroring scripts/gen_extension_icons.py. Geometry is
 in the 128x128 SVG coordinate space and matches the source SVGs under
