@@ -7,12 +7,12 @@ $ErrorActionPreference = "Stop"
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $RunScript = Join-Path $Root "scripts\windows_run_server.ps1"
 $IconCandidates = @(
-  (Join-Path $Root "apps\extension\icons\variants\monitor-template-128.png"),
-  (Join-Path $Root "apps\extension\icons\variants\monitor-template-48.png"),
-  (Join-Path $Root "apps\extension\icons\variants\monitor-template-32.png"),
-  (Join-Path $Root "apps\extension\dist\icons\variants\monitor-template-128.png"),
-  (Join-Path $Root "apps\extension\dist\icons\variants\monitor-template-48.png"),
-  (Join-Path $Root "apps\extension\dist\icons\variants\monitor-template-32.png")
+  (Join-Path $Root "apps\extension\icons\variants\monitor-v1-mono-128.png"),
+  (Join-Path $Root "apps\extension\icons\variants\monitor-v1-mono-48.png"),
+  (Join-Path $Root "apps\extension\icons\variants\monitor-v1-mono-32.png"),
+  (Join-Path $Root "apps\extension\dist\icons\variants\monitor-v1-mono-128.png"),
+  (Join-Path $Root "apps\extension\dist\icons\variants\monitor-v1-mono-48.png"),
+  (Join-Path $Root "apps\extension\dist\icons\variants\monitor-v1-mono-32.png")
 )
 $HealthUrl = "http://127.0.0.1:8765/health"
 $LogDir = Join-Path $Root "data\logs"
