@@ -574,6 +574,7 @@ Next:
   not current state. READMEs, SETUP guides, platforms/architecture docs, and
   the docs index were aligned with the code in the same pass.
 
+
 ## 2026-07-08 P1 Attachment Loop: Page Labels
 
 - Added the server-side always-on page verdict plumbing from
@@ -653,3 +654,53 @@ Verified:
 - `.venv/bin/python -m apps.server.app.replay --db ./data/kibitzer.sqlite3 --list-sessions`
 - `.venv/bin/python -m apps.server.app.replay --db ./data/kibitzer.sqlite3 --latest --full`
 - `.venv/bin/python -m apps.server.app.replay --db ./data/kibitzer.sqlite3 --latest --override relevance.tau_ok=0.2 --csv /tmp/kibitzer-replay-latest.csv --json /tmp/kibitzer-replay-latest.json`
+
+## 2026-07-09 Popup: Server-Offline Banner + Cached Dashboard (issue #11)
+
+- The popup no longer blanks out when the local server is unreachable (the
+  extension half of issue #11). Instead of the full-screen "연결 안 됨" note,
+  every screen keeps rendering: a red banner on top (`서버 연결 안 됨 — 추적을
+  사용할 수 없어요`), the header pill switches to `연결 안 됨`, and the 2s
+  poll keeps running so reconnection stays automatic.
+- The last successfully rendered dashboard (state + goal + stats) is cached in
+  popup localStorage (`kibitzer.lastSnapshot`) and shown read-only while
+  offline: server-dependent buttons (리포트/설정/수정/스누즈/세션 종료) are
+  disabled, the pending nag card is suppressed (it may have expired and its
+  feedback buttons need the server anyway), and the 지금 페이지 card shows
+  `서버에 연결되면 표시돼요`. The snapshot clears once the server reports the
+  captured session is gone (no session / no goal / session ended).
+- With no snapshot (fresh install), the goal setup screen renders under the
+  banner with 추적 시작 disabled; typed goal text survives both the reconnect
+  poll (offline re-renders are skipped while the view kind is unchanged) and
+  the offline→online transition.
+- All unreachable failure paths (goal submit, snooze, session end, report,
+  settings open/apply) now route through one handler instead of six copies of
+  the full-screen error.
+
+Verified:
+
+- `npm run build` in `apps/extension` (typecheck + bundle).
+- Browser-preview harness (built popup.js + stubbed `chrome` and a
+  mode-switchable `fetch`): offline-no-cache setup screen, typing survival
+  across ~18 poll cycles, offline→online auto-recovery to the live dashboard,
+  online→offline cached dashboard (banner, disabled controls, hidden nag
+  card), cold reopen while offline, light + dark screenshots, zero console
+  errors.
+
+## 2026-07-09 Toast Redisplay
+
+- Implemented active-tab redisplay for pending intervention and celebration
+  toasts. The background worker now keeps toast metadata and reinjects the latest
+  pending toast after tab activation, top-frame load completion, or SPA URL
+  updates.
+- Delivery side effects stay single-shot: the first successful presentation
+  reports intervention delivery and plays the sound; redisplays are quiet. A
+  display token prevents stale hidden-tab timeout/dismiss events from clearing a
+  newer active-tab toast.
+- Verified by build/typecheck (`npm.cmd --prefix apps/extension run build`,
+  `npm.cmd --prefix apps/extension run typecheck`) and a manual browser check:
+  tab switching no longer makes the user miss a pending toast.
+- Known polish notes: toast card sizing can vary slightly by tab/site for an
+  unknown reason, and reinjection replays Kibitzer's entrance animation whenever
+  the user switches back and forth while a toast is pending. Both are accepted
+  for now.

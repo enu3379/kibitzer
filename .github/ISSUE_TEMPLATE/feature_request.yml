@@ -1,0 +1,37 @@
+name: 기능 제안
+description: 새 기능 또는 개선 작업 지시서 — 사람이든 에이전트든 이 이슈만 보고 착수할 수 있게 작성
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 배경 · 해결하려는 문제
+      description: 왜 필요한가? 지금 무엇이 불편한가? 관련 D-번호 결정이 있으면 함께.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 제안 내용
+      description: 어떻게 동작해야 하는가? 서버/확장 어느 쪽 변경인가?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 수용 기준 (Acceptance Criteria)
+      description: 이 체크리스트가 모두 충족되면 이슈 완료. 에이전트에게 그대로 맡길 수 있을 만큼 구체적으로.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+        - [ ] 서버 pytest·확장 빌드 통과
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: 참고 자료
+      description: 관련 planning-notes 절, handoff 문서, 링크 (선택)
+    validations:
+      required: false
