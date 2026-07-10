@@ -77,13 +77,25 @@ def _runtime(request: Request) -> RuntimeResources:
 
 
 @router.get("/observations/latest", response_model=LatestObservationResponse)
-async def latest_observation_for_tab(request: Request, tab_id: int) -> LatestObservationResponse:
+async def latest_observation_for_tab(
+    request: Request,
+    tab_id: int,
+    url_host: str,
+    url_path_hash: str,
+) -> LatestObservationResponse:
     store = _store(request)
     current = store.get_current_session()
     if not current:
         raise HTTPException(status_code=404, detail="no active session")
     observation = store.latest_observation_for_tab(current.session.id, tab_id)
-    if not observation:
+    # A Chrome tab id survives navigation. Require the popup's privacy-safe
+    # current-page identity so a pre-dwell navigation cannot expose or label
+    # the previous page's observation as the page currently behind the popup.
+    if (
+        not observation
+        or observation.url_host != url_host
+        or observation.url_path_hash != url_path_hash
+    ):
         raise HTTPException(status_code=404, detail="observation not found")
     return _latest_observation_response(
         observation,

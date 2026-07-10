@@ -170,10 +170,17 @@ function header(pillLabel: string, pillTone: string): string {
     </div>`
 }
 
-async function getActiveTabId(): Promise<number | null> {
+interface ActiveTab {
+  id: number
+  url: string
+}
+
+async function getActiveTab(): Promise<ActiveTab | null> {
   try {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
-    return tabs[0]?.id ?? null
+    const tab = tabs[0]
+    if (tab?.id === undefined || !tab.url) return null
+    return { id: tab.id, url: tab.url }
   } catch {
     return null
   }
@@ -205,12 +212,12 @@ async function refresh(): Promise<void> {
     renderSetup(true, typedGoal)
     return
   }
-  const tabId = await getActiveTabId()
+  const activeTab = await getActiveTab()
   const [current, stats, tiers, page] = await Promise.all([
     getCurrentSession(),
     getSessionStats(),
     getHealthTiers(),
-    tabId === null ? Promise.resolve(null) : getLatestObservation(tabId),
+    activeTab === null ? Promise.resolve(null) : getLatestObservation(activeTab.id, activeTab.url),
   ])
   const goalText = current?.goal?.raw_text ?? ""
   saveSnapshot({ state: result.state, goalText, stats })

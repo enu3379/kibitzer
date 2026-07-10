@@ -1,3 +1,4 @@
+import hashlib
 import sqlite3
 import tempfile
 import unittest
@@ -54,6 +55,14 @@ class PageLabelApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         return response.json()
 
+    def _page_identity(self, title: str, tab_id: int) -> dict[str, str | int]:
+        path = f"/{title.lower().replace(' ', '-')}"
+        return {
+            "tab_id": tab_id,
+            "url_host": "example.com",
+            "url_path_hash": hashlib.sha256(path.encode()).hexdigest(),
+        }
+
     def test_latest_observation_for_tab_returns_verdict_and_diagnostics(self) -> None:
         client = self._client()
         base = datetime(2026, 7, 8, 0, 0, tzinfo=timezone.utc)
@@ -61,10 +70,23 @@ class PageLabelApiTest(unittest.TestCase):
             self._start_goal(client)
             first = self._post_nav(client, "Sourdough bread recipe", 77, base)
             second = self._post_nav(client, "Kibitzer observation API docs", 77, base + timedelta(seconds=1))
-            latest = client.get("/observations/latest", params={"tab_id": 77})
-            missing = client.get("/observations/latest", params={"tab_id": 88})
+            latest = client.get(
+                "/observations/latest",
+                params=self._page_identity("Kibitzer observation API docs", 77),
+            )
+            stale = client.get(
+                "/observations/latest",
+                params=self._page_identity("Sourdough bread recipe", 77),
+            )
+            missing = client.get(
+                "/observations/latest",
+                params=self._page_identity("Never observed", 88),
+            )
             client.post(f"/observations/{second['observation_id']}/label", json={"label": "drift"})
-            relabeled = client.get("/observations/latest", params={"tab_id": 77})
+            relabeled = client.get(
+                "/observations/latest",
+                params=self._page_identity("Kibitzer observation API docs", 77),
+            )
         finally:
             client.__exit__(None, None, None)
 
@@ -81,6 +103,7 @@ class PageLabelApiTest(unittest.TestCase):
         self.assertAlmostEqual(body["tau_ok"], 0.15)
         self.assertIsNone(body["label"])
         self.assertNotEqual(first["observation_id"], second["observation_id"])
+        self.assertEqual(stale.status_code, 404)
         self.assertEqual(missing.status_code, 404)
         self.assertEqual(relabeled.status_code, 200)
         self.assertEqual(relabeled.json()["label"], "drift")
