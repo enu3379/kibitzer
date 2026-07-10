@@ -6,9 +6,9 @@ apps/extension/icons/variants/. Non-destructive: writes color
 {variant}-v1-color-{size}.png and monochrome {variant}-v1-mono-{size}.png into
 that same variants/ folder and never touches the live icon-*.png.
 
-To promote a variant to the live toolbar icon, copy its color SVG over
-apps/extension/icons/icon-128.svg and port this geometry into
-scripts/gen_extension_icons.py (or point the manifest PNGs at these files).
+To promote a variant to the live toolbar icon, copy the chosen exported assets
+to the stable apps/extension/icons/icon-* filenames. Keep the live filenames
+stable; use descriptive versioned names only inside icons/variants/.
 
 Usage: python scripts/gen_icon_variants.py
 """

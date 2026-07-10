@@ -24,7 +24,7 @@ dist/
   background.js
   popup/popup.html
   popup/popup.js
-  icons/icon-16.png ... icon-128.png (plus the source icon-128.svg)
+  icons/icon-16.png ... icon-128.png (plus matching icon-*.svg sources)
 ```
 
 For development rebuilds:
@@ -35,12 +35,10 @@ npm run watch
 
 ## Icons
 
-The live toolbar icon source is `icons/icon-128.svg`. Regenerate transparent
-PNGs with:
-
-```bash
-python ../../scripts/gen_extension_icons.py
-```
+The live toolbar icons are the stable `icons/icon-{16,32,48,128}.png` assets,
+with matching size-specific SVG sources in the same folder. Keep those filenames
+stable because the manifest, notification icon, popup header, and status-dot
+drawing code resolve them directly.
 
 Design variants live under `icons/variants/` and can be regenerated with:
 

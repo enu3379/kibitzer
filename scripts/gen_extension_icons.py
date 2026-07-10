@@ -1,16 +1,16 @@
-"""Rasterize the Kibitzer icon to transparent PNGs.
+"""Legacy rasterizer for the pre-issue #22 Kibitzer monitor icon.
 
 macOS `qlmanage` bakes an opaque white background into SVG thumbnails, which
 made the toolbar icon render as a white square. This script draws the same
-geometry as apps/extension/icons/icon-128.svg (the design source of truth)
-with real alpha, using only the standard library.
+legacy v1 monitor geometry with real alpha, using only the standard library.
 
-The mark is the "peek-over-monitor" kibitzer: a dark head peeking from behind a
-green monitor, a light rim separating the two, hands draped over the top edge,
-and eyes cresting above the screen. Keep this geometry in sync with icon-128.svg.
+Current live icons are designer-provided, size-specific
+apps/extension/icons/icon-{16,32,48,128}.{png,svg} assets. Do not run this
+script as part of normal icon updates; it is retained only to reproduce the old
+v1 PNG geometry if needed.
 
 Usage: python scripts/gen_extension_icons.py
-Writes icon-{16,32,48,128}.png into apps/extension/icons/.
+Writes icon-{16,32,48,128}.png into apps/extension/icons/, overwriting live PNGs.
 """
 
 from __future__ import annotations

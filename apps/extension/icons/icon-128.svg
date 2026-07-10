@@ -1,12 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Kibitzer">
-  <!-- peek-over-monitor: head behind a green monitor with a light rim; hands drape over the top edge -->
-  <circle cx="64" cy="69" r="32" fill="#1F2937"/>
-  <rect x="16" y="67" width="96" height="42" rx="7" fill="#F9FAFB"/>
-  <rect x="18" y="69" width="92" height="38" rx="5" fill="#10B981"/>
-  <rect x="59" y="107" width="10" height="7" fill="#10B981"/>
-  <rect x="49" y="113" width="31" height="5" rx="2" fill="#10B981"/>
-  <circle cx="52" cy="56" r="8" fill="#F9FAFB"/>
-  <circle cx="76" cy="56" r="8" fill="#F9FAFB"/>
-  <rect x="30" y="64" width="15" height="13" rx="6.5" fill="#1F2937"/>
-  <rect x="83" y="64" width="15" height="13" rx="6.5" fill="#1F2937"/>
+  <circle cx="64" cy="50" r="50" fill="#1F2937"></circle>
+  <circle cx="45" cy="36" r="12.5" fill="#F9FAFB"></circle>
+  <circle cx="83" cy="36" r="12.5" fill="#F9FAFB"></circle>
+  <rect x="0" y="52" width="128" height="58" rx="9" fill="#F9FAFB"></rect>
+  <rect x="4" y="56" width="120" height="50" rx="6" fill="#10B981"></rect>
+  <rect x="57" y="106" width="14" height="13" fill="#10B981"></rect>
+  <rect x="44" y="118" width="40" height="10" rx="3" fill="#10B981"></rect>
+  <rect x="11.5" y="48" width="23" height="20" rx="10" fill="#1F2937"></rect>
+  <rect x="93.5" y="48" width="23" height="20" rx="10" fill="#1F2937"></rect>
 </svg>
