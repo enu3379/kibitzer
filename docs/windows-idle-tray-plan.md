@@ -52,8 +52,8 @@ Acceptance checks:
 - The Startup folder contains `Kibitzer Server.lnk`.
 - Logging out/in starts the tray process without a visible terminal.
 - `Invoke-RestMethod http://127.0.0.1:8765/health` returns `mode = idle`.
-- The tray context menu can refresh status, start the server, open health, and
-  quit the tray.
+- The tray context menu can refresh status, start the server, open logs, and
+  quit the tray. Start attempts show progress and failures in the status header.
 
 ## Future Work
 
