@@ -4,6 +4,7 @@ import unittest
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 from fastapi.testclient import TestClient
 
@@ -84,7 +85,7 @@ class PageLabelApiTest(unittest.TestCase):
         self.assertEqual(relabeled.status_code, 200)
         self.assertEqual(relabeled.json()["label"], "drift")
 
-    def test_page_label_related_adds_exemplar_once_and_replaces_label(self) -> None:
+    def test_page_label_related_drift_related_keeps_one_synchronized_exemplar(self) -> None:
         client = self._client()
         base = datetime(2026, 7, 8, 0, 0, tzinfo=timezone.utc)
         try:
@@ -92,11 +93,16 @@ class PageLabelApiTest(unittest.TestCase):
             drift = self._post_nav(client, "Sourdough bread recipe", 77, base)
             observation_id = str(drift["observation_id"])
 
+            related = client.post(
+                f"/observations/{observation_id}/label",
+                json={"label": "related"},
+            )
             drift_label = client.post(
                 f"/observations/{observation_id}/label",
                 json={"label": "drift"},
             )
-            related = client.post(
+            count_after_drift = self.store.goal_exemplar_count(session_id)
+            related_again = client.post(
                 f"/observations/{observation_id}/label",
                 json={"label": "related"},
             )
@@ -107,19 +113,57 @@ class PageLabelApiTest(unittest.TestCase):
         finally:
             client.__exit__(None, None, None)
 
-        self.assertEqual(drift_label.status_code, 200)
-        self.assertEqual(drift_label.json()["label"], "drift")
-        self.assertIsNone(drift_label.json()["exemplar_count"])
         self.assertEqual(related.status_code, 200)
         self.assertEqual(related.json()["label"], "related")
         self.assertEqual(related.json()["exemplar_count"], 2)
+        self.assertEqual(drift_label.status_code, 200)
+        self.assertEqual(drift_label.json()["label"], "drift")
+        self.assertIsNone(drift_label.json()["exemplar_count"])
+        self.assertEqual(count_after_drift, 1)
+        self.assertEqual(related_again.status_code, 200)
+        self.assertEqual(related_again.json()["exemplar_count"], 2)
         self.assertEqual(duplicate.status_code, 200)
         self.assertEqual(duplicate.json()["exemplar_count"], 2)
         self.assertEqual(self.store.goal_exemplar_count(session_id), 2)
 
         with closing(sqlite3.connect(self.db_path)) as conn:
             rows = conn.execute("SELECT observation_id, label FROM page_labels").fetchall()
+            learned_exemplars = conn.execute(
+                """
+                SELECT observation_id
+                FROM goal_exemplars
+                WHERE session_id = ? AND observation_id IS NOT NULL
+                """,
+                (session_id,),
+            ).fetchall()
         self.assertEqual(rows, [(observation_id, "related")])
+        self.assertEqual(learned_exemplars, [(observation_id,)])
+
+    def test_page_label_and_exemplar_update_roll_back_together(self) -> None:
+        client = self._client()
+        base = datetime(2026, 7, 8, 0, 0, tzinfo=timezone.utc)
+        try:
+            session_id = self._start_goal(client)
+            observed = self._post_nav(client, "Sourdough bread recipe", 77, base)
+            observation_id = str(observed["observation_id"])
+
+            with mock.patch.object(
+                self.store,
+                "_append_goal_exemplar_added_event",
+                side_effect=RuntimeError("event write failed"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "event write failed"):
+                    self.store.record_page_label(
+                        session_id,
+                        observation_id,
+                        "related",
+                        exemplar_cap=20,
+                    )
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertIsNone(self.store.page_label_for_observation(observation_id))
+        self.assertEqual(self.store.goal_exemplar_count(session_id), 1)
 
     def test_page_label_rejects_observations_from_inactive_session(self) -> None:
         client = self._client()

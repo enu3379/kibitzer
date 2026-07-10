@@ -25,7 +25,7 @@ class EmbeddingConfig(BaseModel):
 class RelevanceConfig(BaseModel):
     tau_ok: float = 0.15
     beta: float = 0.85
-    anchor_window: int = 10
+    anchor_window: int = Field(default=10, ge=0)
     exemplar_cap: int = 20
     # Anchor admission: a page whose OK came only through the anchor path
     # (goal-exemplar similarity below this) keeps its verdict but must not

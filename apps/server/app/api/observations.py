@@ -111,22 +111,12 @@ async def label_observation(
         if not isinstance(emb, list) or not emb:
             raise HTTPException(status_code=400, detail="observation has no embedding")
 
-    page_label, previous_label = store.record_page_label(
+    page_label, exemplar_count = store.record_page_label(
         session_id=observation.session_id,
         observation_id=observation.id,
         label=body.label,
+        exemplar_cap=request.app.state.config.relevance.exemplar_cap,
     )
-
-    exemplar_count: int | None = None
-    if body.label == "related":
-        if previous_label != "related":
-            exemplar_count = store.add_goal_exemplar_from_observation(
-                observation.session_id,
-                observation.id,
-                request.app.state.config.relevance.exemplar_cap,
-            )
-        else:
-            exemplar_count = store.goal_exemplar_count(observation.session_id)
 
     return PageLabelResponse(
         label_id=page_label.id,

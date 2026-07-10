@@ -195,6 +195,7 @@ class ReplayState:
         self.config = config
         self.goal_text: str | None = None
         self.exemplars: list[list[float]] = []
+        self.exemplar_observation_ids: list[str | None] = []
         self.ok_embeddings: list[list[float]] = []
         self.rows: list[ReplayRow] = []
         self.rows_by_observation_id: dict[str, ReplayRow] = {}
@@ -203,17 +204,33 @@ class ReplayState:
     def reset_goal(self, raw_text: str, exemplar: list[float]) -> None:
         self.goal_text = raw_text
         self.exemplars = [exemplar]
+        self.exemplar_observation_ids = [None]
 
     def add_exemplar(self, observation_id: str) -> bool:
+        if observation_id in self.exemplar_observation_ids:
+            return False
         row = self.rows_by_observation_id.get(observation_id)
         if not row or not row.embedding_replay:
             return False
         self.exemplars.append(row.embedding_replay)
+        self.exemplar_observation_ids.append(observation_id)
         self._enforce_exemplar_cap(max(1, self.config.relevance.exemplar_cap))
         return True
 
+    def remove_exemplar(self, observation_id: str) -> bool:
+        try:
+            index = self.exemplar_observation_ids.index(observation_id)
+        except ValueError:
+            return False
+        del self.exemplars[index]
+        del self.exemplar_observation_ids[index]
+        return True
+
     def anchor_value(self) -> list[float] | None:
-        embeddings = self.ok_embeddings[-self.config.relevance.anchor_window :]
+        window = self.config.relevance.anchor_window
+        if window <= 0:
+            return None
+        embeddings = self.ok_embeddings[-window:]
         if not embeddings:
             return None
         width = len(embeddings[0])
@@ -233,8 +250,10 @@ class ReplayState:
             return
         if len(self.exemplars) - 1 >= excess:
             del self.exemplars[1 : 1 + excess]
+            del self.exemplar_observation_ids[1 : 1 + excess]
         else:
             del self.exemplars[:excess]
+            del self.exemplar_observation_ids[:excess]
 
 
 async def replay_session(
@@ -273,6 +292,11 @@ async def replay_session(
                 observation_id = event.payload.get("observation_id")
                 if isinstance(observation_id, str):
                     state.add_exemplar(observation_id)
+                continue
+            if event.event_type == "page_label.recorded":
+                observation_id = event.payload.get("observation_id")
+                if isinstance(observation_id, str) and event.payload.get("label") == "drift":
+                    state.remove_exemplar(observation_id)
                 continue
             if event.event_type == "session.snoozed":
                 snoozed_until = _parse_dt_optional(event.payload.get("snoozed_until"))
@@ -653,7 +677,9 @@ def _read_session_info(conn: sqlite3.Connection, session_id: str) -> ReplaySessi
 
 def _read_goal_fallback(conn: sqlite3.Connection, session_id: str) -> str | None:
     row = conn.execute("SELECT raw_text FROM goals WHERE session_id = ?", (session_id,)).fetchone()
-    return str(row["raw_text"]) if row else None
+    if not row or row["raw_text"] is None:
+        return None
+    return str(row["raw_text"])
 
 
 def _read_observations(conn: sqlite3.Connection, session_id: str) -> dict[str, StoredObservation]:

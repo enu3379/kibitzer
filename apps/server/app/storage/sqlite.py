@@ -1214,11 +1214,25 @@ class SQLiteStore:
         session_id: str,
         observation_id: str,
         label: str,
+        exemplar_cap: int,
         ts: datetime | None = None,
-    ) -> tuple[PageLabelRecord, str | None]:
+    ) -> tuple[PageLabelRecord, int | None]:
         now = ts or _utc_now()
         with self._connect() as conn:
             self._ensure_schema(conn)
+            observation = conn.execute(
+                "SELECT features_json FROM observations WHERE id = ? AND session_id = ?",
+                (observation_id, session_id),
+            ).fetchone()
+            if not observation:
+                raise ValueError("observation not found")
+
+            if label == "related":
+                features = json.loads(observation["features_json"])
+                emb = features.get("emb")
+                if not isinstance(emb, list) or not emb:
+                    raise ValueError("observation has no embedding")
+
             existing = conn.execute(
                 "SELECT id, label FROM page_labels WHERE observation_id = ?",
                 (observation_id,),
@@ -1247,7 +1261,34 @@ class SQLiteStore:
                 },
                 now,
             )
-        return PageLabelRecord(id=label_id, observation_id=observation_id, label=label, ts=now), previous_label
+
+            exemplar_count: int | None = None
+            if label == "related":
+                exemplar_count, exemplar_id = self._add_goal_exemplar_from_observation(
+                    conn,
+                    session_id,
+                    observation_id,
+                    exemplar_cap,
+                    now,
+                    features=features,
+                )
+                if exemplar_id:
+                    self._append_goal_exemplar_added_event(
+                        conn,
+                        session_id,
+                        observation_id,
+                        exemplar_id,
+                        exemplar_count,
+                        exemplar_cap,
+                        now,
+                    )
+            else:
+                conn.execute(
+                    "DELETE FROM goal_exemplars WHERE session_id = ? AND observation_id = ?",
+                    (session_id, observation_id),
+                )
+
+        return PageLabelRecord(id=label_id, observation_id=observation_id, label=label, ts=now), exemplar_count
 
     def page_label_for_observation(self, observation_id: str) -> str | None:
         with self._connect() as conn:
@@ -1312,57 +1353,30 @@ class SQLiteStore:
         now = ts or _utc_now()
         with self._connect() as conn:
             self._ensure_schema(conn)
-            row = conn.execute(
-                "SELECT features_json FROM observations WHERE id = ? AND session_id = ?",
-                (observation_id, session_id),
-            ).fetchone()
-            if not row:
-                raise ValueError("observation not found")
-            features = json.loads(row["features_json"])
-            emb = features.get("emb")
-            if not isinstance(emb, list) or not emb:
-                raise ValueError("observation has no embedding")
-
-            max_position = conn.execute(
-                "SELECT MAX(position) FROM goal_exemplars WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()[0]
-            position = int(max_position) + 1 if max_position is not None else 0
-            exemplar_id = f"gex_{uuid.uuid4().hex}"
-            conn.execute(
-                """
-                INSERT INTO goal_exemplars (id, session_id, position, vector_json, created_at)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (exemplar_id, session_id, position, json.dumps(emb), now.isoformat()),
-            )
-            self._enforce_goal_exemplar_cap(conn, session_id, max(1, cap))
-            count = conn.execute(
-                "SELECT COUNT(*) FROM goal_exemplars WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()[0]
-            self._append_event(
+            count, exemplar_id = self._add_goal_exemplar_from_observation(
                 conn,
                 session_id,
-                "goal.exemplar_added",
-                {
-                    "observation_id": observation_id,
-                    "exemplar_id": exemplar_id,
-                    "exemplar_count": count,
-                    "cap": max(1, cap),
-                },
+                observation_id,
+                cap,
                 now,
             )
-        return int(count)
+            if exemplar_id:
+                self._append_goal_exemplar_added_event(
+                    conn,
+                    session_id,
+                    observation_id,
+                    exemplar_id,
+                    count,
+                    cap,
+                    now,
+                )
+        return count
 
     def goal_exemplar_count(self, session_id: str) -> int:
         with self._connect() as conn:
             self._ensure_schema(conn)
-            count = conn.execute(
-                "SELECT COUNT(*) FROM goal_exemplars WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()[0]
-        return int(count)
+            count = self._goal_exemplar_count(conn, session_id)
+        return count
 
     def list_observations(self, session_id: str) -> list[ObservationRecord]:
         with self._connect() as conn:
@@ -1642,6 +1656,7 @@ class SQLiteStore:
             CREATE TABLE IF NOT EXISTS goal_exemplars (
                 id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                observation_id TEXT REFERENCES observations(id) ON DELETE CASCADE,
                 position INTEGER NOT NULL,
                 vector_json TEXT NOT NULL,
                 created_at TEXT NOT NULL,
@@ -1731,6 +1746,13 @@ class SQLiteStore:
         )
         self._ensure_observation_columns(conn)
         self._ensure_controller_columns(conn)
+        self._ensure_goal_exemplar_columns(conn)
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_observations_session_tab_latest
+            ON observations(session_id, tab_id, ts DESC, id DESC)
+            """
+        )
 
     def _append_event(
         self,
@@ -1807,6 +1829,181 @@ class SQLiteStore:
             conn.execute("ALTER TABLE controller_states ADD COLUMN alignment_score REAL")
         if "drift_latched" not in columns:
             conn.execute("ALTER TABLE controller_states ADD COLUMN drift_latched INTEGER NOT NULL DEFAULT 0")
+
+    def _ensure_goal_exemplar_columns(self, conn: sqlite3.Connection) -> None:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(goal_exemplars)").fetchall()}
+        added_observation_id = "observation_id" not in columns
+        if added_observation_id:
+            conn.execute(
+                """
+                ALTER TABLE goal_exemplars
+                ADD COLUMN observation_id TEXT REFERENCES observations(id) ON DELETE CASCADE
+                """
+            )
+
+        index_exists = conn.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'index' AND name = 'idx_goal_exemplars_observation'
+            """
+        ).fetchone()
+        if added_observation_id or not index_exists:
+            self._backfill_goal_exemplar_observation_ids(conn)
+            self._deduplicate_goal_exemplar_observations(conn)
+            conn.execute(
+                """
+                DELETE FROM goal_exemplars
+                WHERE observation_id IN (
+                    SELECT observation_id FROM page_labels WHERE label = 'drift'
+                )
+                """
+            )
+
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_goal_exemplars_observation
+            ON goal_exemplars(session_id, observation_id)
+            WHERE observation_id IS NOT NULL
+            """
+        )
+
+    def _backfill_goal_exemplar_observation_ids(self, conn: sqlite3.Connection) -> None:
+        rows = conn.execute(
+            """
+            SELECT session_id, payload_json
+            FROM event_log
+            WHERE event_type = 'goal.exemplar_added'
+            ORDER BY id ASC
+            """
+        ).fetchall()
+        for row in rows:
+            try:
+                payload = json.loads(row["payload_json"])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            exemplar_id = payload.get("exemplar_id")
+            observation_id = payload.get("observation_id")
+            if not isinstance(exemplar_id, str) or not isinstance(observation_id, str):
+                continue
+            conn.execute(
+                """
+                UPDATE goal_exemplars
+                SET observation_id = ?
+                WHERE id = ? AND session_id = ? AND observation_id IS NULL
+                  AND EXISTS (
+                      SELECT 1 FROM observations
+                      WHERE id = ? AND session_id = ?
+                  )
+                """,
+                (observation_id, exemplar_id, row["session_id"], observation_id, row["session_id"]),
+            )
+
+    def _deduplicate_goal_exemplar_observations(self, conn: sqlite3.Connection) -> None:
+        rows = conn.execute(
+            """
+            SELECT id, session_id, observation_id
+            FROM goal_exemplars
+            WHERE observation_id IS NOT NULL
+            ORDER BY session_id ASC, observation_id ASC, position DESC, created_at DESC, id DESC
+            """
+        ).fetchall()
+        seen: set[tuple[str, str]] = set()
+        duplicate_ids: list[str] = []
+        for row in rows:
+            key = (row["session_id"], row["observation_id"])
+            if key in seen:
+                duplicate_ids.append(row["id"])
+            else:
+                seen.add(key)
+        conn.executemany("DELETE FROM goal_exemplars WHERE id = ?", [(item_id,) for item_id in duplicate_ids])
+
+    def _add_goal_exemplar_from_observation(
+        self,
+        conn: sqlite3.Connection,
+        session_id: str,
+        observation_id: str,
+        cap: int,
+        now: datetime,
+        *,
+        features: dict[str, Any] | None = None,
+    ) -> tuple[int, str | None]:
+        existing = conn.execute(
+            """
+            SELECT id
+            FROM goal_exemplars
+            WHERE session_id = ? AND observation_id = ?
+            """,
+            (session_id, observation_id),
+        ).fetchone()
+        if existing:
+            return self._goal_exemplar_count(conn, session_id), None
+
+        if features is None:
+            row = conn.execute(
+                "SELECT features_json FROM observations WHERE id = ? AND session_id = ?",
+                (observation_id, session_id),
+            ).fetchone()
+            if not row:
+                raise ValueError("observation not found")
+            features = json.loads(row["features_json"])
+
+        emb = features.get("emb")
+        if not isinstance(emb, list) or not emb:
+            raise ValueError("observation has no embedding")
+
+        max_position = conn.execute(
+            "SELECT MAX(position) FROM goal_exemplars WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()[0]
+        position = int(max_position) + 1 if max_position is not None else 0
+        exemplar_id = f"gex_{uuid.uuid4().hex}"
+        conn.execute(
+            """
+            INSERT INTO goal_exemplars (
+                id, session_id, observation_id, position, vector_json, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (exemplar_id, session_id, observation_id, position, json.dumps(emb), now.isoformat()),
+        )
+        self._enforce_goal_exemplar_cap(conn, session_id, max(1, cap))
+        survived = conn.execute(
+            "SELECT 1 FROM goal_exemplars WHERE id = ?",
+            (exemplar_id,),
+        ).fetchone()
+        return self._goal_exemplar_count(conn, session_id), exemplar_id if survived else None
+
+    def _append_goal_exemplar_added_event(
+        self,
+        conn: sqlite3.Connection,
+        session_id: str,
+        observation_id: str,
+        exemplar_id: str,
+        exemplar_count: int,
+        cap: int,
+        now: datetime,
+    ) -> None:
+        self._append_event(
+            conn,
+            session_id,
+            "goal.exemplar_added",
+            {
+                "observation_id": observation_id,
+                "exemplar_id": exemplar_id,
+                "exemplar_count": exemplar_count,
+                "cap": max(1, cap),
+            },
+            now,
+        )
+
+    def _goal_exemplar_count(self, conn: sqlite3.Connection, session_id: str) -> int:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM goal_exemplars WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()[0]
+        return int(count)
 
     def _enforce_goal_exemplar_cap(self, conn: sqlite3.Connection, session_id: str, cap: int) -> None:
         rows = conn.execute(

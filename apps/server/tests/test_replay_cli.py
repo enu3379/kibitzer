@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import sqlite3
 import tempfile
 import unittest
 from dataclasses import dataclass, field
@@ -11,6 +12,7 @@ from apps.server.app.config import AppConfig, ControllerConfig, ServerConfig, Ti
 from apps.server.app.main import create_app
 from apps.server.app.providers.judges.base import Tier1Result
 from apps.server.app.replay import apply_config_overrides, replay_session
+from apps.server.app.replay.core import _read_goal_fallback
 from apps.server.app.schemas import Verdict
 from apps.server.app.storage.sqlite import SQLiteStore
 
@@ -139,6 +141,74 @@ class ReplayCliTest(unittest.TestCase):
         self.assertEqual([row.title for row in result.rows], ["Sourdough bread recipe", "Sourdough bread recipe"])
         self.assertLess(result.rows[0].r0_replay, config.relevance.tau_ok)
         self.assertAlmostEqual(result.rows[1].r0_replay, 1.0, places=9)
+
+    def test_page_label_drift_removes_exemplar_from_replay_timeline(self) -> None:
+        config = self._config(tier1_enabled=False)
+        client, _store = self._client(config)
+        try:
+            session_id = self._start_goal(client)
+            first = self._visit(client, "Sourdough bread recipe")
+            observation_id = str(first["observation_id"])
+            client.post(
+                f"/observations/{observation_id}/label",
+                json={"label": "related"},
+            )
+            client.post(
+                f"/observations/{observation_id}/label",
+                json={"label": "drift"},
+            )
+            second = self._visit(client, "Sourdough bread recipe")
+            client.post(
+                f"/observations/{observation_id}/label",
+                json={"label": "related"},
+            )
+            third = self._visit(client, "Sourdough bread recipe")
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertEqual(first["verdict"], "DRIFT")
+        self.assertEqual(second["verdict"], "DRIFT")
+        self.assertEqual(third["verdict"], "OK")
+
+        result = asyncio.run(replay_session(self.db_path, session=session_id, config=config))
+
+        self.assertEqual([row.verdict_replay for row in result.rows], ["DRIFT", "DRIFT", "OK"])
+        self.assertEqual([row for row in result.rows if row.changed], [])
+
+    def test_zero_anchor_window_uses_no_replay_anchor(self) -> None:
+        config = self._config(tier1_enabled=False)
+        client, store = self._client(config)
+        try:
+            session_id = self._start_goal(client)
+            self._visit(client, "Kibitzer observation API docs")
+            self._visit(client, "Kibitzer observation API docs")
+        finally:
+            client.__exit__(None, None, None)
+
+        zero_anchor_config, overrides = apply_config_overrides(config, ["relevance.anchor_window=0"])
+        self.assertIsNone(store.anchor_value(session_id, 0))
+        result = asyncio.run(
+            replay_session(
+                self.db_path,
+                session=session_id,
+                config=zero_anchor_config,
+                overrides=overrides,
+            )
+        )
+
+        self.assertEqual([row.anchor_score_replay for row in result.rows], [0.0, 0.0])
+        with self.assertRaises(ValueError):
+            apply_config_overrides(config, ["relevance.anchor_window=-1"])
+
+    def test_null_goal_fallback_stays_none(self) -> None:
+        with sqlite3.connect(":memory:") as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("CREATE TABLE goals (session_id TEXT PRIMARY KEY, raw_text TEXT)")
+            conn.execute("INSERT INTO goals (session_id, raw_text) VALUES ('sess_null', NULL)")
+
+            fallback = _read_goal_fallback(conn, "sess_null")
+
+        self.assertIsNone(fallback)
 
     def test_tier1_recording_and_no_recording_are_replayed(self) -> None:
         config = self._config(tier1_enabled=True)

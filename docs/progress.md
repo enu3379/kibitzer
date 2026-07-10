@@ -650,7 +650,7 @@ Verified:
 
 Verified:
 
-- `.venv/bin/python -m pytest apps/server/tests -q` passes (98 tests).
+- `.venv/bin/python -m pytest apps/server/tests -q` passes (104 tests).
 - `.venv/bin/python -m apps.server.app.replay --db ./data/kibitzer.sqlite3 --list-sessions`
 - `.venv/bin/python -m apps.server.app.replay --db ./data/kibitzer.sqlite3 --latest --full`
 - `.venv/bin/python -m apps.server.app.replay --db ./data/kibitzer.sqlite3 --latest --override relevance.tau_ok=0.2 --csv /tmp/kibitzer-replay-latest.csv --json /tmp/kibitzer-replay-latest.json`
