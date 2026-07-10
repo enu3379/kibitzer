@@ -55,15 +55,15 @@ function Get-KibitzerHealthStatus {
     $Health = Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 2 -ErrorAction Stop
     $Mode = if ($Health.mode) { [string]$Health.mode } else { "unknown" }
     if ($Mode -eq "active") {
-      return @{ Mode = "active"; IconKey = "active"; Text = "Kibitzer: active" }
+      return @{ Mode = "active"; IconKey = "active"; Text = "Kibitzer: active"; Message = "서버가 작동 중이며 활동을 관찰하고 있습니다." }
     }
     if ($Mode -eq "idle") {
-      return @{ Mode = "idle"; IconKey = "idle"; Text = "Kibitzer: idle" }
+      return @{ Mode = "idle"; IconKey = "idle"; Text = "Kibitzer: idle"; Message = "서버는 실행 중이며 대기 상태입니다. 활동이 감지되면 자동으로 활성화됩니다." }
     }
-    return @{ Mode = $Mode; IconKey = "unknown"; Text = "Kibitzer: $Mode" }
+    return @{ Mode = $Mode; IconKey = "unknown"; Text = "Kibitzer: $Mode"; Message = "서버 상태를 확인할 수 없습니다 (mode=$Mode). 잠시 후 다시 확인해 주세요." }
   }
   catch {
-    return @{ Mode = "dead"; IconKey = "dead"; Text = "Kibitzer: not running" }
+    return @{ Mode = "dead"; IconKey = "dead"; Text = "Kibitzer: not running"; Message = "서버가 실행되지 않았습니다. 메뉴에서 'Start server'를 눌러 실행해 주세요." }
   }
 }
 
@@ -195,6 +195,9 @@ $NotifyIcon.Icon = $TrayIcons.unknown
 $NotifyIcon.Visible = $true
 
 $Menu = New-Object System.Windows.Forms.ContextMenuStrip
+$StatusHeaderItem = $Menu.Items.Add("Kibitzer: starting")
+$StatusHeaderItem.Enabled = $false
+$Menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
 $RefreshItem = $Menu.Items.Add("Refresh status")
 $StartItem = $Menu.Items.Add("Start server")
 $OpenHealthItem = $Menu.Items.Add("Open health")
@@ -206,6 +209,7 @@ function Update-KibitzerTray {
   $IconKey = if ($TrayIcons.ContainsKey($Status.IconKey)) { $Status.IconKey } else { "unknown" }
   $NotifyIcon.Icon = $TrayIcons[$IconKey]
   $NotifyIcon.Text = $Status.Text
+  $StatusHeaderItem.Text = $Status.Message
 }
 
 $RefreshItem.Add_Click({ Update-KibitzerTray })
@@ -216,7 +220,14 @@ $StartItem.Add_Click({
 })
 $OpenHealthItem.Add_Click({ Start-Process $HealthUrl })
 $ExitItem.Add_Click({ [System.Windows.Forms.Application]::Exit() })
-$NotifyIcon.Add_DoubleClick({ Start-Process $HealthUrl })
+$NotifyIcon.Add_MouseClick({
+  param($EventSender, $EventArgs)
+  if ($EventArgs.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+    Update-KibitzerTray
+    $ShowMenu = [System.Windows.Forms.NotifyIcon].GetMethod("ShowContextMenu", [System.Reflection.BindingFlags]"Instance,NonPublic")
+    $ShowMenu.Invoke($NotifyIcon, $null)
+  }
+})
 
 $Timer = New-Object System.Windows.Forms.Timer
 $Timer.Interval = [Math]::Max(1, $PollSeconds) * 1000

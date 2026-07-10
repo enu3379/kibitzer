@@ -33,6 +33,19 @@ enum KibitzerMode: String {
             return "unknown"
         }
     }
+
+    var message: String {
+        switch self {
+        case .dead:
+            return "서버가 실행되지 않았습니다. 'Start server'로 실행해 주세요."
+        case .idle:
+            return "서버는 실행 중이며 대기 상태입니다."
+        case .active:
+            return "서버가 작동 중이며 활동을 관찰하고 있습니다."
+        case .unknown:
+            return "서버 상태를 확인할 수 없습니다. 잠시 후 다시 확인해 주세요."
+        }
+    }
 }
 
 final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
@@ -112,7 +125,7 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
     }
 
     private func render(mode: KibitzerMode) {
-        statusMenuItem.title = "Kibitzer: \(mode.label)"
+        statusMenuItem.title = mode.message
         startServerMenuItem.isEnabled = mode == .dead
         statusItem.button?.toolTip = "Kibitzer: \(mode.label)"
         statusItem.button?.setAccessibilityLabel("Kibitzer: \(mode.label)")
