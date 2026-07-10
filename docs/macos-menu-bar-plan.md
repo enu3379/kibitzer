@@ -27,7 +27,7 @@ The menu bar surface owns only visibility and light process control:
 - kick `com.kibitzer.server` if the server is dead;
 - fall back to `scripts/macos_run_server.sh` when the server LaunchAgent is not
   installed;
-- open the health endpoint and logs folder.
+- open the logs folder.
 
 It must not own sessions, judgments, provider credentials, or controller state.
 
@@ -53,7 +53,7 @@ status item.
 Claude owns the shared icon artwork. The runtime contract to preserve:
 
 - states: `dead`, `idle`, `active`, `unknown`;
-- menu actions: refresh, start server, open health, open logs, quit;
+- menu actions: refresh, start server, open logs, quit;
 - server state source: `/health`;
 - no duplicated judging state.
 

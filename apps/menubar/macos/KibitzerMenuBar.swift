@@ -33,6 +33,19 @@ enum KibitzerMode: String {
             return "unknown"
         }
     }
+
+    var message: String {
+        switch self {
+        case .dead:
+            return "서버가 실행되지 않았습니다. 메뉴에서 'Start server'를 눌러 실행해 주세요."
+        case .idle:
+            return "서버는 실행 중이며 대기 상태입니다. 활동이 감지되면 자동으로 활성화됩니다."
+        case .active:
+            return "서버가 작동 중이며 활동을 관찰하고 있습니다."
+        case .unknown:
+            return "서버 상태를 확인할 수 없습니다. 잠시 후 다시 확인해 주세요."
+        }
+    }
 }
 
 final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
@@ -43,7 +56,6 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
     private let statusMenuItem = NSMenuItem(title: "Kibitzer: starting", action: nil, keyEquivalent: "")
     private let startServerMenuItem = NSMenuItem(title: "Start server", action: #selector(startServerClicked), keyEquivalent: "s")
     private let refreshMenuItem = NSMenuItem(title: "Refresh status", action: #selector(refreshClicked), keyEquivalent: "r")
-    private let openHealthMenuItem = NSMenuItem(title: "Open health", action: #selector(openHealthClicked), keyEquivalent: "h")
     private let openLogsMenuItem = NSMenuItem(title: "Open logs", action: #selector(openLogsClicked), keyEquivalent: "l")
     private var baseIconImage: NSImage?
     private var baseIconLookupFailed = false
@@ -65,7 +77,7 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
         statusMenuItem.isEnabled = false
         menu.addItem(statusMenuItem)
         menu.addItem(NSMenuItem.separator())
-        for item in [refreshMenuItem, startServerMenuItem, openHealthMenuItem, openLogsMenuItem] {
+        for item in [refreshMenuItem, startServerMenuItem, openLogsMenuItem] {
             item.target = self
             menu.addItem(item)
         }
@@ -112,7 +124,7 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
     }
 
     private func render(mode: KibitzerMode) {
-        statusMenuItem.title = "Kibitzer: \(mode.label)"
+        statusMenuItem.title = mode.message
         startServerMenuItem.isEnabled = mode == .dead
         statusItem.button?.toolTip = "Kibitzer: \(mode.label)"
         statusItem.button?.setAccessibilityLabel("Kibitzer: \(mode.label)")
@@ -243,10 +255,6 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
     @objc private func startServerClicked() {
         attemptedAutostart = true
         startServer()
-    }
-
-    @objc private func openHealthClicked() {
-        NSWorkspace.shared.open(healthURL)
     }
 
     @objc private func openLogsClicked() {
