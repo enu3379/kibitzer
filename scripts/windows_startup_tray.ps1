@@ -402,7 +402,10 @@ $RefreshItem.Add_Click({ Update-KibitzerTray })
 $StartItem.Add_Click({
   Start-KibitzerServer -Source "menu"
 })
-$OpenLogsItem.Add_Click({ Start-Process -FilePath explorer.exe -ArgumentList @($LogDir) })
+$OpenLogsItem.Add_Click({
+  $QuotedLogDir = '"' + $LogDir + '"'
+  Start-Process -FilePath explorer.exe -ArgumentList @($QuotedLogDir)
+})
 $ExitItem.Add_Click({ [System.Windows.Forms.Application]::Exit() })
 $NotifyIcon.Add_MouseClick({
   param($EventSender, $EventArgs)
