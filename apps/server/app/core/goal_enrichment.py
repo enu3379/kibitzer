@@ -36,8 +36,7 @@ Rules:
   page almost certainly be about the goal? If not, drop it.
 
 Example — goal "국내 여행지 탐색":
-{{"phrases": ["국내 여행지 추천 코스", "제주 부산 강릉 여행", "국내 숙소 예약
-비교", "당일치기 근교 여행", "domestic Korea travel itinerary"]}}
+{{"phrases": ["국내 여행지 추천 코스", "제주 부산 강릉 여행", "국내 숙소 예약 비교", "당일치기 근교 여행", "domestic Korea travel itinerary"]}}
 """
 
 

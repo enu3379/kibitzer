@@ -51,6 +51,7 @@ class GoalEnrichmentTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn('Declared goal (verbatim): "마인크래프트 크리에이트모드"', prompt)
         self.assertIn("At most 8 phrases", prompt)
+        self.assertIn('"국내 숙소 예약 비교"', prompt)
         self.assertEqual(
             parse_goal_enrichment_response('{"phrases":["Minecraft Create mod train","Create rails"]}', 1),
             ["Minecraft Create mod train"],
