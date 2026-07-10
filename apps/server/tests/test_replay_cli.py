@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -8,8 +9,10 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from apps.server.app.config import AppConfig, ControllerConfig, ServerConfig, Tier1Config, Tier2Config
+from apps.server.app.config import AppConfig, ControllerConfig, GoalEnrichmentConfig, ServerConfig, Tier1Config, Tier2Config
+from apps.server.app.core.goal_enrichment import DerivedPhrase
 from apps.server.app.main import create_app
+from apps.server.app.providers.embeddings.hash_cpu import HashCpuEmbeddingProvider
 from apps.server.app.providers.judges.base import Tier1Result
 from apps.server.app.replay import apply_config_overrides, replay_session
 from apps.server.app.replay.core import _read_goal_fallback
@@ -26,6 +29,9 @@ class FakeTier1Provider:
         self.payloads.append(payload)
         return self.result
 
+    async def complete_goal_enrichment(self, prompt: str, timeout_seconds: float) -> str:
+        return '{"phrases":[]}'
+
 
 class ReplayCliTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -38,6 +44,7 @@ class ReplayCliTest(unittest.TestCase):
     def _config(self, *, tier1_enabled: bool = False) -> AppConfig:
         return AppConfig(
             server=ServerConfig(db_path=str(self.db_path)),
+            goal_enrichment=GoalEnrichmentConfig(enabled=False),
             tier1=Tier1Config(enabled=tier1_enabled),
             tier2=Tier2Config(enabled=False),
             controller=ControllerConfig(k=1, coldstart_observations=1, cooldown_seconds=0),
@@ -236,6 +243,55 @@ class ReplayCliTest(unittest.TestCase):
         no_recording_rows = [row for row in strict_result.rows if row.tier1_no_recording]
         self.assertEqual([row.title for row in no_recording_rows], ["Kibitzer observation API docs"])
         self.assertEqual(strict_result.summary["tier1"]["no_recording"], 1)
+
+    def test_goal_enriched_event_is_replayed(self) -> None:
+        config = self._config(tier1_enabled=False)
+        client, store = self._client(config)
+        try:
+            session_id = self._start_goal(client)
+            vector = asyncio.run(HashCpuEmbeddingProvider().embed(["Sourdough bread recipe"]))[0]
+            store.replace_goal_derived_exemplars(
+                session_id,
+                [DerivedPhrase(phrase="Sourdough bread recipe", vector=vector)],
+                provider="test",
+                latency_ms=1,
+            )
+            self._visit(client, "Sourdough bread recipe")
+        finally:
+            client.__exit__(None, None, None)
+
+        result = asyncio.run(replay_session(self.db_path, session=session_id, config=config))
+
+        self.assertEqual(result.rows[0].verdict_replay, "OK")
+        self.assertAlmostEqual(result.rows[0].derived_score_replay, 1.0, places=9)
+        self.assertTrue(result.rows[0].anchor_eligible_replay)
+
+    def test_derived_phrases_file_injects_after_goal_declaration(self) -> None:
+        config = self._config(tier1_enabled=False)
+        client, _store = self._client(config)
+        try:
+            session_id = self._start_goal(client)
+            self._visit(client, "Sourdough bread recipe")
+        finally:
+            client.__exit__(None, None, None)
+
+        phrases_path = Path(self.tmpdir.name) / "phrases.json"
+        phrases_path.write_text(
+            json.dumps({"goals": {session_id[:13]: {"phrases": ["Sourdough bread recipe"]}}}),
+            encoding="utf-8",
+        )
+        result = asyncio.run(
+            replay_session(
+                self.db_path,
+                session=session_id,
+                config=config,
+                derived_phrases_path=phrases_path,
+            )
+        )
+
+        self.assertEqual(result.rows[0].verdict_replay, "OK")
+        self.assertIn("flip", result.rows[0].flags)
+        self.assertAlmostEqual(result.rows[0].derived_score_replay, 1.0, places=9)
 
     def test_replay_does_not_modify_source_db(self) -> None:
         config, session_id = self._related_feedback_fixture()

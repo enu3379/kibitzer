@@ -66,6 +66,12 @@ relevance:
   # no longer whitelist a whole platform. Tune via the replay CLI later.
   anchor_epsilon: 0.05
 
+goal_enrichment:
+  enabled: true
+  max_phrases: 8
+  derived_tau: 0.25
+  timeout_seconds: 20
+
 controller:
   type: "streak"
   k: 3

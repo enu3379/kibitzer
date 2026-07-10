@@ -36,6 +36,7 @@ router = APIRouter()
 class LatestObservationFeatures(BaseModel):
     r0: float | None = None
     exemplar_score: float | None = None
+    derived_score: float | None = None
     anchor_eligible: bool | None = None
     tier_reached: int | None = None
 
@@ -162,9 +163,12 @@ async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineR
                 request.app.state.config.relevance.anchor_window,
             ),
             beta=request.app.state.config.relevance.beta,
+            derived_exemplars=current.goal.derived_vectors,
+            derived_tau=request.app.state.config.goal_enrichment.derived_tau,
         )
         observation.features.r0 = score.score
         observation.features.exemplar_score = score.exemplar_score
+        observation.features.derived_score = score.derived_score
         observation.features.r_final = observation.features.r0
         observation.features.tier_reached = 0
         observation.verdict = (
@@ -203,6 +207,7 @@ async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineR
         # that rode the anchor alone keeps its verdict but gets no vote.
         observation.features.anchor_eligible = (
             score.exemplar_score >= request.app.state.config.relevance.anchor_epsilon
+            or score.derived_score >= request.app.state.config.goal_enrichment.derived_tau
             or (observation.verdict == Verdict.OK and (observation.features.tier_reached or 0) >= 1)
         )
     store = _store(request)
@@ -243,6 +248,7 @@ def _latest_observation_response(
         features=LatestObservationFeatures(
             r0=features.get("r0"),
             exemplar_score=features.get("exemplar_score"),
+            derived_score=features.get("derived_score"),
             anchor_eligible=features.get("anchor_eligible"),
             tier_reached=features.get("tier_reached", observation.tier_reached),
         ),

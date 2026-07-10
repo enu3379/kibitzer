@@ -33,6 +33,13 @@ class RelevanceConfig(BaseModel):
     anchor_epsilon: float = 0.05
 
 
+class GoalEnrichmentConfig(BaseModel):
+    enabled: bool = True
+    max_phrases: int = Field(default=8, ge=1, le=20)
+    derived_tau: float = Field(default=0.25, ge=0.0, le=1.0)
+    timeout_seconds: float = Field(default=20, gt=0)
+
+
 class Tier1SendConfig(BaseModel):
     title: bool = True
     url_host: bool = True
@@ -140,6 +147,7 @@ class AppConfig(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     relevance: RelevanceConfig = Field(default_factory=RelevanceConfig)
+    goal_enrichment: GoalEnrichmentConfig = Field(default_factory=GoalEnrichmentConfig)
     tier1: Tier1Config = Field(default_factory=Tier1Config)
     tier2: Tier2Config = Field(default_factory=Tier2Config)
     controller: ControllerConfig = Field(default_factory=ControllerConfig)
@@ -165,6 +173,7 @@ def load_config(path: str | Path = "configs/default.yaml") -> AppConfig:
                 "server",
                 "embedding",
                 "relevance",
+                "goal_enrichment",
                 "tier1",
                 "tier2",
                 "controller",

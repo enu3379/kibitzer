@@ -29,6 +29,9 @@ class FakeTier1Provider:
         self.payloads.append(payload)
         return self.result
 
+    async def complete_goal_enrichment(self, prompt: str, timeout_seconds: float) -> str:
+        return '{"phrases":[]}'
+
 
 class Tier1ProviderTest(unittest.TestCase):
     def test_parse_tier1_json_accepts_strict_ok_and_drift(self) -> None:
@@ -81,6 +84,28 @@ class Tier1ProviderTest(unittest.TestCase):
         self.assertNotIn("url_path_hash", as_json)
         self.assertNotIn("tab_id", as_json)
         self.assertNotIn("excerpt", as_json)
+
+    def test_build_tier1_payload_includes_derived_phrases_when_available(self) -> None:
+        observation = Observation(
+            id="obs_test",
+            ts="2026-07-04T00:00:00+00:00",
+            session_id="sess_test",
+            source=Source.BROWSER_NAV,
+            payload={"title": "Create mod train tutorial", "url_host": "youtube.com"},
+        )
+        goal = type(
+            "GoalLike",
+            (),
+            {
+                "raw_text": "마인크래프트 크리에이트모드",
+                "derived_phrases": ["Create mod train tutorial"],
+            },
+        )()
+
+        payload = build_tier1_payload(goal, observation, [], Tier1Config())
+
+        self.assertEqual(payload["goal"], "마인크래프트 크리에이트모드")
+        self.assertEqual(payload["goal.derived_phrases"], ["Create mod train tutorial"])
 
 
 class RaisingTier1Provider:

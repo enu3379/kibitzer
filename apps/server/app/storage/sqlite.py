@@ -24,6 +24,13 @@ class SessionRecord:
 
 
 @dataclass(frozen=True)
+class GoalDerivedExemplarRecord:
+    phrase: str
+    vector: list[float]
+    position: int
+
+
+@dataclass(frozen=True)
 class GoalRecord:
     session_id: str
     raw_text: str
@@ -31,6 +38,15 @@ class GoalRecord:
     exemplars: list[list[float]]
     provenance: str
     updated_at: datetime
+    derived_exemplars: list[GoalDerivedExemplarRecord] = field(default_factory=list)
+
+    @property
+    def derived_phrases(self) -> list[str]:
+        return [item.phrase for item in self.derived_exemplars]
+
+    @property
+    def derived_vectors(self) -> list[list[float]]:
+        return [item.vector for item in self.derived_exemplars]
 
 
 @dataclass(frozen=True)
@@ -770,6 +786,7 @@ class SQLiteStore:
                     """,
                     (f"gex_{uuid.uuid4().hex}", session_id, json.dumps(exemplar), now_text),
                 )
+            conn.execute("DELETE FROM goal_derived_exemplars WHERE session_id = ?", (session_id,))
             self._append_event(
                 conn,
                 session_id,
@@ -785,6 +802,7 @@ class SQLiteStore:
             exemplars=[exemplar] if exemplar is not None else self.get_goal_exemplars(session_id),
             provenance="declared",
             updated_at=now,
+            derived_exemplars=[],
         )
 
     def get_goal_exemplars(self, session_id: str) -> list[list[float]]:
@@ -800,6 +818,85 @@ class SQLiteStore:
                 (session_id,),
             ).fetchall()
         return [json.loads(row["vector_json"]) for row in rows]
+
+    def get_goal_derived_exemplars(self, session_id: str) -> list[GoalDerivedExemplarRecord]:
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                """
+                SELECT phrase, vector_json, position
+                FROM goal_derived_exemplars
+                WHERE session_id = ?
+                ORDER BY position ASC
+                """,
+                (session_id,),
+            ).fetchall()
+        return [
+            GoalDerivedExemplarRecord(
+                phrase=row["phrase"],
+                vector=json.loads(row["vector_json"]),
+                position=int(row["position"]),
+            )
+            for row in rows
+        ]
+
+    def replace_goal_derived_exemplars(
+        self,
+        session_id: str,
+        exemplars: list[Any],
+        provider: str,
+        latency_ms: int,
+        ts: datetime | None = None,
+    ) -> None:
+        now = ts or _utc_now()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            conn.execute("DELETE FROM goal_derived_exemplars WHERE session_id = ?", (session_id,))
+            for position, exemplar in enumerate(exemplars):
+                conn.execute(
+                    """
+                    INSERT INTO goal_derived_exemplars (
+                        id, session_id, position, phrase, vector_json, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        f"gdex_{uuid.uuid4().hex}",
+                        session_id,
+                        position,
+                        exemplar.phrase,
+                        json.dumps(exemplar.vector),
+                        now.isoformat(),
+                    ),
+                )
+            self._append_event(
+                conn,
+                session_id,
+                "goal.enriched",
+                {
+                    "phrases": [exemplar.phrase for exemplar in exemplars],
+                    "provider": provider,
+                    "latency_ms": latency_ms,
+                },
+                now,
+            )
+
+    def record_goal_enrichment_failed(
+        self,
+        session_id: str,
+        error_type: str,
+        ts: datetime | None = None,
+    ) -> None:
+        now = ts or _utc_now()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            self._append_event(
+                conn,
+                session_id,
+                "goal.enrichment_failed",
+                {"error_type": error_type},
+                now,
+            )
 
     def record_observation(self, observation: Observation) -> ObservationRecord:
         payload = observation.payload
@@ -1663,6 +1760,16 @@ class SQLiteStore:
                 UNIQUE(session_id, position)
             );
 
+            CREATE TABLE IF NOT EXISTS goal_derived_exemplars (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL,
+                phrase TEXT NOT NULL,
+                vector_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(session_id, position)
+            );
+
             CREATE TABLE IF NOT EXISTS observations (
                 id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -1775,6 +1882,7 @@ class SQLiteStore:
             exemplars=self.get_goal_exemplars(row["session_id"]),
             provenance=row["provenance"],
             updated_at=_parse_dt(row["updated_at"]),
+            derived_exemplars=self.get_goal_derived_exemplars(row["session_id"]),
         )
 
     def _observation_from_row(self, row: sqlite3.Row) -> ObservationRecord:

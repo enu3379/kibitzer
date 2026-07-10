@@ -1,8 +1,10 @@
+import asyncio
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from ..core.goal_enrichment import enrich_goal_derived_exemplars
 from ..core.runtime_settings import effective_controller_config
 from ..core.runtime_resources import RuntimeResources
 from ..storage.sqlite import NoActiveSessionError, SessionReportRecord, SessionStatsRecord, SQLiteStore
@@ -389,6 +391,7 @@ async def set_current_goal(request: Request, body: GoalRequest) -> GoalResponse:
     try:
         exemplar = await _embed_goal(request, body.raw_text)
         goal = store.set_current_goal(body.raw_text, body.keywords, exemplar)
+        _schedule_goal_enrichment(request, goal.session_id, goal.raw_text)
     except NoActiveSessionError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
@@ -400,3 +403,26 @@ async def set_current_goal(request: Request, body: GoalRequest) -> GoalResponse:
         provenance=goal.provenance,
         updated_at=goal.updated_at.isoformat(),
     )
+
+
+def _schedule_goal_enrichment(request: Request, session_id: str, goal_text: str) -> None:
+    config = request.app.state.config.goal_enrichment
+    if not config.enabled:
+        return
+
+    async def _run() -> None:
+        store = _store(request)
+        try:
+            runtime = _runtime(request)
+            await enrich_goal_derived_exemplars(
+                session_id=session_id,
+                goal_text=goal_text,
+                provider=runtime.tier1_provider(),
+                embedding_provider=runtime.embedding_provider(),
+                store=store,
+                config=config,
+            )
+        except Exception as exc:
+            store.record_goal_enrichment_failed(session_id, type(exc).__name__)
+
+    asyncio.create_task(_run())

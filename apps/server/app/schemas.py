@@ -34,6 +34,7 @@ class ObservationFeatures(BaseModel):
     r_final: float | None = None
     tier_reached: int | None = None
     exemplar_score: float | None = None
+    derived_score: float | None = None
     anchor_eligible: bool | None = None
 
 

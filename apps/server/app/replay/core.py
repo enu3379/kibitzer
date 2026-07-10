@@ -80,6 +80,7 @@ class ReplayRow:
     r0_orig: float | None
     r0_replay: float | None = None
     exemplar_score_replay: float | None = None
+    derived_score_replay: float | None = None
     anchor_score_replay: float | None = None
     anchor_eligible_orig: bool | None = None
     anchor_eligible_replay: bool | None = None
@@ -196,6 +197,8 @@ class ReplayState:
         self.goal_text: str | None = None
         self.exemplars: list[list[float]] = []
         self.exemplar_observation_ids: list[str | None] = []
+        self.derived_phrases: list[str] = []
+        self.derived_vectors: list[list[float]] = []
         self.ok_embeddings: list[list[float]] = []
         self.rows: list[ReplayRow] = []
         self.rows_by_observation_id: dict[str, ReplayRow] = {}
@@ -205,6 +208,12 @@ class ReplayState:
         self.goal_text = raw_text
         self.exemplars = [exemplar]
         self.exemplar_observation_ids = [None]
+        self.derived_phrases = []
+        self.derived_vectors = []
+
+    def set_derived_phrases(self, phrases: list[str], vectors: list[list[float]]) -> None:
+        self.derived_phrases = phrases[: self.config.goal_enrichment.max_phrases]
+        self.derived_vectors = vectors[: self.config.goal_enrichment.max_phrases]
 
     def add_exemplar(self, observation_id: str) -> bool:
         if observation_id in self.exemplar_observation_ids:
@@ -263,6 +272,7 @@ async def replay_session(
     latest: bool = False,
     config: AppConfig,
     overrides: list[ConfigOverride] | None = None,
+    derived_phrases_path: str | Path | None = None,
 ) -> ReplayResult:
     with _connect_readonly(db_path) as conn:
         session_id = resolve_session_id(conn, session=session, latest=latest)
@@ -272,6 +282,10 @@ async def replay_session(
         page_labels = _read_page_labels(conn, session_id)
         goal_fallback = _read_goal_fallback(conn, session_id)
         original_request_excerpt = sum(1 for event in events if event.event_type == "intervention.request_excerpt")
+        injected_phrases = _injected_phrases_for_session(
+            load_derived_phrase_injections(derived_phrases_path),
+            session_id,
+        )
 
         embedding_provider = create_embedding_provider(config.embedding)
         state = ReplayState(session_info, config)
@@ -279,6 +293,7 @@ async def replay_session(
         if goal_fallback and not any(event.event_type == "goal.declared" for event in events):
             vector = (await embedding_provider.embed([goal_fallback]))[0]
             state.reset_goal(goal_fallback, vector)
+            await _apply_injected_derived_phrases(state, embedding_provider, injected_phrases)
 
         processed_observations: set[str] = set()
         for event in events:
@@ -287,6 +302,12 @@ async def replay_session(
                 if raw_text:
                     vector = (await embedding_provider.embed([raw_text]))[0]
                     state.reset_goal(raw_text, vector)
+                    await _apply_injected_derived_phrases(state, embedding_provider, injected_phrases)
+                continue
+            if event.event_type == "goal.enriched":
+                phrases = _phrases_from_event(event.payload.get("phrases"))
+                vectors = await embedding_provider.embed(phrases) if phrases else []
+                state.set_derived_phrases(phrases, vectors)
                 continue
             if event.event_type == "goal.exemplar_added":
                 observation_id = event.payload.get("observation_id")
@@ -424,6 +445,7 @@ def write_csv(path: str | Path, result: ReplayResult) -> None:
         "r0_orig",
         "r0_replay",
         "exemplar_score_replay",
+        "derived_score_replay",
         "anchor_score_replay",
         "anchor_eligible_replay",
         "verdict_orig",
@@ -573,6 +595,8 @@ async def _replay_observation(
         exemplars=state.exemplars,
         anchor=state.anchor_value(),
         beta=state.config.relevance.beta,
+        derived_exemplars=state.derived_vectors,
+        derived_tau=state.config.goal_enrichment.derived_tau,
     )
     tier0_verdict = Verdict.OK if score.score >= state.config.relevance.tau_ok else Verdict.DRIFT
     verdict_replay = tier0_verdict
@@ -589,11 +613,13 @@ async def _replay_observation(
 
     anchor_eligible = (
         score.exemplar_score >= state.config.relevance.anchor_epsilon
+        or score.derived_score >= state.config.goal_enrichment.derived_tau
         or (verdict_replay == Verdict.OK and tier_replay >= 1)
     )
 
     row.r0_replay = score.score
     row.exemplar_score_replay = score.exemplar_score
+    row.derived_score_replay = score.derived_score
     row.anchor_score_replay = score.anchor_score
     row.anchor_eligible_replay = anchor_eligible
     row.verdict_replay = verdict_replay.value
@@ -622,6 +648,7 @@ async def _replay_observation(
             r_final=score.score,
             tier_reached=tier_replay,
             exemplar_score=score.exemplar_score,
+            derived_score=score.derived_score,
             anchor_eligible=anchor_eligible,
         ),
         verdict=verdict_replay,
@@ -752,6 +779,53 @@ def _read_page_labels(conn: sqlite3.Connection, session_id: str) -> dict[str, st
     return {row["observation_id"]: row["label"] for row in rows}
 
 
+def load_derived_phrase_injections(path: str | Path | None) -> dict[str, list[str]]:
+    if not path:
+        return {}
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    goals = payload.get("goals") if isinstance(payload, dict) else None
+    if not isinstance(goals, dict):
+        raise ValueError("derived phrases file must contain goals")
+    injections: dict[str, list[str]] = {}
+    for session_id, value in goals.items():
+        if not isinstance(session_id, str):
+            continue
+        phrases = value.get("phrases") if isinstance(value, dict) else None
+        if not isinstance(phrases, list):
+            continue
+        injections[session_id] = [phrase for phrase in phrases if isinstance(phrase, str)]
+    return injections
+
+
+def _injected_phrases_for_session(injections: dict[str, list[str]], session_id: str) -> list[str]:
+    if session_id in injections:
+        return injections[session_id]
+    matches = [
+        phrases
+        for key, phrases in injections.items()
+        if session_id.startswith(key) or key.startswith(session_id)
+    ]
+    return matches[0] if len(matches) == 1 else []
+
+
+async def _apply_injected_derived_phrases(
+    state: ReplayState,
+    embedding_provider,
+    phrases: list[str],
+) -> None:
+    if not phrases:
+        return
+    capped = phrases[: state.config.goal_enrichment.max_phrases]
+    vectors = await embedding_provider.embed(capped)
+    state.set_derived_phrases(capped, vectors)
+
+
+def _phrases_from_event(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
 def _recent_titles_for_host(
     conn: sqlite3.Connection,
     url_host: str,
@@ -864,6 +938,7 @@ def _csv_row(row: ReplayRow) -> dict[str, Any]:
         "r0_orig": _fmt_float(row.r0_orig),
         "r0_replay": _fmt_float(row.r0_replay),
         "exemplar_score_replay": _fmt_float(row.exemplar_score_replay),
+        "derived_score_replay": _fmt_float(row.derived_score_replay),
         "anchor_score_replay": _fmt_float(row.anchor_score_replay),
         "anchor_eligible_replay": "" if row.anchor_eligible_replay is None else str(row.anchor_eligible_replay).lower(),
         "verdict_orig": row.verdict_orig or "",
