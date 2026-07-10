@@ -1,4 +1,4 @@
-"""Rasterize the peek-over icon variants (monitor / wall) to transparent PNGs.
+"""Rasterize code-defined peek-over icon variants to transparent PNGs.
 
 Standalone and stdlib-only, mirroring scripts/gen_extension_icons.py. Geometry is
 in the 128x128 SVG coordinate space and matches the source SVGs under
@@ -8,7 +8,8 @@ that same variants/ folder and never touches the live icon-*.png.
 
 To promote a variant to the live toolbar icon, copy the chosen exported assets
 to the stable apps/extension/icons/icon-* filenames. Keep the live filenames
-stable; use descriptive versioned names only inside icons/variants/.
+stable; use descriptive versioned names such as monitor-v2-color-* only inside
+icons/variants/.
 
 Usage: python scripts/gen_icon_variants.py
 """
