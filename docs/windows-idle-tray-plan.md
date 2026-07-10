@@ -38,7 +38,7 @@ a scheduled task:
 Tray icon contract:
 
 - Base artwork comes from the monochrome template icon, preferring
-  `apps\extension\icons\variants\monitor-template-128.png` and falling back to
+  `apps\extension\icons\variants\monitor-v1-mono-128.png` and falling back to
   smaller source or built `dist` template PNGs.
 - Windows tints the template alpha mask dark on light system themes and light on
   dark system themes.

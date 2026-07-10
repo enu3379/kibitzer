@@ -8,7 +8,7 @@ This Swift menu bar app mirrors the Windows tray surface:
 - opens the health endpoint and logs folder from the menu.
 
 The status item uses the monochrome template icon at
-`apps/extension/icons/variants/monitor-template-128.png` and renders it as an
+`apps/extension/icons/variants/monitor-v1-mono-128.png` and renders it as an
 AppKit template image so macOS handles light/dark menu bar tinting. The menu bar
 app owns only the runtime state dot.
 

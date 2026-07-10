@@ -135,12 +135,12 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
         }
 
         let candidates = [
-            rootURL.appendingPathComponent("apps/extension/icons/variants/monitor-template-128.png"),
-            rootURL.appendingPathComponent("apps/extension/icons/variants/monitor-template-48.png"),
-            rootURL.appendingPathComponent("apps/extension/icons/variants/monitor-template-32.png"),
-            rootURL.appendingPathComponent("apps/extension/dist/icons/variants/monitor-template-128.png"),
-            rootURL.appendingPathComponent("apps/extension/dist/icons/variants/monitor-template-48.png"),
-            rootURL.appendingPathComponent("apps/extension/dist/icons/variants/monitor-template-32.png"),
+            rootURL.appendingPathComponent("apps/extension/icons/variants/monitor-v1-mono-128.png"),
+            rootURL.appendingPathComponent("apps/extension/icons/variants/monitor-v1-mono-48.png"),
+            rootURL.appendingPathComponent("apps/extension/icons/variants/monitor-v1-mono-32.png"),
+            rootURL.appendingPathComponent("apps/extension/dist/icons/variants/monitor-v1-mono-128.png"),
+            rootURL.appendingPathComponent("apps/extension/dist/icons/variants/monitor-v1-mono-48.png"),
+            rootURL.appendingPathComponent("apps/extension/dist/icons/variants/monitor-v1-mono-32.png"),
         ]
 
         for iconURL in candidates {

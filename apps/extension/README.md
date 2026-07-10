@@ -49,7 +49,7 @@ python ../../scripts/gen_icon_variants.py
 ```
 
 Native status surfaces use the monochrome template assets generated under
-`icons/variants/`, especially `monitor-template-128.png`. macOS lets AppKit tint
+`icons/variants/`, especially `monitor-v1-mono-128.png`. macOS lets AppKit tint
 that template for light/dark menu bars; Windows tints the same alpha mask based
 on the system theme.
 

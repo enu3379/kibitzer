@@ -3,8 +3,8 @@
 Standalone and stdlib-only, mirroring scripts/gen_extension_icons.py. Geometry is
 in the 128x128 SVG coordinate space and matches the source SVGs under
 apps/extension/icons/variants/. Non-destructive: writes color
-{variant}-{size}.png and monochrome {variant}-template-{size}.png into that same
-variants/ folder and never touches the live icon-*.png.
+{variant}-v1-color-{size}.png and monochrome {variant}-v1-mono-{size}.png into
+that same variants/ folder and never touches the live icon-*.png.
 
 To promote a variant to the live toolbar icon, copy its color SVG over
 apps/extension/icons/icon-128.svg and port this geometry into
@@ -78,7 +78,7 @@ VARIANTS = {"monitor": sample_monitor, "wall": sample_wall}
 
 
 def sample_monitor_template(x: float, y: float):
-    """Single-color template glyph matching monitor-mono.svg."""
+    """Single-color template glyph matching monitor-v1-mono.svg."""
     if _in_circle(x, y, 52, 56, 8) or _in_circle(x, y, 76, 56, 8):
         return None
     if _in_round_rect(x, y, 18, 67, 92, 4, 2):
@@ -94,7 +94,7 @@ def sample_monitor_template(x: float, y: float):
 
 
 def sample_wall_template(x: float, y: float):
-    """Single-color template glyph matching wall-mono.svg."""
+    """Single-color template glyph matching wall-v1-mono.svg."""
     if _in_circle(x, y, 51, 60, 8) or _in_circle(x, y, 77, 60, 8):
         return None
     if _in_round_rect(x, y, 10, 72, 108, 4, 2):
@@ -164,8 +164,8 @@ def main() -> None:
                 write_png(path, size, render(size, sampler))
                 print(f"wrote {path} ({size}x{size})")
 
-    render_variants(VARIANTS, "{name}-{size}.png")
-    render_variants(TEMPLATE_VARIANTS, "{name}-template-{size}.png")
+    render_variants(VARIANTS, "{name}-v1-color-{size}.png")
+    render_variants(TEMPLATE_VARIANTS, "{name}-v1-mono-{size}.png")
 
 
 if __name__ == "__main__":
