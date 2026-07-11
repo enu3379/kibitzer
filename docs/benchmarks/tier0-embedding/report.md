@@ -1,5 +1,6 @@
 # Tier 0 Embedding Benchmark
 
+Methods comparison on 200 "anchor-page title" pair.
 No cross-validation is used. Each method selects its threshold on all 200 pairs.
 Positive means `obvious OK`; higher scores predict OK.
 
@@ -16,8 +17,10 @@ Positive means `obvious OK`; higher scores predict OK.
 
 | Method | Source | Dimensions | Cold ms | Warm ms | ROC AUC | partial AUC FPR<=30% | Average precision |
 |---|---|---:|---:|---:|---:|---:|---:|
-| hash | builtin:hash | 256 | 19.0 | 12.1 | 0.3680 | 0.0382 | 0.4013 |
-| onnx | builtin:onnx | 384 | 2333.8 | 1260.6 | 0.7199 | 0.3031 | 0.6043 |
+| hash (baseline) | builtin:hash | 256 | 19.0 | 12.1 | 0.3680 | 0.0382 | 0.4013 |
+| [KoEn-E5-Tiny](https://huggingface.co/exp-models/dragonkue-KoEn-E5-Tiny) | builtin:onnx | 384 | 2333.8 | 1260.6 | 0.7199 | 0.3031 | 0.6043 |
+
+![ROC curve](roc.svg)
 
 ## Operating Points
 
