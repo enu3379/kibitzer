@@ -26,7 +26,7 @@ import {
   putSettings,
   setGoal,
 } from "../lib/api"
-import { ExplorationHistoryEntry, listExplorationHistory } from "../lib/history"
+import { ExplorationHistoryEntry, ExplorationResponseKind, listExplorationHistory } from "../lib/history"
 
 const POLL_MS = 2000
 const TRACKING_PILLS: Record<SessionState["tracking"], { label: string; tone: string }> = {
@@ -579,8 +579,13 @@ async function openHistory(): Promise<void> {
   settingsOpen = false
   reportOpen = false
   stopPoll()
-  const entries = await listExplorationHistory()
-  renderHistory(entries)
+  try {
+    const entries = await listExplorationHistory()
+    renderHistory(entries)
+  } catch {
+    historyOpen = false
+    void refresh()
+  }
 }
 
 function closeHistory(): void {
@@ -607,14 +612,38 @@ function renderHistoryItem(entry: ExplorationHistoryEntry): string {
   const verdictClass = entry.verdict === "OK" ? " ok" : entry.verdict === "DRIFT" ? " drift" : ""
   const ariaLabel =
     entry.verdict === "OK" ? 'aria-label="목표 관련"' : entry.verdict === "DRIFT" ? 'aria-label="이탈"' : 'aria-hidden="true"'
+  const responseIcon = renderHistoryResponseIcon(entry.responseKind)
   return `
     <div class="history-item">
-      <span class="history-light${verdictClass}" ${ariaLabel}></span>
+      <div class="history-status">
+        <span class="history-light${verdictClass}" ${ariaLabel}></span>
+        ${responseIcon}
+      </div>
       <div class="history-main">
         <div class="history-title">${esc(historyTitle(entry))}</div>
         <div class="history-url">${esc(entry.url)}</div>
       </div>
     </div>`
+}
+
+function renderHistoryResponseIcon(responseKind: ExplorationResponseKind | undefined): string {
+  if (responseKind === "intervention") {
+    return `
+      <span class="history-response intervention" role="img" aria-label="훈수 발생" title="훈수 발생">
+        <svg viewBox="0 0 12 12" aria-hidden="true">
+          <path d="M2 2.25h8v5.5H5.2L2.7 9.8V7.75H2z" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" />
+        </svg>
+      </span>`
+  }
+  if (responseKind === "celebration") {
+    return `
+      <span class="history-response celebration" role="img" aria-label="칭찬 발생" title="칭찬 발생">
+        <svg viewBox="0 0 12 12" aria-hidden="true">
+          <path d="M6 1.25C6.45 3.6 7.4 4.55 9.75 5 7.4 5.45 6.45 6.4 6 8.75 5.55 6.4 4.6 5.45 2.25 5 4.6 4.55 5.55 3.6 6 1.25Z" fill="currentColor" />
+        </svg>
+      </span>`
+  }
+  return ""
 }
 
 function historyTitle(entry: ExplorationHistoryEntry): string {
