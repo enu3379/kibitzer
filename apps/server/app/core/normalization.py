@@ -10,9 +10,14 @@ from ..schemas import Observation, RawObservation, Source
 def normalize_browser_nav(raw: RawObservation, session_id: str) -> Observation:
     url = str(raw.payload.url)
     parsed = urlparse(url)
+    location = parsed.path or "/"
+    if parsed.query:
+        location += f"?{parsed.query}"
+    if parsed.fragment:
+        location += f"#{parsed.fragment}"
     payload = {
         "url_host": parsed.hostname or "",
-        "url_path_hash": _hash_path(parsed.path),
+        "url_path_hash": _hash_location(location),
         "title": raw.payload.title.strip(),
         "tab_id": raw.payload.tab_id,
     }
@@ -61,6 +66,5 @@ def strip_repeated_title_suffix(title: str, previous_titles: list[str]) -> str:
     return core if repeats >= _SUFFIX_REPEATS_REQUIRED else stripped
 
 
-def _hash_path(path: str) -> str:
-    normalized = path or "/"
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+def _hash_location(location: str) -> str:
+    return hashlib.sha256(location.encode("utf-8")).hexdigest()

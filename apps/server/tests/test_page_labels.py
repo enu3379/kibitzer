@@ -1,9 +1,11 @@
+import hashlib
 import sqlite3
 import tempfile
 import unittest
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 from unittest import mock
 
 from fastapi.testclient import TestClient
@@ -38,14 +40,22 @@ class PageLabelApiTest(unittest.TestCase):
         client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
         return session_id
 
-    def _post_nav(self, client: TestClient, title: str, tab_id: int, ts: datetime) -> dict[str, object]:
+    def _post_nav(
+        self,
+        client: TestClient,
+        title: str,
+        tab_id: int,
+        ts: datetime,
+        *,
+        url: str | None = None,
+    ) -> dict[str, object]:
         response = client.post(
             "/observations/browser-nav",
             json={
                 "source": "browser_nav",
                 "ts": ts.isoformat(),
                 "payload": {
-                    "url": f"https://example.com/{title.lower().replace(' ', '-')}",
+                    "url": url or f"https://example.com/{title.lower().replace(' ', '-')}",
                     "title": title,
                     "tab_id": tab_id,
                 },
@@ -54,6 +64,25 @@ class PageLabelApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         return response.json()
 
+    def _page_identity(self, title: str, tab_id: int) -> dict[str, str | int]:
+        return self._url_identity(
+            f"https://example.com/{title.lower().replace(' ', '-')}",
+            tab_id,
+        )
+
+    def _url_identity(self, url: str, tab_id: int) -> dict[str, str | int]:
+        parsed = urlparse(url)
+        location = parsed.path or "/"
+        if parsed.query:
+            location += f"?{parsed.query}"
+        if parsed.fragment:
+            location += f"#{parsed.fragment}"
+        return {
+            "tab_id": tab_id,
+            "url_host": parsed.hostname or "",
+            "url_path_hash": hashlib.sha256(location.encode()).hexdigest(),
+        }
+
     def test_latest_observation_for_tab_returns_verdict_and_diagnostics(self) -> None:
         client = self._client()
         base = datetime(2026, 7, 8, 0, 0, tzinfo=timezone.utc)
@@ -61,10 +90,23 @@ class PageLabelApiTest(unittest.TestCase):
             self._start_goal(client)
             first = self._post_nav(client, "Sourdough bread recipe", 77, base)
             second = self._post_nav(client, "Kibitzer observation API docs", 77, base + timedelta(seconds=1))
-            latest = client.get("/observations/latest", params={"tab_id": 77})
-            missing = client.get("/observations/latest", params={"tab_id": 88})
+            latest = client.get(
+                "/observations/latest",
+                params=self._page_identity("Kibitzer observation API docs", 77),
+            )
+            stale = client.get(
+                "/observations/latest",
+                params=self._page_identity("Sourdough bread recipe", 77),
+            )
+            missing = client.get(
+                "/observations/latest",
+                params=self._page_identity("Never observed", 88),
+            )
             client.post(f"/observations/{second['observation_id']}/label", json={"label": "drift"})
-            relabeled = client.get("/observations/latest", params={"tab_id": 77})
+            relabeled = client.get(
+                "/observations/latest",
+                params=self._page_identity("Kibitzer observation API docs", 77),
+            )
         finally:
             client.__exit__(None, None, None)
 
@@ -81,9 +123,39 @@ class PageLabelApiTest(unittest.TestCase):
         self.assertAlmostEqual(body["tau_ok"], 0.15)
         self.assertIsNone(body["label"])
         self.assertNotEqual(first["observation_id"], second["observation_id"])
+        self.assertEqual(stale.status_code, 404)
         self.assertEqual(missing.status_code, 404)
         self.assertEqual(relabeled.status_code, 200)
         self.assertEqual(relabeled.json()["label"], "drift")
+
+    def test_latest_observation_rejects_query_only_navigation(self) -> None:
+        client = self._client()
+        base = datetime(2026, 7, 8, 0, 0, tzinfo=timezone.utc)
+        previous_url = "https://example.com/search?q=old#results"
+        current_url = "https://example.com/search?q=new#results"
+        try:
+            self._start_goal(client)
+            observed = self._post_nav(
+                client,
+                "Old search results",
+                77,
+                base,
+                url=previous_url,
+            )
+            previous = client.get(
+                "/observations/latest",
+                params=self._url_identity(previous_url, 77),
+            )
+            stale = client.get(
+                "/observations/latest",
+                params=self._url_identity(current_url, 77),
+            )
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertEqual(previous.status_code, 200)
+        self.assertEqual(previous.json()["observation_id"], observed["observation_id"])
+        self.assertEqual(stale.status_code, 404)
 
     def test_page_label_related_drift_related_keeps_one_synchronized_exemplar(self) -> None:
         client = self._client()

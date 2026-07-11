@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sqlite3
 import tempfile
@@ -46,7 +47,10 @@ class ObservationIntakeTest(unittest.TestCase):
         self.assertEqual(observation.payload["url_host"], "example.com")
         self.assertEqual(observation.payload["title"], "Example Page")
         self.assertEqual(observation.payload["tab_id"], 42)
-        self.assertEqual(len(observation.payload["url_path_hash"]), 64)
+        self.assertEqual(
+            observation.payload["url_path_hash"],
+            hashlib.sha256(b"/private/path?token=secret#fragment").hexdigest(),
+        )
         self.assertNotIn("url", observation.payload)
 
     def test_browser_nav_without_session_is_noop(self) -> None:

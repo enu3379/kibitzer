@@ -358,14 +358,26 @@ export async function postFeedback(payload: FeedbackPayload): Promise<FeedbackRe
   return response.json() as Promise<FeedbackResult>
 }
 
-export async function getLatestObservation(tabId: number): Promise<LatestObservation | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/observations/latest?tab_id=${encodeURIComponent(tabId)}`).catch(
-    () => {
-      return null
-    },
-  )
-  if (!response?.ok) return null
-  return response.json() as Promise<LatestObservation>
+export async function getLatestObservation(tabId: number, url: string): Promise<LatestObservation | null> {
+  try {
+    const parsed = new URL(url)
+    const location = `${parsed.pathname || "/"}${parsed.search}${parsed.hash}`
+    const pathBytes = new TextEncoder().encode(location)
+    const pathDigest = await crypto.subtle.digest("SHA-256", pathBytes)
+    const urlPathHash = Array.from(new Uint8Array(pathDigest), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("")
+    const params = new URLSearchParams({
+      tab_id: String(tabId),
+      url_host: parsed.hostname,
+      url_path_hash: urlPathHash,
+    })
+    const response = await fetch(`${SERVER_BASE_URL}/observations/latest?${params}`)
+    if (!response.ok) return null
+    return response.json() as Promise<LatestObservation>
+  } catch {
+    return null
+  }
 }
 
 export async function postObservationLabel(
