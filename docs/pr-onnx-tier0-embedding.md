@@ -28,6 +28,8 @@ larger translated keyword list inside the bag-of-token hash approach.
   it from both platform setup scripts.
 - Add an 8-case/40-text smoke report and a fixed 200-pair Korean/English
   benchmark that includes every prior smoke fixture pair.
+- Make the benchmark method-agnostic: additional providers can be loaded with
+  `--method name=module:factory`, with vector-shape/value/stability validation.
 - Commit the full per-pair scores, operating-point tables, JSON result, and ROC
   plot under `docs/benchmarks/tier0-embedding/`.
 
@@ -61,7 +63,8 @@ estimate of unseen-data performance.
 - [x] `python scripts/download_embedding_model.py --check`
 - [x] `python scripts/smoke_onnx_embedding.py`
 - [x] `python scripts/benchmark_tier0_embeddings.py`
-- [x] `python -m pytest apps/server/tests -q` (116 passed)
+- [x] External `--method candidate=module:factory` 200-pair run
+- [x] `python -m pytest apps/server/tests -q` (121 passed)
 - [x] `npm --prefix apps/extension run build`
 - [ ] Run the macOS setup path and one real inference on macOS (reviewer follow-up)
 

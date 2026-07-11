@@ -38,16 +38,28 @@ similarity case plus cold/warm latency:
 python scripts/smoke_onnx_embedding.py
 ```
 
-`benchmark_tier0_embeddings.py` evaluates hash and ONNX on the fixed 200-pair
-dataset with no cross-validation. It selects the highest-recall threshold at
-empirical FPR budgets of 5%, 10%, 15%, 20%, and 30%, and writes all pair scores,
-tables, JSON, and an ROC SVG:
+`benchmark_tier0_embeddings.py` evaluates any compatible embedding methods on
+the fixed 200-pair dataset with no cross-validation. With no arguments it
+compares the built-in hash and ONNX methods. It selects the highest-recall
+threshold at empirical FPR budgets of 5%, 10%, 15%, 20%, and 30%, and writes
+all pair scores, tables, JSON, and an ROC SVG:
 
 ```bash
 python scripts/benchmark_tier0_embeddings.py
 ```
 
-The committed benchmark snapshot is under `docs/benchmarks/tier0-embedding/`.
+External methods can be loaded without editing the runner:
+
+```bash
+python scripts/benchmark_tier0_embeddings.py \
+  --method hash \
+  --method candidate=experiments.my_embedding:create_benchmark_provider
+```
+
+The factory receives `AppConfig` and must return an object implementing async
+`embed(list[str]) -> list[list[float]]`. The runner validates vector count,
+dimension, finite/non-zero values, and cold/warm stability. The full extension
+contract and committed snapshot are under `docs/benchmarks/tier0-embedding/`.
 
 ## `sync-llm-wiki-sources.sh`
 

@@ -22,7 +22,7 @@ Read these in order when starting work:
 
 Benchmarks:
 
-- [Tier 0 Embedding: hash vs KoEn E5 ONNX](benchmarks/tier0-embedding/report.md)
+- [Tier 0 Embedding Benchmark and Extension Contract](benchmarks/tier0-embedding/README.md)
 
 Handoffs (delegated work specs):
 

@@ -14,39 +14,54 @@ Positive means `obvious OK`; higher scores predict OK.
 
 ## Overall
 
-| Method | Dimensions | Cold ms | Warm ms | ROC AUC | partial AUC FPR<=30% | Average precision |
-|---|---:|---:|---:|---:|---:|---:|
-| hash | 256 | 9.3 | 8.8 | 0.3680 | 0.0382 | 0.4013 |
-| onnx | 384 | 1772.2 | 1094.6 | 0.7199 | 0.3031 | 0.6043 |
+| Method | Source | Dimensions | Cold ms | Warm ms | ROC AUC | partial AUC FPR<=30% | Average precision |
+|---|---|---:|---:|---:|---:|---:|---:|
+| hash | builtin:hash | 256 | 19.0 | 12.1 | 0.3680 | 0.0382 | 0.4013 |
+| onnx | builtin:onnx | 384 | 2333.8 | 1260.6 | 0.7199 | 0.3031 | 0.6043 |
 
 ## Operating Points
 
-| FPR budget | Hash tau | Hash recall | Hash actual FPR | Hash FP | ONNX tau | ONNX recall | ONNX actual FPR | ONNX FP | Recall delta |
-|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 5% | 0.670820 | 1.2% | 0.8% | 1 | 0.641367 | 13.8% | 5.0% | 6 | +12.5% |
-| 10% | 0.426401 | 2.5% | 10.0% | 12 | 0.603713 | 23.8% | 10.0% | 12 | +21.2% |
-| 15% | 0.426401 | 2.5% | 10.0% | 12 | 0.573981 | 32.5% | 14.2% | 17 | +30.0% |
-| 20% | 0.408248 | 5.0% | 17.5% | 21 | 0.553277 | 38.8% | 20.0% | 24 | +33.8% |
-| 30% | 0.288675 | 7.5% | 28.3% | 34 | 0.493960 | 56.2% | 30.0% | 36 | +48.8% |
+| FPR budget | Method | Tau | Recall | Actual FPR | FP | Precision |
+|---:|---|---:|---:|---:|---:|---:|
+| 5% | hash | 0.670820 | 1.2% | 0.8% | 1 | 50.0% |
+| 5% | onnx | 0.641367 | 13.8% | 5.0% | 6 | 64.7% |
+| 10% | hash | 0.426401 | 2.5% | 10.0% | 12 | 14.3% |
+| 10% | onnx | 0.603713 | 23.8% | 10.0% | 12 | 61.3% |
+| 15% | hash | 0.426401 | 2.5% | 10.0% | 12 | 14.3% |
+| 15% | onnx | 0.573981 | 32.5% | 14.2% | 17 | 60.5% |
+| 20% | hash | 0.408248 | 5.0% | 17.5% | 21 | 16.0% |
+| 20% | onnx | 0.553277 | 38.8% | 20.0% | 24 | 56.4% |
+| 30% | hash | 0.288675 | 7.5% | 28.3% | 34 | 15.0% |
+| 30% | onnx | 0.493960 | 56.2% | 30.0% | 36 | 55.6% |
 
 ## Tag Slices
 
-| Tag | Count | OK | DRIFT | Hash OK mean | Hash DRIFT mean | ONNX OK mean | ONNX DRIFT mean |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| adjacent_topic | 32 | 0 | 32 | - | 0.0265 | - | 0.3634 |
-| cross_lingual | 41 | 41 | 0 | 0.0179 | - | 0.5534 | - |
-| different_sense | 32 | 0 | 32 | - | 0.3904 | - | 0.5650 |
-| easy_negative | 42 | 0 | 42 | - | 0.0024 | - | 0.2224 |
-| en_translation | 41 | 41 | 0 | 0.0179 | - | 0.5534 | - |
-| ko_semantic_no_overlap | 39 | 39 | 0 | 0.0757 | - | 0.4634 | - |
-| legacy_fixture | 32 | 16 | 16 | 0.0353 | 0.0673 | 0.5217 | 0.2900 |
-| lexical_overlap_trap | 46 | 0 | 46 | - | 0.3485 | - | 0.5391 |
-| short_anchor | 185 | 74 | 111 | 0.0526 | 0.1460 | 0.5111 | 0.3857 |
-| short_title | 200 | 80 | 120 | 0.0460 | 0.1415 | 0.5095 | 0.3814 |
+| Tag | Method | Count | OK | DRIFT | OK mean | DRIFT mean |
+|---|---|---:|---:|---:|---:|---:|
+| adjacent_topic | hash | 32 | 0 | 32 | - | 0.0265 |
+| adjacent_topic | onnx | 32 | 0 | 32 | - | 0.3634 |
+| cross_lingual | hash | 41 | 41 | 0 | 0.0179 | - |
+| cross_lingual | onnx | 41 | 41 | 0 | 0.5534 | - |
+| different_sense | hash | 32 | 0 | 32 | - | 0.3904 |
+| different_sense | onnx | 32 | 0 | 32 | - | 0.5650 |
+| easy_negative | hash | 42 | 0 | 42 | - | 0.0024 |
+| easy_negative | onnx | 42 | 0 | 42 | - | 0.2224 |
+| en_translation | hash | 41 | 41 | 0 | 0.0179 | - |
+| en_translation | onnx | 41 | 41 | 0 | 0.5534 | - |
+| ko_semantic_no_overlap | hash | 39 | 39 | 0 | 0.0757 | - |
+| ko_semantic_no_overlap | onnx | 39 | 39 | 0 | 0.4634 | - |
+| legacy_fixture | hash | 32 | 16 | 16 | 0.0353 | 0.0673 |
+| legacy_fixture | onnx | 32 | 16 | 16 | 0.5217 | 0.2900 |
+| lexical_overlap_trap | hash | 46 | 0 | 46 | - | 0.3485 |
+| lexical_overlap_trap | onnx | 46 | 0 | 46 | - | 0.5391 |
+| short_anchor | hash | 185 | 74 | 111 | 0.0526 | 0.1460 |
+| short_anchor | onnx | 185 | 74 | 111 | 0.5111 | 0.3857 |
+| short_title | hash | 200 | 80 | 120 | 0.0460 | 0.1415 |
+| short_title | onnx | 200 | 80 | 120 | 0.5095 | 0.3814 |
 
 ## All Pair Scores
 
-| ID | Anchor | Title | Label | Tags | Hash | ONNX |
+| ID | Anchor | Title | Label | Tags | hash | onnx |
 |---|---|---|---|---|---:|---:|
 | g01-legacy-01 | 국내 여행지 탐색 | 제주 관광 명소 추천 | OK | short_anchor, ko_semantic_no_overlap, short_title, legacy_fixture | 0.000000 | 0.522639 |
 | g01-legacy-02 | 국내 여행지 탐색 | 부산에서 가볼 만한 곳 | OK | short_anchor, ko_semantic_no_overlap, short_title, legacy_fixture | 0.000000 | 0.507903 |

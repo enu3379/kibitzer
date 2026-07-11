@@ -10,9 +10,15 @@
       0.15,
       0.2,
       0.3
-    ]
+    ],
+    "embedding_contract": {
+      "one_vector_per_input": true,
+      "finite_non_zero": true,
+      "fixed_dimensions_per_method": true,
+      "cold_warm_cosine_min": 0.999
+    }
   },
-  "dataset": "scripts/fixtures/onnx_embedding_benchmark_dataset.json",
+  "dataset": "scripts/fixtures/tier0_embedding_benchmark_dataset.json",
   "pair_count": 200,
   "label_counts": {
     "OK": 80,
@@ -132,9 +138,10 @@
   "methods": [
     {
       "name": "hash",
+      "source": "builtin:hash",
       "dimensions": 256,
-      "cold_ms": 9.262299998226808,
-      "warm_ms": 8.834700001898455,
+      "cold_ms": 18.95679999870481,
+      "warm_ms": 12.072299999999814,
       "roc_auc": 0.3680208333333334,
       "partial_roc_auc_0_30": 0.03819444444444444,
       "average_precision": 0.40125000000000005,
@@ -1246,9 +1253,10 @@
     },
     {
       "name": "onnx",
+      "source": "builtin:onnx",
       "dimensions": 384,
-      "cold_ms": 1772.17759999985,
-      "warm_ms": 1094.567600001028,
+      "cold_ms": 2333.7681999983033,
+      "warm_ms": 1260.5825000064215,
       "roc_auc": 0.7198958333333333,
       "partial_roc_auc_0_30": 0.303125,
       "average_precision": 0.6043152726453604,

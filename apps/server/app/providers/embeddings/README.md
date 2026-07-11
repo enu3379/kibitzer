@@ -51,4 +51,7 @@ tests and the comparison benchmark. It is no longer the default runtime
 provider.
 
 See [the benchmark snapshot](../../../../../docs/benchmarks/tier0-embedding/report.md)
-for the 200-pair hash-versus-ONNX results and per-pair scores.
+for the 200-pair hash-versus-ONNX results and per-pair scores. New providers can
+join the same comparison through the
+[benchmark method contract](../../../../../docs/benchmarks/tier0-embedding/README.md)
+without changing the runner.

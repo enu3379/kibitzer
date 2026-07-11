@@ -4,29 +4,35 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import importlib
 import json
 import math
+import re
 import sys
 import time
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
 from html import escape
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from apps.server.app.config import load_config
+from apps.server.app.config import AppConfig, load_config
 from apps.server.app.core.relevance import cosine
+from apps.server.app.providers.embeddings.base import EmbeddingProvider
 from apps.server.app.providers.embeddings.factory import create_embedding_provider
 from apps.server.app.providers.embeddings.hash_cpu import HashCpuEmbeddingProvider
 
-DEFAULT_DATASET = ROOT / "scripts" / "fixtures" / "onnx_embedding_benchmark_dataset.json"
+DEFAULT_DATASET = ROOT / "scripts" / "fixtures" / "tier0_embedding_benchmark_dataset.json"
 LEGACY_FIXTURE = ROOT / "scripts" / "fixtures" / "onnx_embedding_smoke_cases.json"
 DEFAULT_OUTPUT_DIR = ROOT / "data" / "embedding-benchmark"
 FPR_BUDGETS = (0.05, 0.10, 0.15, 0.20, 0.30)
+DEFAULT_METHODS = ("hash", "onnx")
+METHOD_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+STABILITY_COSINE_MIN = 0.999
 CONTROLLED_TAGS = {
     "short_anchor",
     "short_title",
@@ -70,6 +76,7 @@ class SweepPoint:
 @dataclass(frozen=True)
 class MethodResult:
     name: str
+    source: str
     dimensions: int
     cold_ms: float
     warm_ms: float
@@ -81,14 +88,109 @@ class MethodResult:
     operating_points: dict[str, SweepPoint]
 
 
+ProviderFactory = Callable[[AppConfig], EmbeddingProvider]
+
+
+@dataclass(frozen=True)
+class BenchmarkMethod:
+    name: str
+    source: str
+    provider: EmbeddingProvider
+
+
+def create_hash_method(config: AppConfig) -> EmbeddingProvider:
+    del config
+    return HashCpuEmbeddingProvider(dimensions=256, normalize=True)
+
+
+def create_onnx_method(config: AppConfig) -> EmbeddingProvider:
+    if config.embedding.provider != "onnx_cpu":
+        raise ValueError(
+            "built-in method 'onnx' requires embedding.provider=onnx_cpu in --config"
+        )
+    return create_embedding_provider(config.embedding)
+
+
+BUILTIN_METHODS: dict[str, ProviderFactory] = {
+    "hash": create_hash_method,
+    "onnx": create_onnx_method,
+}
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compare Tier 0 hash and KoEn E5 ONNX embeddings on one fixed dataset"
+        description="Compare Tier 0 embedding methods on one fixed dataset"
     )
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--config", type=Path, default=ROOT / "configs" / "default.yaml")
+    parser.add_argument(
+        "--method",
+        action="append",
+        dest="methods",
+        metavar="NAME[=MODULE:FACTORY]",
+        help=(
+            "method to compare; repeat for multiple methods. Built-ins: hash, onnx. "
+            "External factories receive AppConfig and return an EmbeddingProvider"
+        ),
+    )
+    parser.add_argument(
+        "--list-methods",
+        action="store_true",
+        help="print built-in method names and exit",
+    )
     return parser.parse_args()
+
+
+def parse_method_spec(spec: str) -> tuple[str, ProviderFactory | str]:
+    name, separator, target = spec.partition("=")
+    if not METHOD_NAME_RE.fullmatch(name):
+        raise ValueError(
+            f"invalid method name {name!r}; use lowercase letters, digits, '_' or '-'"
+        )
+    if not separator:
+        factory = BUILTIN_METHODS.get(name)
+        if factory is None:
+            raise ValueError(
+                f"unknown built-in method {name!r}; use NAME=MODULE:FACTORY for external methods"
+            )
+        return name, factory
+    if not target or ":" not in target:
+        raise ValueError(f"external method {name!r} must use NAME=MODULE:FACTORY")
+    return name, target
+
+
+def load_external_factory(target: str) -> ProviderFactory:
+    module_name, attribute = target.rsplit(":", 1)
+    if not module_name or not attribute:
+        raise ValueError(f"invalid external factory target {target!r}")
+    module = importlib.import_module(module_name)
+    factory = getattr(module, attribute, None)
+    if not callable(factory):
+        raise ValueError(f"external factory {target!r} is not callable")
+    return factory
+
+
+def resolve_methods(specs: list[str], config: AppConfig) -> list[BenchmarkMethod]:
+    methods: list[BenchmarkMethod] = []
+    seen: set[str] = set()
+    for spec in specs:
+        name, factory_or_target = parse_method_spec(spec)
+        if name in seen:
+            raise ValueError(f"duplicate method name {name!r}")
+        seen.add(name)
+        factory = (
+            factory_or_target
+            if callable(factory_or_target)
+            else load_external_factory(factory_or_target)
+        )
+        source = f"builtin:{name}" if callable(factory_or_target) else factory_or_target
+        provider = factory(config)
+        embed = getattr(provider, "embed", None)
+        if not callable(embed):
+            raise ValueError(f"method {name!r} factory returned an object without embed()")
+        methods.append(BenchmarkMethod(name=name, source=source, provider=provider))
+    return methods
 
 
 def load_and_validate_dataset(dataset_path: Path) -> list[dict[str, Any]]:
@@ -272,16 +374,26 @@ def average_precision(points: list[SweepPoint]) -> float:
 
 async def score_method(
     name: str,
-    provider: Any,
+    source: str,
+    provider: EmbeddingProvider,
     pairs: list[dict[str, Any]],
 ) -> MethodResult:
     texts = list(dict.fromkeys([text for item in pairs for text in (item["anchor"], item["title"])]))
     cold_started = time.perf_counter()
     cold_vectors = await provider.embed(texts)
     cold_ms = (time.perf_counter() - cold_started) * 1000
+    dimensions = validate_embedding_batch(name, texts, cold_vectors)
     warm_started = time.perf_counter()
     warm_vectors = await provider.embed(texts)
     warm_ms = (time.perf_counter() - warm_started) * 1000
+    validate_embedding_batch(name, texts, warm_vectors, expected_dimensions=dimensions)
+    for index, (cold, warm) in enumerate(zip(cold_vectors, warm_vectors, strict=True)):
+        stability = cosine(cold, warm)
+        if stability < STABILITY_COSINE_MIN:
+            raise ValueError(
+                f"method {name!r} is not stable for input {index}: "
+                f"cold/warm cosine {stability:.6f} < {STABILITY_COSINE_MIN}"
+            )
     vector_by_text = dict(zip(texts, warm_vectors, strict=True))
     scored_pairs = [
         ScoredPair(
@@ -303,7 +415,8 @@ async def score_method(
     }
     return MethodResult(
         name=name,
-        dimensions=len(cold_vectors[0]),
+        source=source,
+        dimensions=dimensions,
         cold_ms=cold_ms,
         warm_ms=warm_ms,
         roc_auc=trapezoid_auc(sweep),
@@ -313,6 +426,39 @@ async def score_method(
         sweep=sweep,
         operating_points=operating_points,
     )
+
+
+def validate_embedding_batch(
+    name: str,
+    texts: list[str],
+    vectors: list[list[float]],
+    *,
+    expected_dimensions: int | None = None,
+) -> int:
+    if not isinstance(vectors, list):
+        raise ValueError(f"method {name!r} embed() must return list[list[float]]")
+    if len(vectors) != len(texts):
+        raise ValueError(
+            f"method {name!r} returned {len(vectors)} vectors for {len(texts)} inputs"
+        )
+    dimensions = expected_dimensions
+    for index, vector in enumerate(vectors):
+        if not isinstance(vector, list) or not vector:
+            raise ValueError(f"method {name!r} vector {index} must be a non-empty list")
+        if dimensions is None:
+            dimensions = len(vector)
+        if len(vector) != dimensions:
+            raise ValueError(
+                f"method {name!r} vector {index} has dimension {len(vector)}; "
+                f"expected {dimensions}"
+            )
+        if not all(isinstance(value, (int, float)) and math.isfinite(value) for value in vector):
+            raise ValueError(f"method {name!r} vector {index} contains a non-finite number")
+        if not any(value != 0.0 for value in vector):
+            raise ValueError(f"method {name!r} vector {index} is zero")
+    if dimensions is None:
+        raise ValueError(f"method {name!r} received no benchmark inputs")
+    return dimensions
 
 
 def budget_key(budget: float) -> str:
@@ -326,6 +472,7 @@ def prediction(score: float, point: SweepPoint) -> str:
 def build_tag_summary(
     pairs: list[dict[str, Any]],
     score_lookup: dict[tuple[str, str], float],
+    method_names: list[str],
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for tag in sorted({tag for item in pairs for tag in item["tags"]}):
@@ -338,7 +485,7 @@ def build_tag_summary(
             "ok_count": len(ok_rows),
             "drift_count": len(drift_rows),
         }
-        for method in ("hash", "onnx"):
+        for method in method_names:
             ok_scores = [score_lookup[(method, item["id"])] for item in ok_rows]
             drift_scores = [score_lookup[(method, item["id"])] for item in drift_rows]
             row[f"{method}_ok_mean"] = sum(ok_scores) / len(ok_scores) if ok_scores else None
@@ -379,10 +526,11 @@ def write_outputs(
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     by_method = {result.name: result for result in results}
+    method_names = [result.name for result in results]
     score_lookup = {
         (result.name, item.id): item.score for result in results for item in result.scored_pairs
     }
-    tag_summary = build_tag_summary(pairs, score_lookup)
+    tag_summary = build_tag_summary(pairs, score_lookup, method_names)
     dataset_stats = build_dataset_stats(pairs)
 
     pair_csv = output_dir / "pair_scores.csv"
@@ -395,10 +543,9 @@ def write_outputs(
         "tags",
         "source",
         "rationale",
-        "hash_score",
-        "onnx_score",
     ]
-    for method in ("hash", "onnx"):
+    fieldnames.extend(f"{method}_score" for method in method_names)
+    for method in method_names:
         fieldnames.extend(f"{method}_at_fpr_{budget_key(budget)}" for budget in FPR_BUDGETS)
     with pair_csv.open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
@@ -407,10 +554,9 @@ def write_outputs(
             row: dict[str, Any] = {
                 **item,
                 "tags": ",".join(item["tags"]),
-                "hash_score": f"{score_lookup[('hash', item['id'])]:.8f}",
-                "onnx_score": f"{score_lookup[('onnx', item['id'])]:.8f}",
             }
-            for method in ("hash", "onnx"):
+            for method in method_names:
+                row[f"{method}_score"] = f"{score_lookup[(method, item['id'])]:.8f}"
                 for budget in FPR_BUDGETS:
                     point = by_method[method].operating_points[budget_key(budget)]
                     row[f"{method}_at_fpr_{budget_key(budget)}"] = prediction(
@@ -421,19 +567,10 @@ def write_outputs(
 
     tag_csv = output_dir / "tag_summary.csv"
     with tag_csv.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(
-            handle,
-            fieldnames=[
-                "tag",
-                "count",
-                "ok_count",
-                "drift_count",
-                "hash_ok_mean",
-                "hash_drift_mean",
-                "onnx_ok_mean",
-                "onnx_drift_mean",
-            ],
-        )
+        tag_fieldnames = ["tag", "count", "ok_count", "drift_count"]
+        for method in method_names:
+            tag_fieldnames.extend((f"{method}_ok_mean", f"{method}_drift_mean"))
+        writer = csv.DictWriter(handle, fieldnames=tag_fieldnames)
         writer.writeheader()
         writer.writerows(tag_summary)
 
@@ -479,6 +616,12 @@ def write_outputs(
             "prediction_rule": "score >= threshold",
             "selection": "maximize recall subject to empirical FPR budget; tie-break lower FPR then higher threshold",
             "fpr_budgets": list(FPR_BUDGETS),
+            "embedding_contract": {
+                "one_vector_per_input": True,
+                "finite_non_zero": True,
+                "fixed_dimensions_per_method": True,
+                "cold_warm_cosine_min": STABILITY_COSINE_MIN,
+            },
         },
         "dataset": dataset_label.replace("\\", "/"),
         "pair_count": len(pairs),
@@ -488,6 +631,7 @@ def write_outputs(
         "methods": [
             {
                 "name": result.name,
+                "source": result.source,
                 "dimensions": result.dimensions,
                 "cold_ms": result.cold_ms,
                 "warm_ms": result.warm_ms,
@@ -517,8 +661,10 @@ def write_outputs(
         "pairs": [
             {
                 **item,
-                "hash_score": score_lookup[("hash", item["id"])],
-                "onnx_score": score_lookup[("onnx", item["id"])],
+                **{
+                    f"{method}_score": score_lookup[(method, item["id"])]
+                    for method in method_names
+                },
             }
             for item in pairs
         ],
@@ -542,6 +688,7 @@ def build_markdown_report(
     dataset_stats: dict[str, int],
 ) -> str:
     by_method = {result.name: result for result in results}
+    method_names = [result.name for result in results]
     lines = [
         "# Tier 0 Embedding Benchmark",
         "",
@@ -559,12 +706,12 @@ def build_markdown_report(
         "",
         "## Overall",
         "",
-        "| Method | Dimensions | Cold ms | Warm ms | ROC AUC | partial AUC FPR<=30% | Average precision |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        "| Method | Source | Dimensions | Cold ms | Warm ms | ROC AUC | partial AUC FPR<=30% | Average precision |",
+        "|---|---|---:|---:|---:|---:|---:|---:|",
     ]
     for result in results:
         lines.append(
-            f"| {result.name} | {result.dimensions} | {result.cold_ms:.1f} | "
+            f"| {result.name} | {result.source} | {result.dimensions} | {result.cold_ms:.1f} | "
             f"{result.warm_ms:.1f} | {result.roc_auc:.4f} | "
             f"{result.partial_roc_auc_0_30:.4f} | {result.average_precision:.4f} |"
         )
@@ -574,45 +721,47 @@ def build_markdown_report(
             "",
             "## Operating Points",
             "",
-            "| FPR budget | Hash tau | Hash recall | Hash actual FPR | Hash FP | ONNX tau | ONNX recall | ONNX actual FPR | ONNX FP | Recall delta |",
-            "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+            "| FPR budget | Method | Tau | Recall | Actual FPR | FP | Precision |",
+            "|---:|---|---:|---:|---:|---:|---:|",
         ]
     )
     for budget in FPR_BUDGETS:
         key = budget_key(budget)
-        hash_point = by_method["hash"].operating_points[key]
-        onnx_point = by_method["onnx"].operating_points[key]
-        lines.append(
-            f"| {budget:.0%} | {hash_point.threshold:.6f} | {hash_point.recall:.1%} | "
-            f"{hash_point.fpr:.1%} | {hash_point.fp} | {onnx_point.threshold:.6f} | "
-            f"{onnx_point.recall:.1%} | {onnx_point.fpr:.1%} | {onnx_point.fp} | "
-            f"{onnx_point.recall - hash_point.recall:+.1%} |"
-        )
+        for method in method_names:
+            point = by_method[method].operating_points[key]
+            lines.append(
+                f"| {budget:.0%} | {method} | {point.threshold:.6f} | "
+                f"{point.recall:.1%} | {point.fpr:.1%} | {point.fp} | "
+                f"{point.precision:.1%} |"
+            )
 
     lines.extend(
         [
             "",
             "## Tag Slices",
             "",
-            "| Tag | Count | OK | DRIFT | Hash OK mean | Hash DRIFT mean | ONNX OK mean | ONNX DRIFT mean |",
-            "|---|---:|---:|---:|---:|---:|---:|---:|",
+            "| Tag | Method | Count | OK | DRIFT | OK mean | DRIFT mean |",
+            "|---|---|---:|---:|---:|---:|---:|",
         ]
     )
     for row in tag_summary:
-        values = [row["hash_ok_mean"], row["hash_drift_mean"], row["onnx_ok_mean"], row["onnx_drift_mean"]]
-        formatted = [f"{value:.4f}" if value is not None else "-" for value in values]
-        lines.append(
-            f"| {row['tag']} | {row['count']} | {row['ok_count']} | {row['drift_count']} | "
-            f"{' | '.join(formatted)} |"
-        )
+        for method in method_names:
+            ok_mean = row[f"{method}_ok_mean"]
+            drift_mean = row[f"{method}_drift_mean"]
+            lines.append(
+                f"| {row['tag']} | {method} | {row['count']} | {row['ok_count']} | "
+                f"{row['drift_count']} | "
+                f"{f'{ok_mean:.4f}' if ok_mean is not None else '-'} | "
+                f"{f'{drift_mean:.4f}' if drift_mean is not None else '-'} |"
+            )
 
     lines.extend(
         [
             "",
             "## All Pair Scores",
             "",
-            "| ID | Anchor | Title | Label | Tags | Hash | ONNX |",
-            "|---|---|---|---|---|---:|---:|",
+            f"| ID | Anchor | Title | Label | Tags | {' | '.join(method_names)} |",
+            f"|---|---|---|---|---|{'|'.join('---:' for _ in method_names)}|",
         ]
     )
     for item in pairs:
@@ -624,10 +773,11 @@ def build_markdown_report(
             ", ".join(item["tags"]),
         ]
         markdown_values = [value.replace("|", "\\|").replace("\n", " ") for value in markdown_values]
+        scores = " | ".join(
+            f"{score_lookup[(method, item['id'])]:.6f}" for method in method_names
+        )
         lines.append(
-            f"| {' | '.join(markdown_values)} | "
-            f"{score_lookup[('hash', item['id'])]:.6f} | "
-            f"{score_lookup[('onnx', item['id'])]:.6f} |"
+            f"| {' | '.join(markdown_values)} | {scores} |"
         )
     lines.append("")
     return "\n".join(lines)
@@ -668,11 +818,11 @@ def build_roc_svg(results: list[MethodResult]) -> str:
             f'<text x="22" y="{top + plot_height / 2}" text-anchor="middle" transform="rotate(-90 22 {top + plot_height / 2})" font-family="sans-serif" font-size="14">Obvious OK Recall</text>',
         ]
     )
-    colors = {"hash": "#d97706", "onnx": "#059669"}
+    colors = ("#d97706", "#059669", "#2563eb", "#dc2626", "#7c3aed", "#0891b2")
     for legend_index, result in enumerate(results):
         coordinates = sorted({(item.fpr, item.recall) for item in result.sweep})
         polyline = " ".join(f"{point(fpr, recall)[0]:.1f},{point(fpr, recall)[1]:.1f}" for fpr, recall in coordinates)
-        color = colors[result.name]
+        color = colors[legend_index % len(colors)]
         elements.append(f'<polyline points="{polyline}" fill="none" stroke="{color}" stroke-width="3"/>')
         for operating_point in result.operating_points.values():
             marker_x, marker_y = point(operating_point.fpr, operating_point.recall)
@@ -692,29 +842,36 @@ def build_roc_svg(results: list[MethodResult]) -> str:
 
 async def main() -> int:
     args = parse_args()
+    if args.list_methods:
+        print("Built-in methods:")
+        for name in BUILTIN_METHODS:
+            print(f"  {name}")
+        print("External method syntax: NAME=MODULE:FACTORY")
+        return 0
+
     pairs = load_and_validate_dataset(args.dataset)
     config = load_config(args.config)
-    onnx_provider = create_embedding_provider(config.embedding)
-    hash_provider = HashCpuEmbeddingProvider(dimensions=256, normalize=True)
+    method_specs = args.methods or list(DEFAULT_METHODS)
+    methods = resolve_methods(method_specs, config)
 
     print(f"validated dataset: {len(pairs)} pairs")
-    hash_result = await score_method("hash", hash_provider, pairs)
-    print(f"hash scored: ROC AUC={hash_result.roc_auc:.4f}")
-    onnx_result = await score_method("onnx", onnx_provider, pairs)
-    print(f"onnx scored: ROC AUC={onnx_result.roc_auc:.4f}")
-    write_outputs(args.output_dir, args.dataset, pairs, [hash_result, onnx_result])
+    results: list[MethodResult] = []
+    for method in methods:
+        result = await score_method(method.name, method.source, method.provider, pairs)
+        results.append(result)
+        print(f"{method.name} scored: ROC AUC={result.roc_auc:.4f}")
+    write_outputs(args.output_dir, args.dataset, pairs, results)
 
-    print("\nFPR budget comparison")
-    print("budget  hash recall/tau       onnx recall/tau       delta")
+    print("\nFPR budget operating points")
+    print("budget  method               recall       tau    actual FPR")
     for budget in FPR_BUDGETS:
         key = budget_key(budget)
-        hash_point = hash_result.operating_points[key]
-        onnx_point = onnx_result.operating_points[key]
-        print(
-            f"{budget:>5.0%}   {hash_point.recall:>6.1%} @ {hash_point.threshold: .6f}   "
-            f"{onnx_point.recall:>6.1%} @ {onnx_point.threshold: .6f}   "
-            f"{onnx_point.recall - hash_point.recall:+.1%}"
-        )
+        for result in results:
+            point = result.operating_points[key]
+            print(
+                f"{budget:>5.0%}   {result.name:<20} {point.recall:>6.1%}   "
+                f"{point.threshold: .6f}   {point.fpr:>6.1%}"
+            )
     print(f"\noutputs: {args.output_dir}")
     return 0
 
