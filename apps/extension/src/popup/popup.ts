@@ -835,6 +835,13 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
     </div>
     <p class="label">페르소나</p>
     <div class="pers">${personaCards}</div>
+    <p class="label">판정 임계값</p>
+    <div class="setrow">
+      <span class="grow">r₀ OK 기준 τ</span>
+      <input id="relevance-tau-ok" class="number" type="number" min="0" max="1" step="0.01"
+        value="${settings.relevance.tau_ok}" />
+    </div>
+    <p class="subhint">r₀가 τ 이상이면 Tier 0에서 현재 목표와 관련 있는 페이지로 판정합니다.</p>
     <p class="label">개입 방식</p>
     <div class="seg">${controllerButtons}</div>
     ${controllerControls}
@@ -894,6 +901,12 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
       if (!type || type === settings.controller.type) return
       void applySettings({ controller: { type } })
     })
+  })
+  document.getElementById("relevance-tau-ok")?.addEventListener("change", (event) => {
+    const tauOk = Number.parseFloat((event.target as HTMLInputElement).value)
+    if (Number.isFinite(tauOk) && tauOk >= 0 && tauOk <= 1) {
+      void applySettings({ relevance: { tau_ok: tauOk } })
+    }
   })
   const updateControllerK = (event: Event) => {
     const k = Number.parseInt((event.target as HTMLInputElement).value, 10)
