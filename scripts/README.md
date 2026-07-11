@@ -20,6 +20,35 @@ Project maintenance scripts live here.
 The application code is shared across operating systems. Keep platform
 differences in these entrypoints unless a native adapter is unavoidable.
 
+## Tier 0 embedding
+
+`download_embedding_model.py` downloads the pinned KoEn E5 Tiny qint8 ONNX
+model and original tokenizer into ignored `data/models/`, verifies SHA-256, and
+is idempotent. Both platform setup scripts call it automatically.
+
+```bash
+python scripts/download_embedding_model.py
+python scripts/download_embedding_model.py --check
+```
+
+`smoke_onnx_embedding.py` prints every fixed Korean, English, and cross-language
+similarity case plus cold/warm latency:
+
+```bash
+python scripts/smoke_onnx_embedding.py
+```
+
+`benchmark_tier0_embeddings.py` evaluates hash and ONNX on the fixed 200-pair
+dataset with no cross-validation. It selects the highest-recall threshold at
+empirical FPR budgets of 5%, 10%, 15%, 20%, and 30%, and writes all pair scores,
+tables, JSON, and an ROC SVG:
+
+```bash
+python scripts/benchmark_tier0_embeddings.py
+```
+
+The committed benchmark snapshot is under `docs/benchmarks/tier0-embedding/`.
+
 ## `sync-llm-wiki-sources.sh`
 
 Refreshes copied snapshots under `raw/sources/project-docs/` for stable project documents.

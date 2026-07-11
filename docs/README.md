@@ -20,6 +20,10 @@ Read these in order when starting work:
 16. [Fun-Layer Roadmap](roadmap-fun-layer.md)
 17. [Planning Notes (living decision log)](planning-notes.md)
 
+Benchmarks:
+
+- [Tier 0 Embedding: hash vs KoEn E5 ONNX](benchmarks/tier0-embedding/report.md)
+
 Handoffs (delegated work specs):
 
 - [P0 Persona Engine](handoff-p0-persona-engine.md)
