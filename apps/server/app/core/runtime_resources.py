@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Literal
+
+import httpx
 
 from ..config import AppConfig
 from ..providers.embeddings.base import EmbeddingProvider
@@ -13,6 +16,30 @@ from ..providers.judges.factory import create_tier1_judge_provider, create_tier2
 from ..storage.sqlite import SQLiteStore
 
 RuntimeMode = Literal["idle", "active"]
+ProviderCallResult = Literal["none", "success", "error"]
+ProviderFailureReason = Literal[
+    "timeout",
+    "connection",
+    "auth",
+    "rate_limited",
+    "server_error",
+    "invalid_response",
+    "other",
+]
+
+
+@dataclass
+class ProviderCallStatus:
+    last_result: ProviderCallResult = "none"
+    reason: ProviderFailureReason | None = None
+    checked_at: datetime | None = None
+
+    def as_dict(self) -> dict[str, str | None]:
+        return {
+            "last_result": self.last_result,
+            "reason": self.reason,
+            "checked_at": self.checked_at.isoformat() if self.checked_at else None,
+        }
 
 
 class RuntimeResources:
@@ -39,6 +66,7 @@ class RuntimeResources:
         self._tier2_initialized = False
         self._active_since: datetime | None = None
         self._degraded_recorded: set[int] = set()
+        self._provider_calls = {1: ProviderCallStatus(), 2: ProviderCallStatus()}
         self._logger = logger or logging.getLogger("kibitzer")
 
     @property
@@ -72,6 +100,25 @@ class RuntimeResources:
                 lambda: create_tier2_judge_provider(self.config.tier2),
             ),
         }
+
+    def provider_call_status(self) -> dict[str, dict[str, str | None]]:
+        return {
+            "tier1": self._provider_calls[1].as_dict(),
+            "tier2": self._provider_calls[2].as_dict(),
+        }
+
+    def record_provider_call_success(self, tier: int) -> None:
+        self._provider_calls[tier] = ProviderCallStatus(
+            last_result="success",
+            checked_at=datetime.now(timezone.utc),
+        )
+
+    def record_provider_call_failure(self, tier: int, exc: Exception) -> None:
+        self._provider_calls[tier] = ProviderCallStatus(
+            last_result="error",
+            reason=_classify_provider_failure(exc),
+            checked_at=datetime.now(timezone.utc),
+        )
 
     def _describe_tier(
         self,
@@ -158,3 +205,22 @@ class RuntimeResources:
         )
         self.store.record_provider_degraded(tier=tier, reason="credentials_missing")
         self._degraded_recorded.add(tier)
+
+
+def _classify_provider_failure(exc: Exception) -> ProviderFailureReason:
+    if isinstance(exc, httpx.TimeoutException):
+        return "timeout"
+    if isinstance(exc, httpx.NetworkError):
+        return "connection"
+    if isinstance(exc, httpx.HTTPStatusError):
+        status_code = exc.response.status_code
+        if status_code in {401, 403}:
+            return "auth"
+        if status_code == 429:
+            return "rate_limited"
+        if 500 <= status_code < 600:
+            return "server_error"
+        return "other"
+    if isinstance(exc, (ValueError, KeyError, IndexError, TypeError)):
+        return "invalid_response"
+    return "other"

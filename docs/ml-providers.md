@@ -52,6 +52,13 @@ If a tier cannot resolve, it degrades to the tier below, `/health` reports
 `tiers: {tierN: degraded}`, and the extension popup shows a
 "판정 축소 모드" warning — degradation is loud, not silent.
 
+Configured tiers separately expose the last real judge call under
+`/health.provider_calls`. The result starts as `none`, changes to `error` with a
+coarse failure reason when a call fails, and returns to `success` after the next
+successful call for that tier. The popup shows a distinct "LLM 호출 문제"
+warning only while a tier's last call is an error. Health polling never probes
+the provider or creates extra API usage.
+
 ## Tier 0
 
 Tier 0 uses embeddings and cosine similarity:

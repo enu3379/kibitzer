@@ -120,11 +120,40 @@ class Tier1ResilienceAndFactoryTest(unittest.TestCase):
             observation = store.list_observations(session_id)[0]
             self.assertEqual(observation.verdict, "DRIFT")
             self.assertEqual(observation.tier_reached, 0)
+            provider_status = client.get("/health").json()["provider_calls"]["tier1"]
+            self.assertEqual(provider_status["last_result"], "error")
+            self.assertEqual(provider_status["reason"], "other")
             with closing(sqlite3.connect(self.db_path)) as conn:
                 count = conn.execute(
                     "SELECT COUNT(*) FROM event_log WHERE event_type = 'tier1.provider_error'"
                 ).fetchone()[0]
             self.assertEqual(count, 1)
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_provider_success_is_reported_in_health(self) -> None:
+        store = SQLiteStore(self.db_path)
+        config = AppConfig(
+            server=ServerConfig(db_path=str(self.db_path)),
+            tier1=Tier1Config(enabled=True),
+        )
+        provider = FakeTier1Provider(Tier1Result(verdict=Verdict.OK, reason="normal subtopic"))
+        client = TestClient(create_app(config=config, store=store, tier1_provider=provider))
+        client.__enter__()
+        try:
+            client.post("/sessions")
+            client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
+            client.post(
+                "/observations/browser-nav",
+                json={
+                    "source": "browser_nav",
+                    "payload": {"url": "https://example.com/bread", "title": "Sourdough bread recipe"},
+                },
+            )
+
+            provider_status = client.get("/health").json()["provider_calls"]["tier1"]
+            self.assertEqual(provider_status["last_result"], "success")
+            self.assertIsNone(provider_status["reason"])
         finally:
             client.__exit__(None, None, None)
 
