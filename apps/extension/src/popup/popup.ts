@@ -559,7 +559,9 @@ function providerFailureReasonText(reason: string | undefined): string {
     case "connection":
       return "Provider 서버에 연결하지 못했어요."
     case "auth":
-      return "API 키 인증 또는 권한을 확인하세요."
+      return "API 키가 유효하지 않아요."
+    case "forbidden":
+      return "Provider가 요청을 거부했어요. 모델 접근 권한 또는 요금제를 확인하세요."
     case "rate_limited":
       return "Provider 요청 한도에 도달했어요."
     case "server_error":

@@ -21,6 +21,7 @@ ProviderFailureReason = Literal[
     "timeout",
     "connection",
     "auth",
+    "forbidden",
     "rate_limited",
     "server_error",
     "invalid_response",
@@ -214,8 +215,10 @@ def _classify_provider_failure(exc: Exception) -> ProviderFailureReason:
         return "connection"
     if isinstance(exc, httpx.HTTPStatusError):
         status_code = exc.response.status_code
-        if status_code in {401, 403}:
+        if status_code == 401:
             return "auth"
+        if status_code == 403:
+            return "forbidden"
         if status_code == 429:
             return "rate_limited"
         if 500 <= status_code < 600:

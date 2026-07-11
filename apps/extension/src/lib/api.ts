@@ -408,6 +408,7 @@ export type ProviderFailureReason =
   | "timeout"
   | "connection"
   | "auth"
+  | "forbidden"
   | "rate_limited"
   | "server_error"
   | "invalid_response"

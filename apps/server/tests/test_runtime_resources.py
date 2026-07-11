@@ -76,6 +76,7 @@ class RuntimeResourcesTest(unittest.TestCase):
             (httpx.TimeoutException("timed out", request=request), "timeout"),
             (httpx.ConnectError("offline", request=request), "connection"),
             (_http_status_error(request, 401), "auth"),
+            (_http_status_error(request, 403), "forbidden"),
             (_http_status_error(request, 429), "rate_limited"),
             (_http_status_error(request, 503), "server_error"),
             (ValueError("bad response"), "invalid_response"),
