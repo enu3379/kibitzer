@@ -16,6 +16,8 @@ Project maintenance scripts live here.
   menu bar status item.
 - `macos_install_menu_bar_agent.sh` / `macos_uninstall_menu_bar_agent.sh`:
   optional macOS login autostart for the menu bar status item.
+- `create_worktree.py`: cross-platform helper that validates the canonical
+  `dev` checkout and creates one sibling worktree for a new task branch.
 
 The application code is shared across operating systems. Keep platform
 differences in these entrypoints unless a native adapter is unavoidable.
