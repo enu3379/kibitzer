@@ -24,7 +24,7 @@ Positive means `obvious OK`; higher scores predict OK.
 
 ## Operating Points
 
-| FPR budget | Method | Tau | Recall | Actual FPR | FP | Precision |
+| FPR budget | Method | Threshold Tau | Recall | Actual FPR | FP | Precision |
 |---:|---|---:|---:|---:|---:|---:|
 | 5% | hash | 0.670820 | 1.2% | 0.8% | 1 | 50.0% |
 | 5% | onnx | 0.641367 | 13.8% | 5.0% | 6 | 64.7% |
