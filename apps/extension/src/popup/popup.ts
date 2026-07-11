@@ -29,6 +29,7 @@ import {
 import { ExplorationHistoryEntry, listExplorationHistory } from "../lib/history"
 
 const POLL_MS = 2000
+const DEFAULT_OBSERVATION_SECONDS = 5
 const TRACKING_PILLS: Record<SessionState["tracking"], { label: string; tone: string }> = {
   coldstart: { label: "워밍업", tone: "gray" },
   tracking: { label: "추적 중", tone: "green" },
@@ -206,15 +207,24 @@ async function refresh(): Promise<void> {
     return
   }
   const tabId = await getActiveTabId()
-  const [current, stats, tiers, page] = await Promise.all([
+  const [current, stats, tiers, page, settings] = await Promise.all([
     getCurrentSession(),
     getSessionStats(),
     getHealthTiers(),
     tabId === null ? Promise.resolve(null) : getLatestObservation(tabId),
+    getSettings(),
   ])
   const goalText = current?.goal?.raw_text ?? ""
   saveSnapshot({ state: result.state, goalText, stats })
-  renderDashboard(result.state, goalText, stats, tiers, page)
+  renderDashboard(
+    result.state,
+    goalText,
+    stats,
+    tiers,
+    page,
+    false,
+    settings?.dwell.observation_seconds ?? DEFAULT_OBSERVATION_SECONDS,
+  )
   schedulePoll()
 }
 
@@ -353,7 +363,11 @@ function pageDiagnosticsHtml(page: LatestObservation): string {
     ${reason}`
 }
 
-function pageCardHtml(page: LatestObservation | null, offline = false): string {
+function pageCardHtml(
+  page: LatestObservation | null,
+  offline = false,
+  observationSeconds = DEFAULT_OBSERVATION_SECONDS,
+): string {
   if (offline) {
     return `
     <p class="label">지금 페이지</p>
@@ -366,7 +380,7 @@ function pageCardHtml(page: LatestObservation | null, offline = false): string {
     <p class="label">지금 페이지</p>
     <div class="page-card">
       <p class="pc-empty">이 탭은 아직 관측 전이에요</p>
-      <p class="pc-empty-hint">5초 이상 머문 일반 웹페이지만 봐요.</p>
+      <p class="pc-empty-hint">${observationSeconds}초 이상 머문 일반 웹페이지만 봐요.</p>
     </div>`
   }
   const belief = pageBelief(page.verdict)
@@ -409,6 +423,7 @@ function renderDashboard(
   tiers: HealthTiers | null = null,
   page: LatestObservation | null = null,
   offline = false,
+  observationSeconds = DEFAULT_OBSERVATION_SECONDS,
 ): void {
   const pill = TRACKING_PILLS[state.tracking] ?? TRACKING_PILLS.tracking
   const pillLabel =
@@ -476,7 +491,7 @@ function renderDashboard(
       <p class="goal-text">${esc(goalText)}</p>
       <button id="goal-edit" class="icon-btn" title="목표 수정"${dis}>수정</button>
     </div>
-    ${pageCardHtml(page, offline)}
+    ${pageCardHtml(page, offline, observationSeconds)}
     <p class="label">${driftLabel}</p>
     ${driftMeter}
     <p class="hint">${driftHint}</p>
