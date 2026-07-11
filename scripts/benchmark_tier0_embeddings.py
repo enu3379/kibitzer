@@ -29,10 +29,18 @@ from apps.server.app.providers.embeddings.hash_cpu import HashCpuEmbeddingProvid
 DEFAULT_DATASET = ROOT / "scripts" / "fixtures" / "tier0_embedding_benchmark_dataset.json"
 LEGACY_FIXTURE = ROOT / "scripts" / "fixtures" / "onnx_embedding_smoke_cases.json"
 DEFAULT_OUTPUT_DIR = ROOT / "data" / "embedding-benchmark"
-FPR_BUDGETS = (0.05, 0.10, 0.15, 0.20, 0.30)
+FPR_BUDGETS = (0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50)
 DEFAULT_METHODS = ("hash", "onnx")
 METHOD_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 STABILITY_COSINE_MIN = 0.999
+METHOD_REPORT_LABELS = {
+    "hash": "hash (baseline)",
+    "onnx": (
+        "[KoEn-E5-Tiny]"
+        "(https://huggingface.co/exp-models/dragonkue-KoEn-E5-Tiny/"
+        "blob/main/onnx/model_qint8_arm64.onnx)"
+    ),
+}
 CONTROLLED_TAGS = {
     "short_anchor",
     "short_title",
@@ -692,6 +700,7 @@ def build_markdown_report(
     lines = [
         "# Tier 0 Embedding Benchmark",
         "",
+        'Methods comparison on 200 "anchor-page title" pair.',
         "No cross-validation is used. Each method selects its threshold on all 200 pairs.",
         "Positive means `obvious OK`; higher scores predict OK.",
         "",
@@ -710,8 +719,9 @@ def build_markdown_report(
         "|---|---|---:|---:|---:|---:|---:|---:|",
     ]
     for result in results:
+        method_label = METHOD_REPORT_LABELS.get(result.name, result.name)
         lines.append(
-            f"| {result.name} | {result.source} | {result.dimensions} | {result.cold_ms:.1f} | "
+            f"| {method_label} | {result.source} | {result.dimensions} | {result.cold_ms:.1f} | "
             f"{result.warm_ms:.1f} | {result.roc_auc:.4f} | "
             f"{result.partial_roc_auc_0_30:.4f} | {result.average_precision:.4f} |"
         )
@@ -719,9 +729,11 @@ def build_markdown_report(
     lines.extend(
         [
             "",
+            "![ROC curve](roc.svg)",
+            "",
             "## Operating Points",
             "",
-            "| FPR budget | Method | Tau | Recall | Actual FPR | FP | Precision |",
+            "| FPR budget | Method | Threshold Tau | Recall | Actual FPR | FP | Precision |",
             "|---:|---|---:|---:|---:|---:|---:|",
         ]
     )

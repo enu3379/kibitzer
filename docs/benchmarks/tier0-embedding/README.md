@@ -104,7 +104,7 @@ as `--method name` without an import target.
 - Threshold rule: predict OK when `score >= tau`.
 - Cross-validation: none, by explicit project decision.
 - Operating points: maximize recall subject to empirical FPR <=5%, 10%, 15%,
-  20%, and 30%; ties prefer lower actual FPR, then higher threshold.
+  20%, 30%, 40%, and 50%; ties prefer lower actual FPR, then higher threshold.
 - Shared outputs: overall ROC AUC, partial AUC through FPR 30%, average
   precision, operating points, tag slices, all pair scores, and ROC SVG.
 

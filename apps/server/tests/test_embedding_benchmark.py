@@ -6,6 +6,7 @@ from collections import Counter
 from apps.server.app.config import AppConfig
 from scripts.benchmark_tier0_embeddings import (
     DEFAULT_DATASET,
+    FPR_BUDGETS,
     ScoredPair,
     build_tag_summary,
     build_sweep,
@@ -74,6 +75,9 @@ class BenchmarkDatasetTest(unittest.TestCase):
         self.assertEqual(len(pairs), 200)
         self.assertEqual(Counter(item["label"] for item in pairs), Counter({"DRIFT": 120, "OK": 80}))
         self.assertEqual(len({item["group_id"] for item in pairs}), 40)
+
+    def test_operating_point_budgets_include_relaxed_comparison_levels(self) -> None:
+        self.assertEqual(FPR_BUDGETS, (0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50))
 
 
 class BenchmarkMethodContractTest(unittest.TestCase):

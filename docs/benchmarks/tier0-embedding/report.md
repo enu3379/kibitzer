@@ -17,8 +17,8 @@ Positive means `obvious OK`; higher scores predict OK.
 
 | Method | Source | Dimensions | Cold ms | Warm ms | ROC AUC | partial AUC FPR<=30% | Average precision |
 |---|---|---:|---:|---:|---:|---:|---:|
-| hash (baseline) | builtin:hash | 256 | 19.0 | 12.1 | 0.3680 | 0.0382 | 0.4013 |
-| [KoEn-E5-Tiny](https://huggingface.co/exp-models/dragonkue-KoEn-E5-Tiny/blob/main/onnx/model_qint8_arm64.onnx) | builtin:onnx | 384 | 2333.8 | 1260.6 | 0.7199 | 0.3031 | 0.6043 |
+| hash (baseline) | builtin:hash | 256 | 16.3 | 12.4 | 0.3680 | 0.0382 | 0.4013 |
+| [KoEn-E5-Tiny](https://huggingface.co/exp-models/dragonkue-KoEn-E5-Tiny/blob/main/onnx/model_qint8_arm64.onnx) | builtin:onnx | 384 | 2297.6 | 1288.0 | 0.7199 | 0.3031 | 0.6043 |
 
 ![ROC curve](roc.svg)
 
@@ -36,6 +36,10 @@ Positive means `obvious OK`; higher scores predict OK.
 | 20% | onnx | 0.553277 | 38.8% | 20.0% | 24 | 56.4% |
 | 30% | hash | 0.288675 | 7.5% | 28.3% | 34 | 15.0% |
 | 30% | onnx | 0.493960 | 56.2% | 30.0% | 36 | 55.6% |
+| 40% | hash | 0.175412 | 17.5% | 34.2% | 41 | 25.5% |
+| 40% | onnx | 0.417392 | 78.8% | 40.0% | 48 | 56.8% |
+| 50% | hash | 0.175412 | 17.5% | 34.2% | 41 | 25.5% |
+| 50% | onnx | 0.354409 | 88.8% | 50.0% | 60 | 54.2% |
 
 ## Tag Slices
 

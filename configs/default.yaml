@@ -57,10 +57,10 @@ tier2:
   experiment_model_key: "tier2_judge"
 
 relevance:
-  # Provisional 200-pair benchmark operating point: maximum obvious-OK recall
-  # subject to empirical FPR <= 5%, with no cross-validation. Recalibrate on
-  # labeled exploration history before treating this as a production estimate.
-  tau_ok: 0.641367
+  # Provisional rounded default selected from the 200-pair benchmark without
+  # cross-validation. Recalibrate on labeled exploration history before
+  # treating this as a production estimate.
+  tau_ok: 0.6
   beta: 0.85
   anchor_window: 10
   exemplar_cap: 20

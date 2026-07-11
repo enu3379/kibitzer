@@ -713,9 +713,9 @@ Verified:
   scripts. Runtime inference stays CPU-only and offline.
 - Added a model-independent 200-pair Korean/English benchmark with all 32 prior
   smoke pairs, no cross-validation, and operating points at FPR budgets 5%, 10%,
-  15%, 20%, and 30%.
+  15%, 20%, 30%, 40%, and 50%.
 - On the fixed dataset, ONNX reached ROC AUC 0.7199 versus hash 0.3680 and
   recalled 13.75% versus 1.25% of obvious OK pairs at the <=5% FPR operating
-  point. Its threshold (`tau_ok=0.641367`) is the provisional default. Full pair
-  scores are committed under
+  point. The runtime default was subsequently rounded to `tau_ok=0.6`. Full pair
+  scores and all operating-point thresholds are committed under
   `docs/benchmarks/tier0-embedding/`.
