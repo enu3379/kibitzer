@@ -445,7 +445,7 @@ function renderDashboard(
   const providerFailureNote = failedProviderCalls.length
     ? `
     <div style="background: var(--red-bg); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px;">
-      <p style="margin: 0; font-size: 12px; color: var(--red-tx);">LLM 호출 문제 — 마지막 판정 요청이 실패했어요. ${providerFailureHint}</p>
+      <p style="margin: 0; font-size: 12px; color: var(--red-tx);">LLM 호출 오류 — 마지막 판정 요청이 실패했어요. ${providerFailureHint}</p>
     </div>`
     : ""
 
