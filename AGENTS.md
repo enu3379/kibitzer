@@ -38,7 +38,7 @@ git worktree list
 ```
 
 - Do not implement changes in a checkout whose current branch is `dev` or
-  `main`. Create a sibling worktree such as `kibitzer-A` for one task branch.
+  `main`. Create a sibling worktree such as `kibitzer-fix-server-bug` for one task branch.
 - Use one active agent session per worktree. Do not switch a task worktree to a
   different branch while another agent is using it.
 - Create ordinary task worktrees from the canonical checkout with

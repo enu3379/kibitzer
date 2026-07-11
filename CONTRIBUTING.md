@@ -21,7 +21,7 @@
 ## 로컬 worktree 운영
 
 Git worktree 사용을 권장합니다. 정본 checkout은 `dev` 동기화와 worktree
-관리에 사용하고, 실제 변경은 `kibitzer-A` 같은 sibling worktree의 작업
+관리에 사용하고, 실제 변경은 `kibitzer-fix-server-bug` 같은 sibling worktree의 작업
 브랜치에서 수행합니다. 로그인 시작 서버가 설치된 checkout과 포트 `8765`는
 작업용 서버가 임의로 대체하지 않습니다. 생성, 플랫폼별 초기화, 포트 배정,
 정리 절차는 [docs/worktree-workflow.md](docs/worktree-workflow.md)를 따릅니다.

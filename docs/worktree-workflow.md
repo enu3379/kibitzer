@@ -63,7 +63,7 @@ cd /path/to/kibitzer
 .venv/bin/python scripts/create_worktree.py A chore/example-task
 ```
 
-결과는 정본의 sibling인 `kibitzer-A`와 그 안의 새 브랜치입니다. helper는
+결과는 정본의 sibling인 `kibitzer-fix-server-bug`와 그 안의 새 브랜치입니다. helper는
 `hotfix/`를 만들지 않습니다. hotfix는 `main`에서 분기해 `main`과 `dev` 양쪽에
 반영해야 하는 별도 절차이므로 `CONTRIBUTING.md`를 따릅니다.
 
