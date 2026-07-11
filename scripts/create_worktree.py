@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 
-ALLOWED_BRANCH_PREFIXES = ("feature/", "fix/", "chore/", "codex/")
+ALLOWED_BRANCH_PREFIXES = ("feature/", "fix/", "chore/", "codex/", "hotfix/")
 SLOT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 
 
