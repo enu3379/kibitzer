@@ -27,6 +27,10 @@ class DwellResponse(BaseModel):
     tier2_seconds: int
 
 
+class RelevanceResponse(BaseModel):
+    tau_ok: float
+
+
 class ControllerResponse(BaseModel):
     type: Literal["streak", "alignment"]
     k: int
@@ -38,6 +42,7 @@ class ControllerResponse(BaseModel):
 class SettingsResponse(BaseModel):
     persona: str
     voice_enabled: bool
+    relevance: RelevanceResponse
     controller: ControllerResponse
     cooldown: CooldownResponse
     dwell: DwellResponse
@@ -70,6 +75,10 @@ class DwellPatch(BaseModel):
     tier2_seconds: int | None = Field(default=None, ge=1, le=300)
 
 
+class RelevancePatch(BaseModel):
+    tau_ok: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
 class ControllerPatch(BaseModel):
     type: Literal["streak", "alignment", "window"] | None = None
     k: int | None = Field(default=None, ge=1, le=20)
@@ -81,6 +90,7 @@ class ControllerPatch(BaseModel):
 class SettingsPatch(BaseModel):
     persona: str | None = None
     voice_enabled: bool | None = None
+    relevance: RelevancePatch | None = None
     controller: ControllerPatch | None = None
     cooldown: CooldownPatch | None = None
     dwell: DwellPatch | None = None
@@ -123,6 +133,11 @@ async def update_settings(request: Request, body: SettingsPatch) -> SettingsResp
 
     if body.voice_enabled is not None:
         partial["voice_enabled"] = body.voice_enabled
+
+    if body.relevance is not None:
+        relevance = dict(current["relevance"])
+        relevance.update(body.relevance.model_dump(exclude_none=True))
+        partial["relevance"] = relevance
 
     if body.controller is not None:
         controller = dict(current["controller"])

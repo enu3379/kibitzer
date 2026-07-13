@@ -2,7 +2,9 @@
 
 ## Provider Policy
 
-Embedding must be local CPU-only in Stage 0. CUDA, Metal, DirectML, and GPU-specific dependencies are not part of the default path.
+Embedding is local CPU-only in Stage 0. CUDA, Metal, DirectML, and GPU-specific
+dependencies are not part of the default path. The setup scripts download the
+model and tokenizer once; ordinary Tier 0 inference makes no network call.
 
 Tier 1 and Tier 2 both support OpenAI-compatible chat completions, Ollama `/api/chat`
 providers, and the `experiment` models-file indirection. A tier that is enabled but
@@ -14,10 +16,13 @@ verdict and records `tier1.provider_error`; it never fails the observation reque
 
 ```yaml
 embedding:
-  provider: hash_cpu
-  model: token-hash-v2   # Hangul character bigrams + whole tokens, title-only input
+  provider: onnx_cpu
+  model: ./data/models/koen-e5-tiny-onnx/onnx/model_qint8_arm64.onnx
+  tokenizer_path: ./data/models/koen-e5-tiny-onnx/tokenizer.json
   device: cpu
   forbid_gpu: true
+  batch_size: 1
+  dimensions: 384
 
 tier1:
   provider: experiment
@@ -80,13 +85,22 @@ than presenting one tier's reason as if it covered both.
 
 ## Tier 0
 
-Tier 0 uses embeddings and cosine similarity:
+Tier 0 embeds the declared goal/exemplars and normalized page title, then uses
+cosine similarity. URL hosts and page bodies are excluded. The default
+`onnx_cpu` provider uses KoEn E5 Tiny qint8 with the original tokenizer,
+attention-mask mean pooling, and L2 normalization:
 
 ```text
 r0 = max(max cosine to goal exemplars, beta * cosine to anchor)
 ```
 
 If `r0 >= tau_ok`, the observation is OK.
+
+The old `hash_cpu` provider remains as a deterministic comparison baseline.
+Implementation and setup details are in
+[`apps/server/app/providers/embeddings/README.md`](../apps/server/app/providers/embeddings/README.md),
+and the fixed 200-pair evaluation is in
+[`docs/benchmarks/tier0-embedding/report.md`](benchmarks/tier0-embedding/report.md).
 
 ## Tier 1
 

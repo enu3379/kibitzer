@@ -21,6 +21,7 @@ fi
 
 ".venv/bin/python" -m pip install --upgrade pip
 ".venv/bin/python" -m pip install -e ".[test]"
+".venv/bin/python" scripts/download_embedding_model.py
 
 npm --prefix apps/extension install
 npm --prefix apps/extension run build

@@ -51,7 +51,7 @@ ignored by git.
 ## Implementation Defaults
 
 ```text
-Embedding  local CPU-only provider, no CUDA requirement
+Embedding  KoEn E5 Tiny qint8 ONNX, local CPU-only, no CUDA requirement
 Tier 1     fast cloud classifier (Ollama Cloud; OpenAI-compatible supported)
 Tier 2     stronger cloud confirmation/message judge (Ollama Cloud)
 Storage    SQLite
