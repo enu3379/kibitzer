@@ -259,6 +259,38 @@ class Tier2ApiTest(unittest.TestCase):
         assert candidate is not None
         self.assertEqual(candidate.status, "pending")
 
+    def test_confirmed_intervention_rolls_back_all_state_when_candidate_resolution_fails(self) -> None:
+        provider = FakeTier2Provider(Tier2Result(confirm_drift=True, message="atomic confirmation"))
+        client, store = self._client(provider)
+        try:
+            request = self._start_goal_and_request_excerpt(client)
+            current = store.get_current_session()
+            assert current is not None
+            before = store.get_controller_state(current.session.id)
+            with patch.object(
+                store,
+                "_resolve_intervention_candidate_in_conn",
+                side_effect=RuntimeError("synthetic candidate resolution failure"),
+            ):
+                with self.assertRaises(RuntimeError):
+                    client.post(
+                        f"/observations/{request['observation_id']}/excerpt",
+                        json={"title": "Bread", "text": "Unrelated bread recipe."},
+                    )
+        finally:
+            client.__exit__(None, None, None)
+
+        after = store.get_controller_state(current.session.id)
+        self.assertEqual(after.streak, before.streak)
+        self.assertEqual(after.last_intervention_ts, before.last_intervention_ts)
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            intervention_count = conn.execute("SELECT COUNT(*) FROM interventions").fetchone()[0]
+        self.assertEqual(intervention_count, 0)
+        candidate = store.get_intervention_candidate_for_observation(str(request["observation_id"]))
+        self.assertIsNotNone(candidate)
+        assert candidate is not None
+        self.assertEqual(candidate.status, "pending")
+
     def test_alignment_evidence_is_consumed_only_after_tier2_confirmation(self) -> None:
         provider = FakeTier2Provider(Tier2Result(confirm_drift=True, message="누적 이탈을 확인했습니다."))
         client, store = self._client(

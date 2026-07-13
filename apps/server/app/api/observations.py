@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from ..config import ControllerConfig
-from ..core.controller_flow import apply_controller, confirm_controller_intervention
+from ..core.controller_flow import apply_controller, controller_state_after_intervention
 from ..core.delivery import clamp_notification_message
 from ..core.normalization import (
     browser_nav_embedding_text,
@@ -374,12 +374,20 @@ async def confirm_observation_excerpt(
             return PipelineResult(action=PipelineAction.NONE, observation_id=observation.id, verdict=verdict)
 
         controller_config = effective_controller_config(request.app.state.config, store)
-        confirm_controller_intervention(store, controller_config, observation.session_id)
-        intervention_id = store.create_intervention(observation.session_id, observation.id, message)
-        store.resolve_intervention_candidate(
+        confirmed_at = datetime.now(timezone.utc)
+        controller_state = controller_state_after_intervention(
+            store,
+            controller_config,
+            observation.session_id,
+            now=confirmed_at,
+        )
+        intervention_id = store.commit_confirmed_intervention(
             candidate.id,
-            "confirmed",
-            intervention_id=intervention_id,
+            observation.session_id,
+            observation.id,
+            message,
+            controller_state,
+            ts=confirmed_at,
         )
         silent = _handle_delivery_side_effects(
             request,

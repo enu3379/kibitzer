@@ -246,6 +246,37 @@ class ControllerHandshakeTest(unittest.TestCase):
         self.assertEqual(state.streak, 2)
         self.assertIsNone(state.last_intervention_ts)
 
+    def test_expired_in_flight_candidate_is_reclaimed_for_a_new_request(self) -> None:
+        client = self._client(ControllerConfig(k=1, coldstart_observations=1, cooldown_seconds=300))
+        try:
+            session_id = self._start_goal(client)
+            first = self._post_drift(client, 1)
+            candidate, claimed = self.store.claim_intervention_candidate(str(first["candidate_id"]))
+            self.assertTrue(claimed)
+            self.assertIsNotNone(candidate)
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute(
+                    "UPDATE intervention_candidates SET expires_at = ? WHERE id = ?",
+                    ((datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(), first["candidate_id"]),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            second = self._post_drift(client, 2)
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertEqual(second["action"], "request_excerpt")
+        self.assertNotEqual(first["candidate_id"], second["candidate_id"])
+        expired = self.store.get_intervention_candidate_for_observation(str(first["observation_id"]))
+        self.assertIsNotNone(expired)
+        assert expired is not None
+        self.assertEqual(expired.status, "expired")
+        state = self.store.get_controller_state(session_id)
+        self.assertEqual(state.streak, 2)
+        self.assertIsNone(state.last_intervention_ts)
+
 
 if __name__ == "__main__":
     unittest.main()

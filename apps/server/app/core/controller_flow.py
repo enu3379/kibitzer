@@ -54,12 +54,52 @@ def confirm_controller_intervention(
 ) -> ControllerStateRecord:
     """Consume controller evidence only after Tier 2 confirms drift."""
 
+    confirmed_state = controller_state_after_intervention(store, config, session_id, now=now)
+    return store.save_controller_state(
+        session_id,
+        streak=confirmed_state.streak,
+        obs_count=confirmed_state.obs_count,
+        last_intervention_ts=confirmed_state.last_intervention_ts,
+        snoozed_until=confirmed_state.snoozed_until,
+        alignment_score=confirmed_state.alignment_score,
+        drift_latched=confirmed_state.drift_latched,
+        ts=confirmed_state.updated_at,
+    )
+
+
+def controller_state_after_intervention(
+    store: SQLiteStore,
+    config: ControllerConfig,
+    session_id: str,
+    now: datetime | None = None,
+) -> ControllerStateRecord:
+    """Build the post-intervention state without persisting it."""
+
     state = store.get_controller_state(session_id)
     controller = _controller_from_state(config, state)
     confirmed_at = now or datetime.now(timezone.utc)
     controller.on_intervened(confirmed_at)
-    _save_controller_state(store, session_id, controller, state, confirmed_at)
-    return store.get_controller_state(session_id)
+    if isinstance(controller, AlignmentController):
+        return ControllerStateRecord(
+            session_id=session_id,
+            streak=controller.armed,
+            obs_count=controller.obs_count,
+            last_intervention_ts=controller.last_intervention_ts,
+            snoozed_until=controller.snoozed_until,
+            alignment_score=controller.alignment_score,
+            drift_latched=controller.drift_latched,
+            updated_at=confirmed_at,
+        )
+    return ControllerStateRecord(
+        session_id=session_id,
+        streak=controller.streak,
+        obs_count=controller.obs_count,
+        last_intervention_ts=controller.last_intervention_ts,
+        snoozed_until=controller.snoozed_until,
+        alignment_score=state.alignment_score,
+        drift_latched=state.drift_latched,
+        updated_at=confirmed_at,
+    )
 
 
 def _controller_from_state(
