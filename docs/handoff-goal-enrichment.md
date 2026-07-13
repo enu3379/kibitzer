@@ -180,3 +180,49 @@ call.
 - No page content in the enrichment call, ever.
 - No popup UI changes in this handoff (derived_score already surfaces via
   the D5 dev card's features once persisted).
+
+## Addendum (2026-07-13) — still valid under the ONNX Tier 0 (post-PR #29)
+
+PR #29 replaced the hash provider with KoEn-E5-Tiny qint8 ONNX and moved
+`tau_ok` 0.15 → 0.6, which raised the question whether semantic embeddings
+subsume this feature. Measured answer: **no — they compose.** The tiny
+model's ko↔en alignment is real but weak (cross-lingual related pairs land
+at 0.26–0.59, mostly under τ), and a derived phrase in the page's language
+bridges exactly that gap.
+
+Method: 40 goal-only phrase sets hand-drafted to the production prompt
+(fixture: `scripts/fixtures/goal_enrichment_sim_phrases.json`; page titles
+unseen while drafting), scored with #26's `max(base, derived)` rule over
+#29's 200-pair benchmark dataset via
+`scripts/simulate_goal_enrichment_tier0.py`:
+
+| tau_ok = 0.6 | ONNX alone | ONNX + derived phrases |
+|---|---|---|
+| recall (OK pairs) | 23.8% (19/80) | **86.2% (69/80)** |
+| FPR (DRIFT pairs) | 11.7% (14/120) | 17.5% (21/120) |
+| ROC AUC | 0.7221 | **0.9214** |
+| cross-lingual recall | 31.7% | **92.7%** |
+
+Caveats: phrases are an LLM-quality proxy (hand-drafted); 4 rescued pairs
+were near-verbatim phrasing coincidences (recall is ~81% without them); the
+dataset deliberately contains no lexical-overlap OK pairs, so absolute
+numbers are hard-mode, not live-traffic estimates.
+
+Consequences for this design:
+
+- **derived_tau lost its original job.** It was an anti-noise gate for hash
+  buckets; under τ=0.6 it is verdict-inert (a derived match only flips a
+  verdict once it clears `relevance.tau_ok` inside `max()`). Kept as a
+  stored-score noise floor; default.yaml comment updated.
+- **Aspect phrases widen the accepted region both ways.** The 7 new
+  false-OKs all came from aspect expansion (e.g. goal "영어 공부", phrase
+  "토익 토플 시험 준비" pulling drift title "토익 시험 접수" to 0.82) and
+  scored 0.60–0.82 — above any plausible `audit_ok_below` band as sketched
+  for hash-scale scores. The audit-band design (audit-plan Step 5) needs
+  ONNX-scale recalibration before it can serve as the mitigation here.
+- **The private-corpus acceptance numbers are hash-era.** The Step-0
+  regression thresholds (false-DRIFT ≤ 30, collateral `r0 < 0.35`) assume
+  hash-scale scores and must be re-derived on the ONNX provider before that
+  eval gate is re-enabled.
+- Prompt copy updated ("local semantic matcher"); the phrase-drafting rules
+  themselves carry over unchanged — they are what made the simulation work.

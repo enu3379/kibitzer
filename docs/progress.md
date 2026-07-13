@@ -1,5 +1,22 @@
 # Progress
 
+## 2026-07-13 D3 revalidated under the ONNX Tier 0 (PR #26 refresh)
+
+Completed:
+
+- Measured that derived phrases still pay for themselves on top of PR #29's
+  KoEn-E5-Tiny provider: over the 200-pair Tier 0 benchmark at `tau_ok=0.6`,
+  recall 23.8% → 86.2%, AUC 0.7221 → 0.9214, cross-lingual recall 31.7% →
+  92.7%, FPR 11.7% → 17.5% — the two PRs compose instead of competing.
+  Reproducible via `scripts/simulate_goal_enrichment_tier0.py` +
+  `scripts/fixtures/goal_enrichment_sim_phrases.json` (40 hand-drafted,
+  goal-text-only phrase sets); caveats recorded in the handoff addendum.
+- Updated the enrichment prompt framing (semantic matcher, not lexical),
+  documented that `derived_tau` is verdict-inert under `tau_ok=0.6` (it
+  survives as a diagnostics noise floor), and flagged that the hash-era
+  audit-band and private-corpus regression thresholds need ONNX-scale
+  recalibration (`docs/handoff-goal-enrichment.md` addendum 2026-07-13).
+
 ## 2026-07-09 D3 Goal Enrichment
 
 Completed:

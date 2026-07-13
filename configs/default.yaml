@@ -69,6 +69,12 @@ relevance:
 goal_enrichment:
   enabled: true
   max_phrases: 8
+  # derived_tau was calibrated (2026-07-09) against hash-bucket noise, where
+  # random collisions scored up to ~0.29. Under the ONNX provider (PR #29,
+  # tau_ok 0.6) the gate no longer decides verdicts — a derived match enters
+  # max() and only flips a verdict once it clears relevance.tau_ok anyway —
+  # so it survives only as a noise floor for stored derived_score
+  # diagnostics. See docs/handoff-goal-enrichment.md addendum (2026-07-13).
   derived_tau: 0.25
   timeout_seconds: 20
 

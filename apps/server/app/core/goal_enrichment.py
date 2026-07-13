@@ -12,9 +12,9 @@ from .relevance import cosine
 
 
 GOAL_ENRICHMENT_PROMPT = """You expand a user's declared browsing goal into short search-style phrases.
-The phrases seed a local lexical matcher that decides whether a browser tab
-title is related to the goal, so each phrase must read like something that
-would literally appear in the title of a related page.
+The phrases seed a local semantic matcher (embedding cosine similarity) that
+decides whether a browser tab title is related to the goal, so each phrase
+must read like something that could plausibly be the title of a related page.
 
 Declared goal (verbatim): "{goal_text}"
 
