@@ -1,4 +1,6 @@
 import asyncio
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -23,6 +25,17 @@ def test_atomic_write_and_instance_cleanup(tmp_path) -> None:
 
     windows_server_host._remove_if_instance_matches(path, "first")
     assert not path.exists()
+
+
+def test_control_record_distinguishes_venv_and_process_executables() -> None:
+    record = windows_server_host._control_record("instance", "127.0.0.1", 8765)
+
+    assert record["python_executable"] == str(Path(sys.executable).resolve())
+    assert record["process_executable"] == str(
+        Path(getattr(sys, "_base_executable", sys.executable)).resolve()
+    )
+    assert record["instance_id"] == "instance"
+    assert record["port"] == 8765
 
 
 @pytest.mark.asyncio

@@ -23,6 +23,22 @@ $ServerControlFile = Join-Path $LogDir "windows-server-control.json"
 $ServerStopRequestFile = Join-Path $LogDir "windows-server-stop-request.json"
 $ServerHostScript = Join-Path $Root "scripts\windows_server_host.py"
 $ServerPython = Join-Path $Root ".venv\Scripts\python.exe"
+$ServerProcessPython = $ServerPython
+$VenvConfig = Join-Path $Root ".venv\pyvenv.cfg"
+if (Test-Path $VenvConfig) {
+  try {
+    $ExecutableLine = Get-Content -LiteralPath $VenvConfig -Encoding UTF8 | Where-Object { $_ -match '^executable\s*=' } | Select-Object -First 1
+    if ($ExecutableLine) {
+      $ConfiguredExecutable = ($ExecutableLine -split '=', 2)[1].Trim()
+      if (Test-Path $ConfiguredExecutable) {
+        $ServerProcessPython = $ConfiguredExecutable
+      }
+    }
+  }
+  catch {
+    $ServerProcessPython = $ServerPython
+  }
+}
 $DefaultTimerInterval = [Math]::Max(1, $PollSeconds) * 1000
 $TransitionTimerInterval = 1000
 $StartupTimeoutSeconds = 30
@@ -39,8 +55,7 @@ $Script:StopControl = $null
 $Script:StopForced = $false
 $Script:StatusMessageOverride = $null
 $Script:RunningStatusMessageOverride = $null
-$Script:StartItem = $null
-$Script:StopItem = $null
+$Script:ServerToggleItem = $null
 $Script:Timer = $null
 
 New-Item -ItemType Directory -Force $LogDir | Out-Null
@@ -95,11 +110,9 @@ function Set-KibitzerStartingTray {
   $NotifyIcon.Icon = $TrayIcons.unknown
   $NotifyIcon.Text = "Kibitzer: starting"
   $StatusHeaderItem.Text = "서버를 시작하고 있습니다..."
-  if ($Script:StartItem) {
-    $Script:StartItem.Enabled = $false
-  }
-  if ($Script:StopItem) {
-    $Script:StopItem.Enabled = $false
+  if ($Script:ServerToggleItem) {
+    $Script:ServerToggleItem.Text = "Start server"
+    $Script:ServerToggleItem.Enabled = $false
   }
   if ($Script:Timer) {
     $Script:Timer.Interval = $TransitionTimerInterval
@@ -127,11 +140,9 @@ function Set-KibitzerStoppingTray {
   $NotifyIcon.Icon = $TrayIcons.unknown
   $NotifyIcon.Text = "Kibitzer: stopping"
   $StatusHeaderItem.Text = if ($Script:StopForced) { "서버를 강제 종료하고 있습니다..." } else { "서버를 중지하고 있습니다..." }
-  if ($Script:StartItem) {
-    $Script:StartItem.Enabled = $false
-  }
-  if ($Script:StopItem) {
-    $Script:StopItem.Enabled = $false
+  if ($Script:ServerToggleItem) {
+    $Script:ServerToggleItem.Text = "Stop server"
+    $Script:ServerToggleItem.Enabled = $false
   }
   if ($Script:Timer) {
     $Script:Timer.Interval = $TransitionTimerInterval
@@ -244,16 +255,40 @@ function Test-KibitzerServerControl {
     $Process = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $ServerProcessId" -ErrorAction Stop
   }
   catch {
+    Write-TrayLog "stop control rejected: process lookup failed: $($_.Exception.Message)"
     return $false
   }
   if (-not $Process) {
+    Write-TrayLog "stop control rejected: pid=$ServerProcessId is not running"
     return $false
   }
-  if (-not (Test-KibitzerPathEqual ([string]$Process.ExecutablePath) $ServerPython)) {
+
+  $HasProcessExecutable = $Control.PSObject.Properties.Name -contains "process_executable"
+  if ($HasProcessExecutable -and -not (Test-KibitzerPathEqual ([string]$Process.ExecutablePath) ([string]$Control.process_executable))) {
+    Write-TrayLog "stop control rejected: actual process executable did not match the recorded base executable"
     return $false
   }
   $CommandLine = [string]$Process.CommandLine
-  if ($CommandLine.IndexOf($ServerHostScript, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+  if (
+    $CommandLine.IndexOf($ServerPython, [System.StringComparison]::OrdinalIgnoreCase) -lt 0 -or
+    $CommandLine.IndexOf($ServerHostScript, [System.StringComparison]::OrdinalIgnoreCase) -lt 0 -or
+    $CommandLine.IndexOf("--port 8765", [System.StringComparison]::OrdinalIgnoreCase) -lt 0
+  ) {
+    Write-TrayLog "stop control rejected: command line did not match the worktree venv, host script, and port"
+    return $false
+  }
+
+  try {
+    $RecordedStart = [DateTimeOffset]::Parse([string]$Control.started_at).UtcDateTime
+    $ActualStart = ([DateTime]$Process.CreationDate).ToUniversalTime()
+    $StartDeltaSeconds = [Math]::Abs(($RecordedStart - $ActualStart).TotalSeconds)
+  }
+  catch {
+    Write-TrayLog "stop control rejected: process start time could not be verified"
+    return $false
+  }
+  if ($StartDeltaSeconds -gt 30) {
+    Write-TrayLog "stop control rejected: pid start time differed from the record by ${StartDeltaSeconds}s"
     return $false
   }
   return $true
@@ -284,7 +319,8 @@ function Get-KibitzerLegacyServerProcess {
     $Candidates = @(
       Get-CimInstance -ClassName Win32_Process -Filter "Name = 'python.exe'" -ErrorAction Stop | Where-Object {
         $CommandLine = [string]$_.CommandLine
-        (Test-KibitzerPathEqual ([string]$_.ExecutablePath) $ServerPython) -and
+        (Test-KibitzerPathEqual ([string]$_.ExecutablePath) $ServerProcessPython) -and
+          $CommandLine.IndexOf($ServerPython, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
           $CommandLine.IndexOf("-m uvicorn", [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
           $CommandLine.IndexOf("apps.server.app.main:app", [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
           $CommandLine.IndexOf("--port 8765", [System.StringComparison]::OrdinalIgnoreCase) -ge 0
@@ -625,12 +661,10 @@ $StatusHeaderItem = $Menu.Items.Add("Kibitzer: starting")
 $StatusHeaderItem.Enabled = $false
 $Menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
 $RefreshItem = $Menu.Items.Add("Refresh status")
-$StartItem = $Menu.Items.Add("Start server")
-$StopItem = $Menu.Items.Add("Stop server")
+$ServerToggleItem = $Menu.Items.Add("Start server")
 $OpenLogsItem = $Menu.Items.Add("Open logs")
 $ExitItem = $Menu.Items.Add("Exit tray")
-$Script:StartItem = $StartItem
-$Script:StopItem = $StopItem
+$Script:ServerToggleItem = $ServerToggleItem
 $NotifyIcon.ContextMenuStrip = $Menu
 
 function Set-KibitzerTrayStatus {
@@ -655,8 +689,8 @@ function Set-KibitzerTrayStatus {
     $StatusHeaderItem.Text = $Status.Message
   }
   $Transitioning = [bool]($Script:StartingUntil -or $Script:StoppingUntil)
-  $StartItem.Enabled = ($Status.Mode -eq "dead" -and -not $Transitioning)
-  $StopItem.Enabled = ($Status.Mode -ne "dead" -and -not $Transitioning)
+  $ServerToggleItem.Text = if ($Status.Mode -eq "dead") { "Start server" } else { "Stop server" }
+  $ServerToggleItem.Enabled = -not $Transitioning
 }
 
 function Resolve-KibitzerStartingState {
@@ -736,11 +770,14 @@ function Update-KibitzerTray {
 }
 
 $RefreshItem.Add_Click({ Update-KibitzerTray })
-$StartItem.Add_Click({
-  Start-KibitzerServer -Source "menu"
-})
-$StopItem.Add_Click({
-  Stop-KibitzerServer -Source "menu"
+$ServerToggleItem.Add_Click({
+  $Status = Get-KibitzerHealthStatus
+  if ($Status.Mode -eq "dead") {
+    Start-KibitzerServer -Source "menu"
+  }
+  else {
+    Stop-KibitzerServer -Source "menu"
+  }
 })
 $OpenLogsItem.Add_Click({
   $QuotedLogDir = '"' + $LogDir + '"'

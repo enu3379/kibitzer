@@ -44,6 +44,21 @@ def _remove_if_instance_matches(path: Path, instance_id: str) -> None:
         path.unlink(missing_ok=True)
 
 
+def _control_record(instance_id: str, host: str, port: int) -> dict[str, Any]:
+    base_executable = getattr(sys, "_base_executable", sys.executable)
+    return {
+        "instance_id": instance_id,
+        "pid": os.getpid(),
+        "root": str(ROOT),
+        "python_executable": str(Path(sys.executable).resolve()),
+        "process_executable": str(Path(base_executable).resolve()),
+        "host_script": str(Path(__file__).resolve()),
+        "host": host,
+        "port": port,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @contextmanager
 def _single_instance() -> Iterator[None]:
     if os.name != "nt":
@@ -92,19 +107,7 @@ async def _serve(host: str, port: int, runtime_dir: Path) -> None:
     with _single_instance():
         instance_id = uuid.uuid4().hex
         stop_request_path.unlink(missing_ok=True)
-        _atomic_write_json(
-            control_path,
-            {
-                "instance_id": instance_id,
-                "pid": os.getpid(),
-                "root": str(ROOT),
-                "python_executable": str(Path(sys.executable).resolve()),
-                "host_script": str(Path(__file__).resolve()),
-                "host": host,
-                "port": port,
-                "started_at": datetime.now(timezone.utc).isoformat(),
-            },
-        )
+        _atomic_write_json(control_path, _control_record(instance_id, host, port))
 
         config = uvicorn.Config(
             "apps.server.app.main:app",
