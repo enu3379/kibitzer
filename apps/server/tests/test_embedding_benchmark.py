@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
 from collections import Counter
+from pathlib import Path
 
 from apps.server.app.config import AppConfig
 from scripts.benchmark_tier0_embeddings import (
+    DATASET_V2,
     DEFAULT_DATASET,
     FPR_BUDGETS,
     ScoredPair,
@@ -75,6 +79,28 @@ class BenchmarkDatasetTest(unittest.TestCase):
         self.assertEqual(len(pairs), 200)
         self.assertEqual(Counter(item["label"] for item in pairs), Counter({"DRIFT": 120, "OK": 80}))
         self.assertEqual(len({item["group_id"] for item in pairs}), 40)
+
+    def test_v2_dataset_satisfies_v2_contract(self) -> None:
+        pairs = load_and_validate_dataset(DATASET_V2)
+
+        self.assertEqual(len(pairs), 200)
+        self.assertEqual(Counter(item["label"] for item in pairs), Counter({"DRIFT": 120, "OK": 80}))
+        self.assertEqual(len({item["group_id"] for item in pairs}), 40)
+        overlap_ok_groups = {
+            item["group_id"]
+            for item in pairs
+            if item["label"] == "OK" and "lexical_overlap_ok" in item["tags"]
+        }
+        self.assertGreaterEqual(len(overlap_ok_groups), 30)
+
+    def test_v2_contract_rejects_wrong_source(self) -> None:
+        payload = json.loads(DATASET_V2.read_text(encoding="utf-8"))
+        payload["pairs"][0]["source"] = "generated"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            broken = Path(tmpdir) / "broken.json"
+            broken.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "invalid source"):
+                load_and_validate_dataset(broken)
 
     def test_operating_point_budgets_include_relaxed_comparison_levels(self) -> None:
         self.assertEqual(FPR_BUDGETS, (0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50))
