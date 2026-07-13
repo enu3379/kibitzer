@@ -165,3 +165,70 @@ Before finishing, validate all of the following:
 
 Do not run either embedding provider while generating or revising labels. The
 dataset must be model-independent.
+
+---
+
+# Version 2 (2026-07-13)
+
+`tier0_embedding_benchmark_dataset_v2.json` supersedes v1 for provider and
+scoring-rule comparisons. It was rebuilt after replaying the labeled real
+corpus (260 observations, 5 real sessions) under the ONNX provider exposed
+what v1 could not measure:
+
+- v1 had **zero lexical-overlap OK pairs** (the "≥30 English OK groups" rule
+  crowded them out), so it scored hash below random (AUC 0.368) and
+  overstated every provider's operating recall at a given tau — v1 predicted
+  recall 23.8% at tau 0.6 where the real corpus delivered 9.9%.
+- v1 had **no same-frame adjacency traps** — the real corpus showed frame
+  siblings ("7월 제철 X" style) passing even tau 0.6 as false-OKs.
+- v1 titles were canonical short phrases; real tab titles carry platform
+  suffixes, unread-count prefixes, typos, and clickbait phrasings that
+  systematically depress cosine scores.
+
+## v2 composition contract (enforced by `_validate_v2_dataset`)
+
+Same structure as v1 (200 pairs, 40 groups × 5, 2 OK : 3 DRIFT, unique
+anchor-title pairs, mechanical `short_anchor`/`short_title` tags), plus:
+
+- `source: "v2_generated"` on every pair; tags from `CONTROLLED_TAGS_V2`.
+- ≥30 groups with a `lexical_overlap_ok` OK title (restores the common case).
+- ≥12 groups with an English OK title (`cross_lingual`, must contain ASCII).
+- ≥30 groups with a trap DRIFT (`same_frame_trap` or `lexical_overlap_trap`).
+- ≥12 `clickbait_ok` OK titles (on-topic pages with weak surface signal).
+- ≥8 `typo_query` titles (misspelled self-search tabs).
+
+Title realism rules: platform suffixes (" - YouTube", " : 네이버 블로그",
+" - Google 검색", " · GitHub", " - Stack Overflow", community boards),
+"(1) " unread prefixes, occasional bare hub titles (`generic_hub`).
+
+## Slice design (5 × 8 groups)
+
+1. v2g01-08 — everyday goals with lexical-overlap OK titles.
+2. v2g09-16 — same-frame adjacency traps (frame shared, topic slot swapped).
+3. v2g17-24 — cross-lingual dev/gaming/research goals with realistic English
+   titles AND English-drift traps that share the OK vocabulary.
+4. v2g25-32 — oblique/clickbait related titles, with traps that look
+   lexically closer than the true OK (the inversion case).
+5. v2g33-40 — 1-2 word polysemous anchors (이사/백신/비자/물때/이월/등기…)
+   whose traps exploit the other word sense.
+
+`goal_enrichment_sim_phrases_v2.json` carries goal-only derived-phrase sets
+for every v2 group so the goal-enrichment scoring rule can be compared on the
+same pairs (consumer script lands with the goal-enrichment PR).
+
+## What v2 is for (and not for)
+
+- **For**: ranking providers/scoring rules under realistic hard cases, and
+  regression-testing that a change doesn't collapse a slice (per-tag recall).
+- **Not for**: calibrating the production `tau_ok`. v2 is deliberately
+  trap-dense (40/40 groups), so absolute FPR/recall are pessimistic relative
+  to live traffic. Calibrate tau on the private labeled real corpus replay
+  (see docs/audit runbook); v2 numbers gate rankings, not thresholds.
+
+## Provenance
+
+All 200 v2 pairs are invented (agent-generated 2026-07-13, human-directed;
+two-stage validation: mechanical contract + independent adversarial label
+audit). No real browsing titles were copied; real-corpus failure modes were
+transferred as PATTERNS only. Verified zero verbatim overlap against the
+private corpus titles.
