@@ -1091,26 +1091,15 @@ class SQLiteStore:
         with self._connect() as conn:
             self._ensure_schema(conn)
             self._expire_stale_intervention_candidates(conn, session_id, now)
-            existing = conn.execute(
-                """
-                SELECT *
-                FROM intervention_candidates
-                WHERE session_id = ? AND status IN ('pending', 'in_flight')
-                ORDER BY requested_at DESC, id DESC
-                LIMIT 1
-                """,
-                (session_id,),
-            ).fetchone()
-            if existing:
-                return self._intervention_candidate_from_row(existing), False
-
-            conn.execute(
+            inserted = conn.execute(
                 """
                 INSERT INTO intervention_candidates (
                     id, session_id, observation_id, status,
                     requested_at, expires_at, updated_at
                 )
                 VALUES (?, ?, ?, 'pending', ?, ?, ?)
+                ON CONFLICT(session_id) WHERE status IN ('pending', 'in_flight')
+                DO NOTHING
                 """,
                 (
                     candidate_id,
@@ -1121,6 +1110,21 @@ class SQLiteStore:
                     now.isoformat(),
                 ),
             )
+            if inserted.rowcount == 0:
+                existing = conn.execute(
+                    """
+                    SELECT *
+                    FROM intervention_candidates
+                    WHERE session_id = ? AND status IN ('pending', 'in_flight')
+                    ORDER BY requested_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (session_id,),
+                ).fetchone()
+                if not existing:
+                    raise RuntimeError("candidate insert conflicted without an active candidate")
+                return self._intervention_candidate_from_row(existing), False
+
             self._append_event(
                 conn,
                 session_id,

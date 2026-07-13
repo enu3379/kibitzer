@@ -1,6 +1,8 @@
 import sqlite3
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -120,6 +122,47 @@ class ControllerHandshakeTest(unittest.TestCase):
         self.assertIsNotNone(candidate)
         assert candidate is not None
         self.assertEqual(candidate.status, "pending")
+
+    def test_concurrent_candidate_creation_reuses_one_active_candidate(self) -> None:
+        client = self._client(ControllerConfig(k=20, coldstart_observations=1, cooldown_seconds=300))
+        try:
+            session_id = self._start_goal(client)
+            observation = self._post_drift(client, 1)
+            observation_id = str(observation["observation_id"])
+            requested_at = datetime.now(timezone.utc)
+            barrier = threading.Barrier(2)
+
+            def create_candidate():
+                barrier.wait()
+                return self.store.create_intervention_candidate(
+                    session_id,
+                    observation_id,
+                    expires_at=requested_at + timedelta(seconds=60),
+                    ts=requested_at,
+                )
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = [executor.submit(create_candidate) for _ in range(2)]
+                results = [future.result() for future in futures]
+        finally:
+            client.__exit__(None, None, None)
+
+        candidates = [candidate for candidate, _created in results]
+        self.assertEqual(sum(1 for _candidate, created in results if created), 1)
+        self.assertEqual(candidates[0].id, candidates[1].id)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            active_count = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM intervention_candidates
+                WHERE session_id = ? AND status IN ('pending', 'in_flight')
+                """,
+                (session_id,),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(active_count, 1)
 
     def test_alignment_controller_uses_ewma_hysteresis(self) -> None:
         now = datetime.now(timezone.utc)
