@@ -704,3 +704,18 @@ Verified:
   unknown reason, and reinjection replays Kibitzer's entrance animation whenever
   the user switches back and forth while a toast is pending. Both are accepted
   for now.
+
+## 2026-07-11 Tier 0 KoEn E5 ONNX experiment
+
+- Replaced the default hash embedding with local KoEn E5 Tiny qint8 ONNX while
+  retaining `hash_cpu` as a deterministic baseline.
+- Added pinned, SHA-256-verified model setup to the Windows and macOS setup
+  scripts. Runtime inference stays CPU-only and offline.
+- Added a model-independent 200-pair Korean/English benchmark with all 32 prior
+  smoke pairs, no cross-validation, and operating points at FPR budgets 5%, 10%,
+  15%, 20%, 30%, 40%, and 50%.
+- On the fixed dataset, ONNX reached ROC AUC 0.7199 versus hash 0.3680 and
+  recalled 13.75% versus 1.25% of obvious OK pairs at the <=5% FPR operating
+  point. The runtime default was subsequently rounded to `tau_ok=0.6`. Full pair
+  scores and all operating-point thresholds are committed under
+  `docs/benchmarks/tier0-embedding/`.
