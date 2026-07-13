@@ -228,6 +228,10 @@ export interface DwellSettings {
   tier2_seconds: number
 }
 
+export interface RelevanceSettings {
+  tau_ok: number
+}
+
 export type ControllerType = "streak" | "alignment"
 
 export interface ControllerSettings {
@@ -241,6 +245,7 @@ export interface ControllerSettings {
 export interface Settings {
   persona: string
   voice_enabled: boolean
+  relevance: RelevanceSettings
   controller: ControllerSettings
   cooldown: Cooldown
   dwell: DwellSettings
@@ -250,6 +255,7 @@ export interface Settings {
 export interface SettingsPatch {
   persona?: string
   voice_enabled?: boolean
+  relevance?: Partial<RelevanceSettings>
   controller?: Partial<ControllerSettings>
   cooldown?: Partial<Cooldown>
   dwell?: Partial<DwellSettings>
@@ -257,6 +263,7 @@ export interface SettingsPatch {
 }
 
 function normalizeSettings(value: Partial<Settings>): Settings {
+  const rawRelevance = (value.relevance ?? {}) as Partial<RelevanceSettings>
   const rawController = (value.controller ?? {}) as Partial<ControllerSettings>
   const rawCooldown = (value.cooldown ?? {}) as Partial<Cooldown>
   const rawDwell = (value.dwell ?? {}) as Partial<DwellSettings>
@@ -271,6 +278,9 @@ function normalizeSettings(value: Partial<Settings>): Settings {
   return {
     persona: typeof value.persona === "string" ? value.persona : "dry_kibitzer",
     voice_enabled: Boolean(value.voice_enabled),
+    relevance: {
+      tau_ok: clampFloat(rawRelevance.tau_ok, 0.15, 0, 1),
+    },
     controller: {
       type: controllerType,
       k,

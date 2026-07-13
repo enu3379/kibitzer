@@ -99,7 +99,7 @@ async def latest_observation_for_tab(
         raise HTTPException(status_code=404, detail="observation not found")
     return _latest_observation_response(
         observation,
-        tau_ok=request.app.state.config.relevance.tau_ok,
+        tau_ok=float(runtime_settings(request.app.state.config, store)["relevance"]["tau_ok"]),
         label=store.page_label_for_observation(observation.id),
     )
 
@@ -159,6 +159,7 @@ async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineR
 
     observation = normalize_browser_nav(raw, current.session.id)
     if current.goal:
+        tau_ok = float(runtime_settings(request.app.state.config, _store(request))["relevance"]["tau_ok"])
         runtime = _runtime(request)
         embedding_text = strip_repeated_title_suffix(
             browser_nav_embedding_text(observation),
@@ -176,11 +177,12 @@ async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineR
             beta=request.app.state.config.relevance.beta,
         )
         observation.features.r0 = score.score
+        observation.features.tau_ok = tau_ok
         observation.features.exemplar_score = score.exemplar_score
         observation.features.r_final = observation.features.r0
         observation.features.tier_reached = 0
         observation.verdict = (
-            Verdict.OK if observation.features.r0 >= request.app.state.config.relevance.tau_ok else Verdict.DRIFT
+            Verdict.OK if observation.features.r0 >= tau_ok else Verdict.DRIFT
         )
         tier1_provider = runtime.tier1_provider()
         if observation.verdict == Verdict.DRIFT and tier1_provider:
@@ -260,7 +262,7 @@ def _latest_observation_response(
             tier_reached=features.get("tier_reached", observation.tier_reached),
         ),
         tier1_reason=observation.tier1_reason,
-        tau_ok=tau_ok,
+        tau_ok=features.get("tau_ok", tau_ok),
         label=label if label in ("related", "drift") else None,
     )
 
