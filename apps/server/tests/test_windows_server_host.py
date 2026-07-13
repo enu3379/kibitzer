@@ -1,5 +1,6 @@
 import asyncio
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -53,3 +54,28 @@ async def test_stop_watcher_ignores_other_instance_then_stops_match(tmp_path) ->
     windows_server_host._atomic_write_json(path, {"instance_id": "target"})
     await asyncio.wait_for(watcher, timeout=0.25)
     assert server.should_exit is True
+
+
+@pytest.mark.asyncio
+async def test_serve_cleans_instance_files_when_uvicorn_initialization_fails(
+    tmp_path, monkeypatch
+) -> None:
+    control_path = tmp_path / windows_server_host.CONTROL_FILENAME
+    stop_request_path = tmp_path / windows_server_host.STOP_REQUEST_FILENAME
+
+    def fail_config(*args, **kwargs):
+        control = windows_server_host._read_json(control_path)
+        assert control is not None
+        windows_server_host._atomic_write_json(
+            stop_request_path, {"instance_id": control["instance_id"]}
+        )
+        raise RuntimeError("config failed")
+
+    monkeypatch.setattr(windows_server_host, "_single_instance", nullcontext)
+    monkeypatch.setattr(windows_server_host.uvicorn, "Config", fail_config)
+
+    with pytest.raises(RuntimeError, match="config failed"):
+        await windows_server_host._serve("127.0.0.1", 8765, tmp_path)
+
+    assert not control_path.exists()
+    assert not stop_request_path.exists()

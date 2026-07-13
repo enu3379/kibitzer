@@ -439,6 +439,37 @@ function Remove-KibitzerControlFiles {
   }
 }
 
+function Get-KibitzerStopProcessState {
+  if (-not $Script:StopControl) {
+    Write-TrayLog "stop process state unknown: control is unavailable"
+    return "unknown"
+  }
+
+  try {
+    $ServerProcessId = [int]$Script:StopControl.pid
+  }
+  catch {
+    Write-TrayLog "stop process state unknown: recorded pid is invalid"
+    return "unknown"
+  }
+  if ($ServerProcessId -le 0) {
+    Write-TrayLog "stop process state unknown: recorded pid is invalid"
+    return "unknown"
+  }
+
+  try {
+    $Process = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $ServerProcessId" -ErrorAction Stop
+  }
+  catch {
+    Write-TrayLog "stop process state unknown: process lookup failed: $($_.Exception.Message)"
+    return "unknown"
+  }
+  if ($Process) {
+    return "running"
+  }
+  return "exited"
+}
+
 function Set-KibitzerStopFailure {
   param(
     [string]$Outcome,
@@ -790,16 +821,19 @@ function Resolve-KibitzerStoppingState {
   param($Status)
 
   if ($Status.Mode -eq "dead") {
-    $Source = $Script:StopSource
-    $Elapsed = Get-KibitzerStopElapsedSeconds
-    $Forced = $Script:StopForced
-    $InstanceId = [string]$Script:StopControl.instance_id
-    Write-TrayLog "stop source=$Source outcome=health-dead forced=$Forced after ${Elapsed}s"
-    Remove-KibitzerControlFiles -InstanceId $InstanceId
-    Clear-KibitzerStoppingState
-    $Script:StatusMessageOverride = "서버가 중지되었습니다. 메뉴에서 'Start server'를 눌러 다시 실행할 수 있습니다."
-    Set-KibitzerTrayStatus $Status
-    return
+    $ProcessState = Get-KibitzerStopProcessState
+    if ($ProcessState -eq "exited") {
+      $Source = $Script:StopSource
+      $Elapsed = Get-KibitzerStopElapsedSeconds
+      $Forced = $Script:StopForced
+      $InstanceId = [string]$Script:StopControl.instance_id
+      Write-TrayLog "stop source=$Source outcome=process-exited forced=$Forced after ${Elapsed}s"
+      Remove-KibitzerControlFiles -InstanceId $InstanceId
+      Clear-KibitzerStoppingState
+      $Script:StatusMessageOverride = "서버가 중지되었습니다. 메뉴에서 'Start server'를 눌러 다시 실행할 수 있습니다."
+      Set-KibitzerTrayStatus $Status
+      return
+    }
   }
 
   if ((Get-Date) -gt $Script:StoppingUntil) {

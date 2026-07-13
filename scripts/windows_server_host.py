@@ -107,22 +107,25 @@ async def _serve(host: str, port: int, runtime_dir: Path) -> None:
     with _single_instance():
         instance_id = uuid.uuid4().hex
         stop_request_path.unlink(missing_ok=True)
-        _atomic_write_json(control_path, _control_record(instance_id, host, port))
-
-        config = uvicorn.Config(
-            "apps.server.app.main:app",
-            host=host,
-            port=port,
-            timeout_graceful_shutdown=10,
-        )
-        server = uvicorn.Server(config)
-        watcher = asyncio.create_task(_watch_for_stop_request(server, stop_request_path, instance_id))
+        watcher: asyncio.Task[None] | None = None
         try:
+            _atomic_write_json(control_path, _control_record(instance_id, host, port))
+            config = uvicorn.Config(
+                "apps.server.app.main:app",
+                host=host,
+                port=port,
+                timeout_graceful_shutdown=10,
+            )
+            server = uvicorn.Server(config)
+            watcher = asyncio.create_task(
+                _watch_for_stop_request(server, stop_request_path, instance_id)
+            )
             await server.serve()
         finally:
-            watcher.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await watcher
+            if watcher is not None:
+                watcher.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await watcher
             _remove_if_instance_matches(stop_request_path, instance_id)
             _remove_if_instance_matches(control_path, instance_id)
 
