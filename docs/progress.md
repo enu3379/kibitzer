@@ -1,5 +1,39 @@
 # Progress
 
+## 2026-07-13 Tier 0 benchmark v2 (real-corpus findings encoded)
+
+Completed:
+
+- Replayed the labeled real corpus (260 obs, 5 real sessions — Step-0's 231
+  plus the newly double-labeled "7월 제철 해산물" session, 93.1% labeler
+  agreement, 2 rows adjudicated) under the ONNX provider. Findings: v1's
+  composition rules (no lexical-overlap OKs, ≥30 English-OK groups) made it
+  overstate operating recall (v1 said 23.8% at tau 0.6; real corpus: 9.9%),
+  it had zero same-frame traps (real false-OKs at tau 0.6 were all frame
+  siblings), and its canonical titles hid the score depression from real
+  title noise. Real-corpus operating point: tau≈0.42-0.45 (FPR≤10%), where
+  goal-enrichment lifts recall 74%→80-87% pooled.
+- Shipped `tier0_embedding_benchmark_dataset_v2.json` (200 pairs, 40 groups,
+  5 slices: lexical-overlap OKs, same-frame traps, realistic cross-lingual,
+  clickbait OKs, polysemous short anchors) + `goal_enrichment_sim_phrases_v2.json`
+  + version-aware dataset validation (`_validate_v2_dataset`, composition
+  quotas) + guidelines v2 section (incl. "rank with v2, calibrate tau on the
+  real corpus" scope note). Generated agent-first, then independently
+  adversarially audited (11 findings, all fixed: 2 label, 5 tag, 3 realism,
+  1 replaced trap); zero verbatim overlap with private corpus titles.
+- v2 results (committed under docs/benchmarks/tier0-embedding-v2/):
+  hash AUC 0.6169 (v1's 0.368 below-random artifact gone), onnx 0.7066,
+  onnx+enrichment 0.8862 with recall 31.2%→81.2% at tau 0.6 and FPR
+  8.3%→14.2% — and the new English-drift traps expose enrichment's real
+  cross-lingual FPR cost (0%→30.8%) that v1 could not measure.
+
+Verified:
+
+- `python -m pytest apps/server/tests -q` green (new v2 contract tests
+  included); v1 dataset still validates through the v1 path unchanged.
+- Benchmark harness run on v2 for hash+onnx; enrichment scored with the
+  goal-enrichment PR's simulator against the same pairs.
+
 ## 2026-07-08 Audit Step 0: Labeled Replay Corpus (Claude)
 
 Completed:
@@ -704,3 +738,18 @@ Verified:
   unknown reason, and reinjection replays Kibitzer's entrance animation whenever
   the user switches back and forth while a toast is pending. Both are accepted
   for now.
+
+## 2026-07-11 Tier 0 KoEn E5 ONNX experiment
+
+- Replaced the default hash embedding with local KoEn E5 Tiny qint8 ONNX while
+  retaining `hash_cpu` as a deterministic baseline.
+- Added pinned, SHA-256-verified model setup to the Windows and macOS setup
+  scripts. Runtime inference stays CPU-only and offline.
+- Added a model-independent 200-pair Korean/English benchmark with all 32 prior
+  smoke pairs, no cross-validation, and operating points at FPR budgets 5%, 10%,
+  15%, 20%, 30%, 40%, and 50%.
+- On the fixed dataset, ONNX reached ROC AUC 0.7199 versus hash 0.3680 and
+  recalled 13.75% versus 1.25% of obvious OK pairs at the <=5% FPR operating
+  point. The runtime default was subsequently rounded to `tau_ok=0.6`. Full pair
+  scores and all operating-point thresholds are committed under
+  `docs/benchmarks/tier0-embedding/`.

@@ -1,7 +1,7 @@
 import {
   ControllerType,
   FeedbackKind,
-  HealthTiers,
+  HealthStatus,
   LatestObservation,
   PageLabel,
   PendingIntervention,
@@ -12,7 +12,7 @@ import {
   Settings,
   createSession,
   getCurrentSession,
-  getHealthTiers,
+  getHealthStatus,
   getLatestObservation,
   getPersonas,
   getSessionReport,
@@ -171,10 +171,17 @@ function header(pillLabel: string, pillTone: string): string {
     </div>`
 }
 
-async function getActiveTabId(): Promise<number | null> {
+interface ActiveTab {
+  id: number
+  url: string
+}
+
+async function getActiveTab(): Promise<ActiveTab | null> {
   try {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
-    return tabs[0]?.id ?? null
+    const tab = tabs[0]
+    if (tab?.id === undefined || !tab.url) return null
+    return { id: tab.id, url: tab.url }
   } catch {
     return null
   }
@@ -206,12 +213,12 @@ async function refresh(): Promise<void> {
     renderSetup(true, typedGoal)
     return
   }
-  const tabId = await getActiveTabId()
-  const [current, stats, tiers, page, settings] = await Promise.all([
+  const activeTab = await getActiveTab()
+  const [current, stats, health, page, settings] = await Promise.all([
     getCurrentSession(),
     getSessionStats(),
-    getHealthTiers(),
-    tabId === null ? Promise.resolve(null) : getLatestObservation(tabId),
+    getHealthStatus(),
+    activeTab === null ? Promise.resolve(null) : getLatestObservation(activeTab.id, activeTab.url),
     getSettings(),
   ])
   const goalText = current?.goal?.raw_text ?? ""
@@ -220,7 +227,7 @@ async function refresh(): Promise<void> {
     result.state,
     goalText,
     stats,
-    tiers,
+    health,
     page,
     false,
     settings?.dwell.observation_seconds ?? DEFAULT_OBSERVATION_SECONDS,
@@ -420,7 +427,7 @@ function renderDashboard(
   state: SessionState,
   goalText: string,
   stats: SessionStats | null,
-  tiers: HealthTiers | null = null,
+  health: HealthStatus | null = null,
   page: LatestObservation | null = null,
   offline = false,
   observationSeconds = DEFAULT_OBSERVATION_SECONDS,
@@ -443,11 +450,24 @@ function renderDashboard(
     ? `정렬도 ${formatScore(state.theta_low)} 미만이면 말하고, ${formatScore(state.theta_high)} 초과면 회복으로 봅니다.`
     : `${state.streak_threshold}회 연속 이탈 시에만 한 번 말을 겁니다.`
 
-  const degraded = tiers?.tier1 === "degraded" || tiers?.tier2 === "degraded"
+  const degraded = health?.tiers.tier1 === "degraded" || health?.tiers.tier2 === "degraded"
   const degradedNote = degraded
     ? `
     <div style="background: var(--amber-bg); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px;">
       <p style="margin: 0; font-size: 12px; color: var(--amber-tx);">판정 축소 모드 — LLM 판정 없이 어휘 매칭만 쓰는 중이에요. configs/models.local.yaml을 확인하세요.</p>
+    </div>`
+    : ""
+
+  const failedProviderCalls = Object.values(health?.provider_calls ?? {}).filter(
+    (call) => call?.last_result === "error",
+  )
+  const failureReasons = new Set(failedProviderCalls.map((call) => call?.reason).filter((reason) => reason != null))
+  const providerFailureHint =
+    failureReasons.size === 1 ? providerFailureReasonText([...failureReasons][0]) : "Provider 상태를 확인하세요."
+  const providerFailureNote = failedProviderCalls.length
+    ? `
+    <div style="background: var(--red-bg); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px;">
+      <p style="margin: 0; font-size: 12px; color: var(--red-tx);">LLM 호출 오류 — 마지막 판정 요청이 실패했어요. ${providerFailureHint}</p>
     </div>`
     : ""
 
@@ -485,6 +505,7 @@ function renderDashboard(
       <button id="open-settings" class="icon-btn">설정</button>
     </div>
     ${degradedNote}
+    ${providerFailureNote}
     ${pendingCard}
     <p class="label">오늘의 목표</p>
     <div class="goal-row">
@@ -551,6 +572,27 @@ function renderDashboard(
   document.getElementById("session-end")?.addEventListener("click", () => {
     void endSession()
   })
+}
+
+function providerFailureReasonText(reason: string | undefined): string {
+  switch (reason) {
+    case "timeout":
+      return "Provider 응답 시간이 초과됐어요."
+    case "connection":
+      return "Provider 서버에 연결하지 못했어요."
+    case "auth":
+      return "API 키가 유효하지 않아요."
+    case "forbidden":
+      return "Provider가 요청을 거부했어요. 모델 접근 권한 또는 요금제를 확인하세요."
+    case "rate_limited":
+      return "Provider 요청 한도에 도달했어요."
+    case "server_error":
+      return "Provider 서버에서 오류가 발생했어요."
+    case "invalid_response":
+      return "Provider 응답을 판정 결과로 읽지 못했어요."
+    default:
+      return "Provider 상태를 확인하세요."
+  }
 }
 
 async function submitInterventionFeedback(
@@ -850,6 +892,12 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
     </div>
     <p class="label">페르소나</p>
     <div class="pers">${personaCards}</div>
+    <div class="setrow">
+      <span class="grow">Tier 0 판정 임계값 τ</span>
+      <input id="relevance-tau-ok" class="number" type="number" min="0" max="1" step="0.01"
+        value="${settings.relevance.tau_ok}" />
+    </div>
+    <p class="subhint">r₀ ≥ τ 이면 Tier 0에서 현재 목표와 관련 있는 페이지로 판정합니다</p>
     <p class="label">개입 방식</p>
     <div class="seg">${controllerButtons}</div>
     ${controllerControls}
@@ -909,6 +957,19 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
       if (!type || type === settings.controller.type) return
       void applySettings({ controller: { type } })
     })
+  })
+  const tauInput = document.getElementById("relevance-tau-ok") as HTMLInputElement | null
+  const updateTauOk = () => {
+    const tauOk = Number.parseFloat(tauInput?.value ?? "")
+    if (Number.isFinite(tauOk) && tauOk >= 0 && tauOk <= 1) {
+      void applySettings({ relevance: { tau_ok: tauOk } })
+    }
+  }
+  tauInput?.addEventListener("change", updateTauOk)
+  tauInput?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return
+    event.preventDefault()
+    updateTauOk()
   })
   const updateControllerK = (event: Event) => {
     const k = Number.parseInt((event.target as HTMLInputElement).value, 10)

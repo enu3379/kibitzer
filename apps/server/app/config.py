@@ -15,9 +15,11 @@ class ServerConfig(BaseModel):
 class EmbeddingConfig(BaseModel):
     provider: str = "hash_cpu"
     model: str = "token-hash-v1"
+    tokenizer_path: str | None = None
     device: str = "cpu"
     forbid_gpu: bool = True
-    batch_size: int = 8
+    batch_size: int = Field(default=8, ge=1, le=256)
+    max_length: int = Field(default=128, ge=1, le=512)
     normalize: bool = True
     dimensions: int = 256
 

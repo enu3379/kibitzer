@@ -9,7 +9,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from apps.server.app.config import AppConfig, ServerConfig, Tier1Config, Tier2Config
+from apps.server.app.config import AppConfig, ControllerConfig, ServerConfig, Tier1Config, Tier2Config
 from apps.server.app.core.tier1_payload import build_tier1_payload
 from apps.server.app.main import create_app
 from apps.server.app.providers.judges.base import Tier1Result
@@ -120,11 +120,40 @@ class Tier1ResilienceAndFactoryTest(unittest.TestCase):
             observation = store.list_observations(session_id)[0]
             self.assertEqual(observation.verdict, "DRIFT")
             self.assertEqual(observation.tier_reached, 0)
+            provider_status = client.get("/health").json()["provider_calls"]["tier1"]
+            self.assertEqual(provider_status["last_result"], "error")
+            self.assertEqual(provider_status["reason"], "other")
             with closing(sqlite3.connect(self.db_path)) as conn:
                 count = conn.execute(
                     "SELECT COUNT(*) FROM event_log WHERE event_type = 'tier1.provider_error'"
                 ).fetchone()[0]
             self.assertEqual(count, 1)
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_provider_success_is_reported_in_health(self) -> None:
+        store = SQLiteStore(self.db_path)
+        config = AppConfig(
+            server=ServerConfig(db_path=str(self.db_path)),
+            tier1=Tier1Config(enabled=True),
+        )
+        provider = FakeTier1Provider(Tier1Result(verdict=Verdict.OK, reason="normal subtopic"))
+        client = TestClient(create_app(config=config, store=store, tier1_provider=provider))
+        client.__enter__()
+        try:
+            client.post("/sessions")
+            client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
+            client.post(
+                "/observations/browser-nav",
+                json={
+                    "source": "browser_nav",
+                    "payload": {"url": "https://example.com/bread", "title": "Sourdough bread recipe"},
+                },
+            )
+
+            provider_status = client.get("/health").json()["provider_calls"]["tier1"]
+            self.assertEqual(provider_status["last_result"], "success")
+            self.assertIsNone(provider_status["reason"])
         finally:
             client.__exit__(None, None, None)
 
@@ -202,11 +231,16 @@ class Tier1ApiTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmpdir.cleanup()
 
-    def _client(self, provider: FakeTier1Provider | None) -> tuple[TestClient, SQLiteStore]:
+    def _client(
+        self,
+        provider: FakeTier1Provider | None,
+        controller: ControllerConfig | None = None,
+    ) -> tuple[TestClient, SQLiteStore]:
         store = SQLiteStore(self.db_path)
         config = AppConfig(
             server=ServerConfig(db_path=str(self.db_path)),
             tier1=Tier1Config(enabled=provider is not None),
+            controller=controller or ControllerConfig(),
         )
         client = TestClient(create_app(config=config, store=store, tier1_provider=provider))
         client.__enter__()
@@ -214,7 +248,15 @@ class Tier1ApiTest(unittest.TestCase):
 
     def test_tier1_can_reclassify_tier0_drift_as_ok(self) -> None:
         provider = FakeTier1Provider(Tier1Result(verdict=Verdict.OK, reason="normal subtopic"))
-        client, store = self._client(provider)
+        client, store = self._client(
+            provider,
+            ControllerConfig(
+                type="alignment",
+                alignment_alpha=0.0,
+                coldstart_observations=1,
+                cooldown_seconds=0,
+            ),
+        )
         try:
             session_id = client.post("/sessions").json()["id"]
             client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
@@ -242,6 +284,7 @@ class Tier1ApiTest(unittest.TestCase):
         finally:
             client.__exit__(None, None, None)
 
+        self.assertEqual(response.json()["action"], "none")
         self.assertEqual(response.json()["verdict"], "OK")
         self.assertEqual(len(provider.payloads), 1)
         payload = provider.payloads[0]
@@ -254,6 +297,10 @@ class Tier1ApiTest(unittest.TestCase):
         self.assertEqual(observations[-1].verdict, "OK")
         self.assertEqual(observations[-1].tier_reached, 1)
         self.assertEqual(observations[-1].tier1_reason, "normal subtopic")
+        self.assertEqual(observations[-1].features["r_final"], 0.85)
+        controller_state = store.get_controller_state(session_id)
+        self.assertEqual(controller_state.alignment_score, 0.85)
+        self.assertFalse(controller_state.drift_latched)
         with closing(sqlite3.connect(self.db_path)) as conn:
             event = conn.execute(
                 "SELECT payload_json FROM event_log WHERE event_type = 'tier1.classified'"
@@ -284,6 +331,7 @@ class Tier1ApiTest(unittest.TestCase):
         observation = store.list_observations(session_id)[0]
         self.assertEqual(observation.verdict, "DRIFT")
         self.assertEqual(observation.tier_reached, 1)
+        self.assertEqual(observation.features["r_final"], 0.0)
 
     def test_without_tier1_provider_tier0_drift_is_kept(self) -> None:
         client, store = self._client(None)
@@ -306,6 +354,7 @@ class Tier1ApiTest(unittest.TestCase):
         self.assertEqual(response.json()["verdict"], "DRIFT")
         observation = store.list_observations(session_id)[0]
         self.assertEqual(observation.tier_reached, 0)
+        self.assertEqual(observation.features["r_final"], observation.features["r0"])
 
 
 if __name__ == "__main__":
