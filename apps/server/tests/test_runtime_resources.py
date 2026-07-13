@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import httpx
 from fastapi.testclient import TestClient
 
 from apps.server.app.config import AppConfig, ServerConfig, Tier1Config, Tier2Config
@@ -27,7 +28,15 @@ class RuntimeResourcesTest(unittest.TestCase):
         self.tmpdir.cleanup()
 
     def test_health_reports_idle_until_goal_starts_tracking(self) -> None:
-        self.assertEqual(self.client.get("/health").json()["mode"], "idle")
+        initial_health = self.client.get("/health").json()
+        self.assertEqual(initial_health["mode"], "idle")
+        self.assertEqual(
+            initial_health["provider_calls"],
+            {
+                "tier1": {"last_result": "none", "reason": None, "checked_at": None},
+                "tier2": {"last_result": "none", "reason": None, "checked_at": None},
+            },
+        )
 
         self.client.post("/sessions")
 
@@ -59,6 +68,39 @@ class RuntimeResourcesTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(self.client.get("/health").json()["mode"], "idle")
+
+    def test_provider_call_status_classifies_failures_and_recovers(self) -> None:
+        runtime = self.client.app.state.runtime
+        request = httpx.Request("POST", "https://provider.invalid/chat")
+        cases = [
+            (httpx.TimeoutException("timed out", request=request), "timeout"),
+            (httpx.ConnectError("offline", request=request), "connection"),
+            (_http_status_error(request, 401), "auth"),
+            (_http_status_error(request, 403), "forbidden"),
+            (_http_status_error(request, 429), "rate_limited"),
+            (_http_status_error(request, 503), "server_error"),
+            (ValueError("bad response"), "invalid_response"),
+            (RuntimeError("unexpected"), "other"),
+        ]
+
+        for exc, expected_reason in cases:
+            with self.subTest(reason=expected_reason):
+                runtime.record_provider_call_failure(1, exc)
+                status = self.client.get("/health").json()["provider_calls"]["tier1"]
+                self.assertEqual(status["last_result"], "error")
+                self.assertEqual(status["reason"], expected_reason)
+                self.assertIsNotNone(status["checked_at"])
+
+        runtime.record_provider_call_success(1)
+        recovered = self.client.get("/health").json()["provider_calls"]["tier1"]
+        self.assertEqual(recovered["last_result"], "success")
+        self.assertIsNone(recovered["reason"])
+        self.assertIsNotNone(recovered["checked_at"])
+
+
+def _http_status_error(request: httpx.Request, status_code: int) -> httpx.HTTPStatusError:
+    response = httpx.Response(status_code, request=request)
+    return httpx.HTTPStatusError("provider response", request=request, response=response)
 
 
 if __name__ == "__main__":

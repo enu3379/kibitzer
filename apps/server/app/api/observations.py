@@ -195,6 +195,7 @@ async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineR
                 result = await tier1_provider.classify_tier1(payload)
             except Exception as exc:
                 # Tier 1 is best-effort: on provider failure keep the Tier 0 verdict.
+                runtime.record_provider_call_failure(1, exc)
                 _store(request).record_tier1_provider_error(
                     session_id=current.session.id,
                     observation_id=observation.id,
@@ -202,6 +203,7 @@ async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineR
                     ts=observation.ts,
                 )
             else:
+                runtime.record_provider_call_success(1)
                 observation.verdict = result.verdict
                 observation.features.r_final = tier1_final_relevance(result.verdict)
                 observation.tier1_reason = result.reason
@@ -452,12 +454,17 @@ async def _confirm_tier2(
     system_prompt: str | None = None,
     persona: Persona | None = None,
 ) -> Tier2Result:
-    provider = _runtime(request).tier2_provider()
+    runtime = _runtime(request)
+    provider = runtime.tier2_provider()
     if provider:
         try:
-            return await provider.confirm_tier2(payload, system_prompt=system_prompt)
+            result = await provider.confirm_tier2(payload, system_prompt=system_prompt)
         except Exception as exc:
+            runtime.record_provider_call_failure(2, exc)
             _store(request).record_tier2_provider_error(session_id, observation_id, type(exc).__name__)
+        else:
+            runtime.record_provider_call_success(2)
+            return result
     current = _store(request).get_current_session()
     observation = _store(request).get_observation(observation_id)
     if current and current.goal and observation:

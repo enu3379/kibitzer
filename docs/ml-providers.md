@@ -57,6 +57,32 @@ If a tier cannot resolve, it degrades to the tier below, `/health` reports
 `tiers: {tierN: degraded}`, and the extension popup shows a
 "판정 축소 모드" warning — degradation is loud, not silent.
 
+Configured tiers separately expose the last real judge call under
+`/health.provider_calls`. The result starts as `none`, changes to `error` with a
+coarse failure reason when a call fails, and returns to `success` after the next
+successful call for that tier. The popup shows a distinct "LLM 호출 오류"
+warning only while a tier's last call is an error. Health polling never probes
+the provider or creates extra API usage.
+
+Failure reasons deliberately stay coarse and never expose raw provider errors,
+URLs, or API keys to the extension:
+
+| Reason | Detected from | Popup hint |
+|---|---|---|
+| `timeout` | provider request timeout | `Provider 응답 시간이 초과됐어요.` |
+| `connection` | DNS, connection refused, or another network error | `Provider 서버에 연결하지 못했어요.` |
+| `auth` | HTTP 401 | `API 키가 유효하지 않아요.` |
+| `forbidden` | HTTP 403 | `Provider가 요청을 거부했어요. 모델 접근 권한 또는 요금제를 확인하세요.` |
+| `rate_limited` | HTTP 429 | `Provider 요청 한도에 도달했어요.` |
+| `server_error` | HTTP 5xx | `Provider 서버에서 오류가 발생했어요.` |
+| `invalid_response` | invalid JSON or judge response shape | `Provider 응답을 판정 결과로 읽지 못했어요.` |
+| `other` | any unclassified failure | `Provider 상태를 확인하세요.` |
+
+The popup prefixes each hint with
+`LLM 호출 오류 — 마지막 판정 요청이 실패했어요.` When both tiers have
+different last-failure reasons, it uses the generic provider-status hint rather
+than presenting one tier's reason as if it covered both.
+
 ## Tier 0
 
 Tier 0 embeds the declared goal/exemplars and normalized page title, then uses

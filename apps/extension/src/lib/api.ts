@@ -425,11 +425,41 @@ export interface HealthTiers {
   tier2?: string
 }
 
-export async function getHealthTiers(): Promise<HealthTiers | null> {
+export type ProviderCallResult = "none" | "success" | "error"
+export type ProviderFailureReason =
+  | "timeout"
+  | "connection"
+  | "auth"
+  | "forbidden"
+  | "rate_limited"
+  | "server_error"
+  | "invalid_response"
+  | "other"
+
+export interface ProviderCallStatus {
+  last_result: ProviderCallResult
+  reason?: ProviderFailureReason | null
+  checked_at?: string | null
+}
+
+export interface ProviderCalls {
+  tier1?: ProviderCallStatus
+  tier2?: ProviderCallStatus
+}
+
+export interface HealthStatus {
+  tiers: HealthTiers
+  provider_calls: ProviderCalls
+}
+
+export async function getHealthStatus(): Promise<HealthStatus | null> {
   const response = await fetch(`${SERVER_BASE_URL}/health`).catch(() => null)
   if (!response?.ok) return null
-  const body = (await response.json()) as { tiers?: HealthTiers }
-  return body.tiers ?? null
+  const body = (await response.json()) as Partial<HealthStatus>
+  return {
+    tiers: body.tiers ?? {},
+    provider_calls: body.provider_calls ?? {},
+  }
 }
 
 export interface ReportHourBucket {
