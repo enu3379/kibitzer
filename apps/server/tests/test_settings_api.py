@@ -1,8 +1,10 @@
+import hashlib
 import json
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi.testclient import TestClient
 
@@ -127,6 +129,19 @@ class SettingsApiTest(unittest.TestCase):
             400,
         )
 
+    def _page_identity(self, url: str, tab_id: int) -> dict[str, str | int]:
+        parsed = urlparse(url)
+        location = parsed.path or "/"
+        if parsed.query:
+            location += f"?{parsed.query}"
+        if parsed.fragment:
+            location += f"#{parsed.fragment}"
+        return {
+            "tab_id": tab_id,
+            "url_host": parsed.hostname or "",
+            "url_path_hash": hashlib.sha256(location.encode()).hexdigest(),
+        }
+
     def test_tau_ok_updates_apply_to_new_observations(self) -> None:
         self.client.post("/sessions")
         self.client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
@@ -151,8 +166,20 @@ class SettingsApiTest(unittest.TestCase):
 
         self.assertEqual(first["verdict"], "DRIFT")
         self.assertEqual(second["verdict"], "OK")
-        self.assertEqual(self.client.get("/observations/latest", params={"tab_id": 7}).json()["tau_ok"], 1.0)
-        self.assertEqual(self.client.get("/observations/latest", params={"tab_id": 8}).json()["tau_ok"], 0.0)
+        self.assertEqual(
+            self.client.get(
+                "/observations/latest",
+                params=self._page_identity("https://example.com/first", 7),
+            ).json()["tau_ok"],
+            1.0,
+        )
+        self.assertEqual(
+            self.client.get(
+                "/observations/latest",
+                params=self._page_identity("https://example.com/second", 8),
+            ).json()["tau_ok"],
+            0.0,
+        )
 
     def test_personas_endpoint_lists_available_personas(self) -> None:
         personas = self.client.get("/personas").json()
