@@ -15,7 +15,20 @@ New-Item -ItemType Directory -Force data | Out-Null
 $env:PYTHONUNBUFFERED = "1"
 
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
-$Arguments = @("-m", "uvicorn", "apps.server.app.main:app", "--host", "127.0.0.1", "--port", "8765")
+$HostScript = Join-Path $Root "scripts\windows_server_host.py"
+$LogDir = Join-Path $Root "data\logs"
+if (-not (Test-Path $HostScript)) {
+  throw "Missing $HostScript."
+}
+$Arguments = @(
+  ('"' + $HostScript + '"'),
+  "--host",
+  "127.0.0.1",
+  "--port",
+  "8765",
+  "--runtime-dir",
+  ('"' + $LogDir + '"')
+)
 
 $StartInfo = New-Object System.Diagnostics.ProcessStartInfo
 $StartInfo.FileName = $Python
@@ -30,7 +43,6 @@ $OutCopyTask = $null
 $ErrCopyTask = $null
 
 if ($LogToFile) {
-  $LogDir = Join-Path $Root "data\logs"
   New-Item -ItemType Directory -Force $LogDir | Out-Null
   $OutLog = Join-Path $LogDir "windows-startup-app.out.log"
   $ErrLog = Join-Path $LogDir "windows-startup-app.err.log"

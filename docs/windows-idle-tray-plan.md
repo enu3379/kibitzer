@@ -32,6 +32,10 @@ a scheduled task:
 - `scripts/windows_startup_tray.ps1` owns the `NotifyIcon`, polls `/health`, and
   starts `scripts/windows_run_server.ps1` when the server is dead and the local
   `.venv` exists.
+- `scripts/windows_server_host.py` runs Uvicorn, publishes an instance-scoped
+  control record under `data/logs/`, and translates the tray stop request into a
+  graceful Uvicorn shutdown. The tray uses a validated forced stop only after a
+  graceful-shutdown timeout.
 - `scripts/windows_uninstall_startup_app.ps1` removes the shortcut.
 - Logs should go under `data\logs\`.
 
@@ -52,8 +56,9 @@ Acceptance checks:
 - The Startup folder contains `Kibitzer Server.lnk`.
 - Logging out/in starts the tray process without a visible terminal.
 - `Invoke-RestMethod http://127.0.0.1:8765/health` returns `mode = idle`.
-- The tray context menu can refresh status, start the server, open logs, and
-  quit the tray. Start attempts show progress and failures in the status header.
+- The tray context menu can refresh status, start or stop the server, open logs,
+  and quit the tray. Start/stop attempts show progress and failures in the
+  status header; quitting the tray does not stop the server.
 
 ## Future Work
 
@@ -72,9 +77,14 @@ Acceptance checks:
 - Do not make Windows-only changes inside the shared observation pipeline unless
   a native dependency forces an adapter.
 
+## Process Control Decision
+
+- The repository-based Windows installation controls the Uvicorn child process
+  through the instance-scoped Windows server host. A future packaged build may
+  replace this adapter with an app service wrapper, but the FastAPI application
+  and extension do not own OS process lifecycle.
+
 ## Open Questions
 
-- Whether restart/stop should control a scheduled task, a child process, or a
-  packaged app service wrapper.
 - Whether Windows voice should use SAPI later or keep voice disabled until a
   dedicated voice pass.

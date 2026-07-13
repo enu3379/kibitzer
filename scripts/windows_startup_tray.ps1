@@ -19,15 +19,28 @@ $LogDir = Join-Path $Root "data\logs"
 $TrayLog = Join-Path $LogDir "windows-startup-tray.log"
 $TrayPidFile = Join-Path $LogDir "windows-startup-tray.pid"
 $StartupErrLog = Join-Path $LogDir "windows-startup-app.err.log"
+$ServerControlFile = Join-Path $LogDir "windows-server-control.json"
+$ServerStopRequestFile = Join-Path $LogDir "windows-server-stop-request.json"
+$ServerHostScript = Join-Path $Root "scripts\windows_server_host.py"
+$ServerPython = Join-Path $Root ".venv\Scripts\python.exe"
 $DefaultTimerInterval = [Math]::Max(1, $PollSeconds) * 1000
-$StartingTimerInterval = 1000
+$TransitionTimerInterval = 1000
 $StartupTimeoutSeconds = 30
+$GracefulStopTimeoutSeconds = 15
+$ForcedStopTimeoutSeconds = 5
 $Script:StartingUntil = $null
 $Script:StartSource = $null
 $Script:StartProcess = $null
 $Script:StartStartedAt = $null
+$Script:StoppingUntil = $null
+$Script:StopSource = $null
+$Script:StopStartedAt = $null
+$Script:StopControl = $null
+$Script:StopForced = $false
 $Script:StatusMessageOverride = $null
+$Script:RunningStatusMessageOverride = $null
 $Script:StartItem = $null
+$Script:StopItem = $null
 $Script:Timer = $null
 
 New-Item -ItemType Directory -Force $LogDir | Out-Null
@@ -85,8 +98,11 @@ function Set-KibitzerStartingTray {
   if ($Script:StartItem) {
     $Script:StartItem.Enabled = $false
   }
+  if ($Script:StopItem) {
+    $Script:StopItem.Enabled = $false
+  }
   if ($Script:Timer) {
-    $Script:Timer.Interval = $StartingTimerInterval
+    $Script:Timer.Interval = $TransitionTimerInterval
   }
 }
 
@@ -105,6 +121,39 @@ function Get-KibitzerStartElapsedSeconds {
     return 0
   }
   return [Math]::Round(((Get-Date) - $Script:StartStartedAt).TotalSeconds, 1)
+}
+
+function Set-KibitzerStoppingTray {
+  $NotifyIcon.Icon = $TrayIcons.unknown
+  $NotifyIcon.Text = "Kibitzer: stopping"
+  $StatusHeaderItem.Text = if ($Script:StopForced) { "서버를 강제 종료하고 있습니다..." } else { "서버를 중지하고 있습니다..." }
+  if ($Script:StartItem) {
+    $Script:StartItem.Enabled = $false
+  }
+  if ($Script:StopItem) {
+    $Script:StopItem.Enabled = $false
+  }
+  if ($Script:Timer) {
+    $Script:Timer.Interval = $TransitionTimerInterval
+  }
+}
+
+function Clear-KibitzerStoppingState {
+  $Script:StoppingUntil = $null
+  $Script:StopSource = $null
+  $Script:StopStartedAt = $null
+  $Script:StopControl = $null
+  $Script:StopForced = $false
+  if ($Script:Timer) {
+    $Script:Timer.Interval = $DefaultTimerInterval
+  }
+}
+
+function Get-KibitzerStopElapsedSeconds {
+  if (-not $Script:StopStartedAt) {
+    return 0
+  }
+  return [Math]::Round(((Get-Date) - $Script:StopStartedAt).TotalSeconds, 1)
 }
 
 function Write-KibitzerStartupErrTail {
@@ -152,6 +201,247 @@ function Set-KibitzerStartFailure {
   Update-KibitzerTray
 }
 
+function Test-KibitzerPathEqual {
+  param(
+    [string]$Left,
+    [string]$Right
+  )
+
+  try {
+    return [System.IO.Path]::GetFullPath($Left) -eq [System.IO.Path]::GetFullPath($Right)
+  }
+  catch {
+    return $false
+  }
+}
+
+function Test-KibitzerServerControl {
+  param($Control)
+
+  try {
+    $ServerProcessId = [int]$Control.pid
+    $InstanceId = [string]$Control.instance_id
+    $ControlPort = [int]$Control.port
+  }
+  catch {
+    return $false
+  }
+
+  if ($ServerProcessId -le 0 -or [string]::IsNullOrWhiteSpace($InstanceId) -or $ControlPort -ne 8765) {
+    return $false
+  }
+  if (-not (Test-KibitzerPathEqual ([string]$Control.root) $Root.ToString())) {
+    return $false
+  }
+  if (-not (Test-KibitzerPathEqual ([string]$Control.python_executable) $ServerPython)) {
+    return $false
+  }
+  if (-not (Test-KibitzerPathEqual ([string]$Control.host_script) $ServerHostScript)) {
+    return $false
+  }
+
+  try {
+    $Process = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $ServerProcessId" -ErrorAction Stop
+  }
+  catch {
+    return $false
+  }
+  if (-not $Process) {
+    return $false
+  }
+  if (-not (Test-KibitzerPathEqual ([string]$Process.ExecutablePath) $ServerPython)) {
+    return $false
+  }
+  $CommandLine = [string]$Process.CommandLine
+  if ($CommandLine.IndexOf($ServerHostScript, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+    return $false
+  }
+  return $true
+}
+
+function Get-KibitzerServerControl {
+  if (-not (Test-Path $ServerControlFile)) {
+    Write-TrayLog "stop control missing: $ServerControlFile"
+    return $null
+  }
+
+  try {
+    $Control = Get-Content -LiteralPath $ServerControlFile -Encoding UTF8 -Raw | ConvertFrom-Json
+  }
+  catch {
+    Write-TrayLog "stop control read failed: $($_.Exception.Message)"
+    return $null
+  }
+  if (-not (Test-KibitzerServerControl $Control)) {
+    Write-TrayLog "stop control rejected: record or process did not match the Kibitzer Windows host"
+    return $null
+  }
+  return $Control
+}
+
+function Get-KibitzerLegacyServerProcess {
+  try {
+    $Candidates = @(
+      Get-CimInstance -ClassName Win32_Process -Filter "Name = 'python.exe'" -ErrorAction Stop | Where-Object {
+        $CommandLine = [string]$_.CommandLine
+        (Test-KibitzerPathEqual ([string]$_.ExecutablePath) $ServerPython) -and
+          $CommandLine.IndexOf("-m uvicorn", [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+          $CommandLine.IndexOf("apps.server.app.main:app", [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+          $CommandLine.IndexOf("--port 8765", [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+      }
+    )
+  }
+  catch {
+    Write-TrayLog "legacy server lookup failed: $($_.Exception.Message)"
+    return $null
+  }
+
+  if ($Candidates.Count -ne 1) {
+    Write-TrayLog "legacy server lookup refused: matches=$($Candidates.Count)"
+    return $null
+  }
+  return $Candidates[0]
+}
+
+function Write-KibitzerStopRequest {
+  param(
+    $Control,
+    [string]$Source
+  )
+
+  $Request = [ordered]@{
+    instance_id = [string]$Control.instance_id
+    requested_at = [DateTime]::UtcNow.ToString("o")
+    source = $Source
+  }
+  $Json = $Request | ConvertTo-Json -Compress
+  $Temporary = "$ServerStopRequestFile.$PID.tmp"
+  $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  try {
+    [System.IO.File]::WriteAllText($Temporary, $Json, $Utf8NoBom)
+    Move-Item -LiteralPath $Temporary -Destination $ServerStopRequestFile -Force
+  }
+  finally {
+    Remove-Item -LiteralPath $Temporary -ErrorAction SilentlyContinue
+  }
+}
+
+function Remove-KibitzerControlFiles {
+  param([string]$InstanceId)
+
+  foreach ($Path in @($ServerStopRequestFile, $ServerControlFile)) {
+    if (-not (Test-Path $Path)) {
+      continue
+    }
+    try {
+      $Value = Get-Content -LiteralPath $Path -Encoding UTF8 -Raw | ConvertFrom-Json
+      if ([string]$Value.instance_id -eq $InstanceId) {
+        Remove-Item -LiteralPath $Path -ErrorAction SilentlyContinue
+      }
+    }
+    catch {
+      Write-TrayLog "stop cleanup skipped for $Path`: $($_.Exception.Message)"
+    }
+  }
+}
+
+function Set-KibitzerStopFailure {
+  param(
+    [string]$Outcome,
+    [string]$Message
+  )
+
+  $Source = $Script:StopSource
+  $Elapsed = Get-KibitzerStopElapsedSeconds
+  Write-TrayLog "stop source=$Source outcome=$Outcome after ${Elapsed}s"
+  Clear-KibitzerStoppingState
+  $Script:RunningStatusMessageOverride = $Message
+  Update-KibitzerTray
+}
+
+function Stop-KibitzerServer {
+  param([string]$Source = "menu")
+
+  if ($Script:StartingUntil -or $Script:StoppingUntil) {
+    Write-TrayLog "stop source=$Source skipped: transition-in-progress"
+    return
+  }
+  $Status = Get-KibitzerHealthStatus
+  if ($Status.Mode -eq "dead") {
+    Write-TrayLog "stop source=$Source skipped: health=dead"
+    Set-KibitzerTrayStatus $Status
+    return
+  }
+
+  $Script:RunningStatusMessageOverride = $null
+  $Script:StopSource = $Source
+  $Script:StopStartedAt = Get-Date
+  $Control = Get-KibitzerServerControl
+  if (-not $Control) {
+    $LegacyProcess = Get-KibitzerLegacyServerProcess
+    if (-not $LegacyProcess) {
+      Set-KibitzerStopFailure `
+        -Outcome "precondition-failed: control-unavailable" `
+        -Message "서버 프로세스를 안전하게 확인할 수 없어 중지하지 않았습니다. 'Open logs'에서 로그를 확인해 주세요."
+      return
+    }
+
+    $LegacyInstanceId = "legacy-$($LegacyProcess.ProcessId)"
+    $Script:StopControl = [pscustomobject]@{
+      instance_id = $LegacyInstanceId
+      pid = [int]$LegacyProcess.ProcessId
+    }
+    $Script:StopForced = $true
+    try {
+      Stop-Process -Id ([int]$LegacyProcess.ProcessId) -Force -ErrorAction Stop
+    }
+    catch {
+      Write-TrayLog "stop source=$Source legacy force failed: $($_.Exception.Message)"
+      Set-KibitzerStopFailure `
+        -Outcome "legacy-force-failed" `
+        -Message "기존 서버 프로세스를 중지하지 못했습니다. 'Open logs'에서 로그를 확인해 주세요."
+      return
+    }
+    $Script:StoppingUntil = (Get-Date).AddSeconds($ForcedStopTimeoutSeconds)
+    Write-TrayLog "stop source=$Source legacy forced pid=$($LegacyProcess.ProcessId)"
+    Set-KibitzerStoppingTray
+    return
+  }
+
+  try {
+    Write-KibitzerStopRequest -Control $Control -Source $Source
+  }
+  catch {
+    Write-TrayLog "stop source=$Source request write failed: $($_.Exception.Message)"
+    Set-KibitzerStopFailure `
+      -Outcome "precondition-failed: request-write-failed" `
+      -Message "서버 중지 요청을 기록하지 못했습니다. 'Open logs'에서 로그를 확인해 주세요."
+    return
+  }
+
+  $Script:StopControl = $Control
+  $Script:StoppingUntil = (Get-Date).AddSeconds($GracefulStopTimeoutSeconds)
+  Write-TrayLog "stop source=$Source requested pid=$($Control.pid) instance=$($Control.instance_id)"
+  Set-KibitzerStoppingTray
+}
+
+function Stop-KibitzerServerHostProcess {
+  $Current = Get-KibitzerServerControl
+  if (-not $Current -or [string]$Current.instance_id -ne [string]$Script:StopControl.instance_id) {
+    return $false
+  }
+
+  try {
+    Stop-Process -Id ([int]$Current.pid) -Force -ErrorAction Stop
+    Write-TrayLog "stop source=$($Script:StopSource) forced pid=$($Current.pid) instance=$($Current.instance_id)"
+    return $true
+  }
+  catch {
+    Write-TrayLog "stop source=$($Script:StopSource) force failed: $($_.Exception.Message)"
+    return $false
+  }
+}
+
 function Start-KibitzerServer {
   param([string]$Source = "menu")
 
@@ -160,12 +450,13 @@ function Start-KibitzerServer {
     Write-TrayLog "start source=$Source skipped: health=$($Status.Mode)"
     return
   }
-  if ($Script:StartingUntil) {
-    Write-TrayLog "start source=$Source skipped: already-starting"
+  if ($Script:StartingUntil -or $Script:StoppingUntil) {
+    Write-TrayLog "start source=$Source skipped: transition-in-progress"
     return
   }
 
   $Script:StatusMessageOverride = $null
+  $Script:RunningStatusMessageOverride = $null
   $Script:StartSource = $Source
 
   $Python = Join-Path $Root ".venv\Scripts\python.exe"
@@ -335,9 +626,11 @@ $StatusHeaderItem.Enabled = $false
 $Menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
 $RefreshItem = $Menu.Items.Add("Refresh status")
 $StartItem = $Menu.Items.Add("Start server")
+$StopItem = $Menu.Items.Add("Stop server")
 $OpenLogsItem = $Menu.Items.Add("Open logs")
 $ExitItem = $Menu.Items.Add("Exit tray")
 $Script:StartItem = $StartItem
+$Script:StopItem = $StopItem
 $NotifyIcon.ContextMenuStrip = $Menu
 
 function Set-KibitzerTrayStatus {
@@ -346,16 +639,24 @@ function Set-KibitzerTrayStatus {
   $IconKey = if ($TrayIcons.ContainsKey($Status.IconKey)) { $Status.IconKey } else { "unknown" }
   $NotifyIcon.Icon = $TrayIcons[$IconKey]
   $NotifyIcon.Text = $Status.Text
-  if ($Status.Mode -ne "dead") {
+  if ($Status.Mode -eq "dead") {
+    $Script:RunningStatusMessageOverride = $null
+  }
+  else {
     $Script:StatusMessageOverride = $null
   }
   if ($Script:StatusMessageOverride -and $Status.Mode -eq "dead") {
     $StatusHeaderItem.Text = $Script:StatusMessageOverride
   }
+  elseif ($Script:RunningStatusMessageOverride -and $Status.Mode -ne "dead") {
+    $StatusHeaderItem.Text = $Script:RunningStatusMessageOverride
+  }
   else {
     $StatusHeaderItem.Text = $Status.Message
   }
-  $StartItem.Enabled = ($Status.Mode -eq "dead" -and -not $Script:StartingUntil)
+  $Transitioning = [bool]($Script:StartingUntil -or $Script:StoppingUntil)
+  $StartItem.Enabled = ($Status.Mode -eq "dead" -and -not $Transitioning)
+  $StopItem.Enabled = ($Status.Mode -ne "dead" -and -not $Transitioning)
 }
 
 function Resolve-KibitzerStartingState {
@@ -388,9 +689,45 @@ function Resolve-KibitzerStartingState {
   Set-KibitzerStartingTray
 }
 
+function Resolve-KibitzerStoppingState {
+  $Status = Get-KibitzerHealthStatus
+  if ($Status.Mode -eq "dead") {
+    $Source = $Script:StopSource
+    $Elapsed = Get-KibitzerStopElapsedSeconds
+    $Forced = $Script:StopForced
+    $InstanceId = [string]$Script:StopControl.instance_id
+    Write-TrayLog "stop source=$Source outcome=health-dead forced=$Forced after ${Elapsed}s"
+    Remove-KibitzerControlFiles -InstanceId $InstanceId
+    Clear-KibitzerStoppingState
+    $Script:StatusMessageOverride = "서버가 중지되었습니다. 메뉴에서 'Start server'를 눌러 다시 실행할 수 있습니다."
+    Set-KibitzerTrayStatus $Status
+    return
+  }
+
+  if ((Get-Date) -gt $Script:StoppingUntil) {
+    if (-not $Script:StopForced -and (Stop-KibitzerServerHostProcess)) {
+      $Script:StopForced = $true
+      $Script:StoppingUntil = (Get-Date).AddSeconds($ForcedStopTimeoutSeconds)
+      Set-KibitzerStoppingTray
+      return
+    }
+
+    Set-KibitzerStopFailure `
+      -Outcome $(if ($Script:StopForced) { "force-timeout" } else { "graceful-timeout: force-refused" }) `
+      -Message "서버 중지 시간이 초과되었습니다. 안전을 위해 확인되지 않은 프로세스는 종료하지 않았습니다. 'Open logs'에서 로그를 확인해 주세요."
+    return
+  }
+
+  Set-KibitzerStoppingTray
+}
+
 function Update-KibitzerTray {
   if ($Script:StartingUntil) {
     Resolve-KibitzerStartingState
+    return
+  }
+  if ($Script:StoppingUntil) {
+    Resolve-KibitzerStoppingState
     return
   }
 
@@ -401,6 +738,9 @@ function Update-KibitzerTray {
 $RefreshItem.Add_Click({ Update-KibitzerTray })
 $StartItem.Add_Click({
   Start-KibitzerServer -Source "menu"
+})
+$StopItem.Add_Click({
+  Stop-KibitzerServer -Source "menu"
 })
 $OpenLogsItem.Add_Click({
   $QuotedLogDir = '"' + $LogDir + '"'

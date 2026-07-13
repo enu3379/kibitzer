@@ -67,6 +67,12 @@ startup failures, and timeouts; **Open logs** opens the folder containing the
 tray and server startup logs. The icon uses the monochrome template artwork,
 tinted for the current Windows system theme, with a small status dot overlay.
 
+The tray menu provides **Start server** and **Stop server**. Stop requests are
+handled by the Windows server host so Uvicorn can shut down gracefully; if that
+times out, the tray force-stops only a process whose executable, command line,
+project path, and instance record all match this Kibitzer checkout. **Exit tray**
+closes only the tray surface and leaves the server running.
+
 ## Optional AI Provider Setup
 
 Copy the example env file:
