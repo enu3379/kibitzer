@@ -10,6 +10,7 @@ export interface PipelineResult {
   action: "none" | "request_excerpt" | "notify"
   kind?: "intervention" | "celebration"
   observation_id?: string | null
+  candidate_id?: string | null
   verdict?: "OK" | "DRIFT" | null
   message?: string | null
   intervention_id?: string | null

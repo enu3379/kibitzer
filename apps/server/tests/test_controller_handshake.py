@@ -75,10 +75,11 @@ class ControllerHandshakeTest(unittest.TestCase):
         self.assertEqual(first["action"], "none")
         self.assertEqual(second["action"], "none")
         self.assertEqual(third["action"], "request_excerpt")
+        self.assertTrue(str(third["candidate_id"]).startswith("cand_"))
         state = self.store.get_controller_state(session_id)
         self.assertEqual(state.obs_count, 3)
-        self.assertEqual(state.streak, 0)
-        self.assertIsNotNone(state.last_intervention_ts)
+        self.assertEqual(state.streak, 3)
+        self.assertIsNone(state.last_intervention_ts)
 
     def test_ok_resets_streak_before_threshold(self) -> None:
         client = self._client(ControllerConfig(k=2, coldstart_observations=1, cooldown_seconds=300))
@@ -97,7 +98,7 @@ class ControllerHandshakeTest(unittest.TestCase):
         self.assertEqual(state.obs_count, 3)
         self.assertEqual(state.streak, 1)
 
-    def test_cooldown_blocks_repeated_request_excerpt(self) -> None:
+    def test_pending_candidate_blocks_repeated_request_excerpt_without_consuming_drift(self) -> None:
         client = self._client(ControllerConfig(k=2, coldstart_observations=1, cooldown_seconds=3600))
         try:
             session_id = self._start_goal(client)
@@ -113,7 +114,12 @@ class ControllerHandshakeTest(unittest.TestCase):
         self.assertEqual(third["action"], "none")
         self.assertEqual(fourth["action"], "none")
         state = self.store.get_controller_state(session_id)
-        self.assertEqual(state.streak, 2)
+        self.assertEqual(state.streak, 4)
+        self.assertIsNone(state.last_intervention_ts)
+        candidate = self.store.get_intervention_candidate_for_observation(str(second["observation_id"]))
+        self.assertIsNotNone(candidate)
+        assert candidate is not None
+        self.assertEqual(candidate.status, "pending")
 
     def test_alignment_controller_uses_ewma_hysteresis(self) -> None:
         now = datetime.now(timezone.utc)
@@ -214,6 +220,31 @@ class ControllerHandshakeTest(unittest.TestCase):
             conn.close()
         self.assertEqual(response["action"], "request_excerpt")
         self.assertEqual(count, 1)
+
+    def test_expired_candidate_allows_a_new_request_without_losing_drift_evidence(self) -> None:
+        client = self._client(ControllerConfig(k=1, coldstart_observations=1, cooldown_seconds=300))
+        try:
+            session_id = self._start_goal(client)
+            first = self._post_drift(client, 1)
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute(
+                    "UPDATE intervention_candidates SET expires_at = ? WHERE id = ?",
+                    ((datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(), first["candidate_id"]),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            second = self._post_drift(client, 2)
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertEqual(first["action"], "request_excerpt")
+        self.assertEqual(second["action"], "request_excerpt")
+        self.assertNotEqual(first["candidate_id"], second["candidate_id"])
+        state = self.store.get_controller_state(session_id)
+        self.assertEqual(state.streak, 2)
+        self.assertIsNone(state.last_intervention_ts)
 
 
 if __name__ == "__main__":

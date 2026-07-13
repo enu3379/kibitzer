@@ -24,37 +24,12 @@ def apply_controller(
         )
 
     state = store.get_controller_state(observation.session_id)
-    if config.type == "alignment":
-        controller = AlignmentController(
-            alpha=config.alignment_alpha,
-            theta_low=config.theta_low,
-            theta_high=config.theta_high,
-            cooldown_seconds=config.cooldown_seconds,
-            coldstart_observations=config.coldstart_observations,
-            alignment_score=state.alignment_score,
-            drift_latched=state.drift_latched,
-            armed=state.streak,
-            obs_count=state.obs_count,
-            last_intervention_ts=state.last_intervention_ts,
-            snoozed_until=state.snoozed_until,
-        )
-    else:
-        controller = StreakController(
-            k=config.k,
-            cooldown_seconds=config.cooldown_seconds,
-            coldstart_observations=config.coldstart_observations,
-            streak=state.streak,
-            obs_count=state.obs_count,
-            last_intervention_ts=state.last_intervention_ts,
-            snoozed_until=state.snoozed_until,
-        )
+    controller = _controller_from_state(config, state)
     controller.update(observation.verdict, observation.features.r_final)
     now = now or datetime.now(timezone.utc)
 
     if controller.should_intervene(now):
-        controller.on_intervened(now)
         _save_controller_state(store, observation.session_id, controller, state, now)
-        store.record_intervention_requested(observation.session_id, observation.id, now)
         return PipelineResult(
             action=PipelineAction.REQUEST_EXCERPT,
             observation_id=observation.id,
@@ -68,6 +43,51 @@ def apply_controller(
         observation_id=observation.id,
         verdict=observation.verdict,
         page=_page_info(observation),
+    )
+
+
+def confirm_controller_intervention(
+    store: SQLiteStore,
+    config: ControllerConfig,
+    session_id: str,
+    now: datetime | None = None,
+) -> ControllerStateRecord:
+    """Consume controller evidence only after Tier 2 confirms drift."""
+
+    state = store.get_controller_state(session_id)
+    controller = _controller_from_state(config, state)
+    confirmed_at = now or datetime.now(timezone.utc)
+    controller.on_intervened(confirmed_at)
+    _save_controller_state(store, session_id, controller, state, confirmed_at)
+    return store.get_controller_state(session_id)
+
+
+def _controller_from_state(
+    config: ControllerConfig,
+    state: ControllerStateRecord,
+) -> AlignmentController | StreakController:
+    if config.type == "alignment":
+        return AlignmentController(
+            alpha=config.alignment_alpha,
+            theta_low=config.theta_low,
+            theta_high=config.theta_high,
+            cooldown_seconds=config.cooldown_seconds,
+            coldstart_observations=config.coldstart_observations,
+            alignment_score=state.alignment_score,
+            drift_latched=state.drift_latched,
+            armed=state.streak,
+            obs_count=state.obs_count,
+            last_intervention_ts=state.last_intervention_ts,
+            snoozed_until=state.snoozed_until,
+        )
+    return StreakController(
+        k=config.k,
+        cooldown_seconds=config.cooldown_seconds,
+        coldstart_observations=config.coldstart_observations,
+        streak=state.streak,
+        obs_count=state.obs_count,
+        last_intervention_ts=state.last_intervention_ts,
+        snoozed_until=state.snoozed_until,
     )
 
 

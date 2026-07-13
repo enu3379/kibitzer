@@ -1,11 +1,12 @@
 import random
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from ..config import ControllerConfig
-from ..core.controller_flow import apply_controller
+from ..core.controller_flow import apply_controller, confirm_controller_intervention
 from ..core.delivery import clamp_notification_message
 from ..core.normalization import (
     browser_nav_embedding_text,
@@ -31,6 +32,8 @@ from ..schemas import PageExcerpt, PageInfo, PipelineAction, PipelineResult, Pip
 from ..storage.sqlite import ControllerStateRecord, CurrentSessionRecord, ObservationRecord, ReturnCandidateRecord, SQLiteStore
 
 router = APIRouter()
+
+CANDIDATE_RESUME_TTL_SECONDS = 60
 
 
 class LatestObservationFeatures(BaseModel):
@@ -228,6 +231,35 @@ async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineR
     )
     store.record_observation(observation)
     result = apply_controller(store, controller_config, observation)
+    if result.action == PipelineAction.REQUEST_EXCERPT:
+        requested_at = datetime.now(timezone.utc)
+        remaining_dwell_seconds = max(
+            0,
+            request.app.state.config.dwell.tier2_seconds
+            - request.app.state.config.dwell.observation_seconds,
+        )
+        candidate, created = store.create_intervention_candidate(
+            observation.session_id,
+            observation.id,
+            expires_at=requested_at
+            + timedelta(seconds=remaining_dwell_seconds + CANDIDATE_RESUME_TTL_SECONDS),
+            ts=requested_at,
+        )
+        if created:
+            store.record_intervention_requested(
+                observation.session_id,
+                observation.id,
+                candidate_id=candidate.id,
+                ts=requested_at,
+            )
+            result.candidate_id = candidate.id
+        else:
+            result = PipelineResult(
+                action=PipelineAction.NONE,
+                observation_id=observation.id,
+                verdict=observation.verdict,
+                page=_page_info(observation),
+            )
     return_candidate = store.note_attachment_observation(
         observation.session_id,
         observation.verdict.value if observation.verdict else None,
@@ -277,73 +309,98 @@ async def confirm_observation_excerpt(
         raise HTTPException(status_code=404, detail="observation not found")
 
     verdict = Verdict(observation.verdict) if observation.verdict else None
-    if verdict != Verdict.DRIFT:
-        return PipelineResult(
-            action=PipelineAction.NONE,
-            observation_id=observation.id,
-            verdict=verdict,
-            page=_page_info(observation),
+    candidate = store.get_intervention_candidate_for_observation(observation.id)
+    if not candidate:
+        raise HTTPException(status_code=409, detail="observation has no intervention candidate")
+
+    candidate, claimed = store.claim_intervention_candidate(candidate.id)
+    if not candidate:
+        raise HTTPException(status_code=409, detail="intervention candidate not found")
+    if not claimed:
+        if candidate.status == "expired":
+            raise HTTPException(status_code=410, detail="intervention candidate expired")
+        raise HTTPException(status_code=409, detail=f"intervention candidate is {candidate.status}")
+
+    try:
+        if verdict != Verdict.DRIFT:
+            store.resolve_intervention_candidate(candidate.id, "cancelled")
+            return PipelineResult(
+                action=PipelineAction.NONE,
+                observation_id=observation.id,
+                verdict=verdict,
+                page=_page_info(observation),
+            )
+
+        recent = store.recent_observation_summaries(
+            observation.session_id,
+            request.app.state.config.tier2.recent_observations,
+        )
+        payload = build_tier2_payload(current.goal, observation, recent, excerpt, request.app.state.config.tier2)
+        _inject_nagging_context(store, payload, observation.session_id, observation.url_host)
+        settings = runtime_settings(request.app.state.config, store)
+        persona = resolve_persona(
+            getattr(request.app.state, "persona_set", None),
+            settings,
+            request.app.state.config.delivery.persona,
+        )
+        system_prompt = compose_tier2_system_prompt(persona) if persona else None
+        result = await _confirm_tier2(
+            request,
+            observation.session_id,
+            observation.id,
+            payload,
+            system_prompt=system_prompt,
+            persona=persona,
+        )
+        max_sentences = (
+            persona.max_sentences
+            if persona and persona.max_sentences is not None
+            else request.app.state.config.delivery.max_sentences
+        )
+        message = clamp_notification_message(
+            result.message or fallback_drift_message(current.goal, observation),
+            max_sentences,
         )
 
-    recent = store.recent_observation_summaries(
-        observation.session_id,
-        request.app.state.config.tier2.recent_observations,
-    )
-    payload = build_tier2_payload(current.goal, observation, recent, excerpt, request.app.state.config.tier2)
-    _inject_nagging_context(store, payload, observation.session_id, observation.url_host)
-    settings = runtime_settings(request.app.state.config, store)
-    persona = resolve_persona(
-        getattr(request.app.state, "persona_set", None),
-        settings,
-        request.app.state.config.delivery.persona,
-    )
-    system_prompt = compose_tier2_system_prompt(persona) if persona else None
-    result = await _confirm_tier2(
-        request,
-        observation.session_id,
-        observation.id,
-        payload,
-        system_prompt=system_prompt,
-        persona=persona,
-    )
-    max_sentences = (
-        persona.max_sentences
-        if persona and persona.max_sentences is not None
-        else request.app.state.config.delivery.max_sentences
-    )
-    message = clamp_notification_message(
-        result.message or fallback_drift_message(current.goal, observation),
-        max_sentences,
-    )
+        store.record_tier2_result(
+            session_id=observation.session_id,
+            observation_id=observation.id,
+            confirm_drift=result.confirm_drift,
+            message=message if result.confirm_drift else result.message,
+        )
 
-    store.record_tier2_result(
-        session_id=observation.session_id,
-        observation_id=observation.id,
-        confirm_drift=result.confirm_drift,
-        message=message if result.confirm_drift else result.message,
-    )
+        if not result.confirm_drift:
+            store.resolve_intervention_candidate(candidate.id, "cancelled")
+            return PipelineResult(action=PipelineAction.NONE, observation_id=observation.id, verdict=verdict)
 
-    if not result.confirm_drift:
-        return PipelineResult(action=PipelineAction.NONE, observation_id=observation.id, verdict=verdict)
-
-    intervention_id = store.create_intervention(observation.session_id, observation.id, message)
-    silent = _handle_delivery_side_effects(
-        request,
-        observation.session_id,
-        intervention_id,
-        message,
-        settings,
-        persona,
-    )
-    return PipelineResult(
-        action=PipelineAction.NOTIFY,
-        observation_id=observation.id,
-        verdict=verdict,
-        message=message,
-        intervention_id=intervention_id,
-        silent=silent,
-        page=_page_info(observation),
-    )
+        controller_config = effective_controller_config(request.app.state.config, store)
+        confirm_controller_intervention(store, controller_config, observation.session_id)
+        intervention_id = store.create_intervention(observation.session_id, observation.id, message)
+        store.resolve_intervention_candidate(
+            candidate.id,
+            "confirmed",
+            intervention_id=intervention_id,
+        )
+        silent = _handle_delivery_side_effects(
+            request,
+            observation.session_id,
+            intervention_id,
+            message,
+            settings,
+            persona,
+        )
+        return PipelineResult(
+            action=PipelineAction.NOTIFY,
+            observation_id=observation.id,
+            verdict=verdict,
+            message=message,
+            intervention_id=intervention_id,
+            silent=silent,
+            page=_page_info(observation),
+        )
+    except BaseException:
+        store.release_intervention_candidate(candidate.id)
+        raise
 
 
 def _page_info(observation) -> PageInfo:

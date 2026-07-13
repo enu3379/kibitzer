@@ -75,6 +75,7 @@ class PipelineResult(BaseModel):
     action: PipelineAction
     kind: PipelineResultKind = PipelineResultKind.INTERVENTION
     observation_id: str | None = None
+    candidate_id: str | None = None
     verdict: Verdict | None = None
     message: str | None = None
     intervention_id: str | None = None

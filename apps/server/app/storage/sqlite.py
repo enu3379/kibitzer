@@ -93,6 +93,18 @@ class InterventionRecord:
 
 
 @dataclass(frozen=True)
+class InterventionCandidateRecord:
+    id: str
+    session_id: str
+    observation_id: str
+    status: str
+    requested_at: datetime
+    expires_at: datetime
+    updated_at: datetime
+    intervention_id: str | None = None
+
+
+@dataclass(frozen=True)
 class SessionStatsRecord:
     session_id: str
     started_at: datetime
@@ -1043,6 +1055,7 @@ class SQLiteStore:
         self,
         session_id: str,
         observation_id: str,
+        candidate_id: str | None = None,
         ts: datetime | None = None,
     ) -> None:
         now = ts or _utc_now()
@@ -1052,9 +1065,238 @@ class SQLiteStore:
                 conn,
                 session_id,
                 "intervention.request_excerpt",
-                {"observation_id": observation_id},
+                {"observation_id": observation_id, "candidate_id": candidate_id},
                 now,
             )
+
+    def create_intervention_candidate(
+        self,
+        session_id: str,
+        observation_id: str,
+        expires_at: datetime,
+        ts: datetime | None = None,
+    ) -> tuple[InterventionCandidateRecord, bool]:
+        now = ts or _utc_now()
+        candidate_id = f"cand_{uuid.uuid4().hex}"
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            self._expire_pending_intervention_candidates(conn, session_id, now)
+            existing = conn.execute(
+                """
+                SELECT *
+                FROM intervention_candidates
+                WHERE session_id = ? AND status IN ('pending', 'in_flight')
+                ORDER BY requested_at DESC, id DESC
+                LIMIT 1
+                """,
+                (session_id,),
+            ).fetchone()
+            if existing:
+                return self._intervention_candidate_from_row(existing), False
+
+            conn.execute(
+                """
+                INSERT INTO intervention_candidates (
+                    id, session_id, observation_id, status,
+                    requested_at, expires_at, updated_at
+                )
+                VALUES (?, ?, ?, 'pending', ?, ?, ?)
+                """,
+                (
+                    candidate_id,
+                    session_id,
+                    observation_id,
+                    now.isoformat(),
+                    expires_at.isoformat(),
+                    now.isoformat(),
+                ),
+            )
+            self._append_event(
+                conn,
+                session_id,
+                "intervention.candidate_created",
+                {
+                    "candidate_id": candidate_id,
+                    "observation_id": observation_id,
+                    "expires_at": expires_at.isoformat(),
+                },
+                now,
+            )
+            row = conn.execute(
+                "SELECT * FROM intervention_candidates WHERE id = ?",
+                (candidate_id,),
+            ).fetchone()
+        assert row is not None
+        return self._intervention_candidate_from_row(row), True
+
+    def get_intervention_candidate_for_observation(
+        self,
+        observation_id: str,
+    ) -> InterventionCandidateRecord | None:
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute(
+                """
+                SELECT *
+                FROM intervention_candidates
+                WHERE observation_id = ?
+                ORDER BY requested_at DESC, id DESC
+                LIMIT 1
+                """,
+                (observation_id,),
+            ).fetchone()
+        return self._intervention_candidate_from_row(row) if row else None
+
+    def claim_intervention_candidate(
+        self,
+        candidate_id: str,
+        ts: datetime | None = None,
+    ) -> tuple[InterventionCandidateRecord | None, bool]:
+        now = ts or _utc_now()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            expired = conn.execute(
+                """
+                UPDATE intervention_candidates
+                SET status = 'expired', updated_at = ?
+                WHERE id = ? AND status = 'pending' AND expires_at <= ?
+                """,
+                (now.isoformat(), candidate_id, now.isoformat()),
+            )
+            if expired.rowcount == 1:
+                row = conn.execute(
+                    "SELECT * FROM intervention_candidates WHERE id = ?",
+                    (candidate_id,),
+                ).fetchone()
+                assert row is not None
+                candidate = self._intervention_candidate_from_row(row)
+                self._append_event(
+                    conn,
+                    candidate.session_id,
+                    "intervention.candidate_expired",
+                    {"candidate_id": candidate.id, "observation_id": candidate.observation_id},
+                    now,
+                )
+                return candidate, False
+
+            claimed = conn.execute(
+                """
+                UPDATE intervention_candidates
+                SET status = 'in_flight', updated_at = ?
+                WHERE id = ? AND status = 'pending'
+                """,
+                (now.isoformat(), candidate_id),
+            )
+            row = conn.execute(
+                "SELECT * FROM intervention_candidates WHERE id = ?",
+                (candidate_id,),
+            ).fetchone()
+            if not row:
+                return None, False
+            candidate = self._intervention_candidate_from_row(row)
+            if claimed.rowcount != 1:
+                return candidate, False
+            self._append_event(
+                conn,
+                candidate.session_id,
+                "intervention.candidate_claimed",
+                {"candidate_id": candidate.id, "observation_id": candidate.observation_id},
+                now,
+            )
+        return candidate, True
+
+    def release_intervention_candidate(
+        self,
+        candidate_id: str,
+        ts: datetime | None = None,
+    ) -> InterventionCandidateRecord | None:
+        now = ts or _utc_now()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute(
+                "SELECT * FROM intervention_candidates WHERE id = ?",
+                (candidate_id,),
+            ).fetchone()
+            if not row:
+                return None
+            candidate = self._intervention_candidate_from_row(row)
+            if candidate.status != "in_flight":
+                return candidate
+            next_status = "expired" if candidate.expires_at <= now else "pending"
+            conn.execute(
+                """
+                UPDATE intervention_candidates
+                SET status = ?, updated_at = ?
+                WHERE id = ? AND status = 'in_flight'
+                """,
+                (next_status, now.isoformat(), candidate_id),
+            )
+            self._append_event(
+                conn,
+                candidate.session_id,
+                "intervention.candidate_released",
+                {
+                    "candidate_id": candidate.id,
+                    "observation_id": candidate.observation_id,
+                    "status": next_status,
+                },
+                now,
+            )
+            row = conn.execute(
+                "SELECT * FROM intervention_candidates WHERE id = ?",
+                (candidate_id,),
+            ).fetchone()
+        assert row is not None
+        return self._intervention_candidate_from_row(row)
+
+    def resolve_intervention_candidate(
+        self,
+        candidate_id: str,
+        status: str,
+        intervention_id: str | None = None,
+        ts: datetime | None = None,
+    ) -> InterventionCandidateRecord | None:
+        if status not in {"confirmed", "cancelled"}:
+            raise ValueError(f"unsupported candidate resolution: {status}")
+        now = ts or _utc_now()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute(
+                "SELECT * FROM intervention_candidates WHERE id = ?",
+                (candidate_id,),
+            ).fetchone()
+            if not row:
+                return None
+            candidate = self._intervention_candidate_from_row(row)
+            if candidate.status == status:
+                return candidate
+            if candidate.status != "in_flight":
+                return candidate
+            conn.execute(
+                """
+                UPDATE intervention_candidates
+                SET status = ?, intervention_id = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (status, intervention_id, now.isoformat(), candidate_id),
+            )
+            self._append_event(
+                conn,
+                candidate.session_id,
+                f"intervention.candidate_{status}",
+                {
+                    "candidate_id": candidate.id,
+                    "observation_id": candidate.observation_id,
+                    "intervention_id": intervention_id,
+                },
+                now,
+            )
+            row = conn.execute(
+                "SELECT * FROM intervention_candidates WHERE id = ?",
+                (candidate_id,),
+            ).fetchone()
+        assert row is not None
+        return self._intervention_candidate_from_row(row)
 
     def record_tier2_result(
         self,
@@ -1697,6 +1939,19 @@ class SQLiteStore:
                 status TEXT NOT NULL DEFAULT 'pending'
             );
 
+            CREATE TABLE IF NOT EXISTS intervention_candidates (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                observation_id TEXT NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+                status TEXT NOT NULL CHECK (
+                    status IN ('pending', 'in_flight', 'confirmed', 'cancelled', 'expired')
+                ),
+                requested_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                intervention_id TEXT REFERENCES interventions(id) ON DELETE SET NULL
+            );
+
             CREATE TABLE IF NOT EXISTS feedback (
                 id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -1742,6 +1997,13 @@ class SQLiteStore:
 
             CREATE UNIQUE INDEX IF NOT EXISTS idx_page_labels_observation
             ON page_labels(observation_id);
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_intervention_candidates_active_session
+            ON intervention_candidates(session_id)
+            WHERE status IN ('pending', 'in_flight');
+
+            CREATE INDEX IF NOT EXISTS idx_intervention_candidates_observation
+            ON intervention_candidates(observation_id, requested_at DESC);
             """
         )
         self._ensure_observation_columns(conn)
@@ -1766,6 +2028,39 @@ class SQLiteStore:
             "INSERT INTO event_log (ts, session_id, event_type, payload_json) VALUES (?, ?, ?, ?)",
             (ts.isoformat(), session_id, event_type, json.dumps(payload)),
         )
+
+    def _expire_pending_intervention_candidates(
+        self,
+        conn: sqlite3.Connection,
+        session_id: str,
+        now: datetime,
+    ) -> None:
+        expired = conn.execute(
+            """
+            SELECT id, observation_id
+            FROM intervention_candidates
+            WHERE session_id = ? AND status = 'pending' AND expires_at <= ?
+            """,
+            (session_id, now.isoformat()),
+        ).fetchall()
+        if not expired:
+            return
+        conn.execute(
+            """
+            UPDATE intervention_candidates
+            SET status = 'expired', updated_at = ?
+            WHERE session_id = ? AND status = 'pending' AND expires_at <= ?
+            """,
+            (now.isoformat(), session_id, now.isoformat()),
+        )
+        for row in expired:
+            self._append_event(
+                conn,
+                session_id,
+                "intervention.candidate_expired",
+                {"candidate_id": row["id"], "observation_id": row["observation_id"]},
+                now,
+            )
 
     def _goal_from_row(self, row: sqlite3.Row) -> GoalRecord:
         return GoalRecord(
@@ -1802,6 +2097,18 @@ class SQLiteStore:
             message=row["message"],
             status=row["status"],
             tier1_reason=row["tier1_reason"],
+        )
+
+    def _intervention_candidate_from_row(self, row: sqlite3.Row) -> InterventionCandidateRecord:
+        return InterventionCandidateRecord(
+            id=row["id"],
+            session_id=row["session_id"],
+            observation_id=row["observation_id"],
+            status=row["status"],
+            requested_at=_parse_dt(row["requested_at"]),
+            expires_at=_parse_dt(row["expires_at"]),
+            updated_at=_parse_dt(row["updated_at"]),
+            intervention_id=row["intervention_id"],
         )
 
     def _controller_state_from_row(self, row: sqlite3.Row) -> ControllerStateRecord:
