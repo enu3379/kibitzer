@@ -104,7 +104,7 @@ toolbar icon** (`icon-128.svg` + regenerated PNG set via `gen_extension_icons.py
 A **wall** variant (peek over a ledge) is kept as an alternate under
 `apps/extension/icons/variants/` (color + menubar-mono SVGs, both rendered by
 `scripts/gen_icon_variants.py`). For the menubar **template** glyph, reuse
-`variants/monitor-mono.svg` but cut the rim as a **transparent slit** — head and
+`variants/monitor-v1-mono.svg` but cut the rim as a **transparent slit** — head and
 screen are the same ink in mono, so a solid rim would merge them; the color icon
 uses a light rim instead.
 

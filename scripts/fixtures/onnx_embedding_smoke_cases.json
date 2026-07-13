@@ -1,0 +1,82 @@
+[
+  {
+    "name": "한국어 여행 주제",
+    "anchor": "국내 여행지 탐색",
+    "candidates": [
+      {"expected": "related", "text": "제주 관광 명소 추천"},
+      {"expected": "related", "text": "부산에서 가볼 만한 곳"},
+      {"expected": "unrelated", "text": "국내 주식 시장 전망"},
+      {"expected": "unrelated", "text": "프리미어리그 경기 하이라이트"}
+    ]
+  },
+  {
+    "name": "한영 교차언어 여행",
+    "anchor": "한국에서 가볼 만한 여행지",
+    "candidates": [
+      {"expected": "related", "text": "Best places to visit in Korea"},
+      {"expected": "related", "text": "A guide to sightseeing in Seoul"},
+      {"expected": "unrelated", "text": "How to invest in Korean stocks"},
+      {"expected": "unrelated", "text": "Premier League match results"}
+    ]
+  },
+  {
+    "name": "프로그래밍과 데이터 분석",
+    "anchor": "파이썬 데이터 분석",
+    "candidates": [
+      {"expected": "related", "text": "Pandas data analysis tutorial"},
+      {"expected": "related", "text": "데이터프레임 전처리 방법"},
+      {"expected": "unrelated", "text": "홈베이킹 식빵 레시피"},
+      {"expected": "unrelated", "text": "프로야구 오늘 경기 결과"}
+    ]
+  },
+  {
+    "name": "브라우저 확장 프로그램 개발",
+    "anchor": "크롬 확장 프로그램 개발",
+    "candidates": [
+      {"expected": "related", "text": "Chrome extension Manifest V3 documentation"},
+      {"expected": "related", "text": "브라우저 extension background service worker"},
+      {"expected": "unrelated", "text": "크롬으로 보는 오늘의 뉴스"},
+      {"expected": "unrelated", "text": "서울 아파트 매매 가격"}
+    ]
+  },
+  {
+    "name": "표면 단어가 다른 동의 범주",
+    "anchor": "반려견 건강 관리",
+    "candidates": [
+      {"expected": "related", "text": "강아지 예방접종과 동물병원 정보"},
+      {"expected": "related", "text": "Healthy food and exercise for dogs"},
+      {"expected": "unrelated", "text": "자바스크립트 비동기 프로그래밍"},
+      {"expected": "unrelated", "text": "환율과 기준금리 뉴스"}
+    ]
+  },
+  {
+    "name": "같은 단어의 다른 의미",
+    "anchor": "머신러닝 모델 학습",
+    "candidates": [
+      {"expected": "related", "text": "신경망 훈련 데이터 준비"},
+      {"expected": "related", "text": "Training a machine learning classifier"},
+      {"expected": "unrelated", "text": "패션 모델의 런웨이 화보"},
+      {"expected": "unrelated", "text": "모델하우스 아파트 분양 안내"}
+    ]
+  },
+  {
+    "name": "짧은 날씨 제목",
+    "anchor": "서울 날씨",
+    "candidates": [
+      {"expected": "related", "text": "Seoul weekly weather forecast"},
+      {"expected": "related", "text": "내일 서울 비 소식과 기온"},
+      {"expected": "unrelated", "text": "서울 부동산 아파트 시세"},
+      {"expected": "unrelated", "text": "서울 지역 맛집 순위"}
+    ]
+  },
+  {
+    "name": "논문과 자료 조사",
+    "anchor": "임베딩 모델 관련 논문 조사",
+    "candidates": [
+      {"expected": "related", "text": "Semantic text embeddings research paper"},
+      {"expected": "related", "text": "Google Scholar multilingual E5"},
+      {"expected": "unrelated", "text": "YouTube 집중 음악 플레이리스트"},
+      {"expected": "unrelated", "text": "저녁 식사 배달 메뉴 추천"}
+    ]
+  }
+]

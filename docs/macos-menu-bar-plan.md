@@ -27,7 +27,7 @@ The menu bar surface owns only visibility and light process control:
 - kick `com.kibitzer.server` if the server is dead;
 - fall back to `scripts/macos_run_server.sh` when the server LaunchAgent is not
   installed;
-- open the health endpoint and logs folder.
+- open the logs folder.
 
 It must not own sessions, judgments, provider credentials, or controller state.
 
@@ -43,7 +43,7 @@ Current prep implementation:
 
 The Swift app uses `NSStatusItem` directly, so it does not add a Python GUI
 dependency. It loads the monochrome template icon from
-`apps/extension/icons/variants/monitor-template-128.png`, marks it as an AppKit
+`apps/extension/icons/variants/monitor-v1-mono-128.png`, marks it as an AppKit
 template image, and shows a small state dot next to it. If the template icon
 asset is unavailable in a source checkout, it falls back to a text-only `K ●`
 status item.
@@ -53,14 +53,14 @@ status item.
 Claude owns the shared icon artwork. The runtime contract to preserve:
 
 - states: `dead`, `idle`, `active`, `unknown`;
-- menu actions: refresh, start server, open health, open logs, quit;
+- menu actions: refresh, start server, open logs, quit;
 - server state source: `/health`;
 - no duplicated judging state.
 
 Current visual contract:
 
-- native template source: `apps/extension/icons/variants/monitor-mono.svg`;
-- menu bar runtime asset: `apps/extension/icons/variants/monitor-template-128.png`;
+- native template source: `apps/extension/icons/variants/monitor-v1-mono.svg`;
+- menu bar runtime asset: `apps/extension/icons/variants/monitor-v1-mono-128.png`;
 - macOS light/dark tinting: handled by `NSImage.isTemplate`;
 - state dot: gray idle, green active, red dead, yellow unknown.
 

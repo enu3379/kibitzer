@@ -519,17 +519,16 @@ async function loadBaseIconBitmaps(): Promise<Map<number, ImageBitmap>> {
 }
 
 function drawStatusDot(ctx: OffscreenCanvasRenderingContext2D, size: number, color: string): void {
-  const r = Math.max(2.4, size * 0.17)
-  const inset = size * 0.07
+  const r = Math.max(2.4, size * 0.16)
+  const inset = size * 0.0
+
   const cx = size - r - inset
   const cy = r + inset
+
   ctx.beginPath()
   ctx.arc(cx, cy, r, 0, Math.PI * 2)
   ctx.fillStyle = color
   ctx.fill()
-  ctx.lineWidth = Math.max(1, size * 0.06)
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.92)" // thin ring separates the pip from icon + toolbar
-  ctx.stroke()
 }
 
 async function applyStatusIcon(status: BadgeStatus): Promise<void> {

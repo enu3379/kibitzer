@@ -20,8 +20,16 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\windows_setup.ps1
 ```
 
-The script creates `.venv`, installs Python dependencies, installs extension
-npm dependencies, and rebuilds `apps\extension\dist`.
+The script creates `.venv`, installs Python dependencies, downloads and verifies
+the local Tier 0 ONNX model plus tokenizer (about 41 MB total), installs
+extension npm dependencies, and rebuilds `apps\extension\dist`.
+
+The model files are stored under ignored `data\models\`. To verify them later
+without downloading again:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\download_embedding_model.py --check
+```
 
 ## Run
 
@@ -62,8 +70,10 @@ Remove the Startup shortcut with:
 
 Startup logs are written under `data\logs\`. The tray icon polls
 `GET /health`: red means unreachable, gray means idle, green means active, and
-yellow means unknown. It uses the monochrome template icon, tinted for the
-current Windows system theme, with a small status dot overlay.
+yellow means unknown or starting. The status header reports missing setup,
+startup failures, and timeouts; **Open logs** opens the folder containing the
+tray and server startup logs. The icon uses the monochrome template artwork,
+tinted for the current Windows system theme, with a small status dot overlay.
 
 ## Optional AI Provider Setup
 

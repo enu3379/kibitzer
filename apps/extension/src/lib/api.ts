@@ -229,6 +229,10 @@ export interface DwellSettings {
   tier2_seconds: number
 }
 
+export interface RelevanceSettings {
+  tau_ok: number
+}
+
 export type ControllerType = "streak" | "alignment"
 
 export interface ControllerSettings {
@@ -242,6 +246,7 @@ export interface ControllerSettings {
 export interface Settings {
   persona: string
   voice_enabled: boolean
+  relevance: RelevanceSettings
   controller: ControllerSettings
   cooldown: Cooldown
   dwell: DwellSettings
@@ -251,6 +256,7 @@ export interface Settings {
 export interface SettingsPatch {
   persona?: string
   voice_enabled?: boolean
+  relevance?: Partial<RelevanceSettings>
   controller?: Partial<ControllerSettings>
   cooldown?: Partial<Cooldown>
   dwell?: Partial<DwellSettings>
@@ -258,6 +264,7 @@ export interface SettingsPatch {
 }
 
 function normalizeSettings(value: Partial<Settings>): Settings {
+  const rawRelevance = (value.relevance ?? {}) as Partial<RelevanceSettings>
   const rawController = (value.controller ?? {}) as Partial<ControllerSettings>
   const rawCooldown = (value.cooldown ?? {}) as Partial<Cooldown>
   const rawDwell = (value.dwell ?? {}) as Partial<DwellSettings>
@@ -272,6 +279,9 @@ function normalizeSettings(value: Partial<Settings>): Settings {
   return {
     persona: typeof value.persona === "string" ? value.persona : "dry_kibitzer",
     voice_enabled: Boolean(value.voice_enabled),
+    relevance: {
+      tau_ok: clampFloat(rawRelevance.tau_ok, 0.15, 0, 1),
+    },
     controller: {
       type: controllerType,
       k,
@@ -359,14 +369,26 @@ export async function postFeedback(payload: FeedbackPayload): Promise<FeedbackRe
   return response.json() as Promise<FeedbackResult>
 }
 
-export async function getLatestObservation(tabId: number): Promise<LatestObservation | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/observations/latest?tab_id=${encodeURIComponent(tabId)}`).catch(
-    () => {
-      return null
-    },
-  )
-  if (!response?.ok) return null
-  return response.json() as Promise<LatestObservation>
+export async function getLatestObservation(tabId: number, url: string): Promise<LatestObservation | null> {
+  try {
+    const parsed = new URL(url)
+    const location = `${parsed.pathname || "/"}${parsed.search}${parsed.hash}`
+    const pathBytes = new TextEncoder().encode(location)
+    const pathDigest = await crypto.subtle.digest("SHA-256", pathBytes)
+    const urlPathHash = Array.from(new Uint8Array(pathDigest), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("")
+    const params = new URLSearchParams({
+      tab_id: String(tabId),
+      url_host: parsed.hostname,
+      url_path_hash: urlPathHash,
+    })
+    const response = await fetch(`${SERVER_BASE_URL}/observations/latest?${params}`)
+    if (!response.ok) return null
+    return response.json() as Promise<LatestObservation>
+  } catch {
+    return null
+  }
 }
 
 export async function postObservationLabel(

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" role="img" aria-label="Kibitzer">
+  <clipPath id="r"><rect width="16" height="16" rx="4"></rect></clipPath>
+  <rect width="16" height="16" rx="4" fill="#10B981"></rect>
+  <g clip-path="url(#r)">
+    <circle cx="8" cy="14.5" r="7" fill="#1F2937"></circle>
+    <circle cx="5.2" cy="10.5" r="2.2" fill="#F9FAFB"></circle>
+    <circle cx="10.8" cy="10.5" r="2.2" fill="#F9FAFB"></circle>
+  </g>
+</svg>

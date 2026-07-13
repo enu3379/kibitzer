@@ -1,8 +1,10 @@
+import hashlib
 import json
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi.testclient import TestClient
 
@@ -18,6 +20,11 @@ from apps.server.app.config import (
 )
 from apps.server.app.main import create_app
 from apps.server.app.storage.sqlite import SQLiteStore
+
+
+class FakeEmbeddingProvider:
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        return [[1.0, 0.0] if "Kibitzer" in text else [0.0, 1.0] for text in texts]
 
 
 class SettingsApiTest(unittest.TestCase):
@@ -36,7 +43,9 @@ class SettingsApiTest(unittest.TestCase):
                 quiet_hours=QuietHoursConfig(enabled=False, start="09:00", end="18:00"),
             ),
         )
-        self.client = TestClient(create_app(config=config, store=self.store))
+        self.client = TestClient(
+            create_app(config=config, store=self.store, embedding_provider=FakeEmbeddingProvider())
+        )
         self.client.__enter__()
 
     def tearDown(self) -> None:
@@ -47,6 +56,7 @@ class SettingsApiTest(unittest.TestCase):
         defaults = self.client.get("/settings").json()
         self.assertEqual(defaults["persona"], "dry_kibitzer")
         self.assertFalse(defaults["voice_enabled"])
+        self.assertEqual(defaults["relevance"], {"tau_ok": 0.15})
         self.assertEqual(
             defaults["controller"],
             {"type": "streak", "k": 1, "alignment_alpha": 0.85, "theta_low": 0.15, "theta_high": 0.3},
@@ -60,6 +70,7 @@ class SettingsApiTest(unittest.TestCase):
             json={
                 "persona": "quiet_coach",
                 "voice_enabled": True,
+                "relevance": {"tau_ok": 0.27},
                 "controller": {"type": "alignment", "k": 3, "alignment_alpha": 0.5, "theta_low": 0.25, "theta_high": 0.55},
                 "cooldown": {"enabled": True, "seconds": 30},
                 "dwell": {"observation_seconds": 3, "tier2_seconds": 6},
@@ -69,6 +80,7 @@ class SettingsApiTest(unittest.TestCase):
 
         self.assertEqual(updated["persona"], "quiet_coach")
         self.assertTrue(updated["voice_enabled"])
+        self.assertEqual(updated["relevance"], {"tau_ok": 0.27})
         self.assertEqual(
             updated["controller"],
             {"type": "alignment", "k": 3, "alignment_alpha": 0.5, "theta_low": 0.25, "theta_high": 0.55},
@@ -87,7 +99,7 @@ class SettingsApiTest(unittest.TestCase):
             conn.close()
         self.assertEqual(
             json.loads(event)["keys"],
-            ["controller", "cooldown", "dwell", "persona", "quiet_hours", "voice_enabled"],
+            ["controller", "cooldown", "dwell", "persona", "quiet_hours", "relevance", "voice_enabled"],
         )
 
     def test_settings_validation(self) -> None:
@@ -109,8 +121,64 @@ class SettingsApiTest(unittest.TestCase):
             422,
         )
         self.assertEqual(
+            self.client.put("/settings", json={"relevance": {"tau_ok": 1.01}}).status_code,
+            422,
+        )
+        self.assertEqual(
             self.client.put("/settings", json={"controller": {"type": "alignment", "theta_low": 0.7, "theta_high": 0.6}}).status_code,
             400,
+        )
+
+    def _page_identity(self, url: str, tab_id: int) -> dict[str, str | int]:
+        parsed = urlparse(url)
+        location = parsed.path or "/"
+        if parsed.query:
+            location += f"?{parsed.query}"
+        if parsed.fragment:
+            location += f"#{parsed.fragment}"
+        return {
+            "tab_id": tab_id,
+            "url_host": parsed.hostname or "",
+            "url_path_hash": hashlib.sha256(location.encode()).hexdigest(),
+        }
+
+    def test_tau_ok_updates_apply_to_new_observations(self) -> None:
+        self.client.post("/sessions")
+        self.client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
+
+        self.client.put("/settings", json={"relevance": {"tau_ok": 1.0}})
+        first = self.client.post(
+            "/observations/browser-nav",
+            json={
+                "source": "browser_nav",
+                "payload": {"url": "https://example.com/first", "title": "Completely unrelated", "tab_id": 7},
+            },
+        ).json()
+
+        self.client.put("/settings", json={"relevance": {"tau_ok": 0.0}})
+        second = self.client.post(
+            "/observations/browser-nav",
+            json={
+                "source": "browser_nav",
+                "payload": {"url": "https://example.com/second", "title": "Completely unrelated", "tab_id": 8},
+            },
+        ).json()
+
+        self.assertEqual(first["verdict"], "DRIFT")
+        self.assertEqual(second["verdict"], "OK")
+        self.assertEqual(
+            self.client.get(
+                "/observations/latest",
+                params=self._page_identity("https://example.com/first", 7),
+            ).json()["tau_ok"],
+            1.0,
+        )
+        self.assertEqual(
+            self.client.get(
+                "/observations/latest",
+                params=self._page_identity("https://example.com/second", 8),
+            ).json()["tau_ok"],
+            0.0,
         )
 
     def test_personas_endpoint_lists_available_personas(self) -> None:
