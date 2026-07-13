@@ -55,7 +55,7 @@ If a tier cannot resolve, it degrades to the tier below, `/health` reports
 Configured tiers separately expose the last real judge call under
 `/health.provider_calls`. The result starts as `none`, changes to `error` with a
 coarse failure reason when a call fails, and returns to `success` after the next
-successful call for that tier. The popup shows a distinct "LLM 호출 문제"
+successful call for that tier. The popup shows a distinct "LLM 호출 오류"
 warning only while a tier's last call is an error. Health polling never probes
 the provider or creates extra API usage.
 
@@ -74,7 +74,7 @@ URLs, or API keys to the extension:
 | `other` | any unclassified failure | `Provider 상태를 확인하세요.` |
 
 The popup prefixes each hint with
-`LLM 호출 문제 — 마지막 판정 요청이 실패했어요.` When both tiers have
+`LLM 호출 오류 — 마지막 판정 요청이 실패했어요.` When both tiers have
 different last-failure reasons, it uses the generic provider-status hint rather
 than presenting one tier's reason as if it covered both.
 

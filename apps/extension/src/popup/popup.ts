@@ -439,7 +439,7 @@ function renderDashboard(
   const failedProviderCalls = Object.values(health?.provider_calls ?? {}).filter(
     (call) => call?.last_result === "error",
   )
-  const failureReasons = new Set(failedProviderCalls.map((call) => call?.reason).filter(Boolean))
+  const failureReasons = new Set(failedProviderCalls.map((call) => call?.reason).filter((reason) => reason != null))
   const providerFailureHint =
     failureReasons.size === 1 ? providerFailureReasonText([...failureReasons][0]) : "Provider 상태를 확인하세요."
   const providerFailureNote = failedProviderCalls.length
