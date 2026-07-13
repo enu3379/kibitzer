@@ -29,7 +29,8 @@ a scheduled task:
 
 - `scripts/windows_install_startup_app.ps1` creates the shortcut and starts the
   tray process immediately if it is not already running.
-- `scripts/windows_startup_tray.ps1` owns the `NotifyIcon`, polls `/health`, and
+- `scripts/windows_startup_tray.ps1` owns the `NotifyIcon`, polls `/health`
+  asynchronously so failed requests never block the WinForms UI thread, and
   starts `scripts/windows_run_server.ps1` when the server is dead and the local
   `.venv` exists.
 - `scripts/windows_server_host.py` runs Uvicorn, publishes an instance-scoped
@@ -60,6 +61,8 @@ Acceptance checks:
   state-dependent menu item, open logs, and quit the tray. Start/stop attempts
   show progress and failures in the status header; quitting the tray does not
   stop the server.
+- With the server stopped and `-PollSeconds 1`, the tray menu remains responsive
+  to hover, click, and dismissal while health checks time out in the background.
 
 ## Future Work
 

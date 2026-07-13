@@ -9,7 +9,7 @@ Project maintenance scripts live here.
   optional Windows login autostart for the idle daemon server.
 - `windows_startup_tray.ps1`: Windows tray status and state-dependent
   Start/Stop surface for the autostarted server; it uses the monochrome template
-  icon with a state dot overlay.
+  icon with a state dot overlay and polls health without blocking the tray UI.
 - `windows_server_host.py`: Windows-only Uvicorn host that provides
   instance-scoped graceful shutdown control to the tray.
 - `macos_setup.sh` / `macos_run_server.sh`: macOS setup and server run.

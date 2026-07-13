@@ -41,6 +41,8 @@ if (Test-Path $VenvConfig) {
 }
 $DefaultTimerInterval = [Math]::Max(1, $PollSeconds) * 1000
 $TransitionTimerInterval = 1000
+$HealthRequestCheckInterval = 100
+$HealthRequestTimeoutSeconds = 2
 $StartupTimeoutSeconds = 30
 $GracefulStopTimeoutSeconds = 15
 $ForcedStopTimeoutSeconds = 5
@@ -57,6 +59,10 @@ $Script:StatusMessageOverride = $null
 $Script:RunningStatusMessageOverride = $null
 $Script:ServerToggleItem = $null
 $Script:Timer = $null
+$Script:HealthRequest = $null
+$Script:NextHealthPollAt = [DateTime]::MinValue
+$Script:LastHealthStatus = $null
+$Script:AutoStartPending = $true
 
 New-Item -ItemType Directory -Force $LogDir | Out-Null
 
@@ -89,21 +95,81 @@ function Get-WindowsPowerShell {
   return (Get-Command powershell.exe -ErrorAction Stop).Source
 }
 
-function Get-KibitzerHealthStatus {
+function New-KibitzerDeadHealthStatus {
+  return @{ Mode = "dead"; IconKey = "dead"; Text = "Kibitzer: not running"; Message = "서버가 실행되지 않았습니다. 메뉴에서 'Start server'를 눌러 실행해 주세요." }
+}
+
+function ConvertTo-KibitzerHealthStatus {
+  param($Health)
+
+  $Mode = if ($Health.mode) { [string]$Health.mode } else { "unknown" }
+  if ($Mode -eq "active") {
+    return @{ Mode = "active"; IconKey = "active"; Text = "Kibitzer: active"; Message = "서버가 작동 중이며 활동을 관찰하고 있습니다." }
+  }
+  if ($Mode -eq "idle") {
+    return @{ Mode = "idle"; IconKey = "idle"; Text = "Kibitzer: idle"; Message = "서버는 실행 중이며 대기 상태입니다. 활동이 감지되면 자동으로 활성화됩니다." }
+  }
+  return @{ Mode = $Mode; IconKey = "unknown"; Text = "Kibitzer: $Mode"; Message = "서버 상태를 확인할 수 없습니다 (mode=$Mode). 잠시 후 다시 확인해 주세요." }
+}
+
+function Start-KibitzerHealthRequest {
+  if ($Script:HealthRequest) {
+    return
+  }
+
   try {
-    $Health = Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 2 -ErrorAction Stop
-    $Mode = if ($Health.mode) { [string]$Health.mode } else { "unknown" }
-    if ($Mode -eq "active") {
-      return @{ Mode = "active"; IconKey = "active"; Text = "Kibitzer: active"; Message = "서버가 작동 중이며 활동을 관찰하고 있습니다." }
+    $Script:HealthRequest = $HttpClient.GetStringAsync($HealthUrl)
+    if ($Script:Timer) {
+      $Script:Timer.Interval = $HealthRequestCheckInterval
     }
-    if ($Mode -eq "idle") {
-      return @{ Mode = "idle"; IconKey = "idle"; Text = "Kibitzer: idle"; Message = "서버는 실행 중이며 대기 상태입니다. 활동이 감지되면 자동으로 활성화됩니다." }
-    }
-    return @{ Mode = $Mode; IconKey = "unknown"; Text = "Kibitzer: $Mode"; Message = "서버 상태를 확인할 수 없습니다 (mode=$Mode). 잠시 후 다시 확인해 주세요." }
+    return $null
   }
   catch {
-    return @{ Mode = "dead"; IconKey = "dead"; Text = "Kibitzer: not running"; Message = "서버가 실행되지 않았습니다. 메뉴에서 'Start server'를 눌러 실행해 주세요." }
+    $Script:HealthRequest = $null
+    return New-KibitzerDeadHealthStatus
   }
+}
+
+function Receive-KibitzerHealthStatus {
+  if (-not $Script:HealthRequest -or -not $Script:HealthRequest.IsCompleted) {
+    return $null
+  }
+
+  $Request = $Script:HealthRequest
+  $Script:HealthRequest = $null
+  try {
+    $Payload = $Request.GetAwaiter().GetResult()
+    $Health = $Payload | ConvertFrom-Json -ErrorAction Stop
+    return ConvertTo-KibitzerHealthStatus $Health
+  }
+  catch {
+    return New-KibitzerDeadHealthStatus
+  }
+}
+
+function Set-KibitzerNextHealthPoll {
+  $DelayMilliseconds = if ($Script:StartingUntil -or $Script:StoppingUntil) {
+    $TransitionTimerInterval
+  }
+  else {
+    $DefaultTimerInterval
+  }
+  $Script:NextHealthPollAt = (Get-Date).AddMilliseconds($DelayMilliseconds)
+  if ($Script:Timer) {
+    $Script:Timer.Interval = $DelayMilliseconds
+  }
+}
+
+function Queue-KibitzerTrayUpdate {
+  $Script:NextHealthPollAt = [DateTime]::MinValue
+  if ($Script:Timer) {
+    $Script:Timer.Interval = 1
+  }
+}
+
+function Request-KibitzerTrayUpdate {
+  Queue-KibitzerTrayUpdate
+  Update-KibitzerTray
 }
 
 function Set-KibitzerStartingTray {
@@ -114,9 +180,6 @@ function Set-KibitzerStartingTray {
     $Script:ServerToggleItem.Text = "Start server"
     $Script:ServerToggleItem.Enabled = $false
   }
-  if ($Script:Timer) {
-    $Script:Timer.Interval = $TransitionTimerInterval
-  }
 }
 
 function Clear-KibitzerStartingState {
@@ -124,9 +187,6 @@ function Clear-KibitzerStartingState {
   $Script:StartSource = $null
   $Script:StartProcess = $null
   $Script:StartStartedAt = $null
-  if ($Script:Timer) {
-    $Script:Timer.Interval = $DefaultTimerInterval
-  }
 }
 
 function Get-KibitzerStartElapsedSeconds {
@@ -144,9 +204,6 @@ function Set-KibitzerStoppingTray {
     $Script:ServerToggleItem.Text = "Stop server"
     $Script:ServerToggleItem.Enabled = $false
   }
-  if ($Script:Timer) {
-    $Script:Timer.Interval = $TransitionTimerInterval
-  }
 }
 
 function Clear-KibitzerStoppingState {
@@ -155,9 +212,6 @@ function Clear-KibitzerStoppingState {
   $Script:StopStartedAt = $null
   $Script:StopControl = $null
   $Script:StopForced = $false
-  if ($Script:Timer) {
-    $Script:Timer.Interval = $DefaultTimerInterval
-  }
 }
 
 function Get-KibitzerStopElapsedSeconds {
@@ -209,7 +263,10 @@ function Set-KibitzerStartFailure {
   }
   Clear-KibitzerStartingState
   $Script:StatusMessageOverride = $Message
-  Update-KibitzerTray
+  if ($Script:LastHealthStatus) {
+    Set-KibitzerTrayStatus $Script:LastHealthStatus
+  }
+  Queue-KibitzerTrayUpdate
 }
 
 function Test-KibitzerPathEqual {
@@ -392,7 +449,10 @@ function Set-KibitzerStopFailure {
   Write-TrayLog "stop source=$Source outcome=$Outcome after ${Elapsed}s"
   Clear-KibitzerStoppingState
   $Script:RunningStatusMessageOverride = $Message
-  Update-KibitzerTray
+  if ($Script:LastHealthStatus) {
+    Set-KibitzerTrayStatus $Script:LastHealthStatus
+  }
+  Queue-KibitzerTrayUpdate
 }
 
 function Stop-KibitzerServer {
@@ -402,10 +462,9 @@ function Stop-KibitzerServer {
     Write-TrayLog "stop source=$Source skipped: transition-in-progress"
     return
   }
-  $Status = Get-KibitzerHealthStatus
-  if ($Status.Mode -eq "dead") {
+  if ($Script:LastHealthStatus -and $Script:LastHealthStatus.Mode -eq "dead") {
     Write-TrayLog "stop source=$Source skipped: health=dead"
-    Set-KibitzerTrayStatus $Status
+    Set-KibitzerTrayStatus $Script:LastHealthStatus
     return
   }
 
@@ -459,6 +518,7 @@ function Stop-KibitzerServer {
   $Script:StoppingUntil = (Get-Date).AddSeconds($GracefulStopTimeoutSeconds)
   Write-TrayLog "stop source=$Source requested pid=$($Control.pid) instance=$($Control.instance_id)"
   Set-KibitzerStoppingTray
+  Queue-KibitzerTrayUpdate
 }
 
 function Stop-KibitzerServerHostProcess {
@@ -481,11 +541,6 @@ function Stop-KibitzerServerHostProcess {
 function Start-KibitzerServer {
   param([string]$Source = "menu")
 
-  $Status = Get-KibitzerHealthStatus
-  if ($Status.Mode -ne "dead") {
-    Write-TrayLog "start source=$Source skipped: health=$($Status.Mode)"
-    return
-  }
   if ($Script:StartingUntil -or $Script:StoppingUntil) {
     Write-TrayLog "start source=$Source skipped: transition-in-progress"
     return
@@ -543,6 +598,7 @@ function Start-KibitzerServer {
   $Script:StartStartedAt = Get-Date
   Write-TrayLog "start source=$Source spawned pid=$($Process.Id)"
   Set-KibitzerStartingTray
+  Queue-KibitzerTrayUpdate
 }
 
 function Get-KibitzerTrayIconPath {
@@ -641,8 +697,12 @@ function New-KibitzerTrayIcon {
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.Net.Http
 
 [System.Windows.Forms.Application]::EnableVisualStyles()
+
+$HttpClient = New-Object System.Net.Http.HttpClient
+$HttpClient.Timeout = [TimeSpan]::FromSeconds($HealthRequestTimeoutSeconds)
 
 $TrayIcons = @{
   active = New-KibitzerTrayIcon ([System.Drawing.Color]::FromArgb(40, 170, 95))
@@ -662,6 +722,7 @@ $StatusHeaderItem.Enabled = $false
 $Menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
 $RefreshItem = $Menu.Items.Add("Refresh status")
 $ServerToggleItem = $Menu.Items.Add("Start server")
+$ServerToggleItem.Enabled = $false
 $OpenLogsItem = $Menu.Items.Add("Open logs")
 $ExitItem = $Menu.Items.Add("Exit tray")
 $Script:ServerToggleItem = $ServerToggleItem
@@ -688,13 +749,14 @@ function Set-KibitzerTrayStatus {
   else {
     $StatusHeaderItem.Text = $Status.Message
   }
-  $Transitioning = [bool]($Script:StartingUntil -or $Script:StoppingUntil)
+  $Transitioning = [bool]($Script:AutoStartPending -or $Script:StartingUntil -or $Script:StoppingUntil)
   $ServerToggleItem.Text = if ($Status.Mode -eq "dead") { "Start server" } else { "Stop server" }
   $ServerToggleItem.Enabled = -not $Transitioning
 }
 
 function Resolve-KibitzerStartingState {
-  $Status = Get-KibitzerHealthStatus
+  param($Status)
+
   if ($Status.Mode -ne "dead") {
     $Source = $Script:StartSource
     $Elapsed = Get-KibitzerStartElapsedSeconds
@@ -724,7 +786,8 @@ function Resolve-KibitzerStartingState {
 }
 
 function Resolve-KibitzerStoppingState {
-  $Status = Get-KibitzerHealthStatus
+  param($Status)
+
   if ($Status.Mode -eq "dead") {
     $Source = $Script:StopSource
     $Elapsed = Get-KibitzerStopElapsedSeconds
@@ -755,23 +818,66 @@ function Resolve-KibitzerStoppingState {
   Set-KibitzerStoppingTray
 }
 
-function Update-KibitzerTray {
+function Apply-KibitzerHealthStatus {
+  param($Status)
+
+  $Script:LastHealthStatus = $Status
+  if ($Script:AutoStartPending) {
+    $Script:AutoStartPending = $false
+    if ($Status.Mode -eq "dead") {
+      Start-KibitzerServer -Source "auto"
+      return
+    }
+    Write-TrayLog "start source=auto skipped: health=$($Status.Mode)"
+    Set-KibitzerTrayStatus $Status
+    return
+  }
+
   if ($Script:StartingUntil) {
-    Resolve-KibitzerStartingState
+    Resolve-KibitzerStartingState $Status
     return
   }
   if ($Script:StoppingUntil) {
-    Resolve-KibitzerStoppingState
+    Resolve-KibitzerStoppingState $Status
     return
   }
 
-  $Status = Get-KibitzerHealthStatus
   Set-KibitzerTrayStatus $Status
 }
 
-$RefreshItem.Add_Click({ Update-KibitzerTray })
+function Update-KibitzerTray {
+  if ($Script:HealthRequest) {
+    $Status = Receive-KibitzerHealthStatus
+    if (-not $Status) {
+      return
+    }
+    Apply-KibitzerHealthStatus $Status
+    if (-not $Script:HealthRequest) {
+      Set-KibitzerNextHealthPoll
+    }
+    return
+  }
+
+  if ((Get-Date) -lt $Script:NextHealthPollAt) {
+    return
+  }
+  $Status = Start-KibitzerHealthRequest
+  if ($Status) {
+    Apply-KibitzerHealthStatus $Status
+    Set-KibitzerNextHealthPoll
+  }
+}
+
+$RefreshItem.Add_Click({ Request-KibitzerTrayUpdate })
 $ServerToggleItem.Add_Click({
-  $Status = Get-KibitzerHealthStatus
+  if ($Script:AutoStartPending -or $Script:StartingUntil -or $Script:StoppingUntil) {
+    return
+  }
+  $Status = $Script:LastHealthStatus
+  if (-not $Status) {
+    Request-KibitzerTrayUpdate
+    return
+  }
   if ($Status.Mode -eq "dead") {
     Start-KibitzerServer -Source "menu"
   }
@@ -787,25 +893,24 @@ $ExitItem.Add_Click({ [System.Windows.Forms.Application]::Exit() })
 $NotifyIcon.Add_MouseClick({
   param($EventSender, $EventArgs)
   if ($EventArgs.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
-    Update-KibitzerTray
+    Request-KibitzerTrayUpdate
     $ShowMenu = [System.Windows.Forms.NotifyIcon].GetMethod("ShowContextMenu", [System.Reflection.BindingFlags]"Instance,NonPublic")
     $ShowMenu.Invoke($NotifyIcon, $null)
   }
 })
 
 $Timer = New-Object System.Windows.Forms.Timer
-$Timer.Interval = $DefaultTimerInterval
+$Timer.Interval = $HealthRequestCheckInterval
 $Script:Timer = $Timer
 $Timer.Add_Tick({ Update-KibitzerTray })
 $Timer.Start()
-
-Start-KibitzerServer -Source "auto"
-Update-KibitzerTray
+Request-KibitzerTrayUpdate
 
 [System.Windows.Forms.Application]::Run()
 
 $Timer.Stop()
 $Timer.Dispose()
+$HttpClient.Dispose()
 $NotifyIcon.Visible = $false
 $NotifyIcon.Dispose()
 foreach ($Icon in $TrayIcons.Values) {
