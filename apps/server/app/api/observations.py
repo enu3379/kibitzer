@@ -19,7 +19,7 @@ from ..core.personas import (
     format_persona_fallback,
     resolve_persona,
 )
-from ..core.relevance import tier0_score_parts
+from ..core.relevance import tier0_score_parts, tier1_final_relevance
 from ..core.runtime_settings import effective_controller_config, quiet_hours_active, runtime_settings
 from ..core.runtime_resources import RuntimeResources
 from ..core.tier1_payload import build_tier1_payload
@@ -201,6 +201,7 @@ async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineR
                 )
             else:
                 observation.verdict = result.verdict
+                observation.features.r_final = tier1_final_relevance(result.verdict)
                 observation.tier1_reason = result.reason
                 observation.features.tier_reached = 1
                 _store(request).record_tier1_result(
