@@ -61,6 +61,8 @@ Acceptance checks:
   state-dependent menu item, open logs, and quit the tray. Start/stop attempts
   show progress and failures in the status header; quitting the tray does not
   stop the server.
+- Selecting refresh keeps the menu open while the asynchronous status check is
+  applied, so repeated refreshes do not require reopening the context menu.
 - With the server stopped and `-PollSeconds 1`, the tray menu remains responsive
   to hover, click, and dismissal while health checks time out in the background.
 

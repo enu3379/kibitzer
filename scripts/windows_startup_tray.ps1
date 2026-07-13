@@ -699,6 +699,26 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Net.Http
 
+if (-not ("KibitzerStayOpenMenuItem" -as [type])) {
+  $StayOpenMenuItemSource = @"
+using System.Windows.Forms;
+
+public sealed class KibitzerStayOpenMenuItem : ToolStripMenuItem
+{
+    public KibitzerStayOpenMenuItem(string text) : base(text) { }
+
+    protected override bool DismissWhenClicked
+    {
+        get { return false; }
+    }
+}
+"@
+  Add-Type `
+    -TypeDefinition $StayOpenMenuItemSource `
+    -ReferencedAssemblies @("System.Windows.Forms", "System.Drawing") `
+    -WarningAction SilentlyContinue
+}
+
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $HttpClient = New-Object System.Net.Http.HttpClient
@@ -720,7 +740,8 @@ $Menu = New-Object System.Windows.Forms.ContextMenuStrip
 $StatusHeaderItem = $Menu.Items.Add("Kibitzer: starting")
 $StatusHeaderItem.Enabled = $false
 $Menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
-$RefreshItem = $Menu.Items.Add("Refresh status")
+$RefreshItem = New-Object KibitzerStayOpenMenuItem -ArgumentList "Refresh status"
+$Menu.Items.Add($RefreshItem) | Out-Null
 $ServerToggleItem = $Menu.Items.Add("Start server")
 $ServerToggleItem.Enabled = $false
 $OpenLogsItem = $Menu.Items.Add("Open logs")

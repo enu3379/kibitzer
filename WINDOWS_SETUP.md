@@ -67,6 +67,8 @@ unreachable server does not block the tray menu. The status header reports
 missing setup, startup failures, and timeouts; **Open logs** opens the folder
 containing the tray and server startup logs. The icon uses the monochrome template artwork,
 tinted for the current Windows system theme, with a small status dot overlay.
+Selecting **Refresh status** starts a new health check and keeps the tray menu
+open so the updated status can be inspected without reopening it.
 
 The tray menu has one server control item: it shows **Start server** while the
 server is down and changes to **Stop server** after startup succeeds. Stop
