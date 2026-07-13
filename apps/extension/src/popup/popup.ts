@@ -29,6 +29,7 @@ import {
 import { ExplorationHistoryEntry, listExplorationHistory } from "../lib/history"
 
 const POLL_MS = 2000
+const DEFAULT_OBSERVATION_SECONDS = 5
 const TRACKING_PILLS: Record<SessionState["tracking"], { label: string; tone: string }> = {
   coldstart: { label: "워밍업", tone: "gray" },
   tracking: { label: "추적 중", tone: "green" },
@@ -213,15 +214,24 @@ async function refresh(): Promise<void> {
     return
   }
   const activeTab = await getActiveTab()
-  const [current, stats, health, page] = await Promise.all([
+  const [current, stats, health, page, settings] = await Promise.all([
     getCurrentSession(),
     getSessionStats(),
     getHealthStatus(),
     activeTab === null ? Promise.resolve(null) : getLatestObservation(activeTab.id, activeTab.url),
+    getSettings(),
   ])
   const goalText = current?.goal?.raw_text ?? ""
   saveSnapshot({ state: result.state, goalText, stats })
-  renderDashboard(result.state, goalText, stats, health, page)
+  renderDashboard(
+    result.state,
+    goalText,
+    stats,
+    health,
+    page,
+    false,
+    settings?.dwell.observation_seconds ?? DEFAULT_OBSERVATION_SECONDS,
+  )
   schedulePoll()
 }
 
@@ -360,7 +370,11 @@ function pageDiagnosticsHtml(page: LatestObservation): string {
     ${reason}`
 }
 
-function pageCardHtml(page: LatestObservation | null, offline = false): string {
+function pageCardHtml(
+  page: LatestObservation | null,
+  offline = false,
+  observationSeconds = DEFAULT_OBSERVATION_SECONDS,
+): string {
   if (offline) {
     return `
     <p class="label">지금 페이지</p>
@@ -373,7 +387,7 @@ function pageCardHtml(page: LatestObservation | null, offline = false): string {
     <p class="label">지금 페이지</p>
     <div class="page-card">
       <p class="pc-empty">이 탭은 아직 관측 전이에요</p>
-      <p class="pc-empty-hint">5초 이상 머문 일반 웹페이지만 봐요.</p>
+      <p class="pc-empty-hint">${observationSeconds}초 이상 머문 일반 웹페이지만 봐요.</p>
     </div>`
   }
   const belief = pageBelief(page.verdict)
@@ -416,6 +430,7 @@ function renderDashboard(
   health: HealthStatus | null = null,
   page: LatestObservation | null = null,
   offline = false,
+  observationSeconds = DEFAULT_OBSERVATION_SECONDS,
 ): void {
   const pill = TRACKING_PILLS[state.tracking] ?? TRACKING_PILLS.tracking
   const pillLabel =
@@ -497,7 +512,7 @@ function renderDashboard(
       <p class="goal-text">${esc(goalText)}</p>
       <button id="goal-edit" class="icon-btn" title="목표 수정"${dis}>수정</button>
     </div>
-    ${pageCardHtml(page, offline)}
+    ${pageCardHtml(page, offline, observationSeconds)}
     <p class="label">${driftLabel}</p>
     ${driftMeter}
     <p class="hint">${driftHint}</p>
@@ -900,7 +915,7 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
     </div>
     <p class="subhint">꺼두면 테스트 중 같은 흐름에서도 다음 훈수를 바로 받을 수 있습니다.</p>
     <div class="setrow">
-      <span class="grow">판정 대기</span>
+      <span class="grow">관측 대기</span>
       <input id="dwell-observation" class="number" type="number" min="1" max="300" step="1"
         value="${settings.dwell.observation_seconds}" />
       <span style="color: var(--muted);">초</span>
@@ -911,7 +926,7 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
         value="${settings.dwell.tier2_seconds}" />
       <span style="color: var(--muted);">초</span>
     </div>
-    <p class="subhint">짧게 들른 페이지는 판정하지 않습니다. 본문 확인 대기는 Tier 2 요청 전에 같은 페이지에 머문 총 시간입니다.</p>
+    <p class="subhint">짧게 들른 페이지는 관측하지 않습니다. 본문 확인 대기는 Tier 2 요청 전에 같은 페이지에 머문 총 시간입니다.</p>
     <div class="setrow">
       <span class="grow">조용한 시간</span>
       <input id="quiet-start" class="time" type="time" value="${esc(settings.quiet_hours.start)}"
