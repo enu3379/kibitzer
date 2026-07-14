@@ -11,7 +11,7 @@ from ..storage.sqlite import (
 )
 from .controllers.alignment import AlignmentController
 from .controllers.streak import StreakController
-from .relevance import RELATED_RELEVANCE, TIER1_DRIFT_RELEVANCE
+from .relevance import DRIFT_RELEVANCE, RELATED_RELEVANCE
 
 
 def apply_controller(
@@ -139,7 +139,7 @@ def rebuild_controller_state(
         if event.label == "related":
             relevance = RELATED_RELEVANCE
         elif event.label == "drift":
-            relevance = TIER1_DRIFT_RELEVANCE
+            relevance = DRIFT_RELEVANCE
         else:
             relevance = event.r_final
         controller.update(Verdict(effective), relevance)

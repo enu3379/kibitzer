@@ -252,6 +252,70 @@ class PageLabelApiTest(unittest.TestCase):
         self.assertAlmostEqual(after["alignment_score"], expected)
         self.assertEqual(after["obs_count"], before["obs_count"])
 
+    def test_drift_label_replaces_related_page_relevance_with_zero(self) -> None:
+        client = self._client(controller_type="alignment", theta_low=0.15, theta_high=0.3)
+        base = datetime(2026, 7, 8, 0, 0, tzinfo=timezone.utc)
+        try:
+            session_id = self._start_goal(client)
+            observed = self._post_nav(client, "Kibitzer observation API docs", 77, base)
+            observation = self.store.get_observation(str(observed["observation_id"]))
+            before = client.get("/sessions/current/state").json()
+            response = client.post(
+                f"/observations/{observed['observation_id']}/label",
+                json={"label": "drift"},
+            )
+            after = client.get("/sessions/current/state").json()
+            stats = client.get("/sessions/current/stats").json()
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertEqual(observed["verdict"], "OK")
+        self.assertIsNotNone(observation)
+        assert observation is not None
+        raw_r = observation.features.get("r_final")
+        self.assertIsNotNone(raw_r)
+        self.assertGreater(before["alignment_score"], 0.3)
+        self.assertEqual(response.json()["verdict"], "DRIFT")
+        self.assertAlmostEqual(after["alignment_score"], 0.0)
+        self.assertEqual(after["obs_count"], 1)
+        self.assertEqual(stats["ok"], 0)
+        self.assertEqual(stats["drift"], 1)
+        unchanged = self.store.get_observation(str(observed["observation_id"]))
+        self.assertIsNotNone(unchanged)
+        assert unchanged is not None
+        self.assertEqual(unchanged.verdict, "OK")
+        self.assertEqual(unchanged.features.get("r_final"), raw_r)
+        self.assertEqual(
+            self.store.page_label_for_observation(str(observed["observation_id"])),
+            "drift",
+        )
+        self.assertEqual(self.store.goal_exemplar_count(session_id), 1)
+
+    def test_drift_label_replays_streak_from_final_page_verdicts(self) -> None:
+        client = self._client()
+        base = datetime(2026, 7, 8, 0, 0, tzinfo=timezone.utc)
+        try:
+            self._start_goal(client)
+            self._post_nav(client, "Sourdough bread recipe", 77, base)
+            related = self._post_nav(
+                client,
+                "Kibitzer observation API docs",
+                77,
+                base + timedelta(seconds=1),
+            )
+            before = client.get("/sessions/current/state").json()
+            client.post(
+                f"/observations/{related['observation_id']}/label",
+                json={"label": "drift"},
+            )
+            after = client.get("/sessions/current/state").json()
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertEqual(before["streak"], 0)
+        self.assertEqual(after["streak"], 2)
+        self.assertEqual(after["obs_count"], 2)
+
     def test_latest_observation_rejects_query_only_navigation(self) -> None:
         client = self._client()
         base = datetime(2026, 7, 8, 0, 0, tzinfo=timezone.utc)

@@ -10,10 +10,14 @@ from ..schemas import Verdict
 # from Tier 1 or an explicit page-label correction.
 RELATED_RELEVANCE = 0.85
 
+# An explicit user correction to drift uses the same replacement relevance as
+# PR #36's Tier 1 DRIFT override while keeping the detector's raw r immutable.
+DRIFT_RELEVANCE = 0.0
+
 # Tier 1 overrides the raw embedding score after it reviews a Tier 0 drift.
 # DRIFT stays below the default alignment theta_low; mapping it to 0.15 would
 # only approach that strict boundary from above and never arm the controller.
-TIER1_DRIFT_RELEVANCE = 0.0
+TIER1_DRIFT_RELEVANCE = DRIFT_RELEVANCE
 
 
 @dataclass(frozen=True)
