@@ -27,6 +27,7 @@ from apps.server.app.providers.embeddings.factory import create_embedding_provid
 from apps.server.app.providers.embeddings.hash_cpu import HashCpuEmbeddingProvider
 
 DEFAULT_DATASET = ROOT / "scripts" / "fixtures" / "tier0_embedding_benchmark_dataset.json"
+DATASET_V2 = ROOT / "scripts" / "fixtures" / "tier0_embedding_benchmark_dataset_v2.json"
 LEGACY_FIXTURE = ROOT / "scripts" / "fixtures" / "onnx_embedding_smoke_cases.json"
 DEFAULT_OUTPUT_DIR = ROOT / "data" / "embedding-benchmark"
 FPR_BUDGETS = (0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50)
@@ -52,6 +53,22 @@ CONTROLLED_TAGS = {
     "adjacent_topic",
     "easy_negative",
     "legacy_fixture",
+}
+
+# v2 rebalances composition after the 2026-07-13 real-corpus replay showed v1's
+# blind spots: no lexical-overlap OK rows (the most common live case), no
+# same-frame adjacency traps, and too-clean titles. See the dataset guidelines.
+CONTROLLED_TAGS_V2 = {
+    "short_anchor",
+    "short_title",
+    "lexical_overlap_ok",
+    "ko_semantic_no_overlap",
+    "cross_lingual",
+    "lexical_overlap_trap",
+    "same_frame_trap",
+    "clickbait_ok",
+    "generic_hub",
+    "typo_query",
 }
 
 
@@ -203,8 +220,11 @@ def resolve_methods(specs: list[str], config: AppConfig) -> list[BenchmarkMethod
 
 def load_and_validate_dataset(dataset_path: Path) -> list[dict[str, Any]]:
     payload = json.loads(dataset_path.read_text(encoding="utf-8"))
-    if payload.get("version") != 1 or not isinstance(payload.get("pairs"), list):
-        raise ValueError("dataset must contain version=1 and a pairs list")
+    version = payload.get("version")
+    if version not in (1, 2) or not isinstance(payload.get("pairs"), list):
+        raise ValueError("dataset must contain version=1 or version=2 and a pairs list")
+    if version == 2:
+        return _validate_v2_dataset(payload["pairs"])
     pairs: list[dict[str, Any]] = payload["pairs"]
     errors: list[str] = []
 
@@ -298,6 +318,99 @@ def load_and_validate_dataset(dataset_path: Path) -> list[dict[str, Any]]:
                 errors.append(f"missing legacy pair: {key}")
             elif item.get("source") != "legacy_fixture" or "legacy_fixture" not in item.get("tags", []):
                 errors.append(f"legacy pair lacks source/tag: {item.get('id')}")
+
+    if errors:
+        raise ValueError("dataset validation failed:\n- " + "\n- ".join(errors))
+    return pairs
+
+
+def _validate_v2_dataset(pairs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    errors: list[str] = []
+
+    if len(pairs) != 200:
+        errors.append(f"expected 200 pairs, got {len(pairs)}")
+    ids = [item.get("id") for item in pairs]
+    if len(set(ids)) != len(ids):
+        errors.append("pair ids must be unique")
+    anchor_titles = [(item.get("anchor"), item.get("title")) for item in pairs]
+    if len(set(anchor_titles)) != len(anchor_titles):
+        errors.append("anchor-title pairs must be unique")
+
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for item in pairs:
+        required = {"id", "group_id", "anchor", "title", "label", "tags", "source", "rationale"}
+        missing = required - item.keys()
+        if missing:
+            errors.append(f"{item.get('id', '<missing id>')}: missing fields {sorted(missing)}")
+            continue
+        groups[item["group_id"]].append(item)
+        if item["label"] not in {"OK", "DRIFT"}:
+            errors.append(f"{item['id']}: invalid label {item['label']!r}")
+        if item["source"] != "v2_generated":
+            errors.append(f"{item['id']}: invalid source {item['source']!r}")
+        if not isinstance(item["tags"], list):
+            errors.append(f"{item['id']}: tags must be a list")
+            continue
+        unknown = set(item["tags"]) - CONTROLLED_TAGS_V2
+        if unknown:
+            errors.append(f"{item['id']}: unknown tags {sorted(unknown)}")
+        is_short_anchor = len(str(item["anchor"]).split()) <= 3
+        if ("short_anchor" in item["tags"]) != is_short_anchor:
+            errors.append(f"{item['id']}: short_anchor tag does not match anchor length")
+        is_short_title = len(str(item["title"]).split()) <= 6
+        if ("short_title" in item["tags"]) != is_short_title:
+            errors.append(f"{item['id']}: short_title tag does not match title length")
+        if "cross_lingual" in item["tags"]:
+            has_ascii_letter = any("A" <= char <= "Z" or "a" <= char <= "z" for char in item["title"])
+            if not has_ascii_letter:
+                errors.append(f"{item['id']}: cross_lingual title must contain English letters")
+        if "lexical_overlap_ok" in item["tags"] and item["label"] != "OK":
+            errors.append(f"{item['id']}: lexical_overlap_ok must be an OK row")
+        if "clickbait_ok" in item["tags"] and item["label"] != "OK":
+            errors.append(f"{item['id']}: clickbait_ok must be an OK row")
+
+    if len(groups) != 40:
+        errors.append(f"expected 40 groups, got {len(groups)}")
+    for group_id, rows in groups.items():
+        anchors = {row.get("anchor") for row in rows}
+        labels = Counter(row.get("label") for row in rows)
+        if len(rows) != 5 or len(anchors) != 1:
+            errors.append(f"{group_id}: expected five rows with one anchor")
+        if labels != Counter({"DRIFT": 3, "OK": 2}):
+            errors.append(f"{group_id}: expected 2 OK and 3 DRIFT, got {dict(labels)}")
+
+    # Composition quotas — the point of v2. Derived from the 2026-07-13
+    # real-corpus replay findings (see the dataset guidelines).
+    overlap_ok_groups = {
+        item["group_id"]
+        for item in pairs
+        if item.get("label") == "OK" and "lexical_overlap_ok" in item.get("tags", [])
+    }
+    if len(overlap_ok_groups) < 30:
+        errors.append(f"expected at least 30 groups with a lexical-overlap OK title, got {len(overlap_ok_groups)}")
+    english_ok_groups = {
+        item["group_id"]
+        for item in pairs
+        if item.get("label") == "OK" and "cross_lingual" in item.get("tags", [])
+    }
+    if len(english_ok_groups) < 12:
+        errors.append(f"expected at least 12 groups with an English OK title, got {len(english_ok_groups)}")
+    trap_groups = {
+        item["group_id"]
+        for item in pairs
+        if item.get("label") == "DRIFT"
+        and {"same_frame_trap", "lexical_overlap_trap"} & set(item.get("tags", []))
+    }
+    if len(trap_groups) < 30:
+        errors.append(f"expected at least 30 groups with a trap DRIFT title, got {len(trap_groups)}")
+    clickbait_ok = sum(
+        item.get("label") == "OK" and "clickbait_ok" in item.get("tags", []) for item in pairs
+    )
+    if clickbait_ok < 12:
+        errors.append(f"expected at least 12 clickbait OK titles, got {clickbait_ok}")
+    typo_queries = sum("typo_query" in item.get("tags", []) for item in pairs)
+    if typo_queries < 8:
+        errors.append(f"expected at least 8 typo'd query titles, got {typo_queries}")
 
     if errors:
         raise ValueError("dataset validation failed:\n- " + "\n- ".join(errors))
@@ -519,7 +632,9 @@ def build_dataset_stats(pairs: list[dict[str, Any]]) -> dict[str, int]:
             {
                 item["group_id"]
                 for item in pairs
-                if item["label"] == "OK" and "en_translation" in item["tags"]
+                # v1 marks translated OK rows en_translation; v2 uses cross_lingual.
+                if item["label"] == "OK"
+                and {"en_translation", "cross_lingual"} & set(item["tags"])
             }
         ),
         "legacy_pairs": sum(item["source"] == "legacy_fixture" for item in pairs),
