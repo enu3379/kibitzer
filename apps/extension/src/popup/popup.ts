@@ -620,11 +620,17 @@ async function submitInterventionFeedback(
   pending: PendingIntervention,
   kind: FeedbackKind,
 ): Promise<void> {
-  await postFeedback({
+  const result = await postFeedback({
     kind,
     intervention_id: pending.intervention_id,
     observation_id: pending.observation_id ?? null,
   })
+  if (
+    result?.observation_id &&
+    (result.verdict === "OK" || result.verdict === "DRIFT")
+  ) {
+    await syncExplorationHistoryVerdict(result.observation_id, result.verdict)
+  }
   notifyBadge()
   await refresh()
 }
