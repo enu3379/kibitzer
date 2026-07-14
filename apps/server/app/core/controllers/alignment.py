@@ -25,6 +25,22 @@ class AlignmentController:
         previous = float(r) if self.alignment_score is None else self.alignment_score
         self.alignment_score = alpha * previous + (1.0 - alpha) * float(r)
 
+        self._refresh_drift_state()
+
+    def replace_latest_relevance(self, previous_r: float, corrected_r: float) -> None:
+        """Replace the latest observation's contribution without adding an observation."""
+        if self.alignment_score is None or self.obs_count <= 1:
+            self.alignment_score = float(corrected_r)
+        else:
+            alpha = min(0.99, max(0.0, self.alpha))
+            self.alignment_score += (1.0 - alpha) * (float(corrected_r) - float(previous_r))
+
+        self._refresh_drift_state()
+
+    def _refresh_drift_state(self) -> None:
+        if self.alignment_score is None:
+            return
+
         if self.alignment_score > self.theta_high:
             self.drift_latched = False
             self.armed = 0

@@ -149,7 +149,7 @@ async def label_observation(
         apply_related_page_correction(
             store,
             effective_controller_config(request.app.state.config, store),
-            observation.session_id,
+            observation,
             now=now,
         )
         # A corrected false drift must not keep the attachment state or a nag

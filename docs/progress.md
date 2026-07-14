@@ -10,9 +10,13 @@ Completed:
 - Wired effective verdicts through the current-page card, session/daily reports,
   recent Tier 1/2 context, drift timing, and anchor selection. Explicit related
   labels may enter the anchor even when the detector originally rejected them.
-- A false-DRIFT → related correction now resets both streak and alignment
-  controllers, clears attachment drift state, and resolves unhandled
-  interventions for the corrected observation without generating a new nag.
+- A false-DRIFT → related correction now resets the streak controller; the
+  alignment controller replaces the current observation's relevance with the
+  Tier 1 OK value `0.85` and recomputes `A_t`. Both paths clear attachment drift
+  state and resolve unhandled interventions for the corrected observation
+  without generating a new nag.
+- The extension synchronizes the matching exploration-history light to the
+  page label's effective verdict.
 - Added page-label API coverage for both override directions, preserved raw
   detector verdicts, streak/alignment recovery, stats/reports, pending
   intervention cleanup, and anchor/recent-context behavior.

@@ -203,7 +203,7 @@ class PageLabelApiTest(unittest.TestCase):
         self.assertEqual(len(self.store.recent_ok_embeddings(session_id, 10)), 1)
         self.assertEqual(self.store.get_observation(observation_id).verdict, "DRIFT")
 
-    def test_related_label_resets_alignment_false_drift(self) -> None:
+    def test_related_label_replaces_first_alignment_relevance_with_related_value(self) -> None:
         client = self._client(controller_type="alignment", theta_low=0.15, theta_high=0.3)
         base = datetime(2026, 7, 8, 0, 0, tzinfo=timezone.utc)
         try:
@@ -220,8 +220,37 @@ class PageLabelApiTest(unittest.TestCase):
 
         self.assertEqual(observed["verdict"], "DRIFT")
         self.assertLess(before["alignment_score"], 0.15)
-        self.assertAlmostEqual(after["alignment_score"], 0.3)
+        self.assertAlmostEqual(after["alignment_score"], 0.85)
         self.assertEqual(after["streak"], 0)
+
+    def test_related_label_recalculates_only_latest_alignment_contribution(self) -> None:
+        client = self._client(controller_type="alignment", theta_low=0.15, theta_high=0.3)
+        base = datetime(2026, 7, 8, 0, 0, tzinfo=timezone.utc)
+        try:
+            self._start_goal(client)
+            self._post_nav(client, "Kibitzer observation API docs", 77, base)
+            observed = self._post_nav(
+                client,
+                "Sourdough bread recipe",
+                77,
+                base + timedelta(seconds=1),
+            )
+            observation = self.store.get_observation(str(observed["observation_id"]))
+            before = client.get("/sessions/current/state").json()
+            client.post(
+                f"/observations/{observed['observation_id']}/label",
+                json={"label": "related"},
+            )
+            after = client.get("/sessions/current/state").json()
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertIsNotNone(observation)
+        previous_r = observation.features.get("r_final")
+        self.assertIsNotNone(previous_r)
+        expected = before["alignment_score"] + (1.0 - 0.85) * (0.85 - previous_r)
+        self.assertAlmostEqual(after["alignment_score"], expected)
+        self.assertEqual(after["obs_count"], before["obs_count"])
 
     def test_latest_observation_rejects_query_only_navigation(self) -> None:
         client = self._client()

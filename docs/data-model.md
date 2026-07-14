@@ -128,9 +128,12 @@ Supported kinds:
 Goal exemplar cap enforcement preserves the declared-goal exemplar when possible and removes older feedback exemplars first.
 
 Page labels are observation-scoped and do not require an intervention. A
-`related` correction adds the observation embedding as an exemplar, clears
-accumulated drift/controller state, and resolves an unhandled intervention for
-that observation. The original detector verdict is retained for audit.
+`related` correction adds the observation embedding as an exemplar and resolves
+an unhandled intervention for that observation. The streak controller clears its
+accumulated streak. The alignment controller instead replaces only the latest
+observation's relevance with `0.85`, recomputes `A_t`, and reapplies its
+thresholds. The extension also updates the matching exploration-history verdict.
+The original detector verdict is retained for audit.
 
 ## Raw Data Retention
 

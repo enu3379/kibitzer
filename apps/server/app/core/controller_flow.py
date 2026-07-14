@@ -4,9 +4,10 @@ from datetime import datetime, timezone
 
 from ..config import ControllerConfig
 from ..schemas import Observation, PageInfo, PipelineAction, PipelineResult, Verdict
-from ..storage.sqlite import ControllerStateRecord, SQLiteStore
+from ..storage.sqlite import ControllerStateRecord, ObservationRecord, SQLiteStore
 from .controllers.alignment import AlignmentController
 from .controllers.streak import StreakController
+from .relevance import RELATED_RELEVANCE
 
 
 def apply_controller(
@@ -105,16 +106,22 @@ def controller_state_after_intervention(
 def apply_related_page_correction(
     store: SQLiteStore,
     config: ControllerConfig,
-    session_id: str,
+    observation: ObservationRecord,
     now: datetime | None = None,
 ) -> None:
-    """Clear accumulated drift after the user corrects a verdict to related."""
-    state = store.get_controller_state(session_id)
+    """Apply the controller-specific effect of correcting a page to related."""
+    state = store.get_controller_state(observation.session_id)
     controller = _controller_from_state(config, state)
-    controller.on_feedback("relevant")
+    if isinstance(controller, AlignmentController):
+        previous_r = observation.features.get("r_final")
+        if previous_r is None:
+            previous_r = 1.0 if observation.verdict == Verdict.OK else 0.0
+        controller.replace_latest_relevance(previous_r, RELATED_RELEVANCE)
+    else:
+        controller.on_feedback("relevant")
     _save_controller_state(
         store,
-        session_id,
+        observation.session_id,
         controller,
         state,
         now or datetime.now(timezone.utc),

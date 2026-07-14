@@ -26,7 +26,12 @@ import {
   putSettings,
   setGoal,
 } from "../lib/api"
-import { ExplorationHistoryEntry, ExplorationResponseKind, loadExplorationHistory } from "../lib/history"
+import {
+  ExplorationHistoryEntry,
+  ExplorationResponseKind,
+  loadExplorationHistory,
+  updateExplorationHistoryByObservationId,
+} from "../lib/history"
 
 const POLL_MS = 2000
 const DEFAULT_OBSERVATION_SECONDS = 5
@@ -420,7 +425,14 @@ async function submitPageLabel(page: LatestObservation, label: PageLabel): Promi
     if (button) button.disabled = true
   }
   const result = await postObservationLabel(page.observation_id, label)
-  if (result) notifyBadge()
+  if (result) {
+    if (result.verdict === "OK" || result.verdict === "DRIFT") {
+      await updateExplorationHistoryByObservationId(result.observation_id, {
+        verdict: result.verdict,
+      })
+    }
+    notifyBadge()
+  }
   await refresh()
 }
 
