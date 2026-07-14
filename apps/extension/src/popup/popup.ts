@@ -26,7 +26,7 @@ import {
   putSettings,
   setGoal,
 } from "../lib/api"
-import { ExplorationHistoryEntry, ExplorationResponseKind, listExplorationHistory } from "../lib/history"
+import { ExplorationHistoryEntry, ExplorationResponseKind, loadExplorationHistory } from "../lib/history"
 
 const POLL_MS = 2000
 const DEFAULT_OBSERVATION_SECONDS = 5
@@ -636,18 +636,36 @@ async function openHistory(): Promise<void> {
   settingsOpen = false
   reportOpen = false
   stopPoll()
-  try {
-    const entries = await listExplorationHistory()
-    renderHistory(entries)
-  } catch {
+  const loaded = await loadExplorationHistory()
+  if (!loaded.ok) {
     historyOpen = false
-    void refresh()
+    renderHistoryLoadError()
+    schedulePoll()
+    return
   }
+  renderHistory(loaded.entries)
 }
 
 function closeHistory(): void {
   historyOpen = false
   void refresh()
+}
+
+function renderHistoryLoadError(): void {
+  root.innerHTML = `
+    <div class="header">
+      <button id="history-back" class="icon-btn" title="대시보드로">←</button>
+      <span class="name">탐색 기록</span>
+    </div>
+    <p class="center-note">탐색 기록을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.</p>
+    <div class="btn-row">
+      <button id="history-retry" class="btn">다시 시도</button>
+    </div>`
+
+  document.getElementById("history-back")?.addEventListener("click", closeHistory)
+  document.getElementById("history-retry")?.addEventListener("click", () => {
+    void openHistory()
+  })
 }
 
 function renderHistory(entries: ExplorationHistoryEntry[]): void {
