@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from apps.server.app.config import AppConfig, ServerConfig
-from apps.server.app.core.relevance import cosine, tier0_score
+from apps.server.app.core.relevance import cosine, tier0_score, tier0_score_parts
 from apps.server.app.main import create_app
 from apps.server.app.providers.embeddings.hash_cpu import HashCpuEmbeddingProvider
 from apps.server.app.storage.sqlite import SQLiteStore
@@ -54,6 +54,33 @@ class EmbeddingTier0Test(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(tier0_score(related, [goal], None, beta=0.85), 0.55)
         self.assertGreaterEqual(tier0_score(anchor_related, [], related, beta=0.85), 0.55)
         self.assertLess(tier0_score(unrelated, [goal], related, beta=0.85), 0.55)
+
+    async def test_derived_score_uses_separate_threshold_gate(self) -> None:
+        emb = [1.0, 0.0, 0.0]
+        below = [0.2, math.sqrt(1 - 0.2**2), 0.0]
+        above = [0.3, math.sqrt(1 - 0.3**2), 0.0]
+
+        below_score = tier0_score_parts(
+            emb,
+            exemplars=[],
+            anchor=None,
+            beta=0.85,
+            derived_exemplars=[below],
+            derived_tau=0.25,
+        )
+        above_score = tier0_score_parts(
+            emb,
+            exemplars=[],
+            anchor=None,
+            beta=0.85,
+            derived_exemplars=[above],
+            derived_tau=0.25,
+        )
+
+        self.assertAlmostEqual(below_score.derived_score, 0.2)
+        self.assertEqual(below_score.score, 0.0)
+        self.assertAlmostEqual(above_score.derived_score, 0.3)
+        self.assertAlmostEqual(above_score.score, 0.3)
 
 
 class Tier0ApiTest(unittest.TestCase):

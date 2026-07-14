@@ -108,7 +108,7 @@ A **wall** variant (peek over a ledge) is kept as an alternate under
 screen are the same ink in mono, so a solid rim would merge them; the color icon
 uses a light rim instead.
 
-### D3 — Goal-enrichment LLM call → OPEN
+### D3 — Goal-enrichment LLM call → RESOLVED (design, 2026-07-09)
 
 The audit plan adds one cheap LLM call at goal declaration to derive positive
 goal phrases. Only the goal text leaves the call site; no page content.
@@ -116,6 +116,32 @@ Direction update (2026-07-08, user): the stack runs on **Ollama Cloud** (tiers
 use nemotron-3-super / minimax-m3 there — newest free-tier models by live probe) — drop the local-first framing; the
 enrichment call should ride the same Tier 1 cloud provider. OPEN only on
 prompt/shape, not on where it runs.
+
+**Data-driven requirement (Step 0, 2026-07-08):** enrichment MUST produce
+**cross-lingual phrases (Korean + English)** and sub-topic vocabulary. The
+private labeled replay corpus shows the dominant Tier-0 failure is false-DRIFT
+(80/142 related pages under τ), mostly Korean goal ↔ English page titles
+(r0=0.000 for "How To Make a Train In Minecraft Create Mod!" under
+"마인크래프트 크리에이트모드") plus unreachable sub-topic words (압출기,
+배낭 펌프, 서비스센터). Threshold tuning cannot fix a 0.00-mass. The corpus
+stays local because it contains browsing history; set `KIBITZER_AUDIT_CORPUS`
+to rerun its regression test.
+
+**Design resolved 2026-07-09 → `handoff-goal-enrichment.md`.** Key shape:
+one async call at goal declaration (Tier-1 cloud stack, goal text only),
+K≤8 phrases via a strict prompt (no bare platform/generic words, ~half
+English when the topic lives in English), stored as a separate
+`goal_derived_exemplars` table, and matched at a **separate higher
+threshold `derived_tau=0.25`** — the user's false-OK concern, answered
+empirically: at 0.25 the pre-flight eval keeps 52/55 fixed false-DRIFTs
+while cutting new false-OKs 7→2, both of which sit inside the 0.35 audit
+band (hash-bucket noise is why the union of K phrases needs its own bar).
+**User proposal (2026-07-09, adopted as feature 2): the derived phrases
+also ride the Tier 1 payload** ("these vocabularies match this goal"), so
+the judge gets the same cross-lingual bridge for exactly the borderline
+band Tier 0 can't settle. Acceptance = deterministic private-corpus regression
+(`--derived-phrases` injection): false-DRIFT ≤ 30 of 80, new false-OKs all
+< 0.35.
 
 ### D4 — Replay CLI scope → OPEN
 

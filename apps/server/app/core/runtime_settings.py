@@ -18,6 +18,13 @@ def validate_hhmm(value: str) -> str:
 
 def runtime_settings(config: AppConfig, store: SQLiteStore) -> dict[str, Any]:
     stored = store.get_settings()
+    relevance = {"tau_ok": config.relevance.tau_ok}
+    stored_relevance = stored.get("relevance")
+    if isinstance(stored_relevance, dict):
+        tau_ok = stored_relevance.get("tau_ok")
+        if isinstance(tau_ok, (int, float)) and 0.0 <= float(tau_ok) <= 1.0:
+            relevance["tau_ok"] = float(tau_ok)
+
     controller = {
         "type": config.controller.type,
         "k": config.controller.k,
@@ -85,6 +92,7 @@ def runtime_settings(config: AppConfig, store: SQLiteStore) -> dict[str, Any]:
         "voice_enabled": (
             bool(stored["voice_enabled"]) if "voice_enabled" in stored else config.delivery.voice.enabled
         ),
+        "relevance": relevance,
         "controller": controller,
         "cooldown": cooldown,
         "dwell": dwell,

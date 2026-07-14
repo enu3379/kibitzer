@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+import httpx
 import yaml
 from fastapi.testclient import TestClient
 
@@ -49,6 +50,19 @@ class FakeTier2Provider:
         self.payloads.append(payload)
         self.system_prompts.append(system_prompt)
         return self.result
+
+
+class RaisingTier2Provider:
+    async def classify_tier1(self, payload: dict[str, object]) -> Tier1Result:
+        return Tier1Result(verdict=Verdict.DRIFT, reason="unused")
+
+    async def confirm_tier2(
+        self,
+        payload: dict[str, object],
+        system_prompt: str | None = None,
+    ) -> Tier2Result:
+        request = httpx.Request("POST", "https://provider.invalid/chat")
+        raise httpx.ConnectError("offline", request=request)
 
 
 class Tier2ProviderTest(unittest.TestCase):
@@ -160,6 +174,7 @@ class Tier2ApiTest(unittest.TestCase):
                 f"/observations/{request['observation_id']}/excerpt",
                 json={"title": "Bread", "text": f"{secret_excerpt} " + ("bread " * 100)},
             )
+            provider_status = client.get("/health").json()["provider_calls"]["tier2"]
         finally:
             client.__exit__(None, None, None)
 
@@ -168,6 +183,8 @@ class Tier2ApiTest(unittest.TestCase):
         self.assertEqual(result["message"], "지금 페이지는 목표와 달라 보여요. 계속 볼까요?")
         self.assertTrue(result["intervention_id"].startswith("int_"))
         self.assertEqual(len(provider.payloads), 1)
+        self.assertEqual(provider_status["last_result"], "success")
+        self.assertIsNone(provider_status["reason"])
         payload = provider.payloads[0]
         self.assertLessEqual(len(str(payload["page_excerpt"])), 120)
         self.assertEqual(payload["current"]["url_host"], "example.com")
@@ -358,6 +375,22 @@ class Tier2ApiTest(unittest.TestCase):
         with closing(sqlite3.connect(self.db_path)) as conn:
             confirmed = conn.execute("SELECT COUNT(*) FROM event_log WHERE event_type = 'tier2.confirmed'").fetchone()[0]
         self.assertEqual(confirmed, 1)
+
+    def test_provider_failure_is_reported_in_health(self) -> None:
+        client, _store = self._client(RaisingTier2Provider())
+        try:
+            request = self._start_goal_and_request_excerpt(client)
+            response = client.post(
+                f"/observations/{request['observation_id']}/excerpt",
+                json={"title": "Bread", "text": "A recipe with unrelated steps."},
+            )
+            provider_status = client.get("/health").json()["provider_calls"]["tier2"]
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertEqual(response.json()["action"], "notify")
+        self.assertEqual(provider_status["last_result"], "error")
+        self.assertEqual(provider_status["reason"], "connection")
 
     def test_tier2_provider_receives_persona_prompt_and_escalation_context(self) -> None:
         provider = FakeTier2Provider(Tier2Result(confirm_drift=True, message="목표와 다른 페이지입니다."))

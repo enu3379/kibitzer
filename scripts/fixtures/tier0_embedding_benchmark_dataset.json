@@ -1,0 +1,2895 @@
+{
+  "version": 1,
+  "pairs": [
+    {
+      "id": "g01-legacy-01",
+      "group_id": "g01-legacy",
+      "anchor": "국내 여행지 탐색",
+      "title": "제주 관광 명소 추천",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It directly supports the declared goal."
+    },
+    {
+      "id": "g01-legacy-02",
+      "group_id": "g01-legacy",
+      "anchor": "국내 여행지 탐색",
+      "title": "부산에서 가볼 만한 곳",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It directly supports the declared goal."
+    },
+    {
+      "id": "g01-legacy-03",
+      "group_id": "g01-legacy",
+      "anchor": "국내 여행지 탐색",
+      "title": "국내 주식 시장 전망",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It does not directly support the declared goal."
+    },
+    {
+      "id": "g01-legacy-04",
+      "group_id": "g01-legacy",
+      "anchor": "국내 여행지 탐색",
+      "title": "프리미어리그 경기 하이라이트",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It does not directly support the declared goal."
+    },
+    {
+      "id": "g01-generated-05",
+      "group_id": "g01-legacy",
+      "anchor": "국내 여행지 탐색",
+      "title": "국내 여행 보험 비교",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is a hard negative that shares context without directly satisfying the goal."
+    },
+    {
+      "id": "g02-legacy-01",
+      "group_id": "g02-legacy",
+      "anchor": "한국에서 가볼 만한 여행지",
+      "title": "Best places to visit in Korea",
+      "label": "OK",
+      "tags": [
+        "en_translation",
+        "cross_lingual",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It directly supports the declared goal."
+    },
+    {
+      "id": "g02-legacy-02",
+      "group_id": "g02-legacy",
+      "anchor": "한국에서 가볼 만한 여행지",
+      "title": "A guide to sightseeing in Seoul",
+      "label": "OK",
+      "tags": [
+        "en_translation",
+        "cross_lingual",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It directly supports the declared goal."
+    },
+    {
+      "id": "g02-legacy-03",
+      "group_id": "g02-legacy",
+      "anchor": "한국에서 가볼 만한 여행지",
+      "title": "How to invest in Korean stocks",
+      "label": "DRIFT",
+      "tags": [
+        "easy_negative",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It does not directly support the declared goal."
+    },
+    {
+      "id": "g02-legacy-04",
+      "group_id": "g02-legacy",
+      "anchor": "한국에서 가볼 만한 여행지",
+      "title": "Premier League match results",
+      "label": "DRIFT",
+      "tags": [
+        "easy_negative",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It does not directly support the declared goal."
+    },
+    {
+      "id": "g02-generated-05",
+      "group_id": "g02-legacy",
+      "anchor": "한국에서 가볼 만한 여행지",
+      "title": "한국 여행 비자 안내",
+      "label": "DRIFT",
+      "tags": [
+        "lexical_overlap_trap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is a hard negative that shares context without directly satisfying the goal."
+    },
+    {
+      "id": "g03-legacy-01",
+      "group_id": "g03-legacy",
+      "anchor": "파이썬 데이터 분석",
+      "title": "Pandas data analysis tutorial",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It directly supports the declared goal."
+    },
+    {
+      "id": "g03-legacy-02",
+      "group_id": "g03-legacy",
+      "anchor": "파이썬 데이터 분석",
+      "title": "데이터프레임 전처리 방법",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It directly supports the declared goal."
+    },
+    {
+      "id": "g03-legacy-03",
+      "group_id": "g03-legacy",
+      "anchor": "파이썬 데이터 분석",
+      "title": "홈베이킹 식빵 레시피",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It does not directly support the declared goal."
+    },
+    {
+      "id": "g03-legacy-04",
+      "group_id": "g03-legacy",
+      "anchor": "파이썬 데이터 분석",
+      "title": "프로야구 오늘 경기 결과",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It does not directly support the declared goal."
+    },
+    {
+      "id": "g03-generated-05",
+      "group_id": "g03-legacy",
+      "anchor": "파이썬 데이터 분석",
+      "title": "파이썬 서식지 정보",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is a hard negative that shares context without directly satisfying the goal."
+    },
+    {
+      "id": "g04-legacy-01",
+      "group_id": "g04-legacy",
+      "anchor": "크롬 확장 프로그램 개발",
+      "title": "Chrome extension Manifest V3 documentation",
+      "label": "OK",
+      "tags": [
+        "en_translation",
+        "cross_lingual",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It directly supports the declared goal."
+    },
+    {
+      "id": "g04-legacy-02",
+      "group_id": "g04-legacy",
+      "anchor": "크롬 확장 프로그램 개발",
+      "title": "브라우저 extension background service worker",
+      "label": "OK",
+      "tags": [
+        "ko_semantic_no_overlap",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It directly supports the declared goal."
+    },
+    {
+      "id": "g04-legacy-03",
+      "group_id": "g04-legacy",
+      "anchor": "크롬 확장 프로그램 개발",
+      "title": "크롬으로 보는 오늘의 뉴스",
+      "label": "DRIFT",
+      "tags": [
+        "lexical_overlap_trap",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It does not directly support the declared goal."
+    },
+    {
+      "id": "g04-legacy-04",
+      "group_id": "g04-legacy",
+      "anchor": "크롬 확장 프로그램 개발",
+      "title": "서울 아파트 매매 가격",
+      "label": "DRIFT",
+      "tags": [
+        "easy_negative",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It does not directly support the declared goal."
+    },
+    {
+      "id": "g04-generated-05",
+      "group_id": "g04-legacy",
+      "anchor": "크롬 확장 프로그램 개발",
+      "title": "크롬 도금 관리법",
+      "label": "DRIFT",
+      "tags": [
+        "lexical_overlap_trap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is a hard negative that shares context without directly satisfying the goal."
+    },
+    {
+      "id": "g05-legacy-01",
+      "group_id": "g05-legacy",
+      "anchor": "반려견 건강 관리",
+      "title": "강아지 예방접종과 동물병원 정보",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It directly supports the declared goal."
+    },
+    {
+      "id": "g05-legacy-02",
+      "group_id": "g05-legacy",
+      "anchor": "반려견 건강 관리",
+      "title": "Healthy food and exercise for dogs",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It directly supports the declared goal."
+    },
+    {
+      "id": "g05-legacy-03",
+      "group_id": "g05-legacy",
+      "anchor": "반려견 건강 관리",
+      "title": "자바스크립트 비동기 프로그래밍",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It does not directly support the declared goal."
+    },
+    {
+      "id": "g05-legacy-04",
+      "group_id": "g05-legacy",
+      "anchor": "반려견 건강 관리",
+      "title": "환율과 기준금리 뉴스",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It does not directly support the declared goal."
+    },
+    {
+      "id": "g05-generated-05",
+      "group_id": "g05-legacy",
+      "anchor": "반려견 건강 관리",
+      "title": "반려동물 미용 예약",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is a hard negative that shares context without directly satisfying the goal."
+    },
+    {
+      "id": "g06-legacy-01",
+      "group_id": "g06-legacy",
+      "anchor": "머신러닝 모델 학습",
+      "title": "신경망 훈련 데이터 준비",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It directly supports the declared goal."
+    },
+    {
+      "id": "g06-legacy-02",
+      "group_id": "g06-legacy",
+      "anchor": "머신러닝 모델 학습",
+      "title": "Training a machine learning classifier",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It directly supports the declared goal."
+    },
+    {
+      "id": "g06-legacy-03",
+      "group_id": "g06-legacy",
+      "anchor": "머신러닝 모델 학습",
+      "title": "패션 모델의 런웨이 화보",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It does not directly support the declared goal."
+    },
+    {
+      "id": "g06-legacy-04",
+      "group_id": "g06-legacy",
+      "anchor": "머신러닝 모델 학습",
+      "title": "모델하우스 아파트 분양 안내",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It does not directly support the declared goal."
+    },
+    {
+      "id": "g06-generated-05",
+      "group_id": "g06-legacy",
+      "anchor": "머신러닝 모델 학습",
+      "title": "모델 촬영 포즈",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is a hard negative that shares context without directly satisfying the goal."
+    },
+    {
+      "id": "g07-legacy-01",
+      "group_id": "g07-legacy",
+      "anchor": "서울 날씨",
+      "title": "Seoul weekly weather forecast",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It directly supports the declared goal."
+    },
+    {
+      "id": "g07-legacy-02",
+      "group_id": "g07-legacy",
+      "anchor": "서울 날씨",
+      "title": "내일 서울 비 소식과 기온",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It directly supports the declared goal."
+    },
+    {
+      "id": "g07-legacy-03",
+      "group_id": "g07-legacy",
+      "anchor": "서울 날씨",
+      "title": "서울 부동산 아파트 시세",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It does not directly support the declared goal."
+    },
+    {
+      "id": "g07-legacy-04",
+      "group_id": "g07-legacy",
+      "anchor": "서울 날씨",
+      "title": "서울 지역 맛집 순위",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It does not directly support the declared goal."
+    },
+    {
+      "id": "g07-generated-05",
+      "group_id": "g07-legacy",
+      "anchor": "서울 날씨",
+      "title": "서울 산책 코스",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is a hard negative that shares context without directly satisfying the goal."
+    },
+    {
+      "id": "g08-legacy-01",
+      "group_id": "g08-legacy",
+      "anchor": "임베딩 모델 관련 논문 조사",
+      "title": "Semantic text embeddings research paper",
+      "label": "OK",
+      "tags": [
+        "en_translation",
+        "cross_lingual",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It directly supports the declared goal."
+    },
+    {
+      "id": "g08-legacy-02",
+      "group_id": "g08-legacy",
+      "anchor": "임베딩 모델 관련 논문 조사",
+      "title": "Google Scholar multilingual E5",
+      "label": "OK",
+      "tags": [
+        "en_translation",
+        "cross_lingual",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It directly supports the declared goal."
+    },
+    {
+      "id": "g08-legacy-03",
+      "group_id": "g08-legacy",
+      "anchor": "임베딩 모델 관련 논문 조사",
+      "title": "YouTube 집중 음악 플레이리스트",
+      "label": "DRIFT",
+      "tags": [
+        "easy_negative",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It does not directly support the declared goal."
+    },
+    {
+      "id": "g08-legacy-04",
+      "group_id": "g08-legacy",
+      "anchor": "임베딩 모델 관련 논문 조사",
+      "title": "저녁 식사 배달 메뉴 추천",
+      "label": "DRIFT",
+      "tags": [
+        "easy_negative",
+        "short_title",
+        "legacy_fixture"
+      ],
+      "source": "legacy_fixture",
+      "rationale": "It does not directly support the declared goal."
+    },
+    {
+      "id": "g08-generated-05",
+      "group_id": "g08-legacy",
+      "anchor": "임베딩 모델 관련 논문 조사",
+      "title": "논문 표지 양식",
+      "label": "DRIFT",
+      "tags": [
+        "lexical_overlap_trap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is a hard negative that shares context without directly satisfying the goal."
+    },
+    {
+      "id": "g09-generated-01",
+      "group_id": "g09-generated",
+      "anchor": "뉴스",
+      "title": "오늘 주요 헤드라인",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g09-generated-02",
+      "group_id": "g09-generated",
+      "anchor": "뉴스",
+      "title": "Latest news headlines",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g09-generated-03",
+      "group_id": "g09-generated",
+      "anchor": "뉴스",
+      "title": "뉴스 앵커 이적",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g09-generated-04",
+      "group_id": "g09-generated",
+      "anchor": "뉴스",
+      "title": "언론사 구독료 비교",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g09-generated-05",
+      "group_id": "g09-generated",
+      "anchor": "뉴스",
+      "title": "피아노 악보 모음",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g10-generated-01",
+      "group_id": "g10-generated",
+      "anchor": "컴퓨터 쇼핑",
+      "title": "노트북 가격 비교",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g10-generated-02",
+      "group_id": "g10-generated",
+      "anchor": "컴퓨터 쇼핑",
+      "title": "Computer shopping deals",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g10-generated-03",
+      "group_id": "g10-generated",
+      "anchor": "컴퓨터 쇼핑",
+      "title": "컴퓨터 자격증 일정",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g10-generated-04",
+      "group_id": "g10-generated",
+      "anchor": "컴퓨터 쇼핑",
+      "title": "키보드 청소 방법",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g10-generated-05",
+      "group_id": "g10-generated",
+      "anchor": "컴퓨터 쇼핑",
+      "title": "근력 운동 루틴",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g11-generated-01",
+      "group_id": "g11-generated",
+      "anchor": "등기부등본",
+      "title": "등기사항증명서 발급",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g11-generated-02",
+      "group_id": "g11-generated",
+      "anchor": "등기부등본",
+      "title": "Real estate registry copy",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g11-generated-03",
+      "group_id": "g11-generated",
+      "anchor": "등기부등본",
+      "title": "등기 우편 조회",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g11-generated-04",
+      "group_id": "g11-generated",
+      "anchor": "등기부등본",
+      "title": "전입신고 신청",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g11-generated-05",
+      "group_id": "g11-generated",
+      "anchor": "등기부등본",
+      "title": "라면 끓이는 법",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g12-generated-01",
+      "group_id": "g12-generated",
+      "anchor": "코스피",
+      "title": "국내 증시 지수",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g12-generated-02",
+      "group_id": "g12-generated",
+      "anchor": "코스피",
+      "title": "KOSPI index today",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g12-generated-03",
+      "group_id": "g12-generated",
+      "anchor": "코스피",
+      "title": "코스피 상장 절차",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g12-generated-04",
+      "group_id": "g12-generated",
+      "anchor": "코스피",
+      "title": "삼성전자 배당 일정",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g12-generated-05",
+      "group_id": "g12-generated",
+      "anchor": "코스피",
+      "title": "아침 요가 영상",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g13-generated-01",
+      "group_id": "g13-generated",
+      "anchor": "여권 갱신",
+      "title": "여권 재발급 신청",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g13-generated-02",
+      "group_id": "g13-generated",
+      "anchor": "여권 갱신",
+      "title": "Passport renewal application",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g13-generated-03",
+      "group_id": "g13-generated",
+      "anchor": "여권 갱신",
+      "title": "여권 사진 보정",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g13-generated-04",
+      "group_id": "g13-generated",
+      "anchor": "여권 갱신",
+      "title": "비자 면제 국가",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g13-generated-05",
+      "group_id": "g13-generated",
+      "anchor": "여권 갱신",
+      "title": "축구화 사이즈 표",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g14-generated-01",
+      "group_id": "g14-generated",
+      "anchor": "전기요금 납부",
+      "title": "한전 고지서 결제",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g14-generated-02",
+      "group_id": "g14-generated",
+      "anchor": "전기요금 납부",
+      "title": "Pay electricity bill",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g14-generated-03",
+      "group_id": "g14-generated",
+      "anchor": "전기요금 납부",
+      "title": "전기차 충전요금",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g14-generated-04",
+      "group_id": "g14-generated",
+      "anchor": "전기요금 납부",
+      "title": "가스요금 자동이체",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g14-generated-05",
+      "group_id": "g14-generated",
+      "anchor": "전기요금 납부",
+      "title": "세계사 연표 정리",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g15-generated-01",
+      "group_id": "g15-generated",
+      "anchor": "부가세 신고",
+      "title": "홈택스 신고서 작성",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g15-generated-02",
+      "group_id": "g15-generated",
+      "anchor": "부가세 신고",
+      "title": "VAT return filing",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g15-generated-03",
+      "group_id": "g15-generated",
+      "anchor": "부가세 신고",
+      "title": "부가서비스 해지",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g15-generated-04",
+      "group_id": "g15-generated",
+      "anchor": "부가세 신고",
+      "title": "소득세 환급 조회",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g15-generated-05",
+      "group_id": "g15-generated",
+      "anchor": "부가세 신고",
+      "title": "등산화 끈 묶기",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g16-generated-01",
+      "group_id": "g16-generated",
+      "anchor": "아파트 청약",
+      "title": "주택청약 당첨 발표",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g16-generated-02",
+      "group_id": "g16-generated",
+      "anchor": "아파트 청약",
+      "title": "Apartment lottery application",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g16-generated-03",
+      "group_id": "g16-generated",
+      "anchor": "아파트 청약",
+      "title": "아파트 조명 추천",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g16-generated-04",
+      "group_id": "g16-generated",
+      "anchor": "아파트 청약",
+      "title": "전세대출 금리 비교",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g16-generated-05",
+      "group_id": "g16-generated",
+      "anchor": "아파트 청약",
+      "title": "클래식 음악 해설",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g17-generated-01",
+      "group_id": "g17-generated",
+      "anchor": "환율",
+      "title": "달러 원 시세",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g17-generated-02",
+      "group_id": "g17-generated",
+      "anchor": "환율",
+      "title": "Currency exchange rates",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g17-generated-03",
+      "group_id": "g17-generated",
+      "anchor": "환율",
+      "title": "환율 우대 쿠폰",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g17-generated-04",
+      "group_id": "g17-generated",
+      "anchor": "환율",
+      "title": "미국 금리 일정",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g17-generated-05",
+      "group_id": "g17-generated",
+      "anchor": "환율",
+      "title": "스케치북 추천",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g18-generated-01",
+      "group_id": "g18-generated",
+      "anchor": "금리 뉴스",
+      "title": "기준금리 발표 속보",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g18-generated-02",
+      "group_id": "g18-generated",
+      "anchor": "금리 뉴스",
+      "title": "Interest rate news",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g18-generated-03",
+      "group_id": "g18-generated",
+      "anchor": "금리 뉴스",
+      "title": "금리 높은 예금",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g18-generated-04",
+      "group_id": "g18-generated",
+      "anchor": "금리 뉴스",
+      "title": "채권 가격 계산기",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g18-generated-05",
+      "group_id": "g18-generated",
+      "anchor": "금리 뉴스",
+      "title": "캘리그래피 강좌",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g19-generated-01",
+      "group_id": "g19-generated",
+      "anchor": "타입스크립트 문서",
+      "title": "타입 시스템 핸드북",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g19-generated-02",
+      "group_id": "g19-generated",
+      "anchor": "타입스크립트 문서",
+      "title": "TypeScript documentation",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g19-generated-03",
+      "group_id": "g19-generated",
+      "anchor": "타입스크립트 문서",
+      "title": "문서 파쇄 견적",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g19-generated-04",
+      "group_id": "g19-generated",
+      "anchor": "타입스크립트 문서",
+      "title": "자바스크립트 번들러",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g19-generated-05",
+      "group_id": "g19-generated",
+      "anchor": "타입스크립트 문서",
+      "title": "제철 과일 달력",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g20-generated-01",
+      "group_id": "g20-generated",
+      "anchor": "FastAPI 테스트",
+      "title": "pytest API 테스트",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g20-generated-02",
+      "group_id": "g20-generated",
+      "anchor": "FastAPI 테스트",
+      "title": "FastAPI testing guide",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g20-generated-03",
+      "group_id": "g20-generated",
+      "anchor": "FastAPI 테스트",
+      "title": "API 성능 테스트",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g20-generated-04",
+      "group_id": "g20-generated",
+      "anchor": "FastAPI 테스트",
+      "title": "파이썬 가상환경",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g20-generated-05",
+      "group_id": "g20-generated",
+      "anchor": "FastAPI 테스트",
+      "title": "수면 음악 모음",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g21-generated-01",
+      "group_id": "g21-generated",
+      "anchor": "리액트 라우터",
+      "title": "SPA 경로 설정",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g21-generated-02",
+      "group_id": "g21-generated",
+      "anchor": "리액트 라우터",
+      "title": "React Router documentation",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g21-generated-03",
+      "group_id": "g21-generated",
+      "anchor": "리액트 라우터",
+      "title": "라우터 공유기 초기화",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g21-generated-04",
+      "group_id": "g21-generated",
+      "anchor": "리액트 라우터",
+      "title": "상태관리 라이브러리",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g21-generated-05",
+      "group_id": "g21-generated",
+      "anchor": "리액트 라우터",
+      "title": "도자기 만들기 체험",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g22-generated-01",
+      "group_id": "g22-generated",
+      "anchor": "논문 검색",
+      "title": "학술 데이터베이스 조회",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g22-generated-02",
+      "group_id": "g22-generated",
+      "anchor": "논문 검색",
+      "title": "Academic paper search",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g22-generated-03",
+      "group_id": "g22-generated",
+      "anchor": "논문 검색",
+      "title": "논문 인용 양식",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g22-generated-04",
+      "group_id": "g22-generated",
+      "anchor": "논문 검색",
+      "title": "대학원 장학금 공고",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g22-generated-05",
+      "group_id": "g22-generated",
+      "anchor": "논문 검색",
+      "title": "헤어스타일 추천",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g23-generated-01",
+      "group_id": "g23-generated",
+      "anchor": "영어 공부",
+      "title": "회화 표현 암기",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g23-generated-02",
+      "group_id": "g23-generated",
+      "anchor": "영어 공부",
+      "title": "English study materials",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g23-generated-03",
+      "group_id": "g23-generated",
+      "anchor": "영어 공부",
+      "title": "영어 유치원 비용",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g23-generated-04",
+      "group_id": "g23-generated",
+      "anchor": "영어 공부",
+      "title": "토익 시험 접수",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g23-generated-05",
+      "group_id": "g23-generated",
+      "anchor": "영어 공부",
+      "title": "주방 수납 아이디어",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g24-generated-01",
+      "group_id": "g24-generated",
+      "anchor": "일본 여행",
+      "title": "도쿄 일정 짜기",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g24-generated-02",
+      "group_id": "g24-generated",
+      "anchor": "일본 여행",
+      "title": "Japan travel guide",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g24-generated-03",
+      "group_id": "g24-generated",
+      "anchor": "일본 여행",
+      "title": "일본어 문법 기초",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g24-generated-04",
+      "group_id": "g24-generated",
+      "anchor": "일본 여행",
+      "title": "엔화 환전 수수료",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g24-generated-05",
+      "group_id": "g24-generated",
+      "anchor": "일본 여행",
+      "title": "농구 드리블 연습",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g25-generated-01",
+      "group_id": "g25-generated",
+      "anchor": "제주 맛집",
+      "title": "서귀포 식당 추천",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g25-generated-02",
+      "group_id": "g25-generated",
+      "anchor": "제주 맛집",
+      "title": "Jeju restaurant recommendations",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g25-generated-03",
+      "group_id": "g25-generated",
+      "anchor": "제주 맛집",
+      "title": "제주 항공권 특가",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g25-generated-04",
+      "group_id": "g25-generated",
+      "anchor": "제주 맛집",
+      "title": "전국 맛집 순위",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g25-generated-05",
+      "group_id": "g25-generated",
+      "anchor": "제주 맛집",
+      "title": "프린터 드라이버 설치",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g26-generated-01",
+      "group_id": "g26-generated",
+      "anchor": "혈압 관리",
+      "title": "고혈압 생활습관 개선",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g26-generated-02",
+      "group_id": "g26-generated",
+      "anchor": "혈압 관리",
+      "title": "Blood pressure management",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g26-generated-03",
+      "group_id": "g26-generated",
+      "anchor": "혈압 관리",
+      "title": "혈압계 배터리 교체",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g26-generated-04",
+      "group_id": "g26-generated",
+      "anchor": "혈압 관리",
+      "title": "콜레스테롤 식단",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g26-generated-05",
+      "group_id": "g26-generated",
+      "anchor": "혈압 관리",
+      "title": "기타 코드 표",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g27-generated-01",
+      "group_id": "g27-generated",
+      "anchor": "고양이 사료",
+      "title": "묘령별 급여 방법",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g27-generated-02",
+      "group_id": "g27-generated",
+      "anchor": "고양이 사료",
+      "title": "Cat food recommendations",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g27-generated-03",
+      "group_id": "g27-generated",
+      "anchor": "고양이 사료",
+      "title": "고양이 모래 탈취제",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g27-generated-04",
+      "group_id": "g27-generated",
+      "anchor": "고양이 사료",
+      "title": "동물병원 접종 비용",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g27-generated-05",
+      "group_id": "g27-generated",
+      "anchor": "고양이 사료",
+      "title": "엑셀 단축키 모음",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g28-generated-01",
+      "group_id": "g28-generated",
+      "anchor": "축구 일정",
+      "title": "대표팀 경기 날짜",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g28-generated-02",
+      "group_id": "g28-generated",
+      "anchor": "축구 일정",
+      "title": "Football match schedule",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g28-generated-03",
+      "group_id": "g28-generated",
+      "anchor": "축구 일정",
+      "title": "축구공 공기압",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g28-generated-04",
+      "group_id": "g28-generated",
+      "anchor": "축구 일정",
+      "title": "스포츠 중계권 뉴스",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g28-generated-05",
+      "group_id": "g28-generated",
+      "anchor": "축구 일정",
+      "title": "실내 식물 물주기",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g29-generated-01",
+      "group_id": "g29-generated",
+      "anchor": "영화 예매",
+      "title": "극장 좌석 예약",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g29-generated-02",
+      "group_id": "g29-generated",
+      "anchor": "영화 예매",
+      "title": "Movie ticket booking",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g29-generated-03",
+      "group_id": "g29-generated",
+      "anchor": "영화 예매",
+      "title": "영화 리뷰 평점",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g29-generated-04",
+      "group_id": "g29-generated",
+      "anchor": "영화 예매",
+      "title": "OTT 공개 일정",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g29-generated-05",
+      "group_id": "g29-generated",
+      "anchor": "영화 예매",
+      "title": "자동차 세차 순서",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g30-generated-01",
+      "group_id": "g30-generated",
+      "anchor": "세탁기 비교",
+      "title": "드럼 통돌이 가격",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g30-generated-02",
+      "group_id": "g30-generated",
+      "anchor": "세탁기 비교",
+      "title": "Washing machine comparison",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g30-generated-03",
+      "group_id": "g30-generated",
+      "anchor": "세탁기 비교",
+      "title": "세탁기 필터 청소",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g30-generated-04",
+      "group_id": "g30-generated",
+      "anchor": "세탁기 비교",
+      "title": "건조기 전기료 계산",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g30-generated-05",
+      "group_id": "g30-generated",
+      "anchor": "세탁기 비교",
+      "title": "명상 호흡법",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g31-generated-01",
+      "group_id": "g31-generated",
+      "anchor": "무선 이어폰",
+      "title": "블루투스 음질 리뷰",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g31-generated-02",
+      "group_id": "g31-generated",
+      "anchor": "무선 이어폰",
+      "title": "Wireless earbuds reviews",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g31-generated-03",
+      "group_id": "g31-generated",
+      "anchor": "무선 이어폰",
+      "title": "무선 공유기 추천",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g31-generated-04",
+      "group_id": "g31-generated",
+      "anchor": "무선 이어폰",
+      "title": "헤드폰 노이즈캔슬링",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g31-generated-05",
+      "group_id": "g31-generated",
+      "anchor": "무선 이어폰",
+      "title": "손글씨 연습장",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g32-generated-01",
+      "group_id": "g32-generated",
+      "anchor": "커피 원두",
+      "title": "싱글오리진 향미 비교",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g32-generated-02",
+      "group_id": "g32-generated",
+      "anchor": "커피 원두",
+      "title": "Coffee bean guide",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g32-generated-03",
+      "group_id": "g32-generated",
+      "anchor": "커피 원두",
+      "title": "커피 머신 세척제",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g32-generated-04",
+      "group_id": "g32-generated",
+      "anchor": "커피 원두",
+      "title": "카페 창업 비용",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g32-generated-05",
+      "group_id": "g32-generated",
+      "anchor": "커피 원두",
+      "title": "야구 글러브 관리",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g33-generated-01",
+      "group_id": "g33-generated",
+      "anchor": "이사 견적",
+      "title": "포장이사 비용 비교",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g33-generated-02",
+      "group_id": "g33-generated",
+      "anchor": "이사 견적",
+      "title": "Moving company quotes",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g33-generated-03",
+      "group_id": "g33-generated",
+      "anchor": "이사 견적",
+      "title": "이사 날짜 달력",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g33-generated-04",
+      "group_id": "g33-generated",
+      "anchor": "이사 견적",
+      "title": "입주 청소 가격표",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g33-generated-05",
+      "group_id": "g33-generated",
+      "anchor": "이사 견적",
+      "title": "수학 퍼즐 게임",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g34-generated-01",
+      "group_id": "g34-generated",
+      "anchor": "택배 조회",
+      "title": "운송장 배송 확인",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g34-generated-02",
+      "group_id": "g34-generated",
+      "anchor": "택배 조회",
+      "title": "Package tracking status",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g34-generated-03",
+      "group_id": "g34-generated",
+      "anchor": "택배 조회",
+      "title": "택배 박스 구매",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g34-generated-04",
+      "group_id": "g34-generated",
+      "anchor": "택배 조회",
+      "title": "우체국 영업시간",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g34-generated-05",
+      "group_id": "g34-generated",
+      "anchor": "택배 조회",
+      "title": "프랑스어 발음 강의",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g35-generated-01",
+      "group_id": "g35-generated",
+      "anchor": "예방접종",
+      "title": "독감 백신 예약",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g35-generated-02",
+      "group_id": "g35-generated",
+      "anchor": "예방접종",
+      "title": "Vaccination appointment schedule",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g35-generated-03",
+      "group_id": "g35-generated",
+      "anchor": "예방접종",
+      "title": "예방접종 증명서",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g35-generated-04",
+      "group_id": "g35-generated",
+      "anchor": "예방접종",
+      "title": "감기약 복용법",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g35-generated-05",
+      "group_id": "g35-generated",
+      "anchor": "예방접종",
+      "title": "인테리어 색상표",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g36-generated-01",
+      "group_id": "g36-generated",
+      "anchor": "중고차 시세",
+      "title": "차종별 매매 가격",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g36-generated-02",
+      "group_id": "g36-generated",
+      "anchor": "중고차 시세",
+      "title": "Used car prices",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g36-generated-03",
+      "group_id": "g36-generated",
+      "anchor": "중고차 시세",
+      "title": "중고차 보험료 계산",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g36-generated-04",
+      "group_id": "g36-generated",
+      "anchor": "중고차 시세",
+      "title": "신차 출시 일정",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g36-generated-05",
+      "group_id": "g36-generated",
+      "anchor": "중고차 시세",
+      "title": "베란다 텃밭 만들기",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g37-generated-01",
+      "group_id": "g37-generated",
+      "anchor": "캠핑 장비",
+      "title": "텐트 버너 추천",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g37-generated-02",
+      "group_id": "g37-generated",
+      "anchor": "캠핑 장비",
+      "title": "Camping gear checklist",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g37-generated-03",
+      "group_id": "g37-generated",
+      "anchor": "캠핑 장비",
+      "title": "캠핑장 예약 날짜",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g37-generated-04",
+      "group_id": "g37-generated",
+      "anchor": "캠핑 장비",
+      "title": "등산 코스 난이도",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g37-generated-05",
+      "group_id": "g37-generated",
+      "anchor": "캠핑 장비",
+      "title": "주식 배당 캘린더",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g38-generated-01",
+      "group_id": "g38-generated",
+      "anchor": "사진 보정",
+      "title": "색감 밝기 조절",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g38-generated-02",
+      "group_id": "g38-generated",
+      "anchor": "사진 보정",
+      "title": "Photo editing tutorial",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g38-generated-03",
+      "group_id": "g38-generated",
+      "anchor": "사진 보정",
+      "title": "사진 인화 가격",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g38-generated-04",
+      "group_id": "g38-generated",
+      "anchor": "사진 보정",
+      "title": "카메라 렌즈 추천",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g38-generated-05",
+      "group_id": "g38-generated",
+      "anchor": "사진 보정",
+      "title": "도시락 반찬 레시피",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g39-generated-01",
+      "group_id": "g39-generated",
+      "anchor": "개인정보 설정",
+      "title": "계정 공개 범위",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g39-generated-02",
+      "group_id": "g39-generated",
+      "anchor": "개인정보 설정",
+      "title": "Privacy settings guide",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g39-generated-03",
+      "group_id": "g39-generated",
+      "anchor": "개인정보 설정",
+      "title": "개인정보 처리방침",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g39-generated-04",
+      "group_id": "g39-generated",
+      "anchor": "개인정보 설정",
+      "title": "비밀번호 관리자 추천",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g39-generated-05",
+      "group_id": "g39-generated",
+      "anchor": "개인정보 설정",
+      "title": "바느질 기초 방법",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    },
+    {
+      "id": "g40-generated-01",
+      "group_id": "g40-generated",
+      "anchor": "자전거 정비",
+      "title": "브레이크 체인 점검",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "ko_semantic_no_overlap",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly satisfies the Korean goal without relying on exact wording."
+    },
+    {
+      "id": "g40-generated-02",
+      "group_id": "g40-generated",
+      "anchor": "자전거 정비",
+      "title": "Bicycle maintenance guide",
+      "label": "OK",
+      "tags": [
+        "short_anchor",
+        "en_translation",
+        "cross_lingual",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It directly expresses the Korean goal in English."
+    },
+    {
+      "id": "g40-generated-03",
+      "group_id": "g40-generated",
+      "anchor": "자전거 정비",
+      "title": "자전거 도로 지도",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "lexical_overlap_trap",
+        "different_sense",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It reuses a prominent word in the wrong sense or context."
+    },
+    {
+      "id": "g40-generated-04",
+      "group_id": "g40-generated",
+      "anchor": "자전거 정비",
+      "title": "헬멧 안전 인증",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "adjacent_topic",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is adjacent but not directly useful for the goal."
+    },
+    {
+      "id": "g40-generated-05",
+      "group_id": "g40-generated",
+      "anchor": "자전거 정비",
+      "title": "웹툰 신작 순위",
+      "label": "DRIFT",
+      "tags": [
+        "short_anchor",
+        "easy_negative",
+        "short_title"
+      ],
+      "source": "generated",
+      "rationale": "It is clearly unrelated to the goal."
+    }
+  ]
+}
