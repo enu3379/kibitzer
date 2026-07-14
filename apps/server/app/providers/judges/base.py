@@ -20,6 +20,9 @@ class JudgeProvider(Protocol):
     async def classify_tier1(self, payload: dict[str, object]) -> Tier1Result:
         ...
 
+    async def complete_goal_enrichment(self, prompt: str, timeout_seconds: float) -> str:
+        ...
+
     async def confirm_tier2(
         self,
         payload: dict[str, object],

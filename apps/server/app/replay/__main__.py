@@ -43,6 +43,7 @@ def main(argv: list[str] | None = None) -> None:
             latest=args.latest,
             config=config,
             overrides=overrides,
+            derived_phrases_path=args.derived_phrases,
         )
     )
     print(format_report(result, full=args.full))
@@ -75,6 +76,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--csv", help="Write labeling CSV")
     parser.add_argument("--json", help="Write machine-readable JSON")
+    parser.add_argument(
+        "--derived-phrases",
+        help="Inject derived phrases JSON after goal.declared (format: goals.<session_id>.phrases)",
+    )
     parser.add_argument("--full", action="store_true", help="Print every observation instead of only changed rows")
     parser.add_argument("--live-tiers", action="store_true", help="Reserved: re-call live tiers for missing recordings")
     return parser

@@ -18,6 +18,7 @@ class Tier0Score:
     score: float
     exemplar_score: float
     anchor_score: float
+    derived_score: float = 0.0
 
 
 def cosine(a: list[float], b: list[float]) -> float:
@@ -36,13 +37,18 @@ def tier0_score_parts(
     exemplars: list[list[float]],
     anchor: list[float] | None,
     beta: float,
+    derived_exemplars: list[list[float]] | None = None,
+    derived_tau: float = 0.0,
 ) -> Tier0Score:
     exemplar_score = max((cosine(emb, ex) for ex in exemplars), default=0.0)
     anchor_score = beta * cosine(emb, anchor) if anchor else 0.0
+    derived_score = max((cosine(emb, ex) for ex in (derived_exemplars or [])), default=0.0)
+    derived_contribution = derived_score if derived_score >= derived_tau else 0.0
     return Tier0Score(
-        score=max(exemplar_score, anchor_score),
+        score=max(exemplar_score, anchor_score, derived_contribution),
         exemplar_score=exemplar_score,
         anchor_score=anchor_score,
+        derived_score=derived_score,
     )
 
 
@@ -51,8 +57,10 @@ def tier0_score(
     exemplars: list[list[float]],
     anchor: list[float] | None,
     beta: float,
+    derived_exemplars: list[list[float]] | None = None,
+    derived_tau: float = 0.0,
 ) -> float:
-    return tier0_score_parts(emb, exemplars, anchor, beta).score
+    return tier0_score_parts(emb, exemplars, anchor, beta, derived_exemplars, derived_tau).score
 
 
 def tier0_verdict(score: float, tau_ok: float) -> str:

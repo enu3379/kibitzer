@@ -51,6 +51,7 @@ export type PageLabel = "related" | "drift"
 export interface LatestObservationFeatures {
   r0?: number | null
   exemplar_score?: number | null
+  derived_score?: number | null
   anchor_eligible?: boolean | null
   tier_reached?: number | null
 }

@@ -1,5 +1,22 @@
 # Progress
 
+## 2026-07-13 D3 revalidated under the ONNX Tier 0 (PR #26 refresh)
+
+Completed:
+
+- Measured that derived phrases still pay for themselves on top of PR #29's
+  KoEn-E5-Tiny provider: over the 200-pair Tier 0 benchmark at `tau_ok=0.6`,
+  recall 23.8% → 86.2%, AUC 0.7221 → 0.9214, cross-lingual recall 31.7% →
+  92.7%, FPR 11.7% → 17.5% — the two PRs compose instead of competing.
+  Reproducible via `scripts/simulate_goal_enrichment_tier0.py` +
+  `scripts/fixtures/goal_enrichment_sim_phrases.json` (40 hand-drafted,
+  goal-text-only phrase sets); caveats recorded in the handoff addendum.
+- Updated the enrichment prompt framing (semantic matcher, not lexical),
+  documented that `derived_tau` is verdict-inert under `tau_ok=0.6` (it
+  survives as a diagnostics noise floor), and flagged that the hash-era
+  audit-band and private-corpus regression thresholds need ONNX-scale
+  recalibration (`docs/handoff-goal-enrichment.md` addendum 2026-07-13).
+
 ## 2026-07-13 Tier 0 benchmark v2 (real-corpus findings encoded)
 
 Completed:
@@ -34,6 +51,64 @@ Verified:
 - Benchmark harness run on v2 for hash+onnx; enrichment scored with the
   goal-enrichment PR's simulator against the same pairs.
 
+## 2026-07-09 D3 Goal Enrichment
+
+Completed:
+
+- Added async goal enrichment after `POST /sessions/current/goal`: the goal
+  response stays non-blocking, while the Tier-1 provider stack derives short
+  cross-lingual/title-like phrases from the goal text only.
+- Persisted derived exemplars in a separate `goal_derived_exemplars` table and
+  lifecycle: goal re-declaration clears them, success records `goal.enriched`,
+  and failures record `goal.enrichment_failed` without changing goal flow.
+- Threaded derived exemplars through Tier 0 with a separate
+  `goal_enrichment.derived_tau` gate (`0.25` default), persisted
+  `derived_score`, and allowed above-threshold derived matches into anchor
+  admission.
+- Added `goal.derived_phrases` to Tier-1 payloads and updated both Tier-1 judge
+  prompts so derived aspects count as goal-related even with no raw-goal word
+  overlap.
+- Extended replay with `goal.enriched` events, `--derived-phrases` injection
+  (including unique session-prefix fixture keys), `derived_score_replay`, and
+  `goal_enrichment.derived_tau` override support.
+
+Verified:
+
+- `python -m pytest apps/server/tests -q` -> `113 passed, 1 private-corpus test skipped`.
+- Replay CLI smoke:
+  `.venv/bin/python -m apps.server.app.replay --db data/kibitzer.sqlite3 --session sess_9f6d171e --derived-phrases $KIBITZER_AUDIT_CORPUS/derived-phrases-eval.json --override goal_enrichment.derived_tau=0.25`.
+- Optional Step-0 corpus regression reads the private path in `KIBITZER_AUDIT_CORPUS` and asserts
+  fixed derived phrases reduce false-DRIFT under the D3 acceptance bar while new
+  false-OKs stay in the planned audit band.
+
+Claude verification + live hardening (2026-07-09, same day):
+
+- Spec-vs-code review clean (verbatim prompt, post-filters, derived_tau gating
+  + anchor admission, separate table with goal-redeclare lifecycle, stale-goal
+  guard on async completion, Tier-1 payload rider, replay injection).
+- Full-simulation corpus numbers (replay `--derived-phrases`, tier0 view):
+  false-DRIFT 80 -> 31, false-OK 9 -> 7 — the two collateral false-OKs
+  (0.302/0.287) sit inside the 0.35 audit band, and two OLD anchor-ride
+  false-OKs disappear because derived-lifted OKs rebuild a healthier anchor.
+  (The optional private-corpus regression uses the static overlay method -> 28; the
+  delta is anchor-state evolution, visible only in full re-simulation.)
+- Live cloud smoke (isolated temp-DB server, real Ollama Cloud keys) caught
+  two blockers offline tests cannot see, both fixed:
+  1. `parse_goal_enrichment_response` used bare `json.loads` -> live thinking
+     preambles/fences fail; now mirrors the judges' lenient brace-window
+     extraction (`_load_json_object` pattern) + tests updated.
+  2. `OllamaChatJudgeProvider.complete_goal_enrichment` shared tier1's
+     `num_predict` (320): nemotron-3-super spent it all on thinking and
+     returned EMPTY content. Enrichment now sends `think: false` with its own
+     512-token budget, falling back to a 2048 thinking budget for models that
+     reject the think flag. Tier-1/2 call paths untouched.
+- Post-fix live smoke end-to-end: `goal.enriched` in 5.8s (goal POST stays
+  3ms), 8 mixed KR/EN phrases; English Create-mod title -> derived 0.236
+  (under derived_tau) -> Tier 1 rescued OK via `goal.derived_phrases`
+  (feature 2 working live); 호날두 drift title -> derived 0.154 ignored,
+  DRIFT kept. The private corpus regression remains reproducible without publishing browsing-history fixtures.
+
+
 ## 2026-07-08 Audit Step 0: Labeled Replay Corpus (Claude)
 
 Completed:
@@ -45,9 +120,9 @@ Completed:
   adjudicator for disagreements — 226/231 inter-labeler agreement, 5
   adjudicated, 0 human escalations.
 - Joined labels with deterministic replay scores (current code, default
-  config) and published the corpus + analysis to `docs/audit/step0/`
-  (labeled CSVs, confusion matrices, r0 histograms, τ/audit-band trade-off
-  curves, Tier-1 call-rate-over-time, full false-OK/false-DRIFT lists).
+  config). The raw corpus and analysis remain local because they contain real
+  page titles, hosts, timestamps, and session identifiers; only aggregate
+  findings are recorded here.
 - Key findings: Tier-0 false-DRIFT dominates (80/142 related pages under τ,
   56%) driven by the cross-lingual Korean-goal ↔ English-title gap and
   sub-topic vocabulary (related-r0 mass at 0.00); false-OK is 9/89 from
@@ -61,7 +136,7 @@ Completed:
 Verified:
 
 - Workflow: 17 agents, 0 errors; labels cover 231/231 rows exactly once.
-- Analysis reproducible from `docs/audit/step0/README.md` regenerate note.
+- Analysis is reproducible from the private corpus runbook.
 
 ## 2026-07-08 P1 Attachment Loop Plumbing
 

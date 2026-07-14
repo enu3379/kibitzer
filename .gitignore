@@ -1,4 +1,6 @@
 data/
+.DS_Store
+docs/audit/step0/
 .env
 .env.*
 !.env.example
