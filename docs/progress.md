@@ -1,5 +1,22 @@
 # Progress
 
+## 2026-07-14 Page labels override the current product verdict
+
+Completed:
+
+- Kept each detector-produced `observations.verdict` immutable for Replay CLI
+  audit, while treating an observation's page label as its effective product
+  verdict (`related` → `OK`, `drift` → `DRIFT`).
+- Wired effective verdicts through the current-page card, session/daily reports,
+  recent Tier 1/2 context, drift timing, and anchor selection. Explicit related
+  labels may enter the anchor even when the detector originally rejected them.
+- A false-DRIFT → related correction now resets both streak and alignment
+  controllers, clears attachment drift state, and resolves unhandled
+  interventions for the corrected observation without generating a new nag.
+- Added page-label API coverage for both override directions, preserved raw
+  detector verdicts, streak/alignment recovery, stats/reports, pending
+  intervention cleanup, and anchor/recent-context behavior.
+
 ## 2026-07-13 D3 revalidated under the ONNX Tier 0 (PR #26 refresh)
 
 Completed:

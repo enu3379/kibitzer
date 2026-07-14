@@ -326,10 +326,10 @@ async function submitGoal(sessionExists: boolean): Promise<void> {
 }
 
 // ---- 지금 페이지 card (D5) ----
-// Pull-only: reports what the system believes about the page behind the popup
-// and takes page-fact labels ("이 페이지가 목표와 관련 있냐") — it never grades
-// the system and never prompts. `related` labels feed the exemplar path;
-// `drift` labels are record-only until D4 decides otherwise.
+// Pull-only: reports the effective verdict for the page behind the popup and
+// takes page-fact labels ("이 페이지가 목표와 관련 있냐"). A label overrides
+// the product verdict while the detector's original verdict remains available
+// to replay/audit. `related` also feeds the exemplar path; labeling never prompts.
 
 const TIER_NAMES: Record<number, string> = {
   0: "Tier 0 · 어휘 매칭",
@@ -419,7 +419,8 @@ async function submitPageLabel(page: LatestObservation, label: PageLabel): Promi
     const button = document.getElementById(id) as HTMLButtonElement | null
     if (button) button.disabled = true
   }
-  await postObservationLabel(page.observation_id, label)
+  const result = await postObservationLabel(page.observation_id, label)
+  if (result) notifyBadge()
   await refresh()
 }
 

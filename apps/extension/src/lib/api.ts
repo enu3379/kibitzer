@@ -72,6 +72,7 @@ export interface PageLabelResult {
   label_id: string
   observation_id: string
   label: PageLabel
+  verdict: "OK" | "DRIFT" | null
   exemplar_count?: number | null
 }
 

@@ -102,6 +102,25 @@ def controller_state_after_intervention(
     )
 
 
+def apply_related_page_correction(
+    store: SQLiteStore,
+    config: ControllerConfig,
+    session_id: str,
+    now: datetime | None = None,
+) -> None:
+    """Clear accumulated drift after the user corrects a verdict to related."""
+    state = store.get_controller_state(session_id)
+    controller = _controller_from_state(config, state)
+    controller.on_feedback("relevant")
+    _save_controller_state(
+        store,
+        session_id,
+        controller,
+        state,
+        now or datetime.now(timezone.utc),
+    )
+
+
 def _controller_from_state(
     config: ControllerConfig,
     state: ControllerStateRecord,

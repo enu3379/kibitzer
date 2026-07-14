@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from ..config import ControllerConfig
-from ..core.controller_flow import apply_controller, controller_state_after_intervention
+from ..core.controller_flow import apply_controller, apply_related_page_correction, controller_state_after_intervention
 from ..core.delivery import clamp_notification_message
 from ..core.normalization import (
     browser_nav_embedding_text,
@@ -29,7 +29,14 @@ from ..core.voice import speak
 from ..providers.judges.base import Tier2Result
 from ..privacy.domain_filter import SensitiveDomainRules, drop_decision_for_url
 from ..schemas import PageExcerpt, PageInfo, PipelineAction, PipelineResult, PipelineResultKind, RawObservation, Verdict
-from ..storage.sqlite import ControllerStateRecord, CurrentSessionRecord, ObservationRecord, ReturnCandidateRecord, SQLiteStore
+from ..storage.sqlite import (
+    ControllerStateRecord,
+    CurrentSessionRecord,
+    ObservationRecord,
+    ReturnCandidateRecord,
+    SQLiteStore,
+    effective_observation_verdict,
+)
 
 router = APIRouter()
 
@@ -65,6 +72,7 @@ class PageLabelResponse(BaseModel):
     label_id: str
     observation_id: str
     label: Literal["related", "drift"]
+    verdict: Literal["OK", "DRIFT"] | None = None
     exemplar_count: int | None = None
 
 
@@ -127,17 +135,42 @@ async def label_observation(
         if not isinstance(emb, list) or not emb:
             raise HTTPException(status_code=400, detail="observation has no embedding")
 
+    previous_label = store.page_label_for_observation(observation.id)
+    previous_verdict = effective_observation_verdict(observation.verdict, previous_label)
     page_label, exemplar_count = store.record_page_label(
         session_id=observation.session_id,
         observation_id=observation.id,
         label=body.label,
         exemplar_cap=request.app.state.config.relevance.exemplar_cap,
     )
+    verdict = effective_observation_verdict(observation.verdict, body.label)
+    if verdict == Verdict.OK.value and previous_verdict != verdict:
+        now = datetime.now(timezone.utc)
+        apply_related_page_correction(
+            store,
+            effective_controller_config(request.app.state.config, store),
+            observation.session_id,
+            now=now,
+        )
+        # A corrected false drift must not keep the attachment state or a nag
+        # for the same observation alive. The user's page label is the answer.
+        store.note_attachment_observation(
+            observation.session_id,
+            Verdict.OK.value,
+            now,
+            drift_confirmed=False,
+        )
+        store.resolve_unhandled_interventions_for_observation(
+            observation.session_id,
+            observation.id,
+            ts=now,
+        )
 
     return PageLabelResponse(
         label_id=page_label.id,
         observation_id=page_label.observation_id,
         label=body.label,
+        verdict=verdict,
         exemplar_count=exemplar_count,
     )
 
@@ -293,7 +326,7 @@ def _latest_observation_response(
         observation_id=observation.id,
         title=observation.title,
         url_host=observation.url_host,
-        verdict=observation.verdict,
+        verdict=effective_observation_verdict(observation.verdict, label),
         features=LatestObservationFeatures(
             r0=features.get("r0"),
             exemplar_score=features.get("exemplar_score"),

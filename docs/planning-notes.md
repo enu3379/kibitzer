@@ -165,6 +165,16 @@ and attach it to a GitHub Release on tag, so a non-builder can download
 Rejected: committing `dist/` (git churn). Chrome Web Store stays a later option for
 true end-user distribution.
 
+### D7 — Page labels override the product verdict → RESOLVED (2026-07-14)
+
+When the user explicitly says the current page is related or drift, that answer
+becomes the product's effective verdict immediately. The popup, session/report
+statistics, recent judgment context, and anchor policy follow the effective
+verdict. A false-DRIFT correction also clears accumulated drift and any unhandled
+intervention for that observation. The detector's original stored verdict remains
+immutable so Replay CLI can still measure false-OK/false-DRIFT against the page
+label. User-declared drift does not synthesize a new nag at click time.
+
 ## Backlog (consolidated 2026-07-08, post-P1)
 
 P0 + P1 + detection fixes + Ollama Cloud stack are all shipped. What remains,

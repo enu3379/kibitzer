@@ -16,6 +16,15 @@ from ..schemas import Observation
 INTERVENTION_CANDIDATE_IN_FLIGHT_STALE_AFTER = timedelta(minutes=15)
 
 
+def effective_observation_verdict(verdict: str | None, label: str | None) -> str | None:
+    """Return the product verdict after applying the user's page-fact label."""
+    if label == "related":
+        return "OK"
+    if label == "drift":
+        return "DRIFT"
+    return verdict
+
+
 class NoActiveSessionError(RuntimeError):
     pass
 
@@ -300,20 +309,33 @@ class SQLiteStore:
                 raise ValueError("session not found")
             verdict_rows = conn.execute(
                 """
-                SELECT verdict, COUNT(*) AS n
+                SELECT CASE page_labels.label
+                         WHEN 'related' THEN 'OK'
+                         WHEN 'drift' THEN 'DRIFT'
+                         ELSE observations.verdict
+                       END AS verdict,
+                       COUNT(*) AS n
                 FROM observations
-                WHERE session_id = ?
+                LEFT JOIN page_labels ON page_labels.observation_id = observations.id
+                WHERE observations.session_id = ?
                 GROUP BY verdict
                 """,
                 (session_id,),
             ).fetchall()
             top_drift_row = conn.execute(
                 """
-                SELECT url_host, COUNT(*) AS n
+                SELECT observations.url_host, COUNT(*) AS n
                 FROM observations
-                WHERE session_id = ? AND verdict = 'DRIFT' AND url_host IS NOT NULL
-                GROUP BY url_host
-                ORDER BY n DESC, url_host ASC
+                LEFT JOIN page_labels ON page_labels.observation_id = observations.id
+                WHERE observations.session_id = ?
+                  AND CASE page_labels.label
+                        WHEN 'related' THEN 'OK'
+                        WHEN 'drift' THEN 'DRIFT'
+                        ELSE observations.verdict
+                      END = 'DRIFT'
+                  AND observations.url_host IS NOT NULL
+                GROUP BY observations.url_host
+                ORDER BY n DESC, observations.url_host ASC
                 LIMIT 1
                 """,
                 (session_id,),
@@ -360,10 +382,18 @@ class SQLiteStore:
             self._ensure_schema(conn)
             observation_rows = conn.execute(
                 """
-                SELECT id, ts, verdict, url_host, title, tier_reached, tier1_reason
+                SELECT observations.id, observations.ts,
+                       CASE page_labels.label
+                         WHEN 'related' THEN 'OK'
+                         WHEN 'drift' THEN 'DRIFT'
+                         ELSE observations.verdict
+                       END AS verdict,
+                       observations.url_host, observations.title,
+                       observations.tier_reached, observations.tier1_reason
                 FROM observations
-                WHERE session_id = ?
-                ORDER BY ts ASC, id ASC
+                LEFT JOIN page_labels ON page_labels.observation_id = observations.id
+                WHERE observations.session_id = ?
+                ORDER BY observations.ts ASC, observations.id ASC
                 """,
                 (session_id,),
             ).fetchall()
@@ -406,10 +436,18 @@ class SQLiteStore:
             self._ensure_schema(conn)
             observation_rows = conn.execute(
                 """
-                SELECT id, ts, verdict, url_host, title, tier_reached, tier1_reason
+                SELECT observations.id, observations.ts,
+                       CASE page_labels.label
+                         WHEN 'related' THEN 'OK'
+                         WHEN 'drift' THEN 'DRIFT'
+                         ELSE observations.verdict
+                       END AS verdict,
+                       observations.url_host, observations.title,
+                       observations.tier_reached, observations.tier1_reason
                 FROM observations
-                WHERE ts >= ? AND ts < ?
-                ORDER BY ts ASC, id ASC
+                LEFT JOIN page_labels ON page_labels.observation_id = observations.id
+                WHERE observations.ts >= ? AND observations.ts < ?
+                ORDER BY observations.ts ASC, observations.id ASC
                 """,
                 (start_utc, end_utc),
             ).fetchall()
@@ -513,10 +551,16 @@ class SQLiteStore:
             self._ensure_schema(conn)
             row = conn.execute(
                 """
-                SELECT ts
+                SELECT observations.ts
                 FROM observations
-                WHERE session_id = ? AND verdict = 'OK'
-                ORDER BY ts DESC, id DESC
+                LEFT JOIN page_labels ON page_labels.observation_id = observations.id
+                WHERE observations.session_id = ?
+                  AND CASE page_labels.label
+                        WHEN 'related' THEN 'OK'
+                        WHEN 'drift' THEN 'DRIFT'
+                        ELSE observations.verdict
+                      END = 'OK'
+                ORDER BY observations.ts DESC, observations.id DESC
                 LIMIT 1
                 """,
                 (session_id,),
@@ -1619,6 +1663,44 @@ class SQLiteStore:
                 now,
             )
 
+    def resolve_unhandled_interventions_for_observation(
+        self,
+        session_id: str,
+        observation_id: str,
+        status: str = "related",
+        ts: datetime | None = None,
+    ) -> int:
+        now = ts or _utc_now()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                """
+                SELECT id
+                FROM interventions
+                WHERE session_id = ? AND observation_id = ?
+                  AND status IN ('pending', 'delivered', 'delivery_failed')
+                """,
+                (session_id, observation_id),
+            ).fetchall()
+            for row in rows:
+                conn.execute(
+                    "UPDATE interventions SET status = ? WHERE id = ?",
+                    (status, row["id"]),
+                )
+                self._append_event(
+                    conn,
+                    session_id,
+                    "intervention.updated",
+                    {
+                        "intervention_id": row["id"],
+                        "observation_id": observation_id,
+                        "status": status,
+                        "source": "page_label",
+                    },
+                    now,
+                )
+        return len(rows)
+
     def get_observation(self, observation_id: str) -> ObservationRecord | None:
         with self._connect() as conn:
             self._ensure_schema(conn)
@@ -1838,10 +1920,16 @@ class SQLiteStore:
             self._ensure_schema(conn)
             rows = conn.execute(
                 """
-                SELECT features_json
+                SELECT observations.features_json, page_labels.label
                 FROM observations
-                WHERE session_id = ? AND verdict = 'OK'
-                ORDER BY ts DESC, id DESC
+                LEFT JOIN page_labels ON page_labels.observation_id = observations.id
+                WHERE observations.session_id = ?
+                  AND CASE page_labels.label
+                        WHEN 'related' THEN 'OK'
+                        WHEN 'drift' THEN 'DRIFT'
+                        ELSE observations.verdict
+                      END = 'OK'
+                ORDER BY observations.ts DESC, observations.id DESC
                 LIMIT ?
                 """,
                 (session_id, limit),
@@ -1852,7 +1940,7 @@ class SQLiteStore:
             features = json.loads(row["features_json"])
             # Anchor admission guard: anchor-only OKs (anchor_eligible False) must
             # not steer the anchor. Rows from before the flag existed pass through.
-            if features.get("anchor_eligible") is False:
+            if features.get("anchor_eligible") is False and row["label"] != "related":
                 continue
             emb = features.get("emb")
             if isinstance(emb, list):
@@ -1893,10 +1981,16 @@ class SQLiteStore:
             self._ensure_schema(conn)
             rows = conn.execute(
                 """
-                SELECT title, verdict
+                SELECT observations.title,
+                       CASE page_labels.label
+                         WHEN 'related' THEN 'OK'
+                         WHEN 'drift' THEN 'DRIFT'
+                         ELSE observations.verdict
+                       END AS verdict
                 FROM observations
-                WHERE session_id = ?
-                ORDER BY ts DESC, id DESC
+                LEFT JOIN page_labels ON page_labels.observation_id = observations.id
+                WHERE observations.session_id = ?
+                ORDER BY observations.ts DESC, observations.id DESC
                 LIMIT ?
                 """,
                 (session_id, limit),
@@ -1917,12 +2011,21 @@ class SQLiteStore:
             self._ensure_schema(conn)
             rows = conn.execute(
                 """
-                SELECT verdict
+                SELECT CASE page_labels.label
+                         WHEN 'related' THEN 'OK'
+                         WHEN 'drift' THEN 'DRIFT'
+                         ELSE observations.verdict
+                       END AS verdict
                 FROM observations
-                WHERE session_id = ?
-                  AND verdict IS NOT NULL
-                  AND (? IS NULL OR ts > ?)
-                ORDER BY ts DESC, id DESC
+                LEFT JOIN page_labels ON page_labels.observation_id = observations.id
+                WHERE observations.session_id = ?
+                  AND CASE page_labels.label
+                        WHEN 'related' THEN 'OK'
+                        WHEN 'drift' THEN 'DRIFT'
+                        ELSE observations.verdict
+                      END IS NOT NULL
+                  AND (? IS NULL OR observations.ts > ?)
+                ORDER BY observations.ts DESC, observations.id DESC
                 LIMIT ?
                 """,
                 (session_id, after_text, after_text, limit),
