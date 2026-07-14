@@ -12,6 +12,10 @@ from typing import Any, Iterator
 from ..schemas import Observation
 
 
+# Pending expiry and abandoned-work recovery are intentionally separate clocks.
+INTERVENTION_CANDIDATE_IN_FLIGHT_STALE_AFTER = timedelta(minutes=15)
+
+
 class NoActiveSessionError(RuntimeError):
     pass
 
@@ -1237,7 +1241,7 @@ class SQLiteStore:
                 "SELECT * FROM intervention_candidates WHERE id = ?",
                 (candidate_id,),
             ).fetchone()
-        assert row is not None
+            row = self._require_intervention_candidate_row(row, candidate_id)
         return self._intervention_candidate_from_row(row), True
 
     def get_intervention_candidate_for_observation(
@@ -1279,7 +1283,7 @@ class SQLiteStore:
                     "SELECT * FROM intervention_candidates WHERE id = ?",
                     (candidate_id,),
                 ).fetchone()
-                assert row is not None
+                row = self._require_intervention_candidate_row(row, candidate_id)
                 candidate = self._intervention_candidate_from_row(row)
                 self._append_event(
                     conn,
@@ -1357,7 +1361,7 @@ class SQLiteStore:
                 "SELECT * FROM intervention_candidates WHERE id = ?",
                 (candidate_id,),
             ).fetchone()
-        assert row is not None
+            row = self._require_intervention_candidate_row(row, candidate_id)
         return self._intervention_candidate_from_row(row)
 
     def resolve_intervention_candidate(
@@ -1422,7 +1426,7 @@ class SQLiteStore:
             "SELECT * FROM intervention_candidates WHERE id = ?",
             (candidate_id,),
         ).fetchone()
-        assert row is not None
+        row = self._require_intervention_candidate_row(row, candidate_id)
         return self._intervention_candidate_from_row(row)
 
     def record_tier2_result(
@@ -2239,24 +2243,26 @@ class SQLiteStore:
         session_id: str,
         now: datetime,
     ) -> None:
+        in_flight_stale_before = now - INTERVENTION_CANDIDATE_IN_FLIGHT_STALE_AFTER
         expired = conn.execute(
-            """
-            SELECT id, observation_id
-            FROM intervention_candidates
-            WHERE session_id = ? AND status IN ('pending', 'in_flight') AND expires_at <= ?
-            """,
-            (session_id, now.isoformat()),
-        ).fetchall()
-        if not expired:
-            return
-        conn.execute(
             """
             UPDATE intervention_candidates
             SET status = 'expired', updated_at = ?
-            WHERE session_id = ? AND status IN ('pending', 'in_flight') AND expires_at <= ?
+            WHERE session_id = ? AND (
+                (status = 'pending' AND expires_at <= ?)
+                OR (status = 'in_flight' AND updated_at <= ?)
+            )
+            RETURNING id, observation_id
             """,
-            (now.isoformat(), session_id, now.isoformat()),
-        )
+            (
+                now.isoformat(),
+                session_id,
+                now.isoformat(),
+                in_flight_stale_before.isoformat(),
+            ),
+        ).fetchall()
+        if not expired:
+            return
         for row in expired:
             self._append_event(
                 conn,
@@ -2265,6 +2271,15 @@ class SQLiteStore:
                 {"candidate_id": row["id"], "observation_id": row["observation_id"]},
                 now,
             )
+
+    def _require_intervention_candidate_row(
+        self,
+        row: sqlite3.Row | None,
+        candidate_id: str,
+    ) -> sqlite3.Row:
+        if row is None:
+            raise RuntimeError(f"intervention candidate disappeared: {candidate_id}")
+        return row
 
     def _goal_from_row(self, row: sqlite3.Row) -> GoalRecord:
         return GoalRecord(
