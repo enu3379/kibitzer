@@ -285,7 +285,7 @@ export interface SettingsPatch {
   quiet_hours?: Partial<QuietHours>
 }
 
-function normalizeSettings(value: Partial<Settings>): Settings {
+export function normalizeSettings(value: Partial<Settings>): Settings {
   const rawRelevance = (value.relevance ?? {}) as Partial<RelevanceSettings>
   const rawController = (value.controller ?? {}) as Partial<ControllerSettings>
   const rawCooldown = (value.cooldown ?? {}) as Partial<Cooldown>
@@ -295,7 +295,7 @@ function normalizeSettings(value: Partial<Settings>): Settings {
   const controllerType: ControllerType = rawType === "alignment" || rawType === "window" ? "alignment" : "streak"
   const k = clampInt(rawController.k, 3, 1, 20)
   const alignmentAlpha = clampFloat(rawController.alignment_alpha, 0.85, 0, 0.99)
-  const thetaLow = clampFloat(rawController.theta_low, 0.15, 0, 1)
+  const thetaLow = clampFloat(rawController.theta_low, 0.15, 0, 0.99)
   const thetaHigh = Math.max(thetaLow + 0.01, clampFloat(rawController.theta_high, 0.3, 0, 1))
 
   return {
