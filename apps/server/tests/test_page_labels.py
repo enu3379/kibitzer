@@ -133,6 +133,7 @@ class PageLabelApiTest(unittest.TestCase):
         self.assertEqual(body["url_host"], "example.com")
         self.assertEqual(body["verdict"], "OK")
         self.assertIn("r0", body["features"])
+        self.assertIsNone(body["features"]["r_override"])
         self.assertIn("exemplar_score", body["features"])
         self.assertIn("anchor_eligible", body["features"])
         self.assertEqual(body["features"]["tier_reached"], 0)
@@ -144,6 +145,7 @@ class PageLabelApiTest(unittest.TestCase):
         self.assertEqual(relabeled.status_code, 200)
         self.assertEqual(relabeled.json()["label"], "drift")
         self.assertEqual(relabeled.json()["verdict"], "DRIFT")
+        self.assertAlmostEqual(relabeled.json()["features"]["r_override"], 0.0)
         self.assertEqual(label_response.json()["verdict"], "DRIFT")
         # Replay/audit keeps the detector's original output even though the
         # product verdict exposed to the user is now DRIFT.
@@ -188,6 +190,7 @@ class PageLabelApiTest(unittest.TestCase):
         self.assertEqual(response.json()["verdict"], "OK")
         self.assertEqual(latest["verdict"], "OK")
         self.assertEqual(latest["label"], "related")
+        self.assertAlmostEqual(latest["features"]["r_override"], 0.85)
         self.assertEqual(stats["ok"], 1)
         self.assertEqual(stats["drift"], 0)
         self.assertIsNone(stats["top_drift_host"])

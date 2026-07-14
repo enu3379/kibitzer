@@ -21,7 +21,12 @@ from ..core.personas import (
     resolve_persona,
 )
 from ..core.page_labels import apply_page_label_override
-from ..core.relevance import tier0_score_parts, tier1_final_relevance
+from ..core.relevance import (
+    DRIFT_RELEVANCE,
+    RELATED_RELEVANCE,
+    tier0_score_parts,
+    tier1_final_relevance,
+)
 from ..core.runtime_settings import effective_controller_config, quiet_hours_active, runtime_settings
 from ..core.runtime_resources import RuntimeResources
 from ..core.tier1_payload import build_tier1_payload
@@ -46,6 +51,7 @@ CANDIDATE_RESUME_TTL_SECONDS = 60
 
 class LatestObservationFeatures(BaseModel):
     r0: float | None = None
+    r_override: float | None = None
     exemplar_score: float | None = None
     derived_score: float | None = None
     anchor_eligible: bool | None = None
@@ -307,6 +313,11 @@ def _latest_observation_response(
         verdict=effective_observation_verdict(observation.verdict, label),
         features=LatestObservationFeatures(
             r0=features.get("r0"),
+            r_override=(
+                RELATED_RELEVANCE
+                if label == "related"
+                else DRIFT_RELEVANCE if label == "drift" else None
+            ),
             exemplar_score=features.get("exemplar_score"),
             derived_score=features.get("derived_score"),
             anchor_eligible=features.get("anchor_eligible"),

@@ -366,6 +366,13 @@ function pageLabelButtons(page: LatestObservation): { related: string; drift: st
   return { related: "관련 있어", drift: "이탈이야" }
 }
 
+function relevanceDiagnosticHtml(page: LatestObservation): string {
+  const original = formatScore(page.features?.r0)
+  const override = page.features?.r_override
+  if (override === null || override === undefined) return original
+  return `<span class="pc-r-original">${original}</span><span class="pc-r-arrow">&rarr;</span><span class="pc-r-override">${formatScore(override)}</span>`
+}
+
 function pageDiagnosticsHtml(page: LatestObservation): string {
   const features = page.features ?? {}
   const tier = features.tier_reached
@@ -378,7 +385,7 @@ function pageDiagnosticsHtml(page: LatestObservation): string {
   return `
     <div class="pc-diag">
       <div class="row"><span class="k">판정 단계</span><span>${tierName}</span></div>
-      <div class="row"><span class="k">r0 / τ</span><span>${formatScore(features.r0)} / ${formatScore(page.tau_ok)}</span></div>
+      <div class="row"><span class="k">r0 / τ</span><span>${relevanceDiagnosticHtml(page)} / ${formatScore(page.tau_ok)}</span></div>
       <div class="row"><span class="k">예시 유사도</span><span>${formatScore(features.exemplar_score)}</span></div>
       <div class="row"><span class="k">앵커 반영</span><span>${anchor}</span></div>
     </div>
