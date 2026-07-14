@@ -21,6 +21,9 @@ def build_tier1_payload(
         "goal": goal.raw_text,
         "current": current,
     }
+    derived_phrases = getattr(goal, "derived_phrases", [])
+    if derived_phrases:
+        payload["goal.derived_phrases"] = list(derived_phrases)
     if config.send.recent_titles:
         payload["recent"] = [
             {"title": item.title or "", "verdict": item.verdict or ""}

@@ -15,9 +15,11 @@ class ServerConfig(BaseModel):
 class EmbeddingConfig(BaseModel):
     provider: str = "hash_cpu"
     model: str = "token-hash-v1"
+    tokenizer_path: str | None = None
     device: str = "cpu"
     forbid_gpu: bool = True
-    batch_size: int = 8
+    batch_size: int = Field(default=8, ge=1, le=256)
+    max_length: int = Field(default=128, ge=1, le=512)
     normalize: bool = True
     dimensions: int = 256
 
@@ -31,6 +33,13 @@ class RelevanceConfig(BaseModel):
     # (goal-exemplar similarity below this) keeps its verdict but must not
     # join the anchor, or the reference frame drifts with the user.
     anchor_epsilon: float = 0.05
+
+
+class GoalEnrichmentConfig(BaseModel):
+    enabled: bool = True
+    max_phrases: int = Field(default=8, ge=1, le=20)
+    derived_tau: float = Field(default=0.25, ge=0.0, le=1.0)
+    timeout_seconds: float = Field(default=20, gt=0)
 
 
 class Tier1SendConfig(BaseModel):
@@ -140,6 +149,7 @@ class AppConfig(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     relevance: RelevanceConfig = Field(default_factory=RelevanceConfig)
+    goal_enrichment: GoalEnrichmentConfig = Field(default_factory=GoalEnrichmentConfig)
     tier1: Tier1Config = Field(default_factory=Tier1Config)
     tier2: Tier2Config = Field(default_factory=Tier2Config)
     controller: ControllerConfig = Field(default_factory=ControllerConfig)
@@ -165,6 +175,7 @@ def load_config(path: str | Path = "configs/default.yaml") -> AppConfig:
                 "server",
                 "embedding",
                 "relevance",
+                "goal_enrichment",
                 "tier1",
                 "tier2",
                 "controller",

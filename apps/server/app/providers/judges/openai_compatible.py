@@ -32,7 +32,9 @@ class OpenAICompatibleJudgeProvider:
                     "role": "system",
                     "content": (
                         "Classify whether the current browser navigation is aligned with the user's declared "
-                        "goal. Treat direct relevance and normal subtopics as ok. Return strict JSON only: "
+                        "goal. Treat direct relevance and normal subtopics as ok. The declared goal includes "
+                        "any goal.derived_phrases; titles matching them are goal-related even when they share "
+                        "no words with the raw goal. Return strict JSON only: "
                         '{"verdict":"ok|drift","reason":"<10 words>"}.'
                     ),
                 },
@@ -44,6 +46,16 @@ class OpenAICompatibleJudgeProvider:
         response = await self._post_chat_completions(request_body)
         content = response.json()["choices"][0]["message"]["content"]
         return parse_tier1_json(content)
+
+    async def complete_goal_enrichment(self, prompt: str, timeout_seconds: float) -> str:
+        request_body = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+        }
+        response = await self._post_chat_completions(request_body, timeout_seconds=timeout_seconds)
+        return response.json()["choices"][0]["message"]["content"]
 
     async def confirm_tier2(
         self,
@@ -61,12 +73,16 @@ class OpenAICompatibleJudgeProvider:
         content = response.json()["choices"][0]["message"]["content"]
         return parse_tier2_json(content)
 
-    async def _post_chat_completions(self, request_body: dict[str, object]) -> httpx.Response:
+    async def _post_chat_completions(
+        self,
+        request_body: dict[str, object],
+        timeout_seconds: float | None = None,
+    ) -> httpx.Response:
         url = _chat_completions_url(self.base_url)
         api_keys = ordered_api_keys(self.api_keys, self.api_key, self.fallback_api_key, self._rotation)
 
         last_response: httpx.Response | None = None
-        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+        async with httpx.AsyncClient(timeout=timeout_seconds or self.timeout_seconds) as client:
             for index, api_key in enumerate(api_keys):
                 headers = {"authorization": f"Bearer {api_key}", "content-type": "application/json"}
                 response = await client.post(url, headers=headers, json=request_body)

@@ -31,9 +31,11 @@ class RawObservation(BaseModel):
 class ObservationFeatures(BaseModel):
     emb: list[float] | None = None
     r0: float | None = None
+    tau_ok: float | None = None
     r_final: float | None = None
     tier_reached: int | None = None
     exemplar_score: float | None = None
+    derived_score: float | None = None
     anchor_eligible: bool | None = None
 
 
@@ -75,6 +77,7 @@ class PipelineResult(BaseModel):
     action: PipelineAction
     kind: PipelineResultKind = PipelineResultKind.INTERVENTION
     observation_id: str | None = None
+    candidate_id: str | None = None
     verdict: Verdict | None = None
     message: str | None = None
     intervention_id: str | None = None

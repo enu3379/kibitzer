@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+import httpx
 import yaml
 from fastapi.testclient import TestClient
 
@@ -16,6 +17,7 @@ from apps.server.app.config import (
     AppConfig,
     ControllerConfig,
     DeliveryConfig,
+    DwellConfig,
     QuietHoursConfig,
     ServerConfig,
     Tier1Config,
@@ -48,6 +50,19 @@ class FakeTier2Provider:
         self.payloads.append(payload)
         self.system_prompts.append(system_prompt)
         return self.result
+
+
+class RaisingTier2Provider:
+    async def classify_tier1(self, payload: dict[str, object]) -> Tier1Result:
+        return Tier1Result(verdict=Verdict.DRIFT, reason="unused")
+
+    async def confirm_tier2(
+        self,
+        payload: dict[str, object],
+        system_prompt: str | None = None,
+    ) -> Tier2Result:
+        request = httpx.Request("POST", "https://provider.invalid/chat")
+        raise httpx.ConnectError("offline", request=request)
 
 
 class Tier2ProviderTest(unittest.TestCase):
@@ -112,14 +127,17 @@ class Tier2ApiTest(unittest.TestCase):
         provider: FakeTier2Provider | None,
         tier2_enabled: bool = True,
         delivery: DeliveryConfig | None = None,
+        controller: ControllerConfig | None = None,
+        dwell: DwellConfig | None = None,
     ) -> tuple[TestClient, SQLiteStore]:
         store = SQLiteStore(self.db_path)
         config = AppConfig(
             server=ServerConfig(db_path=str(self.db_path)),
             tier1=Tier1Config(enabled=False),
             tier2=Tier2Config(enabled=tier2_enabled, excerpt_char_limit=120, recent_observations=3),
-            controller=ControllerConfig(k=1, coldstart_observations=1, cooldown_seconds=0),
+            controller=controller or ControllerConfig(k=1, coldstart_observations=1, cooldown_seconds=0),
             delivery=delivery or DeliveryConfig(),
+            dwell=dwell or DwellConfig(),
         )
         client = TestClient(create_app(config=config, store=store, tier2_provider=provider))
         client.__enter__()
@@ -140,18 +158,23 @@ class Tier2ApiTest(unittest.TestCase):
         )
         result = response.json()
         self.assertEqual(result["action"], "request_excerpt")
+        self.assertTrue(str(result["candidate_id"]).startswith("cand_"))
         return result
 
     def test_excerpt_confirmed_creates_notify_and_intervention_without_storing_excerpt(self) -> None:
         provider = FakeTier2Provider(Tier2Result(confirm_drift=True, message="지금 페이지는 목표와 달라 보여요. 계속 볼까요?"))
-        client, _store = self._client(provider)
+        client, store = self._client(provider)
         secret_excerpt = "DO_NOT_PERSIST_SECRET_EXCERPT"
         try:
             request = self._start_goal_and_request_excerpt(client)
+            before = store.get_controller_state(store.get_current_session().session.id)
+            self.assertEqual(before.streak, 1)
+            self.assertIsNone(before.last_intervention_ts)
             response = client.post(
                 f"/observations/{request['observation_id']}/excerpt",
                 json={"title": "Bread", "text": f"{secret_excerpt} " + ("bread " * 100)},
             )
+            provider_status = client.get("/health").json()["provider_calls"]["tier2"]
         finally:
             client.__exit__(None, None, None)
 
@@ -160,6 +183,8 @@ class Tier2ApiTest(unittest.TestCase):
         self.assertEqual(result["message"], "지금 페이지는 목표와 달라 보여요. 계속 볼까요?")
         self.assertTrue(result["intervention_id"].startswith("int_"))
         self.assertEqual(len(provider.payloads), 1)
+        self.assertEqual(provider_status["last_result"], "success")
+        self.assertIsNone(provider_status["reason"])
         payload = provider.payloads[0]
         self.assertLessEqual(len(str(payload["page_excerpt"])), 120)
         self.assertEqual(payload["current"]["url_host"], "example.com")
@@ -170,10 +195,20 @@ class Tier2ApiTest(unittest.TestCase):
             intervention_count = conn.execute("SELECT COUNT(*) FROM interventions").fetchone()[0]
         self.assertEqual(intervention_count, 1)
         self.assertNotIn(secret_excerpt, events)
+        current = store.get_current_session()
+        assert current is not None
+        after = store.get_controller_state(current.session.id)
+        self.assertEqual(after.streak, 0)
+        self.assertIsNotNone(after.last_intervention_ts)
+        candidate = store.get_intervention_candidate_for_observation(str(request["observation_id"]))
+        self.assertIsNotNone(candidate)
+        assert candidate is not None
+        self.assertEqual(candidate.status, "confirmed")
+        self.assertEqual(candidate.intervention_id, result["intervention_id"])
 
     def test_tier2_can_cancel_false_positive_drift(self) -> None:
         provider = FakeTier2Provider(Tier2Result(confirm_drift=False, message=""))
-        client, _store = self._client(provider)
+        client, store = self._client(provider)
         try:
             request = self._start_goal_and_request_excerpt(client)
             response = client.post(
@@ -189,6 +224,145 @@ class Tier2ApiTest(unittest.TestCase):
             cancelled = conn.execute("SELECT COUNT(*) FROM event_log WHERE event_type = 'tier2.cancelled'").fetchone()[0]
         self.assertEqual(intervention_count, 0)
         self.assertEqual(cancelled, 1)
+        current = store.get_current_session()
+        assert current is not None
+        state = store.get_controller_state(current.session.id)
+        self.assertEqual(state.streak, 1)
+        self.assertIsNone(state.last_intervention_ts)
+        candidate = store.get_intervention_candidate_for_observation(str(request["observation_id"]))
+        self.assertIsNotNone(candidate)
+        assert candidate is not None
+        self.assertEqual(candidate.status, "cancelled")
+
+    def test_duplicate_excerpt_does_not_call_tier2_twice(self) -> None:
+        provider = FakeTier2Provider(Tier2Result(confirm_drift=True, message="한 번만 심사합니다."))
+        client, _store = self._client(provider)
+        try:
+            request = self._start_goal_and_request_excerpt(client)
+            first = client.post(
+                f"/observations/{request['observation_id']}/excerpt",
+                json={"title": "Bread", "text": "Unrelated bread recipe."},
+            )
+            second = client.post(
+                f"/observations/{request['observation_id']}/excerpt",
+                json={"title": "Bread", "text": "Unrelated bread recipe."},
+            )
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 409)
+        self.assertEqual(len(provider.payloads), 1)
+
+    def test_failed_excerpt_processing_releases_candidate_for_retry(self) -> None:
+        provider = FakeTier2Provider(Tier2Result(confirm_drift=True, message="retry me"))
+        client, store = self._client(provider)
+        try:
+            request = self._start_goal_and_request_excerpt(client)
+            with patch(
+                "apps.server.app.api.observations.clamp_notification_message",
+                side_effect=RuntimeError("synthetic processing failure"),
+            ):
+                with self.assertRaises(RuntimeError):
+                    client.post(
+                        f"/observations/{request['observation_id']}/excerpt",
+                        json={"title": "Bread", "text": "Unrelated bread recipe."},
+                    )
+        finally:
+            client.__exit__(None, None, None)
+
+        candidate = store.get_intervention_candidate_for_observation(str(request["observation_id"]))
+        self.assertIsNotNone(candidate)
+        assert candidate is not None
+        self.assertEqual(candidate.status, "pending")
+
+    def test_confirmed_intervention_rolls_back_all_state_when_candidate_resolution_fails(self) -> None:
+        provider = FakeTier2Provider(Tier2Result(confirm_drift=True, message="atomic confirmation"))
+        client, store = self._client(provider)
+        try:
+            request = self._start_goal_and_request_excerpt(client)
+            current = store.get_current_session()
+            assert current is not None
+            before = store.get_controller_state(current.session.id)
+            with closing(sqlite3.connect(self.db_path)) as conn:
+                conn.execute(
+                    """
+                    CREATE TRIGGER fail_candidate_confirmation
+                    BEFORE UPDATE OF status ON intervention_candidates
+                    WHEN NEW.status = 'confirmed'
+                    BEGIN
+                        SELECT RAISE(ABORT, 'synthetic candidate resolution failure');
+                    END
+                    """
+                )
+            with self.assertRaises(sqlite3.IntegrityError):
+                client.post(
+                    f"/observations/{request['observation_id']}/excerpt",
+                    json={"title": "Bread", "text": "Unrelated bread recipe."},
+                )
+        finally:
+            client.__exit__(None, None, None)
+
+        after = store.get_controller_state(current.session.id)
+        self.assertEqual(after.streak, before.streak)
+        self.assertEqual(after.last_intervention_ts, before.last_intervention_ts)
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            intervention_count = conn.execute("SELECT COUNT(*) FROM interventions").fetchone()[0]
+        self.assertEqual(intervention_count, 0)
+        candidate = store.get_intervention_candidate_for_observation(str(request["observation_id"]))
+        self.assertIsNotNone(candidate)
+        assert candidate is not None
+        self.assertEqual(candidate.status, "pending")
+
+    def test_alignment_evidence_is_consumed_only_after_tier2_confirmation(self) -> None:
+        provider = FakeTier2Provider(Tier2Result(confirm_drift=True, message="누적 이탈을 확인했습니다."))
+        client, store = self._client(
+            provider,
+            controller=ControllerConfig(
+                type="alignment",
+                alignment_alpha=0.85,
+                theta_low=0.15,
+                theta_high=0.3,
+                coldstart_observations=1,
+                cooldown_seconds=0,
+            ),
+        )
+        try:
+            request = self._start_goal_and_request_excerpt(client)
+            current = store.get_current_session()
+            assert current is not None
+            before = store.get_controller_state(current.session.id)
+            self.assertEqual(before.streak, 1)
+            self.assertTrue(before.drift_latched)
+            self.assertIsNone(before.last_intervention_ts)
+            response = client.post(
+                f"/observations/{request['observation_id']}/excerpt",
+                json={"title": "Bread", "text": "Unrelated bread recipe."},
+            )
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertEqual(response.status_code, 200)
+        after = store.get_controller_state(current.session.id)
+        self.assertEqual(after.streak, 0)
+        self.assertTrue(after.drift_latched)
+        self.assertIsNotNone(after.last_intervention_ts)
+
+    def test_candidate_expiry_includes_configured_remaining_tier2_dwell(self) -> None:
+        provider = FakeTier2Provider(Tier2Result(confirm_drift=True, message="unused"))
+        client, store = self._client(
+            provider,
+            dwell=DwellConfig(observation_seconds=5, tier2_seconds=120),
+        )
+        try:
+            request = self._start_goal_and_request_excerpt(client)
+        finally:
+            client.__exit__(None, None, None)
+
+        candidate = store.get_intervention_candidate_for_observation(str(request["observation_id"]))
+        self.assertIsNotNone(candidate)
+        assert candidate is not None
+        self.assertEqual(int((candidate.expires_at - candidate.requested_at).total_seconds()), 175)
 
     def test_missing_provider_falls_back_to_local_message(self) -> None:
         client, _store = self._client(None, tier2_enabled=False)
@@ -207,6 +381,22 @@ class Tier2ApiTest(unittest.TestCase):
         with closing(sqlite3.connect(self.db_path)) as conn:
             confirmed = conn.execute("SELECT COUNT(*) FROM event_log WHERE event_type = 'tier2.confirmed'").fetchone()[0]
         self.assertEqual(confirmed, 1)
+
+    def test_provider_failure_is_reported_in_health(self) -> None:
+        client, _store = self._client(RaisingTier2Provider())
+        try:
+            request = self._start_goal_and_request_excerpt(client)
+            response = client.post(
+                f"/observations/{request['observation_id']}/excerpt",
+                json={"title": "Bread", "text": "A recipe with unrelated steps."},
+            )
+            provider_status = client.get("/health").json()["provider_calls"]["tier2"]
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertEqual(response.json()["action"], "notify")
+        self.assertEqual(provider_status["last_result"], "error")
+        self.assertEqual(provider_status["reason"], "connection")
 
     def test_tier2_provider_receives_persona_prompt_and_escalation_context(self) -> None:
         provider = FakeTier2Provider(Tier2Result(confirm_drift=True, message="목표와 다른 페이지입니다."))

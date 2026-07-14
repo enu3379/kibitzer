@@ -11,6 +11,13 @@ from .base import Tier1Result, Tier2Result, ordered_api_keys
 from .openai_compatible import parse_tier1_json, parse_tier2_json
 
 
+# Output budgets for the one-shot goal-enrichment call: with thinking disabled
+# the response is tiny; models that reject the flag need room for reasoning
+# before the JSON content.
+_GOAL_ENRICHMENT_NUM_PREDICT = 512
+_GOAL_ENRICHMENT_THINKING_NUM_PREDICT = 2048
+
+
 @dataclass(frozen=True)
 class OllamaChatJudgeProvider:
     api_url: str
@@ -31,7 +38,8 @@ class OllamaChatJudgeProvider:
                     "role": "system",
                     "content": (
                         "Classify whether the current browser navigation is aligned with the user's declared "
-                        "goal. Return strict JSON only: "
+                        "goal. The declared goal includes any goal.derived_phrases; titles matching them are "
+                        "goal-related even when they share no words with the raw goal. Return strict JSON only: "
                         '{"verdict":"ok|drift","reason":"<10 words>"}.'
                     ),
                 },
@@ -39,6 +47,23 @@ class OllamaChatJudgeProvider:
             ]
         )
         return parse_tier1_json(_message_content(response))
+
+    async def complete_goal_enrichment(self, prompt: str, timeout_seconds: float) -> str:
+        messages = [{"role": "user", "content": prompt}]
+        try:
+            response = await self._post_chat(
+                messages,
+                timeout_seconds=timeout_seconds,
+                think=False,
+                num_predict=_GOAL_ENRICHMENT_NUM_PREDICT,
+            )
+        except httpx.HTTPStatusError:
+            response = await self._post_chat(
+                messages,
+                timeout_seconds=timeout_seconds,
+                num_predict=_GOAL_ENRICHMENT_THINKING_NUM_PREDICT,
+            )
+        return _message_content(response)
 
     async def confirm_tier2(
         self,
@@ -60,18 +85,26 @@ class OllamaChatJudgeProvider:
         )
         return parse_tier2_json(_message_content(response))
 
-    async def _post_chat(self, messages: list[dict[str, str]]) -> dict[str, object]:
+    async def _post_chat(
+        self,
+        messages: list[dict[str, str]],
+        timeout_seconds: float | None = None,
+        think: bool | None = None,
+        num_predict: int | None = None,
+    ) -> dict[str, object]:
         request_body: dict[str, object] = {
             "model": self.model,
             "messages": messages,
             "stream": False,
             "format": "json",
-            "options": {"temperature": 0, "num_predict": self.max_output_tokens},
+            "options": {"temperature": 0, "num_predict": num_predict or self.max_output_tokens},
         }
+        if think is not None:
+            request_body["think"] = think
         api_keys = ordered_api_keys(self.api_keys, self.api_key, self.fallback_api_key, self._rotation)
 
         last_response: httpx.Response | None = None
-        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+        async with httpx.AsyncClient(timeout=timeout_seconds or self.timeout_seconds) as client:
             for index, api_key in enumerate(api_keys):
                 response = await client.post(
                     self.api_url,

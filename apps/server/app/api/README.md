@@ -20,3 +20,8 @@ Current handlers:
 - `GET|PUT /settings`
 - `POST /observations/browser-nav`, `POST /observations/{observation_id}/excerpt`
 - `POST /feedback`, `POST /interventions/{intervention_id}/delivery`
+
+`request_excerpt` responses include an intervention `candidate_id`. The legacy
+observation-keyed excerpt route remains the submission endpoint, but it claims
+that observation's active candidate before making the Tier 2 call. Candidate
+selection does not consume controller evidence; confirmed Tier 2 drift does.

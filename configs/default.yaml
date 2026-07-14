@@ -4,13 +4,18 @@ server:
   db_path: "./data/kibitzer.sqlite3"
 
 embedding:
-  provider: "hash_cpu"
-  model: "token-hash-v2"
+  provider: "onnx_cpu"
+  model: "./data/models/koen-e5-tiny-onnx/onnx/model_qint8_arm64.onnx"
+  tokenizer_path: "./data/models/koen-e5-tiny-onnx/tokenizer.json"
   device: "cpu"
   forbid_gpu: true
-  batch_size: 8
+  # This qint8 export is batch-shape-sensitive on Windows x64. Kibitzer embeds
+  # one goal or page title at a time, so force single-item inference for stable
+  # scores independent of the caller's input grouping.
+  batch_size: 1
+  max_length: 128
   normalize: true
-  dimensions: 256
+  dimensions: 384
 
 tier1:
   enabled: true
@@ -52,11 +57,10 @@ tier2:
   experiment_model_key: "tier2_judge"
 
 relevance:
-  # Calibrated 2026-07-05 on a real Korean session: CJK-bigram hash embedding put
-  # on-goal titles at >= 0.207 and off-goal titles at <= 0.0. Provisional until
-  # the replay CLI enables systematic tuning. Misses are acceptable; false
-  # positives are not, so the threshold sits below the observed on-goal minimum.
-  tau_ok: 0.15
+  # Provisional rounded default selected from the 200-pair benchmark without
+  # cross-validation. Recalibrate on labeled exploration history before
+  # treating this as a production estimate.
+  tau_ok: 0.6
   beta: 0.85
   anchor_window: 10
   exemplar_cap: 20
@@ -65,6 +69,18 @@ relevance:
   # the OK verdict but are excluded from the anchor, so one borderline OK can
   # no longer whitelist a whole platform. Tune via the replay CLI later.
   anchor_epsilon: 0.05
+
+goal_enrichment:
+  enabled: true
+  max_phrases: 8
+  # derived_tau was calibrated (2026-07-09) against hash-bucket noise, where
+  # random collisions scored up to ~0.29. Under the ONNX provider (PR #29,
+  # tau_ok 0.6) the gate no longer decides verdicts — a derived match enters
+  # max() and only flips a verdict once it clears relevance.tau_ok anyway —
+  # so it survives only as a noise floor for stored derived_score
+  # diagnostics. See docs/handoff-goal-enrichment.md addendum (2026-07-13).
+  derived_tau: 0.25
+  timeout_seconds: 20
 
 controller:
   type: "streak"
