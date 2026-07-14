@@ -284,16 +284,22 @@ class Tier2ApiTest(unittest.TestCase):
             current = store.get_current_session()
             assert current is not None
             before = store.get_controller_state(current.session.id)
-            with patch.object(
-                store,
-                "_resolve_intervention_candidate_in_conn",
-                side_effect=RuntimeError("synthetic candidate resolution failure"),
-            ):
-                with self.assertRaises(RuntimeError):
-                    client.post(
-                        f"/observations/{request['observation_id']}/excerpt",
-                        json={"title": "Bread", "text": "Unrelated bread recipe."},
-                    )
+            with closing(sqlite3.connect(self.db_path)) as conn:
+                conn.execute(
+                    """
+                    CREATE TRIGGER fail_candidate_confirmation
+                    BEFORE UPDATE OF status ON intervention_candidates
+                    WHEN NEW.status = 'confirmed'
+                    BEGIN
+                        SELECT RAISE(ABORT, 'synthetic candidate resolution failure');
+                    END
+                    """
+                )
+            with self.assertRaises(sqlite3.IntegrityError):
+                client.post(
+                    f"/observations/{request['observation_id']}/excerpt",
+                    json={"title": "Bread", "text": "Unrelated bread recipe."},
+                )
         finally:
             client.__exit__(None, None, None)
 
