@@ -70,6 +70,8 @@ interface ActiveD7Observation {
   observationId: string
   url: string
   urlPathHash: string
+  contentStored: boolean
+  contentRetryAttempted: boolean
 }
 
 let nextObservationToken = 0
@@ -272,17 +274,27 @@ function newPresenceEventId(): string {
 }
 
 async function captureD7ContentAndActivate(tabId: number, observationId: string, url: string): Promise<void> {
-  if (!(await tabStillOnObservedPage(tabId, url))) return
+  if (!(await tabStillActivelyViewed(tabId, url))) return
   const pathHash = await urlPathHashFor(url).catch(() => null)
   if (!pathHash) return
-  const excerpt = await extractFromTab(tabId)
-  if (excerpt && (await tabStillOnObservedPage(tabId, url))) {
-    await postObservationContent(observationId, excerpt)
+  const tracked: ActiveD7Observation = {
+    observationId,
+    url,
+    urlPathHash: pathHash,
+    contentStored: false,
+    contentRetryAttempted: false,
   }
-  if (!(await tabStillOnObservedPage(tabId, url))) return
-  const tracked = { observationId, url, urlPathHash: pathHash }
+  await captureD7Content(tabId, tracked)
+  if (!(await tabStillActivelyViewed(tabId, url))) return
   activeD7Observations.set(tabId, tracked)
   await sendD7Presence(tabId, tracked, "active")
+}
+
+async function captureD7Content(tabId: number, tracked: ActiveD7Observation): Promise<void> {
+  const excerpt = await extractFromTab(tabId)
+  if (!excerpt || !(await tabStillActivelyViewed(tabId, tracked.url))) return
+  const result = await postObservationContent(tracked.observationId, excerpt)
+  tracked.contentStored = Boolean(result?.stored)
 }
 
 async function sendD7Presence(
@@ -290,7 +302,7 @@ async function sendD7Presence(
   tracked: ActiveD7Observation,
   kind: "active" | "heartbeat" | "inactive",
 ): Promise<void> {
-  if (kind !== "inactive" && !(await tabStillOnObservedPage(tabId, tracked.url))) return
+  if (kind !== "inactive" && !(await tabStillActivelyViewed(tabId, tracked.url))) return
   const result = await postObservationPresence(tracked.observationId, {
     event_id: newPresenceEventId(),
     kind,
@@ -298,7 +310,7 @@ async function sendD7Presence(
     url_path_hash: tracked.urlPathHash,
   })
   if (kind !== "inactive" && result?.action === "notify" && result.message) {
-    if (await tabStillOnObservedPage(tabId, tracked.url)) await showNotification(result, tabId)
+    if (await tabStillActivelyViewed(tabId, tracked.url)) await showNotification(result, tabId)
   }
 }
 
@@ -309,19 +321,71 @@ async function deactivateD7Observation(tabId: number): Promise<void> {
   await sendD7Presence(tabId, tracked, "inactive")
 }
 
-async function heartbeatD7Observation(): Promise<void> {
+async function heartbeatD7Observation(forceActive = false): Promise<void> {
+  if (!(await browserPresenceIsActive())) {
+    await deactivateAllD7Observations()
+    return
+  }
   const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
   const tab = tabs[0]
   if (tab?.id === undefined || !tab.url) return
   let tracked = activeD7Observations.get(tab.id)
+  let kind: "active" | "heartbeat" = forceActive ? "active" : "heartbeat"
   if (!tracked || tracked.url !== tab.url) {
     const latest = await getLatestObservation(tab.id, tab.url)
     const pathHash = await urlPathHashFor(tab.url).catch(() => null)
     if (!latest || !pathHash) return
-    tracked = { observationId: latest.observation_id, url: tab.url, urlPathHash: pathHash }
+    tracked = {
+      observationId: latest.observation_id,
+      url: tab.url,
+      urlPathHash: pathHash,
+      contentStored: false,
+      contentRetryAttempted: false,
+    }
     activeD7Observations.set(tab.id, tracked)
+    kind = "active"
   }
-  await sendD7Presence(tab.id, tracked, "heartbeat")
+  if (!tracked.contentStored && !tracked.contentRetryAttempted) {
+    tracked.contentRetryAttempted = true
+    await captureD7Content(tab.id, tracked)
+  }
+  await sendD7Presence(tab.id, tracked, kind)
+}
+
+async function deactivateAllD7Observations(): Promise<void> {
+  await Promise.all([...activeD7Observations.keys()].map((tabId) => deactivateD7Observation(tabId)))
+}
+
+async function browserPresenceIsActive(): Promise<boolean> {
+  try {
+    const [window, idleState] = await Promise.all([
+      chrome.windows.getLastFocused(),
+      chrome.idle.queryState(60),
+    ])
+    return Boolean(window.focused && idleState === "active")
+  } catch {
+    // D7 intentionally prefers a missed dwell over a false-positive clock.
+    return false
+  }
+}
+
+async function tabStillActivelyViewed(tabId: number, url: string): Promise<boolean> {
+  try {
+    const [tab, window, idleState] = await Promise.all([
+      getTab(tabId),
+      chrome.windows.getLastFocused(),
+      chrome.idle.queryState(60),
+    ])
+    return Boolean(
+      tab?.active
+      && tab.url === url
+      && window.focused
+      && tab.windowId === window.id
+      && idleState === "active"
+    )
+  } catch {
+    return false
+  }
 }
 
 function delay(ms: number): Promise<void> {
@@ -649,6 +713,7 @@ async function refreshBadge(): Promise<void> {
 async function initBadge(): Promise<void> {
   await chrome.alarms.create(BADGE_ALARM, { periodInMinutes: 1 })
   await chrome.alarms.create(D7_HEARTBEAT_ALARM, { periodInMinutes: 1 })
+  chrome.idle.setDetectionInterval(60)
   await refreshBadge()
 }
 
@@ -729,6 +794,22 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
   clearInactiveTabTimers(activeInfo.tabId)
   scheduleTabObservation(activeInfo.tabId)
   void redisplayLatestPendingToast(activeInfo.tabId)
+})
+
+chrome.windows.onFocusChanged.addListener((windowId) => {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) {
+    void deactivateAllD7Observations()
+    return
+  }
+  void heartbeatD7Observation(true)
+})
+
+chrome.idle.onStateChanged.addListener((state) => {
+  if (state === "active") {
+    void heartbeatD7Observation(true)
+    return
+  }
+  void deactivateAllD7Observations()
 })
 
 chrome.tabs.onRemoved.addListener((tabId) => {

@@ -3,8 +3,10 @@
 ## Principles
 
 - Drop sensitive domains before creating observations.
-- Never collect page body continuously. D7 captures at most one bounded
-  excerpt after a qualifying navigation dwell, never on every heartbeat.
+- Never collect page body continuously. D7 retains at most one bounded
+  excerpt per observation after a qualifying navigation dwell. A failed post
+  may be retried once on the next heartbeat, but heartbeats do not otherwise
+  recapture content.
 - With D7 enabled, retain only the bounded current/recent excerpt window
   required for a time-budget Tier 2 comparison; prune older entries locally
   and never put excerpt text in events, reports, or feedback.

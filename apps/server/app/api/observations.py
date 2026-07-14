@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..config import ControllerConfig
-from ..core.controller_flow import apply_controller, controller_is_eligible, mark_controller_intervened
+from ..core.controller_flow import apply_controller, mark_controller_intervened, time_review_is_eligible
 from ..core.delivery import clamp_notification_message
 from ..core.normalization import (
     browser_nav_embedding_text,
@@ -31,12 +31,25 @@ from ..core.tier2_payload import (
     build_tier2_payload,
     fallback_drift_message,
 )
-from ..core.time_budget import mode_clock_seconds, next_review_boundary, review_is_due, thresholds_for_budget
+from ..core.time_budget import (
+    TimeBudgetThresholds,
+    mode_clock_seconds,
+    next_review_boundary,
+    review_is_due,
+    thresholds_for_budget,
+)
 from ..core.voice import speak
 from ..providers.judges.base import Tier2Result
 from ..privacy.domain_filter import SensitiveDomainRules, drop_decision_for_url
 from ..schemas import PageExcerpt, PageInfo, PipelineAction, PipelineResult, PipelineResultKind, RawObservation, Verdict
-from ..storage.sqlite import ControllerStateRecord, CurrentSessionRecord, ObservationRecord, ReturnCandidateRecord, SQLiteStore
+from ..storage.sqlite import (
+    ControllerStateRecord,
+    CurrentSessionRecord,
+    DriftClockStateRecord,
+    ObservationRecord,
+    ReturnCandidateRecord,
+    SQLiteStore,
+)
 
 router = APIRouter()
 
@@ -264,8 +277,6 @@ async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineR
         observation,
         defer_intervention=request.app.state.config.time_budget.enabled,
     )
-    if request.app.state.config.time_budget.enabled and observation.verdict is not None:
-        store.activate_drift_clock(observation, ts=observation.ts)
     return_candidate = store.note_attachment_observation(
         observation.session_id,
         observation.verdict.value if observation.verdict else None,
@@ -355,7 +366,15 @@ async def record_observation_presence(
             verdict=verdict,
             page=_page_info(observation),
         )
+    if body.kind == "heartbeat" and verdict != Verdict.DRIFT:
+        return PipelineResult(
+            action=PipelineAction.NONE,
+            observation_id=observation.id,
+            verdict=verdict,
+            page=_page_info(observation),
+        )
 
+    controller_config = effective_controller_config(request.app.state.config, store)
     now = datetime.now(timezone.utc)
     clock_state, accepted, _duplicate = store.record_drift_presence(
         session_id=observation.session_id,
@@ -365,6 +384,12 @@ async def record_observation_presence(
         tab_id=body.tab_id,
         url_path_hash=body.url_path_hash,
         max_gap_seconds=config.max_heartbeat_gap_seconds,
+        review_timeout_seconds=(
+            int(request.app.state.config.tier2.timeout_seconds)
+            + config.heartbeat_seconds
+            + 1
+        ),
+        reset_review_boundary_on_ok=controller_config.type == "streak",
         ts=now,
     )
     if not accepted or body.kind == "inactive" or verdict != Verdict.DRIFT:
@@ -375,8 +400,7 @@ async def record_observation_presence(
             page=_page_info(observation),
         )
 
-    controller_config = effective_controller_config(request.app.state.config, store)
-    eligible = controller_is_eligible(store, controller_config, observation.session_id, now)
+    eligible = time_review_is_eligible(store, controller_config, observation.session_id, now)
     thresholds = thresholds_for_budget(config, current.goal.available_time_minutes)
     if not review_is_due(clock_state, controller_config.type, thresholds, eligible):
         return PipelineResult(
@@ -393,6 +417,37 @@ async def record_observation_presence(
             page=_page_info(observation),
         )
 
+    try:
+        return await _run_d7_review(
+            request,
+            current,
+            observation,
+            verdict,
+            controller_config,
+            thresholds,
+            clock_state,
+            now,
+        )
+    finally:
+        # Conditional release is a no-op after a normal defer/notification.
+        # It protects the page from a permanent lock on cancellation, restart,
+        # or an unexpected exception anywhere in the review body.
+        store.release_d7_review(observation.session_id, observation.id, "review_aborted")
+
+
+async def _run_d7_review(
+    request: Request,
+    current: CurrentSessionRecord,
+    observation: ObservationRecord,
+    verdict: Verdict,
+    controller_config: ControllerConfig,
+    thresholds: TimeBudgetThresholds,
+    clock_state: DriftClockStateRecord,
+    now: datetime,
+) -> PipelineResult:
+    assert current.goal is not None
+    store = _store(request)
+    config = request.app.state.config.time_budget
     mode_seconds = mode_clock_seconds(clock_state, controller_config.type)
     time_context = {
         "available_time_minutes": current.goal.available_time_minutes,
@@ -403,28 +458,10 @@ async def record_observation_presence(
         "mode_clock_seconds": mode_seconds,
     }
     current_excerpt = store.get_observation_excerpt(observation.id)
-    if not current_excerpt or not current_excerpt.text:
-        return _defer_d7_review(
-            store,
-            observation,
-            thresholds.total_seconds,
-            mode_seconds,
-            "content_unavailable",
-        )
-
     recent_titles = store.recent_observation_summaries(
         observation.session_id,
         request.app.state.config.tier2.recent_observations,
     )
-    recent_content = [
-        item
-        for item in store.recent_observation_content(
-            observation.session_id,
-            config.recent_excerpts + 1,
-            config.recent_excerpt_char_limit,
-        )
-        if item.observation_id != observation.id
-    ][-config.recent_excerpts :]
     settings = runtime_settings(request.app.state.config, store)
     persona = resolve_persona(
         getattr(request.app.state, "persona_set", None),
@@ -433,26 +470,51 @@ async def record_observation_presence(
     )
     system_prompt = compose_tier2_system_prompt(persona) if persona else None
     title_payload = build_d7_title_payload(current.goal, observation, recent_titles, time_context)
-    content_payload = build_d7_content_payload(
-        current.goal,
-        observation,
-        current_excerpt.text,
-        recent_content,
-        time_context,
-    )
-    title_result, content_result = await asyncio.gather(
-        _confirm_d7_tier2(request, observation.session_id, observation.id, title_payload, system_prompt),
-        _confirm_d7_tier2(request, observation.session_id, observation.id, content_payload, system_prompt),
-    )
-    if title_result is None or content_result is None:
-        return _defer_d7_review(
-            store,
+    _inject_nagging_context(store, title_payload, observation.session_id, observation.url_host)
+    payloads = [title_payload]
+    if current_excerpt and current_excerpt.text:
+        recent_content = [
+            item
+            for item in store.recent_observation_content(
+                observation.session_id,
+                config.recent_excerpts + 1,
+                config.recent_excerpt_char_limit,
+            )
+            if item.observation_id != observation.id
+        ][-config.recent_excerpts :]
+        content_payload = build_d7_content_payload(
+            current.goal,
             observation,
-            thresholds.total_seconds,
-            mode_seconds,
-            "judge_unavailable",
+            current_excerpt.text,
+            recent_content,
+            time_context,
         )
-    if not title_result.confirm_drift or not content_result.confirm_drift:
+        _inject_nagging_context(store, content_payload, observation.session_id, observation.url_host)
+        payloads.append(content_payload)
+    else:
+        store.record_d7_content_unavailable(observation.session_id, observation.id, now)
+
+    results = await asyncio.gather(
+        *(
+            _confirm_d7_tier2(
+                request,
+                observation.session_id,
+                observation.id,
+                payload,
+                system_prompt,
+            )
+            for payload in payloads
+        )
+    )
+    if not store.d7_review_is_current(observation.session_id, observation.id):
+        return PipelineResult(
+            action=PipelineAction.NONE,
+            observation_id=observation.id,
+            verdict=verdict,
+            page=_page_info(observation),
+        )
+    available_results = [result for result in results if result is not None]
+    if any(not result.confirm_drift for result in available_results):
         return _defer_d7_review(
             store,
             observation,
@@ -466,8 +528,15 @@ async def record_observation_presence(
         if persona and persona.max_sentences is not None
         else request.app.state.config.delivery.max_sentences
     )
+    provider_message = next(
+        (result.message for result in reversed(available_results) if result.message),
+        None,
+    )
+    if not available_results:
+        nag_count = store.nag_count_today(observation.session_id) + 1
+        provider_message = format_persona_fallback(persona, current.goal, observation, nag_count)
     message = clamp_notification_message(
-        content_result.message or title_result.message or fallback_drift_message(current.goal, observation),
+        provider_message or fallback_drift_message(current.goal, observation),
         max_sentences,
     )
     store.record_tier2_result(

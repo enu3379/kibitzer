@@ -661,6 +661,7 @@ async def _replay_observation(
         state.config.controller,
         observation,
         now=stored.ts,
+        defer_intervention=state.config.time_budget.enabled,
     )
     row.request_excerpt_replay = result.action == PipelineAction.REQUEST_EXCERPT
     state.admit_anchor(emb, verdict_replay, anchor_eligible)

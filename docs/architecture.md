@@ -66,6 +66,13 @@ browser event
   -> notification
 ```
 
+D7 navigation records do not activate a dwell clock by themselves. The
+extension must assert an `active` presence for the focused, non-idle Chrome
+tab; it sends `inactive` when Chrome loses OS focus or the user becomes
+idle/locked. Heartbeats extend only the server-owned active clock, while a
+later `active` event can safely recover it after tab/window changes or service
+worker teardown.
+
 ## Extension-to-Server Actions
 
 Server responses use explicit actions:

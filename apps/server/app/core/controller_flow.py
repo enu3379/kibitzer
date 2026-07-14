@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from ..config import ControllerConfig
 from ..schemas import Observation, PageInfo, PipelineAction, PipelineResult, Verdict
@@ -57,14 +57,29 @@ def apply_controller(
     )
 
 
-def controller_is_eligible(
+def time_review_is_eligible(
     store: SQLiteStore,
     config: ControllerConfig,
     session_id: str,
     now: datetime | None = None,
 ) -> bool:
+    """Apply only the controller gates that remain relevant to a dwell review.
+
+    The D7 mode clock is the drift trigger. Requiring the navigation controller's
+    streak/armed bit here would make a long single-page dwell impossible to
+    review and would also block re-reviews after ``on_intervened`` resets it.
+    """
     state = store.get_controller_state(session_id)
-    return _controller_from_state(config, state).should_intervene(now or datetime.now(timezone.utc))
+    timestamp = now or datetime.now(timezone.utc)
+    if state.obs_count < config.coldstart_observations:
+        return False
+    if state.snoozed_until and timestamp < state.snoozed_until:
+        return False
+    if state.last_intervention_ts:
+        cooldown_until = state.last_intervention_ts + timedelta(seconds=config.cooldown_seconds)
+        if timestamp < cooldown_until:
+            return False
+    return True
 
 
 def mark_controller_intervened(
