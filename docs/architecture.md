@@ -61,8 +61,9 @@ browser event
   -> Tier 0 relevance
   -> optional Tier 1 classifier
   -> controller update
-  -> optional request_excerpt
+  -> optional candidate + request_excerpt (controller evidence retained)
   -> Tier 2 confirmation/message
+  -> confirmed drift consumes controller evidence
   -> notification
 ```
 
@@ -75,7 +76,7 @@ Server responses use explicit actions:
 ```
 
 ```json
-{"action":"request_excerpt","observation_id":"obs_..."}
+{"action":"request_excerpt","observation_id":"obs_...","candidate_id":"cand_..."}
 ```
 
 ```json

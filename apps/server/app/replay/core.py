@@ -14,7 +14,7 @@ from typing import Any
 import yaml
 
 from ..config import AppConfig
-from ..core.controller_flow import apply_controller
+from ..core.controller_flow import apply_controller, confirm_controller_intervention
 from ..core.normalization import strip_repeated_title_suffix
 from ..core.relevance import tier0_score_parts, tier1_final_relevance
 from ..providers.embeddings.factory import create_embedding_provider
@@ -663,6 +663,21 @@ async def _replay_observation(
         now=stored.ts,
     )
     row.request_excerpt_replay = result.action == PipelineAction.REQUEST_EXCERPT
+    if row.request_excerpt_replay:
+        # Replay has no page excerpt or live Tier 2 result. Preserve its existing
+        # "would request" intervention cadence by treating each replayed request
+        # as confirmed after recording the candidate point.
+        state.controller_store.record_intervention_requested(
+            observation.session_id,
+            observation.id,
+            ts=stored.ts,
+        )
+        confirm_controller_intervention(
+            state.controller_store,
+            state.config.controller,
+            observation.session_id,
+            now=stored.ts,
+        )
     state.admit_anchor(emb, verdict_replay, anchor_eligible)
     state.rows.append(row)
     state.rows_by_observation_id[row.observation_id] = row
