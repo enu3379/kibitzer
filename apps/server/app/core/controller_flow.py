@@ -4,10 +4,14 @@ from datetime import datetime, timezone
 
 from ..config import ControllerConfig
 from ..schemas import Observation, PageInfo, PipelineAction, PipelineResult, Verdict
-from ..storage.sqlite import ControllerStateRecord, ObservationRecord, SQLiteStore
+from ..storage.sqlite import (
+    ControllerStateRecord,
+    SQLiteStore,
+    effective_observation_verdict,
+)
 from .controllers.alignment import AlignmentController
 from .controllers.streak import StreakController
-from .relevance import RELATED_RELEVANCE
+from .relevance import RELATED_RELEVANCE, TIER1_DRIFT_RELEVANCE
 
 
 def apply_controller(
@@ -103,29 +107,44 @@ def controller_state_after_intervention(
     )
 
 
-def apply_related_page_correction(
+def rebuild_controller_state(
     store: SQLiteStore,
     config: ControllerConfig,
-    observation: ObservationRecord,
+    session_id: str,
     now: datetime | None = None,
 ) -> None:
-    """Apply the controller-specific effect of correcting a page to related."""
-    state = store.get_controller_state(observation.session_id)
-    controller = _controller_from_state(config, state)
-    if isinstance(controller, AlignmentController):
-        previous_r = observation.features.get("r_final")
-        if previous_r is None:
-            previous_r = 1.0 if observation.verdict == Verdict.OK else 0.0
-        controller.replace_latest_relevance(previous_r, RELATED_RELEVANCE)
-    else:
-        controller.on_feedback("relevant")
-    _save_controller_state(
-        store,
-        observation.session_id,
-        controller,
-        state,
-        now or datetime.now(timezone.utc),
+    """Replay final observation facts and confirmed intervention moments."""
+
+    current = store.get_controller_state(session_id)
+    replayed_at = now or datetime.now(timezone.utc)
+    empty = ControllerStateRecord(
+        session_id=session_id,
+        streak=0,
+        obs_count=0,
+        last_intervention_ts=None,
+        snoozed_until=current.snoozed_until,
+        alignment_score=None,
+        drift_latched=False,
+        updated_at=replayed_at,
     )
+    controller = _controller_from_state(config, empty)
+    for event in store.controller_replay_timeline(session_id):
+        if event.kind == "intervention":
+            controller.on_intervened(event.ts)
+            continue
+
+        effective = effective_observation_verdict(event.verdict, event.label)
+        if effective not in (Verdict.OK.value, Verdict.DRIFT.value):
+            continue
+        if event.label == "related":
+            relevance = RELATED_RELEVANCE
+        elif event.label == "drift":
+            relevance = TIER1_DRIFT_RELEVANCE
+        else:
+            relevance = event.r_final
+        controller.update(Verdict(effective), relevance)
+
+    _save_controller_state(store, session_id, controller, current, replayed_at)
 
 
 def _controller_from_state(

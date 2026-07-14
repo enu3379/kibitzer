@@ -30,7 +30,6 @@ import {
   ExplorationHistoryEntry,
   ExplorationResponseKind,
   loadExplorationHistory,
-  updateExplorationHistoryByObservationId,
 } from "../lib/history"
 
 const POLL_MS = 2000
@@ -148,6 +147,17 @@ function stopPoll(): void {
 
 function notifyBadge(): void {
   void chrome.runtime.sendMessage({ type: "kibitzer:refresh-badge" }).catch(() => undefined)
+}
+
+async function syncExplorationHistoryVerdict(
+  observationId: string,
+  verdict: "OK" | "DRIFT",
+): Promise<void> {
+  await chrome.runtime.sendMessage({
+    type: "kibitzer:update-history-verdict",
+    observationId,
+    verdict,
+  }).catch(() => undefined)
 }
 
 function formatDuration(totalSeconds: number): string {
@@ -427,9 +437,7 @@ async function submitPageLabel(page: LatestObservation, label: PageLabel): Promi
   const result = await postObservationLabel(page.observation_id, label)
   if (result) {
     if (result.verdict === "OK" || result.verdict === "DRIFT") {
-      await updateExplorationHistoryByObservationId(result.observation_id, {
-        verdict: result.verdict,
-      })
+      await syncExplorationHistoryVerdict(result.observation_id, result.verdict)
     }
     notifyBadge()
   }

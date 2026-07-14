@@ -110,5 +110,6 @@ class FeedbackResult(BaseModel):
     intervention_id: str
     observation_id: str | None = None
     intervention_status: str
+    verdict: Verdict | None = None
     exemplar_count: int | None = None
     snoozed_until: datetime | None = None

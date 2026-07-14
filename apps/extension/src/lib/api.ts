@@ -43,6 +43,7 @@ export interface FeedbackResult {
   intervention_id: string
   observation_id?: string | null
   intervention_status: string
+  verdict?: "OK" | "DRIFT" | null
   exemplar_count?: number | null
   snoozed_until?: string | null
 }

@@ -5,6 +5,8 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from ..core.page_labels import apply_page_label_override
+from ..core.runtime_settings import effective_controller_config
 from ..schemas import FeedbackKind, FeedbackRequest, FeedbackResult
 from ..storage.sqlite import SQLiteStore
 
@@ -75,19 +77,25 @@ async def submit_feedback(request: Request, feedback: FeedbackRequest) -> Feedba
     )
 
     exemplar_count: int | None = None
+    verdict = None
     snoozed_until = None
     status = intervention.status
 
-    if created:
-        if feedback.kind == FeedbackKind.RELATED:
-            exemplar_count = store.add_goal_exemplar_from_observation(
-                intervention.session_id,
-                observation.id,
-                request.app.state.config.relevance.exemplar_cap,
-            )
+    if feedback.kind == FeedbackKind.RELATED:
+        _page_label, exemplar_count, verdict = apply_page_label_override(
+            store,
+            effective_controller_config(request.app.state.config, store),
+            observation,
+            label="related",
+            exemplar_cap=request.app.state.config.relevance.exemplar_cap,
+        )
+        refreshed = store.get_intervention(intervention.id)
+        status = refreshed.status if refreshed else intervention.status
+        if status != "related":
+            store.update_intervention_status(intervention.id, "related")
             status = "related"
-            store.update_intervention_status(intervention.id, status)
-        elif feedback.kind == FeedbackKind.ACCEPTED:
+    elif created:
+        if feedback.kind == FeedbackKind.ACCEPTED:
             status = "accepted"
             store.update_intervention_status(intervention.id, status)
         elif feedback.kind == FeedbackKind.SNOOZE:
@@ -99,8 +107,6 @@ async def submit_feedback(request: Request, feedback: FeedbackRequest) -> Feedba
             status = "break"
             store.update_intervention_status(intervention.id, status)
     else:
-        if feedback.kind == FeedbackKind.RELATED:
-            exemplar_count = store.goal_exemplar_count(intervention.session_id)
         if feedback.kind in {FeedbackKind.SNOOZE, FeedbackKind.BREAK}:
             snoozed_until = store.get_controller_state(intervention.session_id).snoozed_until
         refreshed = store.get_intervention(intervention.id)
@@ -113,6 +119,7 @@ async def submit_feedback(request: Request, feedback: FeedbackRequest) -> Feedba
         intervention_id=intervention.id,
         observation_id=observation.id,
         intervention_status=status,
+        verdict=verdict,
         exemplar_count=exemplar_count,
         snoozed_until=snoozed_until,
     )

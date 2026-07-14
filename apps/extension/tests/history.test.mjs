@@ -6,6 +6,7 @@ import {
   loadExplorationHistory,
   prependExplorationHistory,
   updateExplorationHistory,
+  updateExplorationHistoryByObservationId,
 } from "../src/lib/history.ts"
 
 const HISTORY_STORAGE_KEY = "kibitzer:exploration-history"
@@ -97,6 +98,18 @@ test("serializes multiple updates without dropping earlier patches", async () =>
 
   assert.equal(storage.entries()[0].title, "Updated title")
   assert.equal(storage.entries()[0].responseKind, "celebration")
+})
+
+test("serializes response markers and verdict corrections for one observation", async () => {
+  const storage = installSessionStorage([historyEntry("existing")])
+
+  await Promise.all([
+    updateExplorationHistory("existing", { responseKind: "intervention" }),
+    updateExplorationHistoryByObservationId("obs_existing", { verdict: "OK" }),
+  ])
+
+  assert.equal(storage.entries()[0].responseKind, "intervention")
+  assert.equal(storage.entries()[0].verdict, "OK")
 })
 
 test("continues processing mutations after a rejected write", async () => {

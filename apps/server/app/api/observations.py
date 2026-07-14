@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from ..config import ControllerConfig
-from ..core.controller_flow import apply_controller, apply_related_page_correction, controller_state_after_intervention
+from ..core.controller_flow import apply_controller, controller_state_after_intervention
 from ..core.delivery import clamp_notification_message
 from ..core.normalization import (
     browser_nav_embedding_text,
@@ -20,6 +20,7 @@ from ..core.personas import (
     format_persona_fallback,
     resolve_persona,
 )
+from ..core.page_labels import apply_page_label_override
 from ..core.relevance import tier0_score_parts, tier1_final_relevance
 from ..core.runtime_settings import effective_controller_config, quiet_hours_active, runtime_settings
 from ..core.runtime_resources import RuntimeResources
@@ -135,36 +136,13 @@ async def label_observation(
         if not isinstance(emb, list) or not emb:
             raise HTTPException(status_code=400, detail="observation has no embedding")
 
-    previous_label = store.page_label_for_observation(observation.id)
-    previous_verdict = effective_observation_verdict(observation.verdict, previous_label)
-    page_label, exemplar_count = store.record_page_label(
-        session_id=observation.session_id,
-        observation_id=observation.id,
+    page_label, exemplar_count, verdict = apply_page_label_override(
+        store,
+        effective_controller_config(request.app.state.config, store),
+        observation,
         label=body.label,
         exemplar_cap=request.app.state.config.relevance.exemplar_cap,
     )
-    verdict = effective_observation_verdict(observation.verdict, body.label)
-    if verdict == Verdict.OK.value and previous_verdict != verdict:
-        now = datetime.now(timezone.utc)
-        apply_related_page_correction(
-            store,
-            effective_controller_config(request.app.state.config, store),
-            observation,
-            now=now,
-        )
-        # A corrected false drift must not keep the attachment state or a nag
-        # for the same observation alive. The user's page label is the answer.
-        store.note_attachment_observation(
-            observation.session_id,
-            Verdict.OK.value,
-            now,
-            drift_confirmed=False,
-        )
-        store.resolve_unhandled_interventions_for_observation(
-            observation.session_id,
-            observation.id,
-            ts=now,
-        )
 
     return PageLabelResponse(
         label_id=page_label.id,
@@ -352,7 +330,23 @@ async def confirm_observation_excerpt(
     if not current or not current.goal or not observation or observation.session_id != current.session.id:
         raise HTTPException(status_code=404, detail="observation not found")
 
-    verdict = Verdict(observation.verdict) if observation.verdict else None
+    effective_value = effective_observation_verdict(
+        observation.verdict,
+        store.page_label_for_observation(observation.id),
+    )
+    verdict = Verdict(effective_value) if effective_value else None
+    if verdict != Verdict.DRIFT:
+        store.cancel_active_intervention_candidates_for_observation(
+            observation.session_id,
+            observation.id,
+        )
+        return PipelineResult(
+            action=PipelineAction.NONE,
+            observation_id=observation.id,
+            verdict=verdict,
+            page=_page_info(observation),
+        )
+
     candidate = store.get_intervention_candidate_for_observation(observation.id)
     if not candidate:
         raise HTTPException(status_code=409, detail="observation has no intervention candidate")
@@ -366,15 +360,6 @@ async def confirm_observation_excerpt(
         raise HTTPException(status_code=409, detail=f"intervention candidate is {candidate.status}")
 
     try:
-        if verdict != Verdict.DRIFT:
-            store.resolve_intervention_candidate(candidate.id, "cancelled")
-            return PipelineResult(
-                action=PipelineAction.NONE,
-                observation_id=observation.id,
-                verdict=verdict,
-                page=_page_info(observation),
-            )
-
         recent = store.recent_observation_summaries(
             observation.session_id,
             request.app.state.config.tier2.recent_observations,
@@ -417,6 +402,23 @@ async def confirm_observation_excerpt(
             store.resolve_intervention_candidate(candidate.id, "cancelled")
             return PipelineResult(action=PipelineAction.NONE, observation_id=observation.id, verdict=verdict)
 
+        effective_value = effective_observation_verdict(
+            observation.verdict,
+            store.page_label_for_observation(observation.id),
+        )
+        verdict = Verdict(effective_value) if effective_value else None
+        if verdict != Verdict.DRIFT:
+            store.cancel_active_intervention_candidates_for_observation(
+                observation.session_id,
+                observation.id,
+            )
+            return PipelineResult(
+                action=PipelineAction.NONE,
+                observation_id=observation.id,
+                verdict=verdict,
+                page=_page_info(observation),
+            )
+
         controller_config = effective_controller_config(request.app.state.config, store)
         confirmed_at = datetime.now(timezone.utc)
         controller_state = controller_state_after_intervention(
@@ -433,6 +435,17 @@ async def confirm_observation_excerpt(
             controller_state,
             ts=confirmed_at,
         )
+        if intervention_id is None:
+            effective_value = effective_observation_verdict(
+                observation.verdict,
+                store.page_label_for_observation(observation.id),
+            )
+            return PipelineResult(
+                action=PipelineAction.NONE,
+                observation_id=observation.id,
+                verdict=Verdict(effective_value) if effective_value else None,
+                page=_page_info(observation),
+            )
         silent = _handle_delivery_side_effects(
             request,
             observation.session_id,
