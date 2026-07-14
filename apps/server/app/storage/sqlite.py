@@ -38,6 +38,7 @@ class GoalRecord:
     exemplars: list[list[float]]
     provenance: str
     updated_at: datetime
+    available_time_minutes: int | None = None
     derived_exemplars: list[GoalDerivedExemplarRecord] = field(default_factory=list)
 
     @property
@@ -86,6 +87,23 @@ class ObservationSummary:
 
 
 @dataclass(frozen=True)
+class ObservationExcerptRecord:
+    observation_id: str
+    session_id: str
+    captured_at: datetime
+    text: str
+    char_count: int
+
+
+@dataclass(frozen=True)
+class ObservationContentSummary:
+    observation_id: str
+    title: str | None
+    verdict: str | None
+    text: str
+
+
+@dataclass(frozen=True)
 class ControllerStateRecord:
     session_id: str
     streak: int
@@ -94,6 +112,25 @@ class ControllerStateRecord:
     snoozed_until: datetime | None
     alignment_score: float | None
     drift_latched: bool
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class DriftClockStateRecord:
+    session_id: str
+    active_observation_id: str | None
+    active_tab_id: int | None
+    active_url_path_hash: str | None
+    active_verdict: str | None
+    active_since_at: datetime | None
+    last_heartbeat_at: datetime | None
+    current_page_drift_seconds: int
+    continuous_drift_seconds: int
+    cumulative_drift_seconds: int
+    next_review_mode_seconds: int
+    review_observation_id: str | None
+    review_status: str
+    last_defer_reason: str | None
     updated_at: datetime
 
 
@@ -242,7 +279,7 @@ class SQLiteStore:
                 return None
             goal_row = conn.execute(
                 """
-                SELECT session_id, raw_text, keywords_json, provenance, updated_at
+                SELECT session_id, raw_text, keywords_json, provenance, updated_at, available_time_minutes
                 FROM goals
                 WHERE session_id = ?
                 """,
@@ -270,6 +307,7 @@ class SQLiteStore:
                 "UPDATE sessions SET active = 0, ended_at = ? WHERE id = ?",
                 (now.isoformat(), row["id"]),
             )
+            conn.execute("DELETE FROM observation_excerpts WHERE session_id = ?", (row["id"],))
             self._append_event(conn, row["id"], "session.ended", {}, now)
         return SessionRecord(id=row["id"], created_at=_parse_dt(row["created_at"]), active=False)
 
@@ -748,10 +786,13 @@ class SQLiteStore:
         raw_text: str,
         keywords: list[str] | None = None,
         exemplar: list[float] | None = None,
+        available_time_minutes: int | None = None,
     ) -> GoalRecord:
         normalized_goal = raw_text.strip()
         if not normalized_goal:
             raise ValueError("goal text must not be empty")
+        if available_time_minutes is not None and available_time_minutes < 1:
+            raise ValueError("available_time_minutes must be positive")
 
         keywords = keywords or []
         now = _utc_now()
@@ -767,15 +808,18 @@ class SQLiteStore:
             session_id = session_row["id"]
             conn.execute(
                 """
-                INSERT INTO goals (session_id, raw_text, keywords_json, provenance, updated_at)
-                VALUES (?, ?, ?, 'declared', ?)
+                INSERT INTO goals (
+                    session_id, raw_text, keywords_json, provenance, updated_at, available_time_minutes
+                )
+                VALUES (?, ?, ?, 'declared', ?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET
                     raw_text = excluded.raw_text,
                     keywords_json = excluded.keywords_json,
                     provenance = excluded.provenance,
-                    updated_at = excluded.updated_at
+                    updated_at = excluded.updated_at,
+                    available_time_minutes = excluded.available_time_minutes
                 """,
-                (session_id, normalized_goal, json.dumps(keywords), now_text),
+                (session_id, normalized_goal, json.dumps(keywords), now_text, available_time_minutes),
             )
             if exemplar is not None:
                 conn.execute("DELETE FROM goal_exemplars WHERE session_id = ?", (session_id,))
@@ -787,14 +831,38 @@ class SQLiteStore:
                     (f"gex_{uuid.uuid4().hex}", session_id, json.dumps(exemplar), now_text),
                 )
             conn.execute("DELETE FROM goal_derived_exemplars WHERE session_id = ?", (session_id,))
+            conn.execute(
+                """
+                INSERT INTO controller_states (
+                    session_id, streak, obs_count, last_intervention_ts, snoozed_until,
+                    alignment_score, drift_latched, updated_at
+                )
+                VALUES (?, 0, 0, NULL, NULL, NULL, 0, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    streak = 0,
+                    obs_count = 0,
+                    last_intervention_ts = NULL,
+                    snoozed_until = NULL,
+                    alignment_score = NULL,
+                    drift_latched = 0,
+                    updated_at = excluded.updated_at
+                """,
+                (session_id, now_text),
+            )
             self._append_event(
                 conn,
                 session_id,
                 "goal.declared",
-                {"raw_text": normalized_goal, "keywords": keywords, "provenance": "declared"},
+                {
+                    "raw_text": normalized_goal,
+                    "keywords": keywords,
+                    "provenance": "declared",
+                    "available_time_minutes": available_time_minutes,
+                },
                 now,
             )
 
+        self.reset_drift_clock_state(session_id, now)
         return GoalRecord(
             session_id=session_id,
             raw_text=normalized_goal,
@@ -802,6 +870,7 @@ class SQLiteStore:
             exemplars=[exemplar] if exemplar is not None else self.get_goal_exemplars(session_id),
             provenance="declared",
             updated_at=now,
+            available_time_minutes=available_time_minutes,
             derived_exemplars=[],
         )
 
@@ -952,6 +1021,382 @@ class SQLiteStore:
             tier_reached=observation.features.tier_reached,
             tier1_reason=observation.tier1_reason,
         )
+
+    def store_observation_excerpt(
+        self,
+        session_id: str,
+        observation_id: str,
+        text: str,
+        char_limit: int,
+        retention_limit: int,
+        ts: datetime | None = None,
+    ) -> ObservationExcerptRecord:
+        now = ts or _utc_now()
+        cleaned = " ".join(text.split())[:char_limit]
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute(
+                "SELECT session_id FROM observations WHERE id = ? AND session_id = ?",
+                (observation_id, session_id),
+            ).fetchone()
+            if not row:
+                raise ValueError("observation not found")
+            conn.execute(
+                """
+                INSERT INTO observation_excerpts (
+                    observation_id, session_id, captured_at, text, char_count
+                )
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(observation_id) DO UPDATE SET
+                    captured_at = excluded.captured_at,
+                    text = excluded.text,
+                    char_count = excluded.char_count
+                """,
+                (observation_id, session_id, now.isoformat(), cleaned, len(cleaned)),
+            )
+            conn.execute(
+                """
+                DELETE FROM observation_excerpts
+                WHERE session_id = ?
+                  AND observation_id NOT IN (
+                      SELECT observation_id
+                      FROM observation_excerpts
+                      WHERE session_id = ?
+                      ORDER BY captured_at DESC, observation_id DESC
+                      LIMIT ?
+                  )
+                """,
+                (session_id, session_id, max(1, retention_limit)),
+            )
+            self._append_event(
+                conn,
+                session_id,
+                "d7.content_captured",
+                {"observation_id": observation_id, "char_count": len(cleaned)},
+                now,
+            )
+        return ObservationExcerptRecord(
+            observation_id=observation_id,
+            session_id=session_id,
+            captured_at=now,
+            text=cleaned,
+            char_count=len(cleaned),
+        )
+
+    def get_observation_excerpt(self, observation_id: str) -> ObservationExcerptRecord | None:
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute(
+                """
+                SELECT observation_id, session_id, captured_at, text, char_count
+                FROM observation_excerpts
+                WHERE observation_id = ?
+                """,
+                (observation_id,),
+            ).fetchone()
+        return self._excerpt_from_row(row) if row else None
+
+    def recent_observation_content(
+        self,
+        session_id: str,
+        limit: int,
+        excerpt_char_limit: int,
+    ) -> list[ObservationContentSummary]:
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                """
+                SELECT observations.id, observations.title, observations.verdict, observation_excerpts.text
+                FROM observation_excerpts
+                JOIN observations ON observations.id = observation_excerpts.observation_id
+                WHERE observation_excerpts.session_id = ?
+                ORDER BY observation_excerpts.captured_at DESC, observations.id DESC
+                LIMIT ?
+                """,
+                (session_id, limit),
+            ).fetchall()
+        return [
+            ObservationContentSummary(
+                observation_id=row["id"],
+                title=row["title"],
+                verdict=row["verdict"],
+                text=row["text"][:excerpt_char_limit],
+            )
+            for row in reversed(rows)
+        ]
+
+    def get_drift_clock_state(self, session_id: str) -> DriftClockStateRecord:
+        now = _utc_now()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            row = self._ensure_drift_clock_state_row(conn, session_id, now)
+        return self._drift_clock_state_from_row(row)
+
+    def reset_drift_clock_state(self, session_id: str, ts: datetime | None = None) -> DriftClockStateRecord:
+        now = ts or _utc_now()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            conn.execute(
+                """
+                INSERT INTO drift_clock_states (
+                    session_id, current_page_drift_seconds, continuous_drift_seconds,
+                    cumulative_drift_seconds, next_review_mode_seconds, review_status, updated_at
+                )
+                VALUES (?, 0, 0, 0, 0, 'none', ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    active_observation_id = NULL,
+                    active_tab_id = NULL,
+                    active_url_path_hash = NULL,
+                    active_verdict = NULL,
+                    active_since_at = NULL,
+                    last_heartbeat_at = NULL,
+                    current_page_drift_seconds = 0,
+                    continuous_drift_seconds = 0,
+                    cumulative_drift_seconds = 0,
+                    next_review_mode_seconds = 0,
+                    review_observation_id = NULL,
+                    review_status = 'none',
+                    last_defer_reason = NULL,
+                    updated_at = excluded.updated_at
+                """,
+                (session_id, now.isoformat()),
+            )
+            self._append_event(conn, session_id, "d7.clock_reset", {}, now)
+            row = self._ensure_drift_clock_state_row(conn, session_id, now)
+        return self._drift_clock_state_from_row(row)
+
+    def activate_drift_clock(
+        self,
+        observation: Observation,
+        ts: datetime | None = None,
+    ) -> DriftClockStateRecord:
+        now = ts or observation.ts
+        verdict = observation.verdict.value if observation.verdict else None
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            state = self._drift_clock_state_from_row(
+                self._ensure_drift_clock_state_row(conn, observation.session_id, now)
+            )
+            continuous = state.continuous_drift_seconds if verdict == "DRIFT" else 0
+            review_observation_id = state.review_observation_id
+            review_status = state.review_status
+            if review_observation_id and review_observation_id != observation.id:
+                review_observation_id = None
+                review_status = "none"
+            conn.execute(
+                """
+                UPDATE drift_clock_states
+                SET active_observation_id = ?, active_tab_id = ?, active_url_path_hash = ?,
+                    active_verdict = ?, active_since_at = ?, last_heartbeat_at = ?,
+                    current_page_drift_seconds = 0, continuous_drift_seconds = ?,
+                    review_observation_id = ?, review_status = ?, updated_at = ?
+                WHERE session_id = ?
+                """,
+                (
+                    observation.id,
+                    observation.payload.get("tab_id"),
+                    observation.payload.get("url_path_hash"),
+                    verdict,
+                    now.isoformat(),
+                    now.isoformat(),
+                    continuous,
+                    review_observation_id,
+                    review_status,
+                    now.isoformat(),
+                    observation.session_id,
+                ),
+            )
+            self._append_event(
+                conn,
+                observation.session_id,
+                "d7.clock_activated",
+                {"observation_id": observation.id, "verdict": verdict},
+                now,
+            )
+            row = self._ensure_drift_clock_state_row(conn, observation.session_id, now)
+        return self._drift_clock_state_from_row(row)
+
+    def record_drift_presence(
+        self,
+        session_id: str,
+        observation_id: str,
+        event_id: str,
+        kind: str,
+        tab_id: int,
+        url_path_hash: str,
+        max_gap_seconds: int,
+        ts: datetime | None = None,
+    ) -> tuple[DriftClockStateRecord, bool, bool]:
+        if kind not in {"active", "heartbeat", "inactive"}:
+            raise ValueError("unknown presence kind")
+        now = ts or _utc_now()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            state_row = self._ensure_drift_clock_state_row(conn, session_id, now)
+            state = self._drift_clock_state_from_row(state_row)
+            duplicate = conn.execute(
+                "SELECT 1 FROM dwell_presence_events WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+            if duplicate:
+                return state, False, True
+
+            active_matches = (
+                state.active_observation_id == observation_id
+                and state.active_tab_id == tab_id
+                and state.active_url_path_hash == url_path_hash
+            )
+            conn.execute(
+                """
+                INSERT INTO dwell_presence_events (event_id, session_id, observation_id, received_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (event_id, session_id, observation_id, now.isoformat()),
+            )
+            if not active_matches:
+                self._append_event(
+                    conn,
+                    session_id,
+                    "d7.presence_ignored",
+                    {"observation_id": observation_id, "kind": kind},
+                    now,
+                )
+                return state, False, False
+
+            elapsed = 0
+            if state.last_heartbeat_at:
+                elapsed = max(0, int((now - state.last_heartbeat_at).total_seconds()))
+                elapsed = min(elapsed, max_gap_seconds)
+            current_page = state.current_page_drift_seconds
+            continuous = state.continuous_drift_seconds
+            cumulative = state.cumulative_drift_seconds
+            if state.active_verdict == "DRIFT":
+                current_page += elapsed
+                continuous += elapsed
+                cumulative += elapsed
+
+            active_observation_id: str | None = observation_id
+            active_tab_id: int | None = tab_id
+            active_path_hash: str | None = url_path_hash
+            active_verdict: str | None = state.active_verdict
+            active_since_at = state.active_since_at.isoformat() if state.active_since_at else now.isoformat()
+            if kind == "inactive":
+                active_observation_id = None
+                active_tab_id = None
+                active_path_hash = None
+                active_verdict = None
+                active_since_at = None
+                current_page = 0
+
+            conn.execute(
+                """
+                UPDATE drift_clock_states
+                SET active_observation_id = ?, active_tab_id = ?, active_url_path_hash = ?,
+                    active_verdict = ?, active_since_at = ?, last_heartbeat_at = ?,
+                    current_page_drift_seconds = ?, continuous_drift_seconds = ?,
+                    cumulative_drift_seconds = ?, updated_at = ?
+                WHERE session_id = ?
+                """,
+                (
+                    active_observation_id,
+                    active_tab_id,
+                    active_path_hash,
+                    active_verdict,
+                    active_since_at,
+                    now.isoformat(),
+                    current_page,
+                    continuous,
+                    cumulative,
+                    now.isoformat(),
+                    session_id,
+                ),
+            )
+            self._append_event(
+                conn,
+                session_id,
+                "d7.presence_recorded",
+                {"observation_id": observation_id, "kind": kind, "elapsed_seconds": elapsed},
+                now,
+            )
+            row = self._ensure_drift_clock_state_row(conn, session_id, now)
+        return self._drift_clock_state_from_row(row), True, False
+
+    def begin_d7_review(
+        self,
+        session_id: str,
+        observation_id: str,
+        ts: datetime | None = None,
+    ) -> bool:
+        now = ts or _utc_now()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            row = self._ensure_drift_clock_state_row(conn, session_id, now)
+            if row["active_observation_id"] != observation_id or row["review_observation_id"] is not None:
+                return False
+            updated = conn.execute(
+                """
+                UPDATE drift_clock_states
+                SET review_observation_id = ?, review_status = 'reviewing', updated_at = ?
+                WHERE session_id = ? AND review_observation_id IS NULL
+                """,
+                (observation_id, now.isoformat(), session_id),
+            )
+            if updated.rowcount != 1:
+                return False
+            self._append_event(conn, session_id, "d7.review_started", {"observation_id": observation_id}, now)
+        return True
+
+    def defer_d7_review(
+        self,
+        session_id: str,
+        observation_id: str,
+        next_review_mode_seconds: int,
+        reason: str,
+        ts: datetime | None = None,
+    ) -> None:
+        now = ts or _utc_now()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            conn.execute(
+                """
+                UPDATE drift_clock_states
+                SET next_review_mode_seconds = ?, review_observation_id = NULL,
+                    review_status = 'deferred', last_defer_reason = ?, updated_at = ?
+                WHERE session_id = ? AND review_observation_id = ?
+                """,
+                (next_review_mode_seconds, reason, now.isoformat(), session_id, observation_id),
+            )
+            self._append_event(
+                conn,
+                session_id,
+                "d7.review_deferred",
+                {
+                    "observation_id": observation_id,
+                    "next_review_mode_seconds": next_review_mode_seconds,
+                    "reason": reason,
+                },
+                now,
+            )
+
+    def complete_d7_review_notification(
+        self,
+        session_id: str,
+        observation_id: str,
+        ts: datetime | None = None,
+    ) -> None:
+        now = ts or _utc_now()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            conn.execute(
+                """
+                UPDATE drift_clock_states
+                SET review_observation_id = NULL, review_status = 'notified',
+                    last_defer_reason = NULL, updated_at = ?
+                WHERE session_id = ? AND review_observation_id = ?
+                """,
+                (now.isoformat(), session_id, observation_id),
+            )
+            self._append_event(conn, session_id, "d7.review_notified", {"observation_id": observation_id}, now)
 
     def record_dropped_observation(
         self,
@@ -1747,7 +2192,8 @@ class SQLiteStore:
                 raw_text TEXT NOT NULL,
                 keywords_json TEXT NOT NULL DEFAULT '[]',
                 provenance TEXT NOT NULL CHECK (provenance = 'declared'),
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                available_time_minutes INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS goal_exemplars (
@@ -1849,10 +2295,47 @@ class SQLiteStore:
 
             CREATE UNIQUE INDEX IF NOT EXISTS idx_page_labels_observation
             ON page_labels(observation_id);
+
+            CREATE TABLE IF NOT EXISTS observation_excerpts (
+                observation_id TEXT PRIMARY KEY REFERENCES observations(id) ON DELETE CASCADE,
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                captured_at TEXT NOT NULL,
+                text TEXT NOT NULL,
+                char_count INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS drift_clock_states (
+                session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+                active_observation_id TEXT REFERENCES observations(id) ON DELETE SET NULL,
+                active_tab_id INTEGER,
+                active_url_path_hash TEXT,
+                active_verdict TEXT,
+                active_since_at TEXT,
+                last_heartbeat_at TEXT,
+                current_page_drift_seconds INTEGER NOT NULL DEFAULT 0,
+                continuous_drift_seconds INTEGER NOT NULL DEFAULT 0,
+                cumulative_drift_seconds INTEGER NOT NULL DEFAULT 0,
+                next_review_mode_seconds INTEGER NOT NULL DEFAULT 0,
+                review_observation_id TEXT REFERENCES observations(id) ON DELETE SET NULL,
+                review_status TEXT NOT NULL DEFAULT 'none',
+                last_defer_reason TEXT,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS dwell_presence_events (
+                event_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                observation_id TEXT REFERENCES observations(id) ON DELETE SET NULL,
+                received_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_observation_excerpts_session_recent
+            ON observation_excerpts(session_id, captured_at DESC, observation_id DESC);
             """
         )
         self._ensure_observation_columns(conn)
         self._ensure_controller_columns(conn)
+        self._ensure_goal_columns(conn)
         self._ensure_goal_exemplar_columns(conn)
         conn.execute(
             """
@@ -1882,6 +2365,7 @@ class SQLiteStore:
             exemplars=self.get_goal_exemplars(row["session_id"]),
             provenance=row["provenance"],
             updated_at=_parse_dt(row["updated_at"]),
+            available_time_minutes=row["available_time_minutes"],
             derived_exemplars=self.get_goal_derived_exemplars(row["session_id"]),
         )
 
@@ -1899,6 +2383,15 @@ class SQLiteStore:
             verdict=row["verdict"],
             tier_reached=row["tier_reached"],
             tier1_reason=row["tier1_reason"],
+        )
+
+    def _excerpt_from_row(self, row: sqlite3.Row) -> ObservationExcerptRecord:
+        return ObservationExcerptRecord(
+            observation_id=row["observation_id"],
+            session_id=row["session_id"],
+            captured_at=_parse_dt(row["captured_at"]),
+            text=row["text"],
+            char_count=int(row["char_count"]),
         )
 
     def _intervention_from_row(self, row: sqlite3.Row) -> InterventionRecord:
@@ -1924,6 +2417,52 @@ class SQLiteStore:
             updated_at=_parse_dt(row["updated_at"]),
         )
 
+    def _ensure_drift_clock_state_row(
+        self,
+        conn: sqlite3.Connection,
+        session_id: str,
+        now: datetime,
+    ) -> sqlite3.Row:
+        row = conn.execute(
+            "SELECT * FROM drift_clock_states WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if row:
+            return row
+        conn.execute(
+            """
+            INSERT INTO drift_clock_states (
+                session_id, current_page_drift_seconds, continuous_drift_seconds,
+                cumulative_drift_seconds, next_review_mode_seconds, review_status, updated_at
+            )
+            VALUES (?, 0, 0, 0, 0, 'none', ?)
+            """,
+            (session_id, now.isoformat()),
+        )
+        return conn.execute(
+            "SELECT * FROM drift_clock_states WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+
+    def _drift_clock_state_from_row(self, row: sqlite3.Row) -> DriftClockStateRecord:
+        return DriftClockStateRecord(
+            session_id=row["session_id"],
+            active_observation_id=row["active_observation_id"],
+            active_tab_id=row["active_tab_id"],
+            active_url_path_hash=row["active_url_path_hash"],
+            active_verdict=row["active_verdict"],
+            active_since_at=_parse_dt(row["active_since_at"]) if row["active_since_at"] else None,
+            last_heartbeat_at=_parse_dt(row["last_heartbeat_at"]) if row["last_heartbeat_at"] else None,
+            current_page_drift_seconds=int(row["current_page_drift_seconds"]),
+            continuous_drift_seconds=int(row["continuous_drift_seconds"]),
+            cumulative_drift_seconds=int(row["cumulative_drift_seconds"]),
+            next_review_mode_seconds=int(row["next_review_mode_seconds"]),
+            review_observation_id=row["review_observation_id"],
+            review_status=row["review_status"],
+            last_defer_reason=row["last_defer_reason"],
+            updated_at=_parse_dt(row["updated_at"]),
+        )
+
     def _ensure_observation_columns(self, conn: sqlite3.Connection) -> None:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(observations)").fetchall()}
         if "tab_id" not in columns:
@@ -1937,6 +2476,11 @@ class SQLiteStore:
             conn.execute("ALTER TABLE controller_states ADD COLUMN alignment_score REAL")
         if "drift_latched" not in columns:
             conn.execute("ALTER TABLE controller_states ADD COLUMN drift_latched INTEGER NOT NULL DEFAULT 0")
+
+    def _ensure_goal_columns(self, conn: sqlite3.Connection) -> None:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(goals)").fetchall()}
+        if "available_time_minutes" not in columns:
+            conn.execute("ALTER TABLE goals ADD COLUMN available_time_minutes INTEGER")
 
     def _ensure_goal_exemplar_columns(self, conn: sqlite3.Connection) -> None:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(goal_exemplars)").fetchall()}

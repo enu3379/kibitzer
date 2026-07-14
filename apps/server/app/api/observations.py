@@ -1,11 +1,13 @@
+import asyncio
 import random
+from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..config import ControllerConfig
-from ..core.controller_flow import apply_controller
+from ..core.controller_flow import apply_controller, controller_is_eligible, mark_controller_intervened
 from ..core.delivery import clamp_notification_message
 from ..core.normalization import (
     browser_nav_embedding_text,
@@ -23,7 +25,13 @@ from ..core.relevance import tier0_score_parts, tier1_final_relevance
 from ..core.runtime_settings import effective_controller_config, quiet_hours_active, runtime_settings
 from ..core.runtime_resources import RuntimeResources
 from ..core.tier1_payload import build_tier1_payload
-from ..core.tier2_payload import build_tier2_payload, fallback_drift_message
+from ..core.tier2_payload import (
+    build_d7_content_payload,
+    build_d7_title_payload,
+    build_tier2_payload,
+    fallback_drift_message,
+)
+from ..core.time_budget import mode_clock_seconds, next_review_boundary, review_is_due, thresholds_for_budget
 from ..core.voice import speak
 from ..providers.judges.base import Tier2Result
 from ..privacy.domain_filter import SensitiveDomainRules, drop_decision_for_url
@@ -63,6 +71,19 @@ class PageLabelResponse(BaseModel):
     observation_id: str
     label: Literal["related", "drift"]
     exemplar_count: int | None = None
+
+
+class ContentCaptureResponse(BaseModel):
+    observation_id: str
+    stored: bool
+    char_count: int
+
+
+class PresenceRequest(BaseModel):
+    event_id: str = Field(min_length=1, max_length=128)
+    kind: Literal["active", "heartbeat", "inactive"]
+    tab_id: int
+    url_path_hash: str = Field(min_length=1, max_length=128)
 
 
 def _store(request: Request) -> SQLiteStore:
@@ -237,7 +258,14 @@ async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineR
         observation.features.r_final,
     )
     store.record_observation(observation)
-    result = apply_controller(store, controller_config, observation)
+    result = apply_controller(
+        store,
+        controller_config,
+        observation,
+        defer_intervention=request.app.state.config.time_budget.enabled,
+    )
+    if request.app.state.config.time_budget.enabled and observation.verdict is not None:
+        store.activate_drift_clock(observation, ts=observation.ts)
     return_candidate = store.note_attachment_observation(
         observation.session_id,
         observation.verdict.value if observation.verdict else None,
@@ -272,6 +300,202 @@ def _latest_observation_response(
         tier1_reason=observation.tier1_reason,
         tau_ok=features.get("tau_ok", tau_ok),
         label=label if label in ("related", "drift") else None,
+    )
+
+
+@router.post("/observations/{observation_id}/content", response_model=ContentCaptureResponse)
+async def capture_observation_content(
+    request: Request,
+    observation_id: str,
+    excerpt: PageExcerpt,
+) -> ContentCaptureResponse:
+    store = _store(request)
+    current = store.get_current_session()
+    observation = store.get_observation(observation_id)
+    if not current or not current.goal or not observation or observation.session_id != current.session.id:
+        raise HTTPException(status_code=404, detail="observation not found")
+    config = request.app.state.config.time_budget
+    if not config.enabled:
+        return ContentCaptureResponse(observation_id=observation_id, stored=False, char_count=0)
+    stored = store.store_observation_excerpt(
+        session_id=observation.session_id,
+        observation_id=observation.id,
+        text=excerpt.text,
+        char_limit=request.app.state.config.tier2.excerpt_char_limit,
+        retention_limit=config.recent_excerpts + 1,
+    )
+    return ContentCaptureResponse(
+        observation_id=observation.id,
+        stored=True,
+        char_count=stored.char_count,
+    )
+
+
+@router.post("/observations/{observation_id}/presence", response_model=PipelineResult)
+async def record_observation_presence(
+    request: Request,
+    observation_id: str,
+    body: PresenceRequest,
+) -> PipelineResult:
+    store = _store(request)
+    current = store.get_current_session()
+    observation = store.get_observation(observation_id)
+    if not current or not current.goal or not observation or observation.session_id != current.session.id:
+        raise HTTPException(status_code=404, detail="observation not found")
+    config = request.app.state.config.time_budget
+    verdict = Verdict(observation.verdict) if observation.verdict else None
+    if (
+        not config.enabled
+        or observation.tab_id != body.tab_id
+        or observation.url_path_hash != body.url_path_hash
+    ):
+        return PipelineResult(
+            action=PipelineAction.NONE,
+            observation_id=observation.id,
+            verdict=verdict,
+            page=_page_info(observation),
+        )
+
+    now = datetime.now(timezone.utc)
+    clock_state, accepted, _duplicate = store.record_drift_presence(
+        session_id=observation.session_id,
+        observation_id=observation.id,
+        event_id=body.event_id,
+        kind=body.kind,
+        tab_id=body.tab_id,
+        url_path_hash=body.url_path_hash,
+        max_gap_seconds=config.max_heartbeat_gap_seconds,
+        ts=now,
+    )
+    if not accepted or body.kind == "inactive" or verdict != Verdict.DRIFT:
+        return PipelineResult(
+            action=PipelineAction.NONE,
+            observation_id=observation.id,
+            verdict=verdict,
+            page=_page_info(observation),
+        )
+
+    controller_config = effective_controller_config(request.app.state.config, store)
+    eligible = controller_is_eligible(store, controller_config, observation.session_id, now)
+    thresholds = thresholds_for_budget(config, current.goal.available_time_minutes)
+    if not review_is_due(clock_state, controller_config.type, thresholds, eligible):
+        return PipelineResult(
+            action=PipelineAction.NONE,
+            observation_id=observation.id,
+            verdict=verdict,
+            page=_page_info(observation),
+        )
+    if not store.begin_d7_review(observation.session_id, observation.id, now):
+        return PipelineResult(
+            action=PipelineAction.NONE,
+            observation_id=observation.id,
+            verdict=verdict,
+            page=_page_info(observation),
+        )
+
+    mode_seconds = mode_clock_seconds(clock_state, controller_config.type)
+    time_context = {
+        "available_time_minutes": current.goal.available_time_minutes,
+        "controller_type": controller_config.type,
+        "total_seconds": thresholds.total_seconds,
+        "per_page_seconds": thresholds.per_page_seconds,
+        "current_page_drift_seconds": clock_state.current_page_drift_seconds,
+        "mode_clock_seconds": mode_seconds,
+    }
+    current_excerpt = store.get_observation_excerpt(observation.id)
+    if not current_excerpt or not current_excerpt.text:
+        return _defer_d7_review(
+            store,
+            observation,
+            thresholds.total_seconds,
+            mode_seconds,
+            "content_unavailable",
+        )
+
+    recent_titles = store.recent_observation_summaries(
+        observation.session_id,
+        request.app.state.config.tier2.recent_observations,
+    )
+    recent_content = [
+        item
+        for item in store.recent_observation_content(
+            observation.session_id,
+            config.recent_excerpts + 1,
+            config.recent_excerpt_char_limit,
+        )
+        if item.observation_id != observation.id
+    ][-config.recent_excerpts :]
+    settings = runtime_settings(request.app.state.config, store)
+    persona = resolve_persona(
+        getattr(request.app.state, "persona_set", None),
+        settings,
+        request.app.state.config.delivery.persona,
+    )
+    system_prompt = compose_tier2_system_prompt(persona) if persona else None
+    title_payload = build_d7_title_payload(current.goal, observation, recent_titles, time_context)
+    content_payload = build_d7_content_payload(
+        current.goal,
+        observation,
+        current_excerpt.text,
+        recent_content,
+        time_context,
+    )
+    title_result, content_result = await asyncio.gather(
+        _confirm_d7_tier2(request, observation.session_id, observation.id, title_payload, system_prompt),
+        _confirm_d7_tier2(request, observation.session_id, observation.id, content_payload, system_prompt),
+    )
+    if title_result is None or content_result is None:
+        return _defer_d7_review(
+            store,
+            observation,
+            thresholds.total_seconds,
+            mode_seconds,
+            "judge_unavailable",
+        )
+    if not title_result.confirm_drift or not content_result.confirm_drift:
+        return _defer_d7_review(
+            store,
+            observation,
+            thresholds.total_seconds,
+            mode_seconds,
+            "acceptable_side_branch",
+        )
+
+    max_sentences = (
+        persona.max_sentences
+        if persona and persona.max_sentences is not None
+        else request.app.state.config.delivery.max_sentences
+    )
+    message = clamp_notification_message(
+        content_result.message or title_result.message or fallback_drift_message(current.goal, observation),
+        max_sentences,
+    )
+    store.record_tier2_result(
+        session_id=observation.session_id,
+        observation_id=observation.id,
+        confirm_drift=True,
+        message=message,
+        ts=now,
+    )
+    intervention_id = store.create_intervention(observation.session_id, observation.id, message, ts=now)
+    mark_controller_intervened(store, controller_config, observation.session_id, now)
+    store.complete_d7_review_notification(observation.session_id, observation.id, now)
+    silent = _handle_delivery_side_effects(
+        request,
+        observation.session_id,
+        intervention_id,
+        message,
+        settings,
+        persona,
+    )
+    return PipelineResult(
+        action=PipelineAction.NOTIFY,
+        observation_id=observation.id,
+        verdict=verdict,
+        message=message,
+        intervention_id=intervention_id,
+        silent=silent,
+        page=_page_info(observation),
     )
 
 
@@ -450,6 +674,56 @@ def _maybe_create_celebration(
         message=message,
         page=_page_info(observation),
     )
+
+
+def _defer_d7_review(
+    store: SQLiteStore,
+    observation: ObservationRecord,
+    total_seconds: int,
+    mode_seconds: int,
+    reason: str,
+) -> PipelineResult:
+    next_boundary = next_review_boundary(mode_seconds, total_seconds)
+    store.record_tier2_result(
+        session_id=observation.session_id,
+        observation_id=observation.id,
+        confirm_drift=False,
+        message=f"d7_deferred:{reason}",
+    )
+    store.defer_d7_review(
+        session_id=observation.session_id,
+        observation_id=observation.id,
+        next_review_mode_seconds=next_boundary,
+        reason=reason,
+    )
+    verdict = Verdict(observation.verdict) if observation.verdict else None
+    return PipelineResult(
+        action=PipelineAction.NONE,
+        observation_id=observation.id,
+        verdict=verdict,
+        page=_page_info(observation),
+    )
+
+
+async def _confirm_d7_tier2(
+    request: Request,
+    session_id: str,
+    observation_id: str,
+    payload: dict[str, object],
+    system_prompt: str | None,
+) -> Tier2Result | None:
+    runtime = _runtime(request)
+    provider = runtime.tier2_provider()
+    if not provider:
+        return None
+    try:
+        result = await provider.confirm_tier2(payload, system_prompt=system_prompt)
+    except Exception as exc:
+        runtime.record_provider_call_failure(2, exc)
+        _store(request).record_tier2_provider_error(session_id, observation_id, type(exc).__name__)
+        return None
+    runtime.record_provider_call_success(2)
+    return result
 
 
 async def _confirm_tier2(

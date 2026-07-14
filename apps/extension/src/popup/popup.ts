@@ -86,6 +86,7 @@ let serverDown = false
 // the same so typing in the goal input survives the 2s reconnect poll.
 let offlineView: "setup" | "dashboard" | null = null
 let devDiagnostics = false
+let currentGoalBudgetMinutes: number | null = null
 try {
   devDiagnostics = localStorage.getItem(DEV_DIAGNOSTICS_KEY) === "1"
 } catch {
@@ -204,12 +205,14 @@ async function refresh(): Promise<void> {
   if (result.kind === "no_session") {
     clearSnapshot()
     stopPoll()
+    currentGoalBudgetMinutes = null
     renderSetup(false, typedGoal)
     return
   }
   if (!result.state.has_goal) {
     clearSnapshot()
     stopPoll()
+    currentGoalBudgetMinutes = null
     renderSetup(true, typedGoal)
     return
   }
@@ -222,6 +225,7 @@ async function refresh(): Promise<void> {
     getSettings(),
   ])
   const goalText = current?.goal?.raw_text ?? ""
+  currentGoalBudgetMinutes = current?.goal?.available_time_minutes ?? null
   saveSnapshot({ state: result.state, goalText, stats })
   renderDashboard(
     result.state,
@@ -276,6 +280,9 @@ function renderSetup(sessionExists: boolean, currentGoal = "", offline = false):
     <p class="label">오늘의 목표</p>
     <input id="goal-input" class="goal-input" type="text"
       placeholder="예: 핀란드 여행 일정 계획하기" value="${esc(currentGoal)}" />
+    <p class="label">사용 가능 시간 (선택)</p>
+    <input id="time-budget-input" class="goal-input" type="number" min="1" max="1440" step="1"
+      placeholder="예: 120 (분)" value="${currentGoalBudgetMinutes ?? ""}" />
     <div class="btn-row">
       <button id="goal-submit" class="btn primary"${offline ? " disabled" : ""}>추적 시작</button>
       ${editing ? '<button id="goal-cancel" class="btn">취소</button>' : ""}
@@ -301,10 +308,21 @@ function renderSetup(sessionExists: boolean, currentGoal = "", offline = false):
 
 async function submitGoal(sessionExists: boolean): Promise<void> {
   const input = document.getElementById("goal-input") as HTMLInputElement
+  const budgetInput = document.getElementById("time-budget-input") as HTMLInputElement
   const submit = document.getElementById("goal-submit") as HTMLButtonElement
   const text = input.value.trim()
   if (!text) {
     input.focus()
+    return
+  }
+  const rawBudget = budgetInput.value.trim()
+  const availableTimeMinutes = rawBudget ? Number.parseInt(rawBudget, 10) : null
+  if (
+    rawBudget
+    && (availableTimeMinutes === null || !Number.isFinite(availableTimeMinutes)
+      || availableTimeMinutes < 1 || availableTimeMinutes > 1440)
+  ) {
+    budgetInput.focus()
     return
   }
   submit.disabled = true
@@ -315,11 +333,12 @@ async function submitGoal(sessionExists: boolean): Promise<void> {
       return
     }
   }
-  const goal = await setGoal(text)
+  const goal = await setGoal(text, availableTimeMinutes)
   if (!goal) {
     handleUnreachable()
     return
   }
+  currentGoalBudgetMinutes = goal.available_time_minutes ?? null
   editing = false
   notifyBadge()
   await refresh()

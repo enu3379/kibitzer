@@ -27,6 +27,14 @@ export interface PageExcerpt {
   text: string
 }
 
+export type PresenceKind = "active" | "heartbeat" | "inactive"
+
+export interface ContentCaptureResult {
+  observation_id: string
+  stored: boolean
+  char_count: number
+}
+
 export type FeedbackKind = "related" | "accepted" | "snooze" | "break"
 
 export interface FeedbackPayload {
@@ -98,6 +106,18 @@ export interface SessionState {
   snoozed_until?: string | null
   cooldown_until?: string | null
   pending_intervention?: PendingIntervention | null
+  time_budget?: TimeBudgetState | null
+}
+
+export interface TimeBudgetState {
+  available_time_minutes?: number | null
+  total_seconds: number
+  per_page_seconds: number
+  current_page_drift_seconds: number
+  mode_clock_seconds: number
+  next_review_mode_seconds: number
+  status: string
+  last_defer_reason?: string | null
 }
 
 export type SessionStateResult =
@@ -117,6 +137,7 @@ export interface GoalInfo {
   keywords: string[]
   provenance: string
   updated_at: string
+  available_time_minutes?: number | null
 }
 
 export interface CurrentSession {
@@ -162,11 +183,11 @@ export async function createSession(): Promise<SessionInfo | null> {
   return response.json() as Promise<SessionInfo>
 }
 
-export async function setGoal(rawText: string): Promise<GoalInfo | null> {
+export async function setGoal(rawText: string, availableTimeMinutes?: number | null): Promise<GoalInfo | null> {
   const response = await fetch(`${SERVER_BASE_URL}/sessions/current/goal`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ raw_text: rawText }),
+    body: JSON.stringify({ raw_text: rawText, available_time_minutes: availableTimeMinutes ?? null }),
   }).catch(() => null)
   if (!response?.ok) return null
   return response.json() as Promise<GoalInfo>
@@ -372,12 +393,7 @@ export async function postFeedback(payload: FeedbackPayload): Promise<FeedbackRe
 export async function getLatestObservation(tabId: number, url: string): Promise<LatestObservation | null> {
   try {
     const parsed = new URL(url)
-    const location = `${parsed.pathname || "/"}${parsed.search}${parsed.hash}`
-    const pathBytes = new TextEncoder().encode(location)
-    const pathDigest = await crypto.subtle.digest("SHA-256", pathBytes)
-    const urlPathHash = Array.from(new Uint8Array(pathDigest), (byte) =>
-      byte.toString(16).padStart(2, "0"),
-    ).join("")
+    const urlPathHash = await urlPathHashFor(url)
     const params = new URLSearchParams({
       tab_id: String(tabId),
       url_host: parsed.hostname,
@@ -389,6 +405,14 @@ export async function getLatestObservation(tabId: number, url: string): Promise<
   } catch {
     return null
   }
+}
+
+export async function urlPathHashFor(url: string): Promise<string> {
+  const parsed = new URL(url)
+  const location = `${parsed.pathname || "/"}${parsed.search}${parsed.hash}`
+  const pathBytes = new TextEncoder().encode(location)
+  const pathDigest = await crypto.subtle.digest("SHA-256", pathBytes)
+  return Array.from(new Uint8Array(pathDigest), (byte) => byte.toString(16).padStart(2, "0")).join("")
 }
 
 export async function postObservationLabel(
@@ -417,6 +441,32 @@ export async function postObservationExcerpt(
   }).catch(() => {
     return null
   })
+  if (!response?.ok) return null
+  return response.json() as Promise<PipelineResult>
+}
+
+export async function postObservationContent(
+  observationId: string,
+  excerpt: PageExcerpt,
+): Promise<ContentCaptureResult | null> {
+  const response = await fetch(`${SERVER_BASE_URL}/observations/${observationId}/content`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(excerpt),
+  }).catch(() => null)
+  if (!response?.ok) return null
+  return response.json() as Promise<ContentCaptureResult>
+}
+
+export async function postObservationPresence(
+  observationId: string,
+  payload: { event_id: string; kind: PresenceKind; tab_id: number; url_path_hash: string },
+): Promise<PipelineResult | null> {
+  const response = await fetch(`${SERVER_BASE_URL}/observations/${observationId}/presence`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  }).catch(() => null)
   if (!response?.ok) return null
   return response.json() as Promise<PipelineResult>
 }

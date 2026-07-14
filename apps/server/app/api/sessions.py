@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from ..core.goal_enrichment import enrich_goal_derived_exemplars
 from ..core.runtime_settings import effective_controller_config
 from ..core.runtime_resources import RuntimeResources
+from ..core.time_budget import mode_clock_seconds, thresholds_for_budget
 from ..storage.sqlite import NoActiveSessionError, SessionReportRecord, SessionStatsRecord, SQLiteStore
 
 router = APIRouter()
@@ -21,6 +22,7 @@ class SessionResponse(BaseModel):
 class GoalRequest(BaseModel):
     raw_text: str = Field(min_length=1)
     keywords: list[str] = Field(default_factory=list)
+    available_time_minutes: int | None = Field(default=None, ge=1, le=1440)
 
 
 class GoalResponse(BaseModel):
@@ -29,6 +31,7 @@ class GoalResponse(BaseModel):
     keywords: list[str]
     provenance: str
     updated_at: str
+    available_time_minutes: int | None = None
 
 
 class CurrentSessionResponse(BaseModel):
@@ -43,6 +46,17 @@ class PendingInterventionResponse(BaseModel):
     ts: str
     status: str
     tier1_reason: str | None = None
+
+
+class TimeBudgetStateResponse(BaseModel):
+    available_time_minutes: int | None = None
+    total_seconds: int
+    per_page_seconds: int
+    current_page_drift_seconds: int
+    mode_clock_seconds: int
+    next_review_mode_seconds: int
+    status: str
+    last_defer_reason: str | None = None
 
 
 class SessionStateResponse(BaseModel):
@@ -60,6 +74,7 @@ class SessionStateResponse(BaseModel):
     snoozed_until: str | None = None
     cooldown_until: str | None = None
     pending_intervention: PendingInterventionResponse | None = None
+    time_budget: TimeBudgetStateResponse | None = None
 
 
 class SnoozeRequest(BaseModel):
@@ -172,6 +187,7 @@ async def get_current_session(request: Request) -> CurrentSessionResponse:
             keywords=current.goal.keywords,
             provenance=current.goal.provenance,
             updated_at=current.goal.updated_at.isoformat(),
+            available_time_minutes=current.goal.available_time_minutes,
         )
     return CurrentSessionResponse(
         session=SessionResponse(
@@ -221,6 +237,24 @@ async def get_current_state(request: Request) -> SessionStateResponse:
         tracking = "tracking"
 
     pending = store.latest_unhandled_intervention(current.session.id)
+    time_budget = None
+    if current.goal and request.app.state.config.time_budget.enabled:
+        clock_state = store.get_drift_clock_state(current.session.id)
+        thresholds = thresholds_for_budget(
+            request.app.state.config.time_budget,
+            current.goal.available_time_minutes,
+        )
+        time_budget = TimeBudgetStateResponse(
+            available_time_minutes=current.goal.available_time_minutes,
+            total_seconds=thresholds.total_seconds,
+            per_page_seconds=thresholds.per_page_seconds,
+            current_page_drift_seconds=clock_state.current_page_drift_seconds,
+            mode_clock_seconds=mode_clock_seconds(clock_state, controller_config.type),
+            next_review_mode_seconds=clock_state.next_review_mode_seconds,
+            status=clock_state.review_status,
+            last_defer_reason=clock_state.last_defer_reason,
+        )
+
     return SessionStateResponse(
         session_id=current.session.id,
         has_goal=current.goal is not None,
@@ -245,6 +279,7 @@ async def get_current_state(request: Request) -> SessionStateResponse:
         )
         if pending
         else None,
+        time_budget=time_budget,
     )
 
 
@@ -390,7 +425,12 @@ async def set_current_goal(request: Request, body: GoalRequest) -> GoalResponse:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no active session")
     try:
         exemplar = await _embed_goal(request, body.raw_text)
-        goal = store.set_current_goal(body.raw_text, body.keywords, exemplar)
+        goal = store.set_current_goal(
+            body.raw_text,
+            body.keywords,
+            exemplar,
+            available_time_minutes=body.available_time_minutes,
+        )
         _schedule_goal_enrichment(request, goal.session_id, goal.raw_text)
     except NoActiveSessionError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -402,6 +442,7 @@ async def set_current_goal(request: Request, body: GoalRequest) -> GoalResponse:
         keywords=goal.keywords,
         provenance=goal.provenance,
         updated_at=goal.updated_at.isoformat(),
+        available_time_minutes=goal.available_time_minutes,
     )
 
 

@@ -61,8 +61,8 @@ browser event
   -> Tier 0 relevance
   -> optional Tier 1 classifier
   -> controller update
-  -> optional request_excerpt
-  -> Tier 2 confirmation/message
+  -> D7 bounded content capture + server-owned presence heartbeat
+  -> optional time-budget Tier 2 title/content confirmation
   -> notification
 ```
 
