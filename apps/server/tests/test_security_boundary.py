@@ -12,9 +12,11 @@ from pydantic import ValidationError
 
 from apps.server.app.config import (
     AppConfig,
+    DeliveryConfig,
     SecurityConfig,
     ServerConfig,
     Tier1Config,
+    Tier1SendConfig,
     Tier2Config,
     load_config,
 )
@@ -132,6 +134,17 @@ class SecurityBoundaryTest(unittest.TestCase):
 
 
 class SecurityConfigTest(unittest.TestCase):
+    def test_removed_noop_config_fields_are_rejected(self) -> None:
+        cases = (
+            (ServerConfig, {"host": "0.0.0.0"}),
+            (Tier1SendConfig, {"url_path": True}),
+            (Tier1SendConfig, {"page_excerpt": True}),
+            (DeliveryConfig, {"channel": "webhook"}),
+        )
+        for model, value in cases:
+            with self.subTest(model=model.__name__, value=value), self.assertRaises(ValidationError):
+                model.model_validate(value)
+
     def test_default_allowlist_matches_the_stable_manifest_key(self) -> None:
         manifest = json.loads(Path("apps/extension/manifest.json").read_text(encoding="utf-8"))
         digest = hashlib.sha256(base64.b64decode(manifest["key"])).digest()[:16]

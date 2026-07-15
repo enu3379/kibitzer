@@ -12,7 +12,8 @@ CHROME_EXTENSION_ID_PATTERN = re.compile(r"^[a-p]{32}$")
 
 
 class ServerConfig(BaseModel):
-    host: str = "127.0.0.1"
+    model_config = ConfigDict(extra="forbid")
+
     db_path: str = "./data/kibitzer.sqlite3"
 
 
@@ -59,11 +60,11 @@ class GoalEnrichmentConfig(BaseModel):
 
 
 class Tier1SendConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: bool = True
     url_host: bool = True
-    url_path: bool = False
     recent_titles: bool = True
-    page_excerpt: bool = False
 
 
 class Tier1Config(BaseModel):
@@ -168,7 +169,8 @@ class BreakConfig(BaseModel):
 
 
 class DeliveryConfig(BaseModel):
-    channel: str = "chrome_notification"
+    model_config = ConfigDict(extra="forbid")
+
     persona: str = "dry_kibitzer"
     personas_file: str = "configs/personas.yaml"
     custom_personas_file: str = "~/.kibitzer/personas.yaml"
