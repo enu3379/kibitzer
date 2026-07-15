@@ -40,12 +40,15 @@ class SQLiteStoreTest(unittest.TestCase):
         session = self.store.create_session()
         first = self.store.set_current_goal("  write the paper  ", ["paper"])
         second = self.store.set_current_goal("revise the talk", ["slides"])
+        unchanged = self.store.set_current_goal("revise the talk", ["slides"])
         current = self.store.get_current_session()
 
         self.assertEqual(first.session_id, session.id)
         self.assertEqual(first.raw_text, "write the paper")
         self.assertEqual(second.raw_text, "revise the talk")
         self.assertEqual(second.provenance, "declared")
+        self.assertEqual((first.goal_revision, second.goal_revision), (1, 2))
+        self.assertEqual(unchanged.goal_revision, second.goal_revision)
         self.assertEqual(current.goal.raw_text, "revise the talk")
         self.assertEqual(current.goal.keywords, ["slides"])
 
@@ -56,7 +59,7 @@ class SQLiteStoreTest(unittest.TestCase):
                 (session.id,),
             ).fetchone()[0]
         self.assertEqual(goals, 1)
-        self.assertEqual(goal_events, 2)
+        self.assertEqual(goal_events, 3)
 
     def test_latest_observation_index_supports_filter_and_order(self) -> None:
         with closing(sqlite3.connect(self.db_path)) as conn:
@@ -233,7 +236,92 @@ class SQLiteStoreTest(unittest.TestCase):
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'observation_requests'"
             ).fetchone()
         self.assertIn("result_json", candidate_columns)
+        self.assertIn("goal_revision", candidate_columns)
         self.assertIsNotNone(request_table)
+
+    def test_initialize_backfills_goal_revision_across_legacy_goal_scoped_rows(self) -> None:
+        legacy_path = Path(self.tmpdir.name) / "revision-legacy.sqlite3"
+        with closing(sqlite3.connect(legacy_path)) as conn:
+            conn.executescript(
+                """
+                CREATE TABLE sessions (
+                    id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    active INTEGER NOT NULL DEFAULT 1,
+                    ended_at TEXT
+                );
+                CREATE TABLE goals (
+                    session_id TEXT PRIMARY KEY,
+                    raw_text TEXT NOT NULL,
+                    keywords_json TEXT NOT NULL DEFAULT '[]',
+                    provenance TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    available_time_minutes INTEGER
+                );
+                CREATE TABLE observations (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    ts TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    url_host TEXT,
+                    url_path_hash TEXT,
+                    title TEXT,
+                    features_json TEXT NOT NULL DEFAULT '{}',
+                    verdict TEXT,
+                    tier_reached INTEGER
+                );
+                CREATE TABLE goal_derived_exemplars (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    position INTEGER NOT NULL,
+                    phrase TEXT NOT NULL,
+                    vector_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(session_id, position)
+                );
+                CREATE TABLE intervention_candidates (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    observation_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    requested_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    intervention_id TEXT,
+                    result_json TEXT
+                );
+                INSERT INTO sessions VALUES ('sess_legacy', '2026-07-08T00:00:00+00:00', 1, NULL);
+                INSERT INTO goals VALUES (
+                    'sess_legacy', 'legacy goal', '[]', 'declared',
+                    '2026-07-08T00:00:00+00:00', NULL
+                );
+                INSERT INTO observations VALUES (
+                    'obs_legacy', 'sess_legacy', '2026-07-08T00:00:01+00:00',
+                    'browser_nav', 'example.com', 'hash', 'Legacy page',
+                    '{"emb":[1.0]}', 'DRIFT', 0
+                );
+                INSERT INTO goal_derived_exemplars VALUES (
+                    'gdex_legacy', 'sess_legacy', 0, 'legacy phrase', '[1.0]',
+                    '2026-07-08T00:00:02+00:00'
+                );
+                INSERT INTO intervention_candidates VALUES (
+                    'cand_legacy', 'sess_legacy', 'obs_legacy', 'pending',
+                    '2026-07-08T00:00:03+00:00', '2026-07-08T00:10:00+00:00',
+                    '2026-07-08T00:00:03+00:00', NULL, NULL
+                );
+                """
+            )
+
+        SQLiteStore(legacy_path).initialize()
+
+        with closing(sqlite3.connect(legacy_path)) as conn:
+            revisions = (
+                conn.execute("SELECT goal_revision FROM goals").fetchone()[0],
+                conn.execute("SELECT goal_revision FROM observations").fetchone()[0],
+                conn.execute("SELECT goal_revision FROM goal_derived_exemplars").fetchone()[0],
+                conn.execute("SELECT goal_revision FROM intervention_candidates").fetchone()[0],
+            )
+        self.assertEqual(revisions, (1, 1, 1, 1))
 
 
 if __name__ == "__main__":

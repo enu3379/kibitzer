@@ -33,8 +33,12 @@ def apply_page_label_override(
         ts=applied_at,
     )
     verdict = effective_observation_verdict(observation.verdict, label)
+    is_current_goal = (
+        observation.goal_revision is not None
+        and store.goal_revision_is_current(observation.session_id, observation.goal_revision)
+    )
 
-    if previous_label != label:
+    if previous_label != label and is_current_goal:
         rebuild_controller_state(
             store,
             controller_config,
@@ -42,13 +46,14 @@ def apply_page_label_override(
             now=applied_at,
         )
 
-    if label == "related":
+    if label == "related" and is_current_goal:
         store.note_attachment_observation(
             observation.session_id,
             Verdict.OK.value,
             applied_at,
             drift_confirmed=False,
         )
+    if label == "related":
         store.resolve_unhandled_interventions_for_observation(
             observation.session_id,
             observation.id,

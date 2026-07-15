@@ -241,6 +241,40 @@ class Tier2ApiTest(unittest.TestCase):
         assert candidate is not None
         self.assertEqual(candidate.status, "cancelled")
 
+    def test_goal_edit_cancels_pending_excerpt_and_rejects_the_old_observation(self) -> None:
+        provider = FakeTier2Provider(Tier2Result(confirm_drift=True, message="must not be used"))
+        client, store = self._client(provider)
+        try:
+            request = self._start_goal_and_request_excerpt(client)
+            goal_response = client.post(
+                "/sessions/current/goal",
+                json={"raw_text": "A newly revised goal"},
+            )
+            response = client.post(
+                f"/observations/{request['observation_id']}/excerpt",
+                json={"title": "Bread", "text": "Old goal excerpt."},
+            )
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertEqual(goal_response.status_code, 200)
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(provider.payloads, [])
+        candidate = store.get_intervention_candidate_for_observation(
+            str(request["observation_id"])
+        )
+        self.assertIsNotNone(candidate)
+        assert candidate is not None
+        self.assertEqual(candidate.status, "cancelled")
+        current = store.get_current_session()
+        assert current is not None
+        self.assertEqual(current.goal.goal_revision, 2)
+        controller = store.get_controller_state(current.session.id)
+        self.assertEqual((controller.streak, controller.obs_count), (0, 0))
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            intervention_count = conn.execute("SELECT COUNT(*) FROM interventions").fetchone()[0]
+        self.assertEqual(intervention_count, 0)
+
     def test_duplicate_excerpt_does_not_call_tier2_twice(self) -> None:
         provider = FakeTier2Provider(Tier2Result(confirm_drift=True, message="한 번만 심사합니다."))
         client, _store = self._client(provider)

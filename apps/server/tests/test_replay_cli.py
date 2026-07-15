@@ -253,6 +253,7 @@ class ReplayCliTest(unittest.TestCase):
             store.replace_goal_derived_exemplars(
                 session_id,
                 [DerivedPhrase(phrase="Sourdough bread recipe", vector=vector)],
+                goal_revision=store.get_current_session().goal.goal_revision,
                 provider="test",
                 latency_ms=1,
             )

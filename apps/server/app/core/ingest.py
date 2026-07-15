@@ -40,6 +40,7 @@ async def ingest_browser_nav(
     persona_set: PersonaSet | None,
 ) -> PipelineResult:
     session_id = current.session.id if current else None
+    captured_goal_revision = current.goal.goal_revision if current and current.goal else None
 
     decision = drop_decision_for_url(str(raw.payload.url), sensitive_domain_rules)
     if decision.should_drop:
@@ -70,6 +71,7 @@ async def ingest_browser_nav(
             anchor=store.anchor_value(
                 current.session.id,
                 config.relevance.anchor_window,
+                captured_goal_revision,
             ),
             beta=config.relevance.beta,
             derived_exemplars=current.goal.derived_vectors,
@@ -89,6 +91,7 @@ async def ingest_browser_nav(
             recent = store.recent_observation_summaries(
                 current.session.id,
                 config.tier1.recent_observations,
+                captured_goal_revision,
             )
             payload = build_tier1_payload(current.goal, observation, recent, config.tier1)
             try:
@@ -127,6 +130,18 @@ async def ingest_browser_nav(
             )
         )
 
+    store.record_observation(observation, goal_revision=captured_goal_revision)
+    if (
+        captured_goal_revision is not None
+        and not store.goal_revision_is_current(observation.session_id, captured_goal_revision)
+    ):
+        return PipelineResult(
+            action=PipelineAction.NONE,
+            observation_id=observation.id,
+            verdict=observation.verdict,
+            page=observation_page_info(observation),
+        )
+
     controller_config = effective_controller_config(config, store)
     controller_state_before = store.get_controller_state(observation.session_id)
     drift_confirmed = _drift_confirmed_after_observation(
@@ -135,7 +150,6 @@ async def ingest_browser_nav(
         observation.verdict,
         observation.features.r_final,
     )
-    store.record_observation(observation)
     result = apply_controller(
         store,
         controller_config,
@@ -156,6 +170,7 @@ async def ingest_browser_nav(
             expires_at=requested_at
             + timedelta(seconds=remaining_dwell_seconds + CANDIDATE_RESUME_TTL_SECONDS),
             ts=requested_at,
+            goal_revision=captured_goal_revision,
         )
         if created:
             store.record_intervention_requested(

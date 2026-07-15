@@ -135,6 +135,7 @@ async def enrich_goal_derived_exemplars(
     *,
     session_id: str,
     goal_text: str,
+    goal_revision: int,
     provider: Any,
     embedding_provider: EmbeddingProvider,
     store: SQLiteStore,
@@ -145,7 +146,8 @@ async def enrich_goal_derived_exemplars(
 
     complete = getattr(provider, "complete_goal_enrichment", None)
     if provider is None or not callable(complete):
-        store.record_goal_enrichment_failed(session_id, "provider_unavailable")
+        if store.goal_revision_is_current(session_id, goal_revision):
+            store.record_goal_enrichment_failed(session_id, "provider_unavailable")
         return
 
     started = time.perf_counter()
@@ -158,18 +160,17 @@ async def enrich_goal_derived_exemplars(
             embedding_provider=embedding_provider,
             max_phrases=config.max_phrases,
         )
-        current = store.get_current_session()
-        if not current or current.session.id != session_id or not current.goal or current.goal.raw_text != goal_text:
-            return
         latency_ms = int((time.perf_counter() - started) * 1000)
         store.replace_goal_derived_exemplars(
             session_id=session_id,
             exemplars=derived,
+            goal_revision=goal_revision,
             provider=provider_name,
             latency_ms=latency_ms,
         )
     except Exception as exc:
-        store.record_goal_enrichment_failed(session_id, type(exc).__name__)
+        if store.goal_revision_is_current(session_id, goal_revision):
+            store.record_goal_enrichment_failed(session_id, type(exc).__name__)
 
 
 def _provider_name(provider: Any) -> str:
