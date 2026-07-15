@@ -5,12 +5,20 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
+from uuid import uuid4
 
 from .runtime_paths import RuntimePaths, resolve_runtime_paths
+from .server_lifecycle import (
+    make_control_record,
+    remove_if_instance_matches,
+    watch_for_stop_request,
+    write_control_record,
+)
 
 LOOPBACK_HOST = "127.0.0.1"
 IDENTITY_PATH = "/identity"
@@ -151,7 +159,8 @@ def port_owner_diagnostics(ports: Sequence[int]) -> list[str]:
 
 
 def main(runtime_paths: RuntimePaths | None = None) -> int:
-    effective_port_file = (runtime_paths or resolve_runtime_paths()).effective_port_file
+    paths = runtime_paths or resolve_runtime_paths()
+    effective_port_file = paths.effective_port_file
     effective_port_file.unlink(missing_ok=True)
     try:
         port, bound_socket = acquire_server_socket()
@@ -166,20 +175,51 @@ def main(runtime_paths: RuntimePaths | None = None) -> int:
         print(f"Kibitzer is already running on {LOOPBACK_HOST}:{port}")
         return 0
 
+    instance_id = uuid4().hex
+    stop_event = threading.Event()
+    stop_watcher: threading.Thread | None = None
     try:
         import uvicorn
 
+        from .main import create_app
+
+        app = create_app(instance_id=instance_id)
         config = uvicorn.Config(
-            "apps.server.app.main:app",
+            app,
             host=LOOPBACK_HOST,
             port=port,
+            timeout_graceful_shutdown=10,
         )
-        uvicorn.Server(config).run(sockets=[bound_socket])
+        server = uvicorn.Server(config)
+        paths.server_stop_request_file.unlink(missing_ok=True)
+        write_control_record(
+            paths.server_control_file,
+            make_control_record(
+                service=SERVICE_NAME,
+                protocol_version=PROTOCOL_VERSION,
+                instance_id=instance_id,
+                host=LOOPBACK_HOST,
+                port=port,
+            ),
+        )
+        stop_watcher = threading.Thread(
+            target=watch_for_stop_request,
+            args=(server, paths.server_stop_request_file, instance_id, stop_event),
+            name="kibitzer-stop-watcher",
+            daemon=True,
+        )
+        stop_watcher.start()
+        server.run(sockets=[bound_socket])
     except KeyboardInterrupt:
         pass
     finally:
+        stop_event.set()
+        if stop_watcher is not None:
+            stop_watcher.join(timeout=1)
         bound_socket.close()
         clear_effective_port(port, effective_port_file)
+        remove_if_instance_matches(paths.server_stop_request_file, instance_id)
+        remove_if_instance_matches(paths.server_control_file, instance_id)
     return 0
 
 

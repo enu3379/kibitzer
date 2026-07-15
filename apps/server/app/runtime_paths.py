@@ -31,6 +31,26 @@ class RuntimePaths:
         return self.data_dir / "kibitzer.port"
 
     @property
+    def server_control_file(self) -> Path:
+        return self.data_dir / "server-control.json"
+
+    @property
+    def server_stop_request_file(self) -> Path:
+        return self.data_dir / "server-stop-request.json"
+
+    @property
+    def tray_control_file(self) -> Path:
+        return self.data_dir / "tray-control.json"
+
+    @property
+    def tray_exit_request_file(self) -> Path:
+        return self.data_dir / "tray-exit-request.json"
+
+    @property
+    def logs_dir(self) -> Path:
+        return self.data_dir / "logs"
+
+    @property
     def database_file(self) -> Path:
         return self.data_dir / "kibitzer.sqlite3"
 
@@ -55,6 +75,11 @@ class RuntimePaths:
             "experiment_models_file": str(self.experiment_models_file),
             "custom_personas_file": str(self.custom_personas_file),
             "effective_port_file": str(self.effective_port_file),
+            "server_control_file": str(self.server_control_file),
+            "server_stop_request_file": str(self.server_stop_request_file),
+            "tray_control_file": str(self.tray_control_file),
+            "tray_exit_request_file": str(self.tray_exit_request_file),
+            "logs_dir": str(self.logs_dir),
         }
 
 

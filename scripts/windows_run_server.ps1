@@ -56,10 +56,7 @@ try {
   if ($LogToFile) {
     $OutCopyTask = $ServerProcess.StandardOutput.BaseStream.CopyToAsync($OutStream)
     $ErrCopyTask = $ServerProcess.StandardError.BaseStream.CopyToAsync($ErrStream)
-    while (-not $ServerProcess.WaitForExit(1000)) {
-      $OutStream.Flush()
-      $ErrStream.Flush()
-    }
+    $ServerProcess.WaitForExit()
     [System.Threading.Tasks.Task]::WaitAll(
       [System.Threading.Tasks.Task[]]@($OutCopyTask, $ErrCopyTask)
     )

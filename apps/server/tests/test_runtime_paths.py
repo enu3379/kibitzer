@@ -51,6 +51,11 @@ class RuntimePathsTest(unittest.TestCase):
         self.assertEqual(paths.data_dir, local_app_data / "Kibitzer")
         self.assertEqual(paths.user_config_dir, local_app_data / "Kibitzer" / "configs")
         self.assertEqual(paths.effective_port_file, local_app_data / "Kibitzer" / "kibitzer.port")
+        self.assertEqual(
+            paths.server_control_file,
+            local_app_data / "Kibitzer" / "server-control.json",
+        )
+        self.assertEqual(paths.logs_dir, local_app_data / "Kibitzer" / "logs")
 
     def test_macos_packaged_paths_use_application_support(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

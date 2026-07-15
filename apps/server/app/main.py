@@ -30,6 +30,7 @@ def create_app(
     embedding_provider: EmbeddingProvider | None = None,
     tier1_provider: JudgeProvider | None = None,
     tier2_provider: JudgeProvider | None = None,
+    instance_id: str | None = None,
 ) -> FastAPI:
     config = config or load_config()
     store = store or SQLiteStore(config.server.db_path)
@@ -40,7 +41,7 @@ def create_app(
         tier1_provider=tier1_provider,
         tier2_provider=tier2_provider,
     )
-    instance_id = uuid4().hex
+    instance_id = instance_id or uuid4().hex
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

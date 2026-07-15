@@ -20,7 +20,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\windows_setup.ps1
 ```
 
-The script creates `.venv`, installs Python dependencies, downloads and verifies
+The script creates `.venv`, installs Python and pystray dependencies, downloads and verifies
 the local Tier 0 ONNX model plus tokenizer (about 41 MB total), installs
 extension npm dependencies, and rebuilds `apps\extension\dist`.
 
@@ -66,8 +66,8 @@ available to loopback CLI clients such as `Invoke-RestMethod`.
 
 ## Optional Login Autostart
 
-Install a current-user Startup shortcut so the server starts at Windows logon in
-idle mode and shows a taskbar tray icon:
+Install a current-user Startup shortcut so the pystray app starts at Windows
+logon, owns the local server lifecycle, and shows a taskbar tray icon:
 
 ```powershell
 .\scripts\windows_install_startup_app.ps1
@@ -89,12 +89,15 @@ Remove the Startup shortcut with:
 .\scripts\windows_uninstall_startup_app.ps1
 ```
 
-Startup logs are written under `data\logs\`. The tray icon polls
-`GET /health`: red means unreachable, gray means idle, green means active, and
-yellow means unknown or starting. The status header reports missing setup,
-startup failures, and timeouts; **Open logs** opens the folder containing the
-tray and server startup logs. The icon uses the monochrome template artwork,
-tinted for the current Windows system theme, with a small status dot overlay.
+Startup logs are written under `data\logs\`. **Start server**, **Stop server**,
+and **Restart server** run in background threads, and Exit gracefully stops the
+server before closing the tray. Red means unreachable, gray means idle, green
+means active, and yellow means unknown or transitioning. **Open logs** opens the
+folder containing the tray and server logs.
+
+The tray verifies the server's `/identity` instance ID before requesting a
+shutdown. It does not trust a PID file, so a stale PID cannot terminate an
+unrelated process.
 
 ## Optional AI Provider Setup
 

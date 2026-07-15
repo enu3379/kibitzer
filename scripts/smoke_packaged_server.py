@@ -26,10 +26,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def executable_in(dist_dir: Path) -> Path:
-    name = "kibitzer.exe" if sys.platform == "win32" else "kibitzer"
-    executable = dist_dir.resolve() / name
+    name = "kibitzer-server.exe" if sys.platform == "win32" else "kibitzer"
+    resolved_dist = dist_dir.resolve()
+    executable = resolved_dist / name
     if not executable.is_file():
         raise RuntimeError(f"packaged executable not found: {executable}")
+    if sys.platform == "win32" and not (resolved_dist / "Kibitzer.exe").is_file():
+        raise RuntimeError(f"packaged tray executable not found: {resolved_dist / 'Kibitzer.exe'}")
     return executable
 
 
@@ -101,6 +104,28 @@ def stop_process(process: subprocess.Popen[str]) -> tuple[str, str]:
         except subprocess.TimeoutExpired:
             process.kill()
     return process.communicate(timeout=10)
+
+
+def request_graceful_stop(profile: Path, instance_id: str) -> None:
+    control_file = profile / "server-control.json"
+    try:
+        control = json.loads(control_file.read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError) as exc:
+        raise RuntimeError(f"packaged server did not publish {control_file}") from exc
+    if control.get("instance_id") != instance_id:
+        raise RuntimeError(f"control/identity instance mismatch: {control}")
+    pending = profile / "server-stop-request.json.tmp"
+    pending.write_text(
+        json.dumps(
+            {
+                "service": control.get("service"),
+                "protocol_version": control.get("protocol_version"),
+                "instance_id": instance_id,
+            }
+        ),
+        encoding="utf-8",
+    )
+    pending.replace(profile / "server-stop-request.json")
 
 
 def smoke(dist_dir: Path) -> None:
@@ -178,9 +203,15 @@ tier2:
                 f"stdout={stdout!r} stderr={stderr!r}"
             ) from exc
         else:
-            stdout, stderr = stop_process(process)
-            allowed_return_codes = {0, 1} if sys.platform == "win32" else {0, -15}
-            if process.returncode not in allowed_return_codes:
+            request_graceful_stop(profile, str(identity["instance_id"]))
+            try:
+                stdout, stderr = process.communicate(timeout=15)
+            except subprocess.TimeoutExpired as exc:
+                stdout, stderr = stop_process(process)
+                raise RuntimeError(
+                    f"packaged server ignored graceful stop: stdout={stdout!r} stderr={stderr!r}"
+                ) from exc
+            if process.returncode != 0:
                 raise RuntimeError(
                     f"packaged server stopped with {process.returncode}: "
                     f"stdout={stdout!r} stderr={stderr!r}"

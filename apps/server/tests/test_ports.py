@@ -162,6 +162,7 @@ class PortSelectionTest(unittest.TestCase):
 
             self.assertTrue(owned_socket.closed)
             self.assertFalse(paths.effective_port_file.exists())
+            self.assertFalse(paths.server_control_file.exists())
 
 
 class IdentityEndpointTest(unittest.TestCase):
@@ -173,13 +174,19 @@ class IdentityEndpointTest(unittest.TestCase):
                 tier1=Tier1Config(enabled=False),
                 tier2=Tier2Config(enabled=False),
             )
-            with TestClient(create_app(config=config, store=SQLiteStore(db_path))) as client:
+            with TestClient(
+                create_app(
+                    config=config,
+                    store=SQLiteStore(db_path),
+                    instance_id="known-instance",
+                )
+            ) as client:
                 identity = client.get("/identity").json()
                 health = client.get("/health").json()
 
         self.assertEqual(identity["service"], SERVICE_NAME)
         self.assertEqual(identity["protocol_version"], PROTOCOL_VERSION)
-        self.assertTrue(identity["instance_id"])
+        self.assertEqual(identity["instance_id"], "known-instance")
         self.assertEqual(health["version"], APP_VERSION)
 
 

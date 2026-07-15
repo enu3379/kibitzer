@@ -7,8 +7,8 @@ Project maintenance scripts live here.
 - `windows_setup.ps1` / `windows_run_server.ps1`: Windows setup and server run.
 - `windows_install_startup_app.ps1` / `windows_uninstall_startup_app.ps1`:
   optional Windows login autostart for the idle daemon server.
-- `windows_startup_tray.ps1`: Windows tray status surface for the autostarted
-  server; it uses the monochrome template icon with a state dot overlay.
+- `apps/server/app/windows_tray.py`: pystray status and lifecycle surface;
+  `windows_startup_tray.ps1` is only a compatibility forwarder for old shortcuts.
 - `macos_setup.sh` / `macos_run_server.sh`: macOS setup and server run.
 - `macos_install_launch_agent.sh` / `macos_uninstall_launch_agent.sh`: optional
   macOS login autostart for the idle daemon server.
@@ -24,8 +24,9 @@ differences in these entrypoints unless a native adapter is unavoidable.
 
 After building `packaging/kibitzer.spec`, `smoke_packaged_server.py` executes
 the frozen CLI, checks its bundled resources and profile paths, starts the
-server with an isolated hash-embedding config, and verifies `/identity`,
-`/health`, the SQLite DB, and the effective-port file.
+server with an isolated hash-embedding config, verifies `/identity`, `/health`,
+the SQLite DB, and the effective-port file, then exercises the instance-scoped
+graceful-stop protocol.
 
 ```bash
 python scripts/smoke_packaged_server.py --dist-dir dist/kibitzer

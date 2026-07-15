@@ -1,107 +1,86 @@
 $ErrorActionPreference = "Stop"
 
-$ShortcutName = "Kibitzer Server.lnk"
-
+$ShortcutName = "Kibitzer.lnk"
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
-$TrayScript = Join-Path $Root "scripts\windows_startup_tray.ps1"
-$Python = Join-Path $Root ".venv\Scripts\python.exe"
-$LogDir = Join-Path $Root "data\logs"
-$PortFile = Join-Path $Root "data\kibitzer.port"
-$TrayPidFile = Join-Path $LogDir "windows-startup-tray.pid"
+$PackagedTray = Join-Path $Root "dist\kibitzer\Kibitzer.exe"
+$Pythonw = Join-Path $Root ".venv\Scripts\pythonw.exe"
 $StartupDir = [Environment]::GetFolderPath([Environment+SpecialFolder]::Startup)
 
 if (-not $StartupDir) {
   $StartupDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup"
 }
 
+if (Test-Path $PackagedTray) {
+  $Target = $PackagedTray
+  $Arguments = ""
+  $WorkingDirectory = Split-Path -Parent $PackagedTray
+  $DataDir = if ($env:KIBITZER_HOME) { $env:KIBITZER_HOME } else { Join-Path $env:LOCALAPPDATA "Kibitzer" }
+}
+else {
+  if (-not (Test-Path $Pythonw)) {
+    throw "Missing .venv. Run .\scripts\windows_setup.ps1 first."
+  }
+  $Target = $Pythonw
+  $Arguments = "-m apps.server.app.windows_tray"
+  $WorkingDirectory = $Root.ToString()
+  $DataDir = if ($env:KIBITZER_HOME) { $env:KIBITZER_HOME } else { Join-Path $Root "data" }
+}
+
 $ShortcutPath = Join-Path $StartupDir $ShortcutName
-
-if (-not (Test-Path $Python)) {
-  throw "Missing .venv. Run .\scripts\windows_setup.ps1 first."
-}
-
-if (-not (Test-Path $TrayScript)) {
-  throw "Missing $TrayScript."
-}
-
-New-Item -ItemType Directory -Force (Join-Path $Root "data") | Out-Null
-New-Item -ItemType Directory -Force $LogDir | Out-Null
 New-Item -ItemType Directory -Force $StartupDir | Out-Null
+New-Item -ItemType Directory -Force $DataDir | Out-Null
 
-function Wait-KibitzerHealth {
-  param(
-    [int]$TimeoutSeconds = 20
-  )
-
-  $Deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-  while ((Get-Date) -lt $Deadline) {
-    try {
-      $Port = [int](Get-Content -LiteralPath $PortFile -Raw -ErrorAction Stop)
-      if ($Port -lt 1 -or $Port -gt 65535) {
-        throw "Invalid Kibitzer port file."
-      }
-      $BaseUrl = "http://127.0.0.1:$Port"
-      $Identity = Invoke-RestMethod -Uri "$BaseUrl/identity" -TimeoutSec 2 -ErrorAction Stop
-      if (
-        $Identity.service -ne "kibitzer" -or
-        $Identity.protocol_version -ne 1 -or
-        [string]::IsNullOrWhiteSpace([string]$Identity.instance_id)
-      ) {
-        throw "Port $Port is not a Kibitzer server."
-      }
-      return Invoke-RestMethod -Uri "$BaseUrl/health" -TimeoutSec 2 -ErrorAction Stop
-    }
-    catch {
-      Start-Sleep -Milliseconds 500
-    }
-  }
-  return $null
-}
-
-$PowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
-if (-not (Test-Path $PowerShell)) {
-  $PowerShell = (Get-Command powershell.exe -ErrorAction Stop).Source
-}
-
-function Test-KibitzerTrayRunning {
-  if (-not (Test-Path $TrayPidFile)) {
-    return $false
-  }
-
-  try {
-    $TrayPid = [int](Get-Content -LiteralPath $TrayPidFile -Raw)
-  }
-  catch {
-    return $false
-  }
-
-  $Process = Get-Process -Id $TrayPid -ErrorAction SilentlyContinue
-  return [bool]($Process -and $Process.ProcessName -in @("powershell", "pwsh"))
-}
-
-$ShortcutArguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $TrayScript + '"'
 $Shell = New-Object -ComObject WScript.Shell
 $Shortcut = $Shell.CreateShortcut($ShortcutPath)
-$Shortcut.TargetPath = $PowerShell
-$Shortcut.Arguments = $ShortcutArguments
-$Shortcut.WorkingDirectory = $Root.ToString()
+$Shortcut.TargetPath = $Target
+$Shortcut.Arguments = $Arguments
+$Shortcut.WorkingDirectory = $WorkingDirectory
 $Shortcut.WindowStyle = 7
-$Shortcut.Description = "Starts the Kibitzer local server at Windows logon in idle mode."
+$Shortcut.Description = "Starts Kibitzer and its local server at Windows logon."
 $Shortcut.Save()
 
 Write-Host "Installed Startup shortcut: $ShortcutPath"
-Write-Host "Effective port: $PortFile"
-Write-Host "Logs: $(Join-Path $LogDir 'windows-startup-app.out.log') and .err.log"
+Write-Host "Runtime data: $DataDir"
+Write-Host "Logs: $(Join-Path $DataDir 'logs')"
 
-if (-not (Test-KibitzerTrayRunning)) {
-  Start-Process -FilePath $PowerShell -ArgumentList $ShortcutArguments -WorkingDirectory $Root -WindowStyle Hidden
-  Start-Sleep -Milliseconds 500
+# Starting an already-running tray is safe: its named mutex makes the duplicate
+# process exit without creating a second icon.
+if ($Arguments) {
+  Start-Process -FilePath $Target -ArgumentList $Arguments -WorkingDirectory $WorkingDirectory -WindowStyle Hidden
+}
+else {
+  Start-Process -FilePath $Target -WorkingDirectory $WorkingDirectory -WindowStyle Hidden
 }
 
-$Health = Wait-KibitzerHealth
+$Ports = @(49187, 51387, 53587, 55787, 57987)
+$Deadline = (Get-Date).AddSeconds(30)
+$Health = $null
+while ((Get-Date) -lt $Deadline) {
+  foreach ($Port in $Ports) {
+    try {
+      $Identity = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/identity" -TimeoutSec 1 -ErrorAction Stop
+      if (
+        $Identity.service -eq "kibitzer" -and
+        $Identity.protocol_version -eq 1 -and
+        -not [string]::IsNullOrWhiteSpace([string]$Identity.instance_id)
+      ) {
+        $Health = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 1 -ErrorAction Stop
+        break
+      }
+    }
+    catch {
+      continue
+    }
+  }
+  if ($Health) {
+    break
+  }
+  Start-Sleep -Milliseconds 250
+}
+
 if ($Health) {
   Write-Host "Health check ok. mode=$($Health.mode)"
 }
 else {
-  Write-Warning "Startup shortcut was installed, but Kibitzer did not respond within 20 seconds. Check the logs above."
+  Write-Warning "Startup shortcut was installed, but Kibitzer did not respond within 30 seconds. Check the logs above."
 }
