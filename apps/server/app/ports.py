@@ -10,10 +10,10 @@ from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
 
+from .runtime_paths import RuntimePaths, resolve_runtime_paths
+
 LOOPBACK_HOST = "127.0.0.1"
 IDENTITY_PATH = "/identity"
-EFFECTIVE_PORT_FILE = Path("data/kibitzer.port")
-
 _contract = json.loads(Path(__file__).with_name("port-candidates.json").read_text(encoding="utf-8"))
 SERVICE_NAME = str(_contract["service"])
 PROTOCOL_VERSION = int(_contract["protocol_version"])
@@ -93,14 +93,14 @@ def acquire_server_socket(
     raise PortSelectionError(ports, failures)
 
 
-def write_effective_port(port: int, path: Path = EFFECTIVE_PORT_FILE) -> None:
+def write_effective_port(port: int, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     pending = path.with_suffix(f"{path.suffix}.tmp")
     pending.write_text(f"{port}\n", encoding="utf-8")
     pending.replace(path)
 
 
-def clear_effective_port(port: int, path: Path = EFFECTIVE_PORT_FILE) -> None:
+def clear_effective_port(port: int, path: Path) -> None:
     try:
         if path.read_text(encoding="utf-8").strip() == str(port):
             path.unlink()
@@ -150,8 +150,9 @@ def port_owner_diagnostics(ports: Sequence[int]) -> list[str]:
     return []
 
 
-def main() -> int:
-    EFFECTIVE_PORT_FILE.unlink(missing_ok=True)
+def main(runtime_paths: RuntimePaths | None = None) -> int:
+    effective_port_file = (runtime_paths or resolve_runtime_paths()).effective_port_file
+    effective_port_file.unlink(missing_ok=True)
     try:
         port, bound_socket = acquire_server_socket()
     except PortSelectionError as exc:
@@ -160,7 +161,7 @@ def main() -> int:
             print(diagnostic, file=sys.stderr)
         return 2
 
-    write_effective_port(port)
+    write_effective_port(port, effective_port_file)
     if bound_socket is None:
         print(f"Kibitzer is already running on {LOOPBACK_HOST}:{port}")
         return 0
@@ -178,7 +179,7 @@ def main() -> int:
         pass
     finally:
         bound_socket.close()
-        clear_effective_port(port)
+        clear_effective_port(port, effective_port_file)
     return 0
 
 

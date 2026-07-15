@@ -48,6 +48,24 @@ For AI provider keys, copy `.env.example` to `.env` and keep the real `.env`
 local. Local model routing belongs in `configs/models.local.yaml`, which is also
 ignored by git.
 
+The installed server entry point supports these diagnostics and launch forms:
+
+```text
+kibitzer              Start the local server
+kibitzer serve        Start the local server explicitly
+kibitzer paths        Print resolved config/data/resource paths as JSON
+kibitzer --version    Print the application version
+```
+
+Source runs resolve `configs/`, `.env`, and `data/` from the repository rather
+than the current shell directory. Packaged builds use the OS user-data
+directory for writable state. `KIBITZER_HOME` overrides writable paths and
+`KIBITZER_CONFIG` selects a different main config file.
+
+The current unsigned server-only onedir package and its executable smoke test
+are documented in [packaging/README.md](packaging/README.md). Platform tray and
+menu-bar integration remain separate follow-up work.
+
 ## Implementation Defaults
 
 ```text

@@ -67,7 +67,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--session", help="Session id or unique id prefix")
     parser.add_argument("--latest", action="store_true", help="Replay the newest ended session that has a goal")
     parser.add_argument("--list-sessions", action="store_true", help="List sessions and exit")
-    parser.add_argument("--config", default="configs/default.yaml", help="Replay config path")
+    parser.add_argument(
+        "--config",
+        help="Replay config path (default: the resolved Kibitzer config)",
+    )
     parser.add_argument(
         "--override",
         action="append",

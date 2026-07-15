@@ -21,6 +21,9 @@ test = [
   "pytest>=8.0",
   "pytest-asyncio>=0.23",
 ]
+package = [
+  "pyinstaller>=6.21,<7",
+]
 
 [project.scripts]
 kibitzer = "apps.server.app.cli.main:main"

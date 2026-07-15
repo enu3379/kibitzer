@@ -7,6 +7,8 @@ import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .runtime_paths import RuntimePaths, resolve_runtime_paths
+
 
 CHROME_EXTENSION_ID_PATTERN = re.compile(r"^[a-p]{32}$")
 
@@ -202,9 +204,14 @@ class AppConfig(BaseModel):
     raw: dict[str, Any] = Field(default_factory=dict)
 
 
-def load_config(path: str | Path = "configs/default.yaml") -> AppConfig:
-    load_dotenv(Path(".env"), override=False)
-    config_path = Path(path)
+def load_config(
+    path: str | Path | None = None,
+    *,
+    runtime_paths: RuntimePaths | None = None,
+) -> AppConfig:
+    paths = runtime_paths or resolve_runtime_paths()
+    load_dotenv(paths.env_file, override=False)
+    config_path = Path(path).expanduser() if path is not None else paths.default_config_file
     data = yaml.safe_load(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
     values = {
         k: v
@@ -235,7 +242,123 @@ def load_config(path: str | Path = "configs/default.yaml") -> AppConfig:
         ]
         values["security"] = security
 
-    return AppConfig(
+    config = AppConfig(
         raw=data or {},
         **values,
     )
+    return _resolve_config_paths(config, paths=paths, config_path=config_path)
+
+
+def _resolve_config_paths(
+    config: AppConfig,
+    *,
+    paths: RuntimePaths,
+    config_path: Path,
+) -> AppConfig:
+    server = config.server.model_copy(
+        update={"db_path": _writable_data_path(config.server.db_path, paths)}
+    )
+    embedding = config.embedding.model_copy(
+        update={
+            "model": _embedding_path(config.embedding.model, paths),
+            "tokenizer_path": (
+                _writable_data_path(config.embedding.tokenizer_path, paths)
+                if config.embedding.tokenizer_path
+                else None
+            ),
+        }
+    )
+    tier1 = config.tier1.model_copy(
+        update={
+            "experiment_models_file": _user_config_path(
+                config.tier1.experiment_models_file, paths
+            )
+        }
+    )
+    tier2 = config.tier2.model_copy(
+        update={
+            "experiment_models_file": _user_config_path(
+                config.tier2.experiment_models_file, paths
+            )
+        }
+    )
+    privacy = config.privacy.model_copy(
+        update={
+            "sensitive_domains_file": _bundled_resource_path(
+                config.privacy.sensitive_domains_file, paths, config_path
+            )
+        }
+    )
+    delivery = config.delivery.model_copy(
+        update={
+            "personas_file": _bundled_resource_path(
+                config.delivery.personas_file, paths, config_path
+            ),
+            "custom_personas_file": _custom_personas_path(
+                config.delivery.custom_personas_file, paths
+            ),
+        }
+    )
+    return config.model_copy(
+        update={
+            "server": server,
+            "embedding": embedding,
+            "tier1": tier1,
+            "tier2": tier2,
+            "privacy": privacy,
+            "delivery": delivery,
+        }
+    )
+
+
+def _writable_data_path(value: str, paths: RuntimePaths) -> str:
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return str(path)
+    parts = path.parts
+    if parts and parts[0] == "data":
+        return str(paths.data_dir.joinpath(*parts[1:]))
+    return str(paths.data_dir / path)
+
+
+def _embedding_path(value: str, paths: RuntimePaths) -> str:
+    path = Path(value).expanduser()
+    if path.is_absolute() or (path.parts and path.parts[0] == "data"):
+        return _writable_data_path(value, paths)
+    if "/" in value or "\\" in value or value.startswith("."):
+        return _writable_data_path(value, paths)
+    return value
+
+
+def _user_config_path(
+    value: str | None,
+    paths: RuntimePaths,
+) -> str | None:
+    if value is None or (value.startswith("${") and value.endswith("}")):
+        return value
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return str(path)
+    parts = path.parts
+    if parts and parts[0] == "configs":
+        return str(paths.user_config_dir.joinpath(*parts[1:]))
+    return str(paths.user_config_dir / path)
+
+
+def _bundled_resource_path(value: str, paths: RuntimePaths, config_path: Path) -> str:
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return str(path)
+    parts = path.parts
+    if parts and parts[0] == "configs":
+        return str(paths.resource_root.joinpath(*parts))
+    return str(config_path.parent / path)
+
+
+def _custom_personas_path(value: str, paths: RuntimePaths) -> str:
+    if value == "~/.kibitzer/personas.yaml":
+        return str(paths.custom_personas_file)
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return str(path)
+    return str(paths.user_config_dir / path)
