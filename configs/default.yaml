@@ -122,8 +122,6 @@ time_budget:
 
 privacy:
   sensitive_domains_file: "configs/sensitive_domains.json"
-  strip_query: true
-  hash_url_path: true
 
 delivery:
   channel: "chrome_notification"
