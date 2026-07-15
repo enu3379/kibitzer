@@ -112,7 +112,12 @@ class WindowsTrayAppTest(unittest.TestCase):
             manager = SimpleNamespace(paths=runtime_paths(Path(tmpdir)))
             app = WindowsTrayApp(manager)  # type: ignore[arg-type]
             app._images = {state: object() for state in ServerState}
-            app._icon = SimpleNamespace(icon=None, title="", update_menu=lambda: None)
+            menu_lock_states: list[bool] = []
+            app._icon = SimpleNamespace(
+                icon=None,
+                title="",
+                update_menu=lambda: menu_lock_states.append(app._action_lock.locked()),
+            )
             entered = threading.Event()
             release = threading.Event()
 
@@ -133,6 +138,7 @@ class WindowsTrayAppTest(unittest.TestCase):
             while app._action_lock.locked() and time.monotonic() < deadline:
                 time.sleep(0.01)
             self.assertFalse(app._action_lock.locked())
+            self.assertFalse(menu_lock_states[-1])
 
 
 if __name__ == "__main__":

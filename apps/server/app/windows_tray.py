@@ -322,7 +322,8 @@ class WindowsTrayApp:
 
         def stop_and_exit() -> None:
             try:
-                self.manager.stop()
+                with self._action_lock:
+                    self.manager.stop()
             finally:
                 self._icon.stop()
 
@@ -338,6 +339,7 @@ class WindowsTrayApp:
             return
 
         def run_action() -> None:
+            final_status = ServerStatus(ServerState.DEAD, f"Kibitzer: {name} failed")
             try:
                 self._set_status(ServerStatus(transition, f"Kibitzer: {transition.value}"))
                 try:
@@ -345,12 +347,21 @@ class WindowsTrayApp:
                 except Exception:
                     LOGGER.exception("tray %s action failed", name)
                     succeeded = False
-                status = self.manager.status()
-                if not succeeded and status.state is ServerState.DEAD:
-                    status = ServerStatus(ServerState.DEAD, f"Kibitzer: {name} failed")
-                self._set_status(status)
+                try:
+                    final_status = self.manager.status()
+                except Exception:
+                    LOGGER.exception("tray status refresh failed after %s", name)
+                if not succeeded and final_status.state is ServerState.DEAD:
+                    final_status = ServerStatus(
+                        ServerState.DEAD,
+                        f"Kibitzer: {name} failed",
+                    )
             finally:
                 self._action_lock.release()
+            # Enabled menu properties consult the action lock, so refresh only
+            # after releasing it. Otherwise every action leaves the buttons
+            # disabled until the next polling interval.
+            self._set_status(final_status)
 
         threading.Thread(
             target=run_action,
