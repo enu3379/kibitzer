@@ -956,6 +956,7 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
       <button id="settings-back" class="icon-btn" title="대시보드로">←</button>
       <span class="name">설정</span>
     </div>
+    <div id="settings-error" class="settings-error" role="alert" hidden></div>
     <p class="label">페르소나</p>
     <div class="pers">${personaCards}</div>
     <div class="setrow">
@@ -974,7 +975,7 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
     <p class="subhint">음성 기능은 현재 macOS say 기반이며 Windows 패키지에서는 기본적으로 꺼져 있습니다.</p>
     <div class="setrow">
       <span class="grow">쿨다운</span>
-      <input id="cooldown-seconds" class="number" type="number" min="0" step="30"
+      <input id="cooldown-seconds" class="number" type="number" min="0" max="86400" step="30"
         value="${settings.cooldown.seconds}" ${settings.cooldown.enabled ? "" : "disabled"} />
       <span style="color: var(--muted);">초</span>
       <input id="cooldown-toggle" type="checkbox" ${settings.cooldown.enabled ? "checked" : ""} />
@@ -1039,7 +1040,7 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
   })
   const updateControllerK = (event: Event) => {
     const k = Number.parseInt((event.target as HTMLInputElement).value, 10)
-    if (!Number.isFinite(k) || k < 1) return
+    if (!Number.isFinite(k) || k < 1 || k > 20) return
     void applySettings({ controller: { k } })
   }
   document.getElementById("controller-k")?.addEventListener("input", updateControllerK)
@@ -1074,7 +1075,7 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
   })
   document.getElementById("cooldown-seconds")?.addEventListener("change", (event) => {
     const seconds = Number.parseInt((event.target as HTMLInputElement).value, 10)
-    if (Number.isFinite(seconds) && seconds >= 0) {
+    if (Number.isFinite(seconds) && seconds >= 0 && seconds <= 86400) {
       void applySettings({ cooldown: { seconds } })
     }
   })
@@ -1110,12 +1111,24 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
 }
 
 async function applySettings(patch: Parameters<typeof putSettings>[0]): Promise<void> {
-  const updated = await putSettings(patch)
-  if (!updated) {
+  const result = await putSettings(patch)
+  if (result.kind === "unreachable") {
     handleUnreachable()
     return
   }
-  renderSettings(updated, personaCache)
+  if (result.kind === "http_error") {
+    const error = document.getElementById("settings-error")
+    if (!error) return
+    const prefix = result.status >= 400 && result.status < 500
+      ? "설정값을 확인해 주세요."
+      : "설정을 저장하지 못했어요."
+    error.textContent = result.detail
+      ? `${prefix} ${result.detail}`
+      : `${prefix} (HTTP ${result.status})`
+    error.hidden = false
+    return
+  }
+  renderSettings(result.settings, personaCache)
 }
 
 void refresh()
