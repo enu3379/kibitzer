@@ -442,8 +442,8 @@ function pageBelief(verdict: LatestObservation["verdict"]): { dot: string; text:
 type PageCardProcessingStage = CurrentPageProcessingStage
 
 const PAGE_PROCESSING_COPY: Record<PageCardProcessingStage, { text: string; hint?: string }> = {
-  tier0: { text: "Tier 0 · 관련성을 빠르게 판단하고 있어요" },
-  tier1: { text: "Tier 1 · 애매한 판단을 다시 확인하고 있어요" },
+  tier0: { text: "관련성을 빠르게 판단하고 있어요" },
+  tier1: { text: "애매한 판단을 다시 확인하고 있어요" },
 }
 
 // The 맞아/아니 prefix agrees or disagrees with the displayed belief, but the
