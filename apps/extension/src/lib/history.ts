@@ -12,6 +12,9 @@ export interface ExplorationHistoryEntry {
   tier2DwellMs: number
   observationId?: string
   verdict?: ExplorationVerdict
+  // User correction from the page-label override path. The pipeline verdict
+  // above stays untouched so the history view can show both when they differ.
+  userVerdict?: ExplorationVerdict
   responseKind?: ExplorationResponseKind
 }
 
@@ -84,6 +87,8 @@ function isHistoryEntry(value: unknown): value is ExplorationHistoryEntry {
   const endedAtValid = item.endedAt === undefined || isFiniteNumber(item.endedAt)
   const observationIdValid = item.observationId === undefined || typeof item.observationId === "string"
   const verdictValid = item.verdict === undefined || item.verdict === "OK" || item.verdict === "DRIFT"
+  const userVerdictValid =
+    item.userVerdict === undefined || item.userVerdict === "OK" || item.userVerdict === "DRIFT"
   const responseKindValid =
     item.responseKind === undefined || item.responseKind === "intervention" || item.responseKind === "celebration"
   return (
@@ -97,6 +102,7 @@ function isHistoryEntry(value: unknown): value is ExplorationHistoryEntry {
     isFiniteNumber(item.tier2DwellMs) &&
     observationIdValid &&
     verdictValid &&
+    userVerdictValid &&
     responseKindValid
   )
 }

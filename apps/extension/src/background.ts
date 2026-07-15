@@ -815,7 +815,7 @@ chrome.runtime.onMessage.addListener(
       (message.verdict === "OK" || message.verdict === "DRIFT")
     ) {
       void updateExplorationHistoryByObservationId(message.observationId, {
-        verdict: message.verdict,
+        userVerdict: message.verdict,
       }).then(
         () => sendResponse({ ok: true }),
         () => sendResponse({ ok: false }),
@@ -865,7 +865,7 @@ async function submitNotificationFeedback(
       (result.verdict === "OK" || result.verdict === "DRIFT")
     ) {
       await updateExplorationHistoryByObservationId(result.observation_id, {
-        verdict: result.verdict,
+        userVerdict: result.verdict,
       }).catch(() => undefined)
     }
   }
