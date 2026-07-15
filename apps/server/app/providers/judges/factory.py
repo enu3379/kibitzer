@@ -148,17 +148,28 @@ def _resolve_tier2_settings(config: Tier2Config) -> _ResolvedJudgeSettings | Non
 
 def _resolve_direct_tier2_settings(config: Tier2Config) -> _ResolvedJudgeSettings | None:
     api_url = _expand_env(config.base_url)
-    api_key = os.environ.get(config.api_key_env)
-    fallback_api_key = os.environ.get(config.fallback_api_key_env) if config.fallback_api_key_env else None
+    api_key, fallback_api_key, api_keys = _resolve_api_keys(
+        api_key=os.environ.get(config.api_key_env),
+        fallback_api_key=(
+            os.environ.get(config.fallback_api_key_env)
+            if config.fallback_api_key_env
+            else None
+        ),
+        api_key_pool_envs=config.api_key_pool_envs,
+    )
     if not api_url or not api_key:
         return None
-    provider = "ollama_chat" if config.provider in {"ollama", "ollama_chat"} else config.provider
+    provider = (
+        "ollama_chat"
+        if config.provider in {"ollama", "ollama_chat"}
+        else config.provider
+    )
     return _ResolvedJudgeSettings(
         provider=provider,
         api_url=api_url,
         api_key=api_key,
         fallback_api_key=fallback_api_key,
-        api_keys=None,
+        api_keys=api_keys,
         model=config.model,
         timeout_seconds=config.timeout_seconds,
         max_output_tokens=config.max_output_tokens,
