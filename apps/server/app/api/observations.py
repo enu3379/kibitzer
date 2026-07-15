@@ -548,7 +548,12 @@ async def _run_d7_review(
     )
     intervention_id = store.create_intervention(observation.session_id, observation.id, message, ts=now)
     mark_controller_intervened(store, controller_config, observation.session_id, now)
-    store.complete_d7_review_notification(observation.session_id, observation.id, now)
+    store.complete_d7_review_notification(
+        observation.session_id,
+        observation.id,
+        next_review_boundary(mode_seconds, thresholds.total_seconds),
+        now,
+    )
     silent = _handle_delivery_side_effects(
         request,
         observation.session_id,

@@ -1494,8 +1494,12 @@ class SQLiteStore:
         self,
         session_id: str,
         observation_id: str,
+        next_review_mode_seconds: int,
         ts: datetime | None = None,
     ) -> None:
+        # A delivered nag must consume the review window like an acceptable
+        # defer does; otherwise every later presence event on the still-dwelled
+        # page re-qualifies immediately and the user is nagged per heartbeat.
         now = ts or _utc_now()
         with self._connect() as conn:
             self._ensure_schema(conn)
@@ -1503,12 +1507,18 @@ class SQLiteStore:
                 """
                 UPDATE drift_clock_states
                 SET review_observation_id = NULL, review_started_at = NULL, review_status = 'notified',
-                    last_defer_reason = NULL, updated_at = ?
+                    next_review_mode_seconds = ?, last_defer_reason = NULL, updated_at = ?
                 WHERE session_id = ? AND review_observation_id = ?
                 """,
-                (now.isoformat(), session_id, observation_id),
+                (next_review_mode_seconds, now.isoformat(), session_id, observation_id),
             )
-            self._append_event(conn, session_id, "d7.review_notified", {"observation_id": observation_id}, now)
+            self._append_event(
+                conn,
+                session_id,
+                "d7.review_notified",
+                {"observation_id": observation_id, "next_review_mode_seconds": next_review_mode_seconds},
+                now,
+            )
 
     def release_d7_review(
         self,

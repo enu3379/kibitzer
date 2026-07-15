@@ -80,6 +80,34 @@ const pendingTabObservations = new Map<number, PendingTabObservation>()
 const pendingToasts = new Map<string, PendingToast>()
 const activeD7Observations = new Map<number, ActiveD7Observation>()
 
+// MV3 tears the service worker down between heartbeat alarms. Without a
+// storage.session copy, every alarm wakes an empty map and takes the
+// zero-credit "active" recovery path (stalling the server clocks) and
+// re-captures page content each minute.
+const D7_TRACKING_STORAGE_KEY = "d7ActiveObservations"
+let d7ObservationsRestored = false
+
+async function ensureD7ObservationsRestored(): Promise<void> {
+  if (d7ObservationsRestored) return
+  d7ObservationsRestored = true
+  try {
+    const data = await chrome.storage.session.get(D7_TRACKING_STORAGE_KEY)
+    const entries = data?.[D7_TRACKING_STORAGE_KEY] as Array<[number, ActiveD7Observation]> | undefined
+    if (!Array.isArray(entries)) return
+    for (const [tabId, tracked] of entries) {
+      if (!activeD7Observations.has(tabId)) activeD7Observations.set(tabId, tracked)
+    }
+  } catch {
+    // Start empty; the heartbeat recovery path remains the fallback.
+  }
+}
+
+function persistD7Observations(): void {
+  void chrome.storage.session
+    .set({ [D7_TRACKING_STORAGE_KEY]: [...activeD7Observations.entries()] })
+    .catch(() => undefined)
+}
+
 function scheduleTabObservation(tabId: number, observedUrl?: string): void {
   void deactivateD7Observation(tabId)
   clearTabTimer(tabId)
@@ -214,6 +242,11 @@ function clearInactiveTabTimers(activeTabId: number): void {
   for (const tabId of pendingTabObservations.keys()) {
     if (tabId !== activeTabId) clearTabTimer(tabId)
   }
+  void deactivateInactiveD7Observations(activeTabId)
+}
+
+async function deactivateInactiveD7Observations(activeTabId: number): Promise<void> {
+  await ensureD7ObservationsRestored()
   for (const tabId of activeD7Observations.keys()) {
     if (tabId !== activeTabId) void deactivateD7Observation(tabId)
   }
@@ -274,6 +307,7 @@ function newPresenceEventId(): string {
 }
 
 async function captureD7ContentAndActivate(tabId: number, observationId: string, url: string): Promise<void> {
+  await ensureD7ObservationsRestored()
   if (!(await tabStillActivelyViewed(tabId, url))) return
   const pathHash = await urlPathHashFor(url).catch(() => null)
   if (!pathHash) return
@@ -287,6 +321,7 @@ async function captureD7ContentAndActivate(tabId: number, observationId: string,
   await captureD7Content(tabId, tracked)
   if (!(await tabStillActivelyViewed(tabId, url))) return
   activeD7Observations.set(tabId, tracked)
+  persistD7Observations()
   await sendD7Presence(tabId, tracked, "active")
 }
 
@@ -315,13 +350,16 @@ async function sendD7Presence(
 }
 
 async function deactivateD7Observation(tabId: number): Promise<void> {
+  await ensureD7ObservationsRestored()
   const tracked = activeD7Observations.get(tabId)
   if (!tracked) return
   activeD7Observations.delete(tabId)
+  persistD7Observations()
   await sendD7Presence(tabId, tracked, "inactive")
 }
 
 async function heartbeatD7Observation(forceActive = false): Promise<void> {
+  await ensureD7ObservationsRestored()
   if (!(await browserPresenceIsActive())) {
     await deactivateAllD7Observations()
     return
@@ -343,16 +381,19 @@ async function heartbeatD7Observation(forceActive = false): Promise<void> {
       contentRetryAttempted: false,
     }
     activeD7Observations.set(tab.id, tracked)
+    persistD7Observations()
     kind = "active"
   }
   if (!tracked.contentStored && !tracked.contentRetryAttempted) {
     tracked.contentRetryAttempted = true
     await captureD7Content(tab.id, tracked)
+    persistD7Observations()
   }
   await sendD7Presence(tab.id, tracked, kind)
 }
 
 async function deactivateAllD7Observations(): Promise<void> {
+  await ensureD7ObservationsRestored()
   await Promise.all([...activeD7Observations.keys()].map((tabId) => deactivateD7Observation(tabId)))
 }
 

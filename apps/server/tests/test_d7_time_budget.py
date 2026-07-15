@@ -318,7 +318,7 @@ class D7ApiTest(unittest.TestCase):
         self.assertEqual(result["action"], "notify")
         self.assertEqual([payload["review_kind"] for payload in self.provider.payloads], ["title"])
 
-    def test_missing_judge_uses_fallback_without_advancing_boundary(self) -> None:
+    def test_missing_judge_uses_fallback_and_consumes_window(self) -> None:
         observation_id, path_hash = self._start_drift_observation()
         self.client.app.state.runtime._tier2_provider = None
         self._presence(observation_id, path_hash, "fallback-active", "active", self.start)
@@ -333,8 +333,53 @@ class D7ApiTest(unittest.TestCase):
         self.assertEqual(result["action"], "notify")
         session_id = self.client.get("/sessions/current/state").json()["session_id"]
         state = self.store.get_drift_clock_state(session_id)
-        self.assertEqual(state.next_review_mode_seconds, 0)
+        self.assertEqual(state.next_review_mode_seconds, 180)
         self.assertEqual(state.review_status, "notified")
+
+    def test_notification_consumes_review_window(self) -> None:
+        observation_id, path_hash = self._start_drift_observation()
+        self._presence(observation_id, path_hash, "window-active", "active", self.start)
+        self._presence(observation_id, path_hash, "window-minute", "heartbeat", self.start + timedelta(seconds=60))
+        result = self._presence(
+            observation_id,
+            path_hash,
+            "window-two-minutes",
+            "heartbeat",
+            self.start + timedelta(seconds=120),
+        )
+        self.assertEqual(result["action"], "notify")
+        session_id = self.client.get("/sessions/current/state").json()["session_id"]
+        self.assertEqual(self.store.get_drift_clock_state(session_id).next_review_mode_seconds, 180)
+        reassert = self._presence(
+            observation_id,
+            path_hash,
+            "window-reassert",
+            "active",
+            self.start + timedelta(seconds=130),
+        )
+        self.assertEqual(reassert["action"], "none")
+        blocked = self._presence(
+            observation_id,
+            path_hash,
+            "window-blocked",
+            "heartbeat",
+            self.start + timedelta(seconds=150),
+        )
+        self.assertEqual(blocked["action"], "none")
+        renag = self._presence(
+            observation_id,
+            path_hash,
+            "window-renag",
+            "heartbeat",
+            self.start + timedelta(seconds=215),
+        )
+        self.assertEqual(renag["action"], "notify")
+        with self.store._connect() as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) FROM interventions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()[0]
+        self.assertEqual(count, 2)
 
     def test_stale_review_lock_expires_on_presence(self) -> None:
         observation_id, path_hash = self._start_drift_observation()
