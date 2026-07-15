@@ -75,6 +75,15 @@ class LatestObservationResponse(BaseModel):
     label: Literal["related", "drift"] | None = None
 
 
+class CurrentPageStateResponse(BaseModel):
+    state: Literal["unobserved", "processing", "judged"]
+    stage: Literal["tier0", "tier1"] | None = None
+    observation_id: str | None = None
+    title: str | None = None
+    url_host: str | None = None
+    observation: LatestObservationResponse | None = None
+
+
 class PageLabelRequest(BaseModel):
     label: Literal["related", "drift"]
 
@@ -106,6 +115,59 @@ def _store(request: Request) -> SQLiteStore:
 
 def _runtime(request: Request) -> RuntimeResources:
     return request.app.state.runtime
+
+
+@router.get("/observations/page-state", response_model=CurrentPageStateResponse)
+async def current_page_state(
+    request: Request,
+    tab_id: int,
+    url_host: str,
+    url_path_hash: str,
+) -> CurrentPageStateResponse:
+    store = _store(request)
+    current = store.get_current_session()
+    if not current or not current.goal:
+        return CurrentPageStateResponse(state="unobserved")
+
+    processing = store.observation_processing_state_for_page(
+        current.session.id,
+        current.goal.goal_revision,
+        tab_id,
+        url_host,
+        url_path_hash,
+    )
+    if processing:
+        return CurrentPageStateResponse(
+            state="processing",
+            stage=processing.stage,
+            observation_id=processing.observation_id,
+            title=processing.title,
+            url_host=processing.url_host,
+        )
+
+    observation = store.latest_observation_for_tab(
+        current.session.id,
+        tab_id,
+        current.goal.goal_revision,
+    )
+    if (
+        not observation
+        or observation.url_host != url_host
+        or observation.url_path_hash != url_path_hash
+    ):
+        return CurrentPageStateResponse(state="unobserved")
+
+    return CurrentPageStateResponse(
+        state="judged",
+        observation_id=observation.id,
+        title=observation.title,
+        url_host=observation.url_host,
+        observation=_latest_observation_response(
+            observation,
+            tau_ok=float(runtime_settings(request.app.state.config, store)["relevance"]["tau_ok"]),
+            label=store.page_label_for_observation(observation.id),
+        ),
+    )
 
 
 @router.get("/observations/latest", response_model=LatestObservationResponse)

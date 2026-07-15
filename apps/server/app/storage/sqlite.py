@@ -197,6 +197,20 @@ class ObservationRequestRecord:
 
 
 @dataclass(frozen=True)
+class ObservationProcessingStateRecord:
+    observation_id: str
+    session_id: str
+    goal_revision: int
+    tab_id: int | None
+    url_host: str | None
+    url_path_hash: str | None
+    title: str | None
+    stage: str
+    started_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
 class SessionStatsRecord:
     session_id: str
     started_at: datetime
@@ -319,6 +333,9 @@ class SQLiteStore:
             conn.execute(
                 "DELETE FROM drift_page_dwell_states WHERE session_id IN (SELECT id FROM sessions WHERE active = 1)"
             )
+            conn.execute(
+                "DELETE FROM observation_processing_states WHERE session_id IN (SELECT id FROM sessions WHERE active = 1)"
+            )
             conn.execute("UPDATE sessions SET active = 0, ended_at = ? WHERE active = 1", (now_text,))
             conn.execute(
                 "INSERT INTO sessions (id, created_at, active) VALUES (?, ?, 1)",
@@ -378,6 +395,7 @@ class SQLiteStore:
             conn.execute("DELETE FROM observation_excerpts WHERE session_id = ?", (row["id"],))
             conn.execute("DELETE FROM dwell_presence_events WHERE session_id = ?", (row["id"],))
             conn.execute("DELETE FROM drift_page_dwell_states WHERE session_id = ?", (row["id"],))
+            conn.execute("DELETE FROM observation_processing_states WHERE session_id = ?", (row["id"],))
             self._append_event(conn, row["id"], "session.ended", {}, now)
         return SessionRecord(id=row["id"], created_at=_parse_dt(row["created_at"]), active=False)
 
@@ -895,6 +913,7 @@ class SQLiteStore:
         raw_text: str,
         exemplar: list[float] | None = None,
         available_time_minutes: int | None = None,
+        ensure_session: bool = False,
     ) -> GoalRecord:
         normalized_goal = raw_text.strip()
         if not normalized_goal:
@@ -911,9 +930,25 @@ class SQLiteStore:
                 "SELECT id FROM sessions WHERE active = 1 ORDER BY created_at DESC LIMIT 1"
             ).fetchone()
             if not session_row:
-                raise NoActiveSessionError("create a session before setting a goal")
-
-            session_id = session_row["id"]
+                if not ensure_session:
+                    raise NoActiveSessionError("create a session before setting a goal")
+                session_id = f"sess_{uuid.uuid4().hex}"
+                conn.execute(
+                    "INSERT INTO sessions (id, created_at, active) VALUES (?, ?, 1)",
+                    (session_id, now_text),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO controller_states (
+                        session_id, streak, obs_count, last_intervention_ts, snoozed_until, updated_at
+                    )
+                    VALUES (?, 0, 0, NULL, NULL, ?)
+                    """,
+                    (session_id, now_text),
+                )
+                self._append_event(conn, session_id, "session.created", {"active": True}, now)
+            else:
+                session_id = session_row["id"]
             previous_goal = conn.execute(
                 """
                 SELECT raw_text, available_time_minutes, goal_revision
@@ -1190,6 +1225,93 @@ class SQLiteStore:
             )
         return deleted.rowcount == 1
 
+    def set_observation_processing_stage(
+        self,
+        observation: Observation,
+        goal_revision: int,
+        stage: str,
+        ts: datetime | None = None,
+    ) -> ObservationProcessingStateRecord:
+        if stage not in {"tier0", "tier1"}:
+            raise ValueError(f"unsupported observation processing stage: {stage}")
+        now = ts or _utc_now()
+        payload = observation.payload
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            conn.execute(
+                """
+                INSERT INTO observation_processing_states (
+                    observation_id, session_id, goal_revision, tab_id,
+                    url_host, url_path_hash, title, stage, started_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(observation_id) DO UPDATE SET
+                    stage = excluded.stage,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    observation.id,
+                    observation.session_id,
+                    goal_revision,
+                    payload.get("tab_id"),
+                    payload.get("url_host"),
+                    payload.get("url_path_hash"),
+                    payload.get("title"),
+                    stage,
+                    now.isoformat(),
+                    now.isoformat(),
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM observation_processing_states WHERE observation_id = ?",
+                (observation.id,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("observation processing state disappeared after upsert")
+        return self._observation_processing_state_from_row(row)
+
+    def clear_observation_processing_state(self, observation_id: str) -> bool:
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            deleted = conn.execute(
+                "DELETE FROM observation_processing_states WHERE observation_id = ?",
+                (observation_id,),
+            )
+        return deleted.rowcount == 1
+
+    def observation_processing_state_for_page(
+        self,
+        session_id: str,
+        goal_revision: int,
+        tab_id: int,
+        url_host: str,
+        url_path_hash: str,
+        *,
+        stale_after_seconds: int = 600,
+    ) -> ObservationProcessingStateRecord | None:
+        cutoff = _utc_now() - timedelta(seconds=max(1, stale_after_seconds))
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            conn.execute(
+                "DELETE FROM observation_processing_states WHERE updated_at < ?",
+                (cutoff.isoformat(),),
+            )
+            row = conn.execute(
+                """
+                SELECT *
+                FROM observation_processing_states
+                WHERE session_id = ?
+                  AND goal_revision = ?
+                  AND tab_id = ?
+                  AND url_host = ?
+                  AND url_path_hash = ?
+                ORDER BY updated_at DESC, observation_id DESC
+                LIMIT 1
+                """,
+                (session_id, goal_revision, tab_id, url_host, url_path_hash),
+            ).fetchone()
+        return self._observation_processing_state_from_row(row) if row else None
+
     def record_observation(
         self,
         observation: Observation,
@@ -1397,6 +1519,10 @@ class SQLiteStore:
             ),
         )
         conn.execute("DELETE FROM attachment_states WHERE session_id = ?", (session_id,))
+        conn.execute(
+            "DELETE FROM observation_processing_states WHERE session_id = ? AND goal_revision != ?",
+            (session_id, goal_revision),
+        )
         cancelled = conn.execute(
             """
             UPDATE intervention_candidates
@@ -3318,6 +3444,19 @@ class SQLiteStore:
                 result_json TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS observation_processing_states (
+                observation_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                goal_revision INTEGER NOT NULL,
+                tab_id INTEGER,
+                url_host TEXT,
+                url_path_hash TEXT,
+                title TEXT,
+                stage TEXT NOT NULL CHECK (stage IN ('tier0', 'tier1')),
+                started_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS controller_states (
                 session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
                 streak INTEGER NOT NULL DEFAULT 0,
@@ -3473,6 +3612,14 @@ class SQLiteStore:
             ON observations(session_id, goal_revision, ts DESC, id DESC)
             """
         )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_observation_processing_page
+            ON observation_processing_states(
+                session_id, goal_revision, tab_id, url_host, url_path_hash, updated_at DESC
+            )
+            """
+        )
 
     def _current_goal_revision_in_conn(
         self,
@@ -3611,6 +3758,23 @@ class SQLiteStore:
             idempotency_key=row["idempotency_key"],
             request_fingerprint=row["request_fingerprint"],
             result=json.loads(row["result_json"]) if row["result_json"] else None,
+        )
+
+    def _observation_processing_state_from_row(
+        self,
+        row: sqlite3.Row,
+    ) -> ObservationProcessingStateRecord:
+        return ObservationProcessingStateRecord(
+            observation_id=row["observation_id"],
+            session_id=row["session_id"],
+            goal_revision=int(row["goal_revision"]),
+            tab_id=row["tab_id"],
+            url_host=row["url_host"],
+            url_path_hash=row["url_path_hash"],
+            title=row["title"],
+            stage=row["stage"],
+            started_at=_parse_dt(row["started_at"]),
+            updated_at=_parse_dt(row["updated_at"]),
         )
 
     def _controller_state_from_row(self, row: sqlite3.Row) -> ControllerStateRecord:

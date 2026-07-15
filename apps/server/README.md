@@ -38,6 +38,7 @@ GET  /reports/daily?date=YYYY-MM-DD
 GET  /personas
 GET|PUT /settings
 POST /observations/browser-nav
+GET  /observations/page-state?tab_id=&url_host=&url_path_hash=
 POST /observations/{id}/excerpt
 POST /feedback
 POST /interventions/{id}/delivery
@@ -45,6 +46,10 @@ POST /interventions/{id}/delivery
 
 `GET /identity` prevents local port discovery from accepting an unrelated
 service. It is a discovery marker, not an authentication boundary.
+
+The popup submits goals with `POST /sessions/current/goal?ensure_session=true`.
+That mode creates an active session in the same storage transaction when none
+exists; the default endpoint still returns 404 without an active session.
 
 When the controller returns `request_excerpt`, the response also contains a
 `candidate_id`. Candidate creation preserves streak/alignment state. Tier 2

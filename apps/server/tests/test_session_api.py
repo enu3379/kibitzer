@@ -56,6 +56,32 @@ class SessionApiTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_goal_can_atomically_ensure_active_session(self) -> None:
+        response = self.client.post(
+            "/sessions/current/goal",
+            params={"ensure_session": "true"},
+            json={"raw_text": "start from this goal"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        current = self.client.get("/sessions/current")
+        self.assertEqual(current.status_code, 200)
+        self.assertEqual(response.json()["session_id"], current.json()["session"]["id"])
+        self.assertEqual(current.json()["goal"]["raw_text"], "start from this goal")
+
+    def test_goal_ensure_preserves_existing_active_session(self) -> None:
+        session_id = self.client.post("/sessions").json()["id"]
+
+        response = self.client.post(
+            "/sessions/current/goal",
+            params={"ensure_session": "true"},
+            json={"raw_text": "keep this session"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["session_id"], session_id)
+        self.assertEqual(self.client.get("/sessions/current").json()["session"]["id"], session_id)
+
     def test_goal_rejects_removed_keyword_field(self) -> None:
         self.client.post("/sessions")
 

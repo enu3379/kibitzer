@@ -873,3 +873,33 @@ Verified:
   point. The runtime default was subsequently rounded to `tau_ok=0.6`. Full pair
   scores and all operating-point thresholds are committed under
   `docs/benchmarks/tier0-embedding/`.
+
+## 2026-07-15 Popup: Goal-ready Resume and Judgment Progress
+
+- Goal creation now runs in the extension service worker and, after the goal
+  embedding is stored, immediately reschedules the active page with its
+  original dwell start. A page that already passed `observation_seconds`
+  therefore enters Tier 0 without a reload or tab switch; a shorter dwell keeps
+  only the remaining observation delay.
+- Popup goal submission no longer carries a cached session-exists flag. The
+  server atomically creates a session when needed and stores the goal while
+  preserving any active session that already exists.
+- Browser navigation intake no longer persists an unjudged observation while
+  the active session has no goal. This removes the goal/session timing race that
+  produced a permanent goal-less current-page result.
+- Added `GET /observations/page-state` plus minimized transient Tier 0/Tier 1
+  processing state. The popup combines that server state with the extension's
+  persisted observation dwell so it can distinguish Tier 0 and Tier 1 work
+  from a genuinely unobserved page.
+- Updated the current-page and goal-preparation Korean copy and added explicit
+  Tier 0 and Tier 1 processing messages.
+- Session replacement and end paths now remove transient page-processing rows
+  alongside the existing excerpt and dwell cleanup.
+
+Verified:
+
+- `.venv\\Scripts\\python.exe -m pytest apps/server/tests -q` passes (229
+  tests, 1 skipped, 35 subtests).
+- `npm.cmd run build` in `apps/extension` passes (41 tests, type-check, bundle).
+- Direct async transition tests observe `tier0` during embedding and `tier1`
+  during provider classification, then verify cleanup after completion.

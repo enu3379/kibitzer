@@ -98,6 +98,23 @@ test("navigation token change cancels stale persisted work", async () => {
   }
 })
 
+test("reports the current persisted observation for the active page", async () => {
+  const clock = installFakeClock(1_000)
+  const harness = createChromeMock({ now: clock.now })
+  globalThis.chrome = harness.chrome
+  try {
+    const scheduler = new PersistentDwellScheduler(async () => "complete", async () => {})
+    const observation = observationRecord({ url: "https://example.com/current" })
+    await scheduler.startNavigation(observation.tabId, observation.token)
+    await scheduler.schedule(observation)
+    assert.equal((await scheduler.currentRecordForPage(observation.tabId, observation.url))?.stage, "observation")
+
+    assert.equal(await scheduler.currentRecordForPage(observation.tabId, "https://example.com/other"), null)
+  } finally {
+    clock.restore()
+  }
+})
+
 test("server success followed by response loss retries the same persisted stage", async () => {
   const clock = installFakeClock(61_000)
   const harness = createChromeMock({ now: clock.now })

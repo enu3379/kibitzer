@@ -2,6 +2,7 @@ import { extractPageExcerpt } from "./content/readabilityExtract"
 import { showKibitzerToast } from "./content/toastOverlay"
 import {
   FeedbackKind,
+  GoalInfo,
   PageInfo,
   PageExcerpt,
   PipelineResult,
@@ -14,6 +15,7 @@ import {
   postObservationContent,
   postObservationExcerpt,
   postObservationPresence,
+  setGoal,
   urlPathHashFor,
 } from "./lib/api"
 import { createBadgeRefresher } from "./lib/badgeRefresh"
@@ -70,6 +72,10 @@ interface PendingToast {
 
 interface RuntimeMessage {
   type?: string
+  tabId?: number
+  url?: string
+  rawGoalText?: string
+  availableTimeMinutes?: number | null
   notificationId?: string
   kind?: string
   displayToken?: number
@@ -85,16 +91,25 @@ interface ActiveD7Observation {
   contentRetryAttempted: boolean
 }
 
+interface ActivePageAttention {
+  version: 1
+  tabId: number
+  url: string
+  startedAt: number
+}
+
 let nextToastDisplayToken = 0
 const latestObservationTokens = new Map<number, string>()
 const pendingToasts = new Map<string, PendingToast>()
 const activeD7Observations = new Map<number, ActiveD7Observation>()
+let goalObservationTail: Promise<void> = Promise.resolve()
 
 // MV3 tears the service worker down between heartbeat alarms. Without a
 // storage.session copy, every alarm wakes an empty map and takes the
 // zero-credit "active" recovery path (stalling the server clocks) and
 // re-captures page content each minute.
 const D7_TRACKING_STORAGE_KEY = "d7ActiveObservations"
+const ACTIVE_PAGE_ATTENTION_PREFIX = "kibitzer:active-page-attention:"
 let d7ObservationsRestorePromise: Promise<void> | null = null
 let d7ObservationsPersistTail: Promise<void> = Promise.resolve()
 
@@ -130,21 +145,53 @@ const dwellScheduler = new PersistentDwellScheduler(processDwellRecord, async (r
   await finishHistoryEntry(record.historyId)
 })
 
-async function scheduleTabObservation(tabId: number, observedUrl?: string): Promise<void> {
+function runGoalObservationTask<T>(task: () => Promise<T>): Promise<T> {
+  const result = goalObservationTail.then(task, task)
+  goalObservationTail = result.then(() => undefined, () => undefined)
+  return result
+}
+
+function activePageAttentionKey(tabId: number): string {
+  return `${ACTIVE_PAGE_ATTENTION_PREFIX}${tabId}`
+}
+
+async function loadActivePageAttention(tabId: number): Promise<ActivePageAttention | null> {
+  const key = activePageAttentionKey(tabId)
+  const stored = (await chrome.storage.session.get(key))[key] as Partial<ActivePageAttention> | undefined
+  if (
+    stored?.version !== 1
+    || stored.tabId !== tabId
+    || typeof stored.url !== "string"
+    || typeof stored.startedAt !== "number"
+    || !Number.isFinite(stored.startedAt)
+  ) return null
+  return stored as ActivePageAttention
+}
+
+async function saveActivePageAttention(attention: ActivePageAttention): Promise<void> {
+  await chrome.storage.session.set({ [activePageAttentionKey(attention.tabId)]: attention })
+}
+
+async function scheduleTabObservation(
+  tabId: number,
+  observedUrl?: string,
+  preservedStartedAt?: number,
+): Promise<boolean> {
   void deactivateD7Observation(tabId)
   const token = makeObservationToken()
-  const startedAt = Date.now()
+  const startedAt = preservedStartedAt ?? Date.now()
   latestObservationTokens.set(tabId, token)
   await dwellScheduler.startNavigation(tabId, token)
-  if (latestObservationTokens.get(tabId) !== token) return
+  if (latestObservationTokens.get(tabId) !== token) return false
 
   const tab = await getTab(tabId)
   const url = observedUrl ?? tab?.url
-  if (!tab?.active || !url || tab.url !== url || shouldDropUrl(url)) return
+  if (!tab?.active || !url || tab.url !== url || shouldDropUrl(url)) return false
+  await saveActivePageAttention({ version: 1, tabId, url, startedAt })
   const dwell = await loadDwellSettings()
-  if (latestObservationTokens.get(tabId) !== token) return
+  if (latestObservationTokens.get(tabId) !== token) return false
   const currentTab = await getTab(tabId)
-  if (!currentTab?.active || currentTab.url !== url) return
+  if (!currentTab?.active || currentTab.url !== url) return false
 
   const historyId = makeHistoryId(token)
   await prependExplorationHistory({
@@ -158,7 +205,7 @@ async function scheduleTabObservation(tabId: number, observedUrl?: string): Prom
   })
   if (latestObservationTokens.get(tabId) !== token) {
     await finishHistoryEntry(historyId)
-    return
+    return false
   }
 
   const record: ObservationDwellRecord = {
@@ -172,7 +219,43 @@ async function scheduleTabObservation(tabId: number, observedUrl?: string): Prom
     historyId,
     tier2DwellMs: dwell.tier2DwellMs,
   }
-  if (!(await dwellScheduler.schedule(record))) await finishHistoryEntry(historyId)
+  if (!(await dwellScheduler.schedule(record))) {
+    await finishHistoryEntry(historyId)
+    return false
+  }
+  return true
+}
+
+async function scheduleCurrentPageForReadyGoal(): Promise<{ ok: boolean; immediate: boolean }> {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+  const tab = tabs[0]
+  if (tab?.id === undefined || !tab.url) return { ok: false, immediate: false }
+  const attention = await loadActivePageAttention(tab.id)
+  const startedAt = attention?.url === tab.url ? attention.startedAt : Date.now()
+  const scheduled = await scheduleTabObservation(tab.id, tab.url, startedAt)
+  const record = scheduled ? await dwellScheduler.currentRecordForPage(tab.id, tab.url) : null
+  return { ok: scheduled, immediate: Boolean(record && record.dueAt <= Date.now()) }
+}
+
+async function setGoalAndScheduleCurrentPage(
+  rawGoalText: string,
+  availableTimeMinutes: number | null,
+): Promise<{ ok: boolean; goal?: GoalInfo; immediate: boolean }> {
+  return runGoalObservationTask(async () => {
+    const goal = await setGoal(rawGoalText, availableTimeMinutes, true)
+    if (!goal) return { ok: false, immediate: false }
+    const scheduled = await scheduleCurrentPageForReadyGoal()
+    return { ok: true, goal, immediate: scheduled.immediate }
+  })
+}
+
+async function currentPageProcessingStage(
+  tabId: number,
+  url: string,
+): Promise<"tier0" | null> {
+  const record = await dwellScheduler.currentRecordForPage(tabId, url)
+  if (!record || record.stage !== "observation") return null
+  return record.dueAt <= Date.now() ? "tier0" : null
 }
 
 function makeObservationToken(): string {
@@ -409,10 +492,19 @@ async function processObservationDwell(record: ObservationDwellRecord): Promise<
   const tab = await getTab(record.tabId)
   if (!tab?.active || tab.url !== record.url || shouldDropUrl(record.url)) return "cancel"
 
-  const result = await postBrowserNav(
-    { url: record.url, title: tab.title ?? "", tab_id: tab.id },
-    record.token,
-  )
+  const attempt = await runGoalObservationTask(async () => {
+    const current = await dwellScheduler.currentRecordForPage(record.tabId, record.url)
+    if (current?.stage !== "observation" || current.token !== record.token) {
+      return { cancelled: true, result: null }
+    }
+    const result = await postBrowserNav(
+      { url: record.url, title: tab.title ?? "", tab_id: tab.id },
+      record.token,
+    )
+    return { cancelled: false, result }
+  })
+  if (attempt.cancelled) return "cancel"
+  const result = attempt.result
   if (!result) return "retry"
   await updateHistoryWithPipelineResult(record.historyId, result, tab.title ?? "")
   if (result.observation_id) {
@@ -817,6 +909,30 @@ chrome.runtime.onMessage.addListener(
       )
       return true
     }
+    if (
+      message?.type === "kibitzer:set-goal"
+      && typeof message.rawGoalText === "string"
+    ) {
+      void setGoalAndScheduleCurrentPage(
+        message.rawGoalText,
+        message.availableTimeMinutes ?? null,
+      ).then(
+        (result) => sendResponse(result),
+        () => sendResponse({ ok: false, immediate: false }),
+      )
+      return true
+    }
+    if (
+      message?.type === "kibitzer:get-page-processing-stage"
+      && typeof message.tabId === "number"
+      && typeof message.url === "string"
+    ) {
+      void currentPageProcessingStage(message.tabId, message.url).then(
+        (stage) => sendResponse({ stage }),
+        () => sendResponse({ stage: null }),
+      )
+      return true
+    }
     if (message?.type === "kibitzer:refresh-badge") void refreshBadge()
     if (message?.type === "kibitzer:toast-feedback" && message.notificationId) {
       const kind = message.kind
@@ -910,6 +1026,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   void deactivateD7Observation(tabId)
   latestObservationTokens.delete(tabId)
   void dwellScheduler.cancelTab(tabId)
+  void chrome.storage.session.remove(activePageAttentionKey(tabId))
 })
 
 void dwellScheduler.restore()

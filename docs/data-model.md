@@ -69,6 +69,7 @@ goal_exemplars
 observations
 page_labels
 observation_requests
+observation_processing_states
 controller_states
 drift_clock_states
 drift_page_dwell_states
@@ -85,6 +86,13 @@ It stores only the opaque key, a hash of the canonical request, and the terminal
 response JSON—never the raw URL or page body. A null response marks the active
 claim. A completed row is replayed verbatim on transport retry; a key whose
 request hash differs is rejected.
+
+`observation_processing_states` is the current-goal-revision lookup used by
+the popup while a browser navigation is being judged. It stores only minimized
+page identity (`tab_id`, host, and path hash), title, and the active `tier0` or
+`tier1` stage. Intake creates the row before Tier 0 work, advances it before a
+Tier 1 provider call, and removes it when intake finishes or fails. Goal
+revision changes remove older rows, and stale rows are pruned defensively.
 
 `drift_clock_states` stores the active observation and page identity
 (`url_host` + path hash), cumulative/continuous/current-page seconds, the next
