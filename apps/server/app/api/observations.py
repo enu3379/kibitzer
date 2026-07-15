@@ -1,7 +1,6 @@
 import asyncio
 import hashlib
 import json
-import random
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
@@ -10,34 +9,23 @@ from pydantic import BaseModel, Field
 
 from ..config import ControllerConfig
 from ..core.controller_flow import (
-    apply_controller,
     confirm_controller_intervention,
     controller_state_after_intervention,
     time_review_is_eligible,
 )
 from ..core.delivery import clamp_notification_message
-from ..core.normalization import (
-    browser_nav_embedding_text,
-    normalize_browser_nav,
-    strip_repeated_title_suffix,
-)
+from ..core.ingest import ingest_browser_nav as ingest_browser_nav_core
+from ..core.ingest import observation_page_info
 from ..core.personas import (
     Persona,
     compose_tier2_system_prompt,
-    format_celebration_template,
     format_persona_fallback,
     resolve_persona,
 )
 from ..core.page_labels import apply_page_label_override
-from ..core.relevance import (
-    DRIFT_RELEVANCE,
-    RELATED_RELEVANCE,
-    tier0_score_parts,
-    tier1_final_relevance,
-)
-from ..core.runtime_settings import effective_controller_config, quiet_hours_active, runtime_settings
+from ..core.relevance import DRIFT_RELEVANCE, RELATED_RELEVANCE
 from ..core.runtime_resources import RuntimeResources
-from ..core.tier1_payload import build_tier1_payload
+from ..core.runtime_settings import effective_controller_config, quiet_hours_active, runtime_settings
 from ..core.tier2_payload import (
     build_d7_content_payload,
     build_d7_title_payload,
@@ -53,23 +41,17 @@ from ..core.time_budget import (
 )
 from ..core.voice import speak
 from ..providers.judges.base import Tier2Result
-from ..privacy.domain_filter import SensitiveDomainRules, drop_decision_for_url
-from ..schemas import PageExcerpt, PageInfo, PipelineAction, PipelineResult, PipelineResultKind, RawObservation, Verdict
+from ..schemas import PageExcerpt, PipelineAction, PipelineResult, RawObservation, Verdict
 from ..storage.sqlite import (
-    ControllerStateRecord,
     CurrentSessionRecord,
     DriftClockStateRecord,
     IdempotencyConflictError,
     ObservationRecord,
-    ReturnCandidateRecord,
     SQLiteStore,
     effective_observation_verdict,
 )
 
 router = APIRouter()
-
-CANDIDATE_RESUME_TTL_SECONDS = 60
-
 
 class LatestObservationFeatures(BaseModel):
     r0: float | None = None
@@ -120,10 +102,6 @@ class PresenceRequest(BaseModel):
 
 def _store(request: Request) -> SQLiteStore:
     return request.app.state.store
-
-
-def _sensitive_domain_rules(request: Request) -> SensitiveDomainRules:
-    return request.app.state.sensitive_domain_rules
 
 
 def _runtime(request: Request) -> RuntimeResources:
@@ -240,147 +218,15 @@ async def _ingest_browser_nav_once(
     raw: RawObservation,
     current: CurrentSessionRecord | None,
 ) -> PipelineResult:
-    session_id = current.session.id if current else None
-
-    decision = drop_decision_for_url(str(raw.payload.url), _sensitive_domain_rules(request))
-    if decision.should_drop:
-        _store(request).record_dropped_observation(
-            session_id=session_id,
-            source=raw.source,
-            url_host=decision.host,
-            reason=decision.reason or "sensitive_domain",
-            ts=raw.ts,
-        )
-        return PipelineResult(action=PipelineAction.NONE)
-
-    if not current:
-        return PipelineResult(action=PipelineAction.NONE)
-
-    observation = normalize_browser_nav(raw, current.session.id)
-    if current.goal:
-        tau_ok = float(runtime_settings(request.app.state.config, _store(request))["relevance"]["tau_ok"])
-        runtime = _runtime(request)
-        embedding_text = strip_repeated_title_suffix(
-            browser_nav_embedding_text(observation),
-            _store(request).recent_titles_for_host(str(observation.payload.get("url_host") or "")),
-        )
-        vectors = await runtime.embedding_provider().embed([embedding_text])
-        observation.features.emb = vectors[0]
-        score = tier0_score_parts(
-            emb=observation.features.emb,
-            exemplars=current.goal.exemplars,
-            anchor=_store(request).anchor_value(
-                current.session.id,
-                request.app.state.config.relevance.anchor_window,
-            ),
-            beta=request.app.state.config.relevance.beta,
-            derived_exemplars=current.goal.derived_vectors,
-            derived_tau=request.app.state.config.goal_enrichment.derived_tau,
-        )
-        observation.features.r0 = score.score
-        observation.features.tau_ok = tau_ok
-        observation.features.exemplar_score = score.exemplar_score
-        observation.features.derived_score = score.derived_score
-        observation.features.r_final = observation.features.r0
-        observation.features.tier_reached = 0
-        observation.verdict = (
-            Verdict.OK if observation.features.r0 >= tau_ok else Verdict.DRIFT
-        )
-        tier1_provider = runtime.tier1_provider()
-        if observation.verdict == Verdict.DRIFT and tier1_provider:
-            recent = _store(request).recent_observation_summaries(
-                current.session.id,
-                request.app.state.config.tier1.recent_observations,
-            )
-            payload = build_tier1_payload(current.goal, observation, recent, request.app.state.config.tier1)
-            try:
-                result = await tier1_provider.classify_tier1(payload)
-            except Exception as exc:
-                # Tier 1 is best-effort: on provider failure keep the Tier 0 verdict.
-                runtime.record_provider_call_failure(1, exc)
-                _store(request).record_tier1_provider_error(
-                    session_id=current.session.id,
-                    observation_id=observation.id,
-                    error_type=type(exc).__name__,
-                    ts=observation.ts,
-                )
-            else:
-                runtime.record_provider_call_success(1)
-                observation.verdict = result.verdict
-                observation.features.r_final = tier1_final_relevance(result.verdict)
-                observation.tier1_reason = result.reason
-                observation.features.tier_reached = 1
-                _store(request).record_tier1_result(
-                    session_id=current.session.id,
-                    observation_id=observation.id,
-                    verdict=result.verdict.value,
-                    reason=result.reason,
-                    ts=observation.ts,
-                )
-        # Anchor admission guard: only pages with genuine goal affinity — direct
-        # exemplar similarity, or an LLM-vetted OK — may steer the anchor. An OK
-        # that rode the anchor alone keeps its verdict but gets no vote.
-        observation.features.anchor_eligible = (
-            score.exemplar_score >= request.app.state.config.relevance.anchor_epsilon
-            or score.derived_score >= request.app.state.config.goal_enrichment.derived_tau
-            or (observation.verdict == Verdict.OK and (observation.features.tier_reached or 0) >= 1)
-        )
-    store = _store(request)
-    controller_config = effective_controller_config(request.app.state.config, store)
-    controller_state_before = store.get_controller_state(observation.session_id)
-    drift_confirmed = _drift_confirmed_after_observation(
-        controller_config,
-        controller_state_before,
-        observation.verdict,
-        observation.features.r_final,
+    return await ingest_browser_nav_core(
+        raw,
+        current,
+        config=request.app.state.config,
+        store=request.app.state.store,
+        runtime=request.app.state.runtime,
+        sensitive_domain_rules=request.app.state.sensitive_domain_rules,
+        persona_set=getattr(request.app.state, "persona_set", None),
     )
-    store.record_observation(observation)
-    result = apply_controller(
-        store,
-        controller_config,
-        observation,
-        defer_intervention=request.app.state.config.time_budget.enabled,
-    )
-    if result.action == PipelineAction.REQUEST_EXCERPT:
-        requested_at = datetime.now(timezone.utc)
-        remaining_dwell_seconds = max(
-            0,
-            request.app.state.config.dwell.tier2_seconds
-            - request.app.state.config.dwell.observation_seconds,
-        )
-        candidate, created = store.create_intervention_candidate(
-            observation.session_id,
-            observation.id,
-            expires_at=requested_at
-            + timedelta(seconds=remaining_dwell_seconds + CANDIDATE_RESUME_TTL_SECONDS),
-            ts=requested_at,
-        )
-        if created:
-            store.record_intervention_requested(
-                observation.session_id,
-                observation.id,
-                candidate_id=candidate.id,
-                ts=requested_at,
-            )
-            result.candidate_id = candidate.id
-        else:
-            result = PipelineResult(
-                action=PipelineAction.NONE,
-                observation_id=observation.id,
-                verdict=observation.verdict,
-                page=_page_info(observation),
-            )
-    return_candidate = store.note_attachment_observation(
-        observation.session_id,
-        observation.verdict.value if observation.verdict else None,
-        observation.ts,
-        drift_confirmed,
-    )
-    if result.action == PipelineAction.NONE:
-        celebration = _maybe_create_celebration(request, current, observation, return_candidate)
-        if celebration:
-            return celebration
-    return result
 
 
 def _browser_nav_request_fingerprint(raw: RawObservation) -> str:
@@ -468,14 +314,14 @@ async def record_observation_presence(
             action=PipelineAction.NONE,
             observation_id=observation.id,
             verdict=verdict,
-            page=_page_info(observation),
+            page=observation_page_info(observation),
         )
     if body.kind == "heartbeat" and verdict != Verdict.DRIFT:
         return PipelineResult(
             action=PipelineAction.NONE,
             observation_id=observation.id,
             verdict=verdict,
-            page=_page_info(observation),
+            page=observation_page_info(observation),
         )
 
     controller_config = effective_controller_config(request.app.state.config, store)
@@ -501,7 +347,7 @@ async def record_observation_presence(
             action=PipelineAction.NONE,
             observation_id=observation.id,
             verdict=verdict,
-            page=_page_info(observation),
+            page=observation_page_info(observation),
         )
 
     eligible = time_review_is_eligible(store, controller_config, observation.session_id, now)
@@ -511,14 +357,14 @@ async def record_observation_presence(
             action=PipelineAction.NONE,
             observation_id=observation.id,
             verdict=verdict,
-            page=_page_info(observation),
+            page=observation_page_info(observation),
         )
     if not store.begin_d7_review(observation.session_id, observation.id, now):
         return PipelineResult(
             action=PipelineAction.NONE,
             observation_id=observation.id,
             verdict=verdict,
-            page=_page_info(observation),
+            page=observation_page_info(observation),
         )
 
     try:
@@ -615,7 +461,7 @@ async def _run_d7_review(
             action=PipelineAction.NONE,
             observation_id=observation.id,
             verdict=verdict,
-            page=_page_info(observation),
+            page=observation_page_info(observation),
         )
     available_results = [result for result in results if result is not None]
     if any(not result.confirm_drift for result in available_results):
@@ -676,7 +522,7 @@ async def _run_d7_review(
         message=message,
         intervention_id=intervention_id,
         silent=silent,
-        page=_page_info(observation),
+        page=observation_page_info(observation),
     )
 
 
@@ -706,7 +552,7 @@ async def confirm_observation_excerpt(
             action=PipelineAction.NONE,
             observation_id=observation.id,
             verdict=verdict,
-            page=_page_info(observation),
+            page=observation_page_info(observation),
         )
 
     candidate = store.get_intervention_candidate_for_observation(observation.id)
@@ -782,7 +628,7 @@ async def confirm_observation_excerpt(
                 action=PipelineAction.NONE,
                 observation_id=observation.id,
                 verdict=verdict,
-                page=_page_info(observation),
+                page=observation_page_info(observation),
             )
 
         controller_config = effective_controller_config(request.app.state.config, store)
@@ -800,7 +646,7 @@ async def confirm_observation_excerpt(
             verdict=verdict,
             message=message,
             silent=silent,
-            page=_page_info(observation),
+            page=observation_page_info(observation),
         )
         intervention_id = store.commit_confirmed_intervention(
             candidate.id,
@@ -820,7 +666,7 @@ async def confirm_observation_excerpt(
                 action=PipelineAction.NONE,
                 observation_id=observation.id,
                 verdict=Verdict(effective_value) if effective_value else None,
-                page=_page_info(observation),
+                page=observation_page_info(observation),
             )
         _handle_delivery_side_effects(
             request,
@@ -835,101 +681,6 @@ async def confirm_observation_excerpt(
     except BaseException:
         store.release_intervention_candidate(candidate.id)
         raise
-
-
-def _page_info(observation) -> PageInfo:
-    payload = getattr(observation, "payload", {}) or {}
-    return PageInfo(
-        host=getattr(observation, "url_host", None) or payload.get("url_host"),
-        title=getattr(observation, "title", None) or payload.get("title"),
-    )
-
-
-def _drift_confirmed_after_observation(
-    config: ControllerConfig,
-    state: ControllerStateRecord,
-    verdict: Verdict | None,
-    r: float | None,
-) -> bool:
-    if verdict != Verdict.DRIFT:
-        return False
-    obs_count = state.obs_count + 1
-    if obs_count < config.coldstart_observations:
-        return False
-    if config.type == "alignment":
-        score = _next_alignment_score(config, state, verdict, r)
-        return state.drift_latched or score < config.theta_low
-    return state.streak + 1 >= config.k
-
-
-def _next_alignment_score(
-    config: ControllerConfig,
-    state: ControllerStateRecord,
-    verdict: Verdict,
-    r: float | None,
-) -> float:
-    if r is None:
-        r = 1.0 if verdict == Verdict.OK else 0.0
-    alpha = min(0.99, max(0.0, config.alignment_alpha))
-    previous = float(r) if state.alignment_score is None else state.alignment_score
-    return alpha * previous + (1.0 - alpha) * float(r)
-
-
-def _maybe_create_celebration(
-    request: Request,
-    current: CurrentSessionRecord,
-    observation,
-    candidate: ReturnCandidateRecord | None,
-) -> PipelineResult | None:
-    if not candidate or not current.goal:
-        return None
-
-    return_seconds = max(0, int((observation.ts - candidate.drift_started_at).total_seconds()))
-    return_minutes = return_seconds // 60  # template placeholder stays whole minutes
-    config = request.app.state.config.celebration
-    if return_seconds < config.min_drift_minutes * 60:
-        return None
-    if candidate.last_celebration_ts:
-        elapsed = (observation.ts - candidate.last_celebration_ts).total_seconds()
-        if elapsed < config.cooldown_seconds:
-            return None
-
-    settings = runtime_settings(request.app.state.config, _store(request))
-    try:
-        if quiet_hours_active(settings["quiet_hours"]):
-            return None
-    except Exception:
-        pass
-
-    persona = resolve_persona(
-        getattr(request.app.state, "persona_set", None),
-        settings,
-        request.app.state.config.delivery.persona,
-    )
-    templates = list(persona.celebrate_templates) if persona else []
-    if not templates:
-        return None
-    choices = [template for template in templates if template != candidate.last_celebration_template]
-    template = random.choice(choices or templates)
-    message = format_celebration_template(template, current.goal, return_minutes)
-    if not message:
-        return None
-
-    _store(request).record_celebration_delivered(
-        observation.session_id,
-        observation.id,
-        return_minutes,
-        template,
-        ts=observation.ts,
-    )
-    return PipelineResult(
-        action=PipelineAction.NOTIFY,
-        kind=PipelineResultKind.CELEBRATION,
-        observation_id=observation.id,
-        verdict=observation.verdict,
-        message=message,
-        page=_page_info(observation),
-    )
 
 
 def _defer_d7_review(
@@ -960,7 +711,7 @@ def _defer_d7_review(
         action=PipelineAction.NONE,
         observation_id=observation.id,
         verdict=verdict,
-        page=_page_info(observation),
+        page=observation_page_info(observation),
     )
 
 

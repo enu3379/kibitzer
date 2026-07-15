@@ -120,6 +120,31 @@ class AttachmentLoopTest(unittest.TestCase):
             ).fetchone()[0]
         self.assertEqual(event_count, 0)
 
+    def test_invalid_stored_quiet_hours_suppress_celebration(self) -> None:
+        client = self._client(min_drift_minutes=3, cooldown_seconds=0)
+        base = datetime(2026, 7, 8, 0, 0, tzinfo=timezone.utc)
+        try:
+            self._start_goal(client)
+            self.store.update_settings(
+                {"quiet_hours": {"enabled": True, "start": "invalid", "end": "07:00"}}
+            )
+            self._post_nav(client, "Sourdough bread recipe", base)
+            self._post_nav(client, "Mechanical keyboard deals", base + timedelta(minutes=1))
+            returned = self._post_nav(
+                client,
+                "Kibitzer observation API docs",
+                base + timedelta(minutes=4),
+            )
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertEqual(returned["action"], "none")
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            event_count = conn.execute(
+                "SELECT COUNT(*) FROM event_log WHERE event_type = 'celebration.delivered'"
+            ).fetchone()[0]
+        self.assertEqual(event_count, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
