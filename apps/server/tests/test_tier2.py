@@ -396,13 +396,13 @@ class Tier2ApiTest(unittest.TestCase):
         self.assertTrue(after.drift_latched)
         self.assertIsNotNone(after.last_intervention_ts)
 
-    def test_candidate_expiry_includes_configured_remaining_tier2_dwell(self) -> None:
+    def test_candidate_expiry_includes_runtime_remaining_tier2_dwell(self) -> None:
         provider = FakeTier2Provider(Tier2Result(confirm_drift=True, message="unused"))
-        client, store = self._client(
-            provider,
-            dwell=DwellConfig(observation_seconds=5, tier2_seconds=120),
-        )
+        client, store = self._client(provider)
         try:
+            store.update_settings(
+                {"dwell": {"observation_seconds": 5, "tier2_seconds": 120}}
+            )
             request = self._start_goal_and_request_excerpt(client)
         finally:
             client.__exit__(None, None, None)
