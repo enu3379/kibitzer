@@ -50,9 +50,20 @@ def create_app(
         app.state.store = store
         app.state.runtime = runtime
         app.state.browser_nav_lock = asyncio.Lock()
+        app.state.goal_enrichment_tasks = set()
         app.state.sensitive_domain_rules = load_sensitive_domain_rules(config.privacy.sensitive_domains_file)
         app.state.persona_set = _load_persona_set(config, logger)
-        yield
+        try:
+            yield
+        finally:
+            # Enrichment is best-effort: shutdown cancels unfinished provider
+            # calls instead of waiting for their configured timeout.
+            tasks = tuple(app.state.goal_enrichment_tasks)
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            app.state.goal_enrichment_tasks.clear()
 
     app = FastAPI(title="Kibitzer Local Server", lifespan=lifespan)
     app.add_middleware(
