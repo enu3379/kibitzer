@@ -121,7 +121,7 @@ time_budget:
   recent_excerpt_char_limit: 600
 
 privacy:
-  sensitive_domains_file: "configs/sensitive_domains.yaml"
+  sensitive_domains_file: "configs/sensitive_domains.json"
   strip_query: true
   hash_url_path: true
 

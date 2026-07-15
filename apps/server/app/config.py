@@ -142,7 +142,7 @@ class TimeBudgetConfig(BaseModel):
 
 
 class PrivacyConfig(BaseModel):
-    sensitive_domains_file: str = "configs/sensitive_domains.yaml"
+    sensitive_domains_file: str = "configs/sensitive_domains.json"
     strip_query: bool = True
     hash_url_path: bool = True
 
