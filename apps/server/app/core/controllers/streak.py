@@ -38,7 +38,3 @@ class StreakController:
         self.streak = 0
         self.last_intervention_ts = now
 
-    def on_feedback(self, kind: str) -> None:
-        if kind == "relevant":
-            self.streak = 0
-

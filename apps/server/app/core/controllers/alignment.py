@@ -57,9 +57,3 @@ class AlignmentController:
     def on_intervened(self, now: datetime) -> None:
         self.armed = 0
         self.last_intervention_ts = now
-
-    def on_feedback(self, kind: str) -> None:
-        if kind == "relevant":
-            self.alignment_score = self.theta_high
-            self.drift_latched = False
-            self.armed = 0

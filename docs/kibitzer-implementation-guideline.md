@@ -148,7 +148,6 @@ Controller  (교체 가능 인터페이스 — B안/A안/PH가 모두 이것을 
   update(verdict, r)
   should_intervene(now) -> bool
   on_intervened(now)
-  on_feedback(kind)
 ```
 
 ### 4.4 업그레이드 경로 — A안: 누적 정렬도 + 히스테리시스

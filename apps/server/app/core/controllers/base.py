@@ -14,6 +14,3 @@ class Controller(Protocol):
     def on_intervened(self, now: datetime) -> None:
         ...
 
-    def on_feedback(self, kind: str) -> None:
-        ...
-
