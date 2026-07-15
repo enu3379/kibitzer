@@ -26,6 +26,7 @@ def runtime_paths(root: Path) -> RuntimePaths:
         mode="packaged",
         resource_root=root / "bundle",
         data_dir=root / "profile",
+        control_dir=root / "profile" / "runtime",
         user_config_dir=root / "profile" / "configs",
         default_config_file=root / "bundle" / "configs" / "default.yaml",
         env_file=root / "profile" / ".env",

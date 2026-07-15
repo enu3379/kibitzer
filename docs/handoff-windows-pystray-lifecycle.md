@@ -15,7 +15,7 @@ separate follow-up PR.
 ## Ownership contract
 
 The FastAPI server remains the single source of truth. A server that owns a
-candidate port publishes these files in the resolved runtime data directory:
+candidate port publishes these files in the resolved runtime control directory:
 
 - `server-control.json`: protocol, instance ID, PID, host, selected port, and
   process metadata.
@@ -29,6 +29,12 @@ The tray must verify the control record against `/identity` before requesting a
 stop. A stale PID is never sufficient authority to terminate a process. A hard
 kill is allowed only for the exact child `Popen` object created by the current
 tray process, after graceful shutdown times out.
+
+On Windows, the control directory is shared at
+`%LOCALAPPDATA%\Kibitzer\runtime` even in development, while databases and
+configuration remain worktree-local. This lets a new worktree tray safely stop
+the currently listening old-worktree server. `KIBITZER_HOME` still creates a
+fully isolated control directory for tests and parallel profiles.
 
 ## Tray contract
 

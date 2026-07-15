@@ -23,9 +23,16 @@ if ($env:LOCALAPPDATA) {
 }
 $DataDirs += (Join-Path $Root "data")
 
+$ControlDirs = @()
 foreach ($DataDir in ($DataDirs | Select-Object -Unique)) {
-  $ControlPath = Join-Path $DataDir "tray-control.json"
-  $RequestPath = Join-Path $DataDir "tray-exit-request.json"
+  $ControlDirs += (Join-Path $DataDir "runtime")
+  # Also recognize control files written by early development builds.
+  $ControlDirs += $DataDir
+}
+
+foreach ($ControlDir in ($ControlDirs | Select-Object -Unique)) {
+  $ControlPath = Join-Path $ControlDir "tray-control.json"
+  $RequestPath = Join-Path $ControlDir "tray-exit-request.json"
   if (-not (Test-Path $ControlPath)) {
     continue
   }

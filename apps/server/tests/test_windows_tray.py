@@ -23,6 +23,7 @@ def runtime_paths(root: Path, *, mode: str = "development") -> RuntimePaths:
         mode=mode,  # type: ignore[arg-type]
         resource_root=root,
         data_dir=root / "data",
+        control_dir=root / "data" / "runtime",
         user_config_dir=root / "configs",
         default_config_file=root / "configs" / "default.yaml",
         env_file=root / ".env",

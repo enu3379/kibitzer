@@ -20,6 +20,7 @@ class RuntimePaths:
     mode: RuntimeMode
     resource_root: Path
     data_dir: Path
+    control_dir: Path
     user_config_dir: Path
     default_config_file: Path
     env_file: Path
@@ -32,19 +33,19 @@ class RuntimePaths:
 
     @property
     def server_control_file(self) -> Path:
-        return self.data_dir / "server-control.json"
+        return self.control_dir / "server-control.json"
 
     @property
     def server_stop_request_file(self) -> Path:
-        return self.data_dir / "server-stop-request.json"
+        return self.control_dir / "server-stop-request.json"
 
     @property
     def tray_control_file(self) -> Path:
-        return self.data_dir / "tray-control.json"
+        return self.control_dir / "tray-control.json"
 
     @property
     def tray_exit_request_file(self) -> Path:
-        return self.data_dir / "tray-exit-request.json"
+        return self.control_dir / "tray-exit-request.json"
 
     @property
     def logs_dir(self) -> Path:
@@ -67,6 +68,7 @@ class RuntimePaths:
             "mode": self.mode,
             "resource_root": str(self.resource_root),
             "data_dir": str(self.data_dir),
+            "control_dir": str(self.control_dir),
             "user_config_dir": str(self.user_config_dir),
             "default_config_file": str(self.default_config_file),
             "env_file": str(self.env_file),
@@ -132,11 +134,23 @@ def resolve_runtime_paths(
         if config_override
         else resource_root / "configs" / "default.yaml"
     )
+    if platform_name == "win32" and not home_override:
+        # Development worktrees keep their own databases/config, but all
+        # Windows launchers must be able to stop the one currently listening
+        # Kibitzer server before switching worktrees.
+        control_dir = _platform_data_dir(
+            platform=platform_name,
+            environ=environment,
+            home=home_dir,
+        ) / "runtime"
+    else:
+        control_dir = data_dir / "runtime"
 
     return RuntimePaths(
         mode="packaged" if is_frozen else "development",
         resource_root=resource_root,
         data_dir=data_dir,
+        control_dir=control_dir,
         user_config_dir=user_config_dir,
         default_config_file=default_config_file,
         env_file=env_file,

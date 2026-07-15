@@ -106,15 +106,18 @@ def stop_process(process: subprocess.Popen[str]) -> tuple[str, str]:
     return process.communicate(timeout=10)
 
 
-def request_graceful_stop(profile: Path, instance_id: str) -> None:
-    control_file = profile / "server-control.json"
+def request_graceful_stop(
+    control_file: Path,
+    request_file: Path,
+    instance_id: str,
+) -> None:
     try:
         control = json.loads(control_file.read_text(encoding="utf-8"))
     except (FileNotFoundError, ValueError) as exc:
         raise RuntimeError(f"packaged server did not publish {control_file}") from exc
     if control.get("instance_id") != instance_id:
         raise RuntimeError(f"control/identity instance mismatch: {control}")
-    pending = profile / "server-stop-request.json.tmp"
+    pending = request_file.with_suffix(f"{request_file.suffix}.tmp")
     pending.write_text(
         json.dumps(
             {
@@ -125,7 +128,7 @@ def request_graceful_stop(profile: Path, instance_id: str) -> None:
         ),
         encoding="utf-8",
     )
-    pending.replace(profile / "server-stop-request.json")
+    pending.replace(request_file)
 
 
 def smoke(dist_dir: Path) -> None:
@@ -203,7 +206,11 @@ tier2:
                 f"stdout={stdout!r} stderr={stderr!r}"
             ) from exc
         else:
-            request_graceful_stop(profile, str(identity["instance_id"]))
+            request_graceful_stop(
+                Path(str(paths["server_control_file"])),
+                Path(str(paths["server_stop_request_file"])),
+                str(identity["instance_id"]),
+            )
             try:
                 stdout, stderr = process.communicate(timeout=15)
             except subprocess.TimeoutExpired as exc:

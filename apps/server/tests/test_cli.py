@@ -72,6 +72,7 @@ class CliTest(unittest.TestCase):
             mode="development",
             resource_root=root,
             data_dir=root / "data",
+            control_dir=root / "data" / "runtime",
             user_config_dir=root / "configs",
             default_config_file=root / "configs" / "default.yaml",
             env_file=root / ".env",
