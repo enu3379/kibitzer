@@ -13,44 +13,33 @@ fi
 
 mkdir -p "$HOME/Library/LaunchAgents" "$LOG_DIR" "$ROOT/data"
 
-cat > "$PLIST" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>${LABEL}</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/bin/bash</string>
-    <string>${ROOT}/scripts/macos_run_server.sh</string>
-  </array>
-  <key>WorkingDirectory</key>
-  <string>${ROOT}</string>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <dict>
-    <key>Crashed</key>
-    <true/>
-  </dict>
-  <key>ProcessType</key>
-  <string>Background</string>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-    <key>PYTHONUNBUFFERED</key>
-    <string>1</string>
-  </dict>
-  <key>StandardOutPath</key>
-  <string>${LOG_DIR}/macos-launch-agent.out.log</string>
-  <key>StandardErrorPath</key>
-  <string>${LOG_DIR}/macos-launch-agent.err.log</string>
-</dict>
-</plist>
-PLIST
+"$ROOT/.venv/bin/python" - "$PLIST" "$LABEL" "$ROOT" "$LOG_DIR" <<'PYTHON'
+import plistlib
+import sys
+from pathlib import Path
+
+_, plist_path, label, root, log_dir = sys.argv
+payload = {
+    "Label": label,
+    "ProgramArguments": [
+        "/bin/bash",
+        str(Path(root) / "scripts" / "macos_run_server.sh"),
+    ],
+    "WorkingDirectory": root,
+    "RunAtLoad": True,
+    "KeepAlive": {"Crashed": True},
+    "ProcessType": "Background",
+    "EnvironmentVariables": {
+        "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+        "PYTHONUNBUFFERED": "1",
+    },
+    "StandardOutPath": str(Path(log_dir) / "macos-launch-agent.out.log"),
+    "StandardErrorPath": str(Path(log_dir) / "macos-launch-agent.err.log"),
+}
+
+with Path(plist_path).open("wb") as output:
+    plistlib.dump(payload, output, fmt=plistlib.FMT_XML, sort_keys=False)
+PYTHON
 
 launchctl bootout "gui/${UID}" "$PLIST" >/dev/null 2>&1 || true
 launchctl bootstrap "gui/${UID}" "$PLIST"
