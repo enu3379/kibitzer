@@ -12,7 +12,11 @@ from ..config import AppConfig
 from ..providers.embeddings.base import EmbeddingProvider
 from ..providers.embeddings.factory import create_embedding_provider
 from ..providers.judges.base import JudgeProvider
-from ..providers.judges.factory import create_tier1_judge_provider, create_tier2_judge_provider
+from ..providers.judges.factory import (
+    JudgeProviderConfigError,
+    create_tier1_judge_provider,
+    create_tier2_judge_provider,
+)
 from ..storage.sqlite import SQLiteStore
 
 RuntimeMode = Literal["idle", "active"]
@@ -183,7 +187,13 @@ class RuntimeResources:
         if self._provided_tier1_provider is not None:
             self._tier1_provider = self._provided_tier1_provider
         else:
-            self._tier1_provider = create_tier1_judge_provider(self.config.tier1)
+            try:
+                self._tier1_provider = create_tier1_judge_provider(self.config.tier1)
+            except JudgeProviderConfigError as exc:
+                self._tier1_provider = None
+                self._tier1_initialized = True
+                self._record_invalid_config(1, exc)
+                return
         self._tier1_initialized = True
         self._record_degraded_if_needed(1, self.config.tier1.enabled, self._tier1_provider)
 
@@ -193,9 +203,28 @@ class RuntimeResources:
         if self._provided_tier2_provider is not None:
             self._tier2_provider = self._provided_tier2_provider
         else:
-            self._tier2_provider = create_tier2_judge_provider(self.config.tier2)
+            try:
+                self._tier2_provider = create_tier2_judge_provider(self.config.tier2)
+            except JudgeProviderConfigError as exc:
+                self._tier2_provider = None
+                self._tier2_initialized = True
+                self._record_invalid_config(2, exc)
+                return
         self._tier2_initialized = True
         self._record_degraded_if_needed(2, self.config.tier2.enabled, self._tier2_provider)
+
+    def _record_invalid_config(self, tier: int, exc: JudgeProviderConfigError) -> None:
+        if tier in self._degraded_recorded:
+            return
+        self._logger.warning(
+            "Tier %d provider configuration is invalid; field=%s error_type=%s; "
+            "running without it",
+            tier,
+            exc.field,
+            exc.error_type,
+        )
+        self.store.record_provider_degraded(tier=tier, reason="config_invalid")
+        self._degraded_recorded.add(tier)
 
     def _record_degraded_if_needed(self, tier: int, enabled: bool, provider: JudgeProvider | None) -> None:
         if not enabled or provider is not None or tier in self._degraded_recorded:
