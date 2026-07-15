@@ -78,6 +78,17 @@ export interface LatestObservation {
   label?: PageLabel | null
 }
 
+export type CurrentPageProcessingStage = "tier0" | "tier1"
+
+export interface CurrentPageState {
+  state: "unobserved" | "processing" | "judged"
+  stage?: CurrentPageProcessingStage | null
+  observation_id?: string | null
+  title?: string | null
+  url_host?: string | null
+  observation?: LatestObservation | null
+}
+
 export interface PageLabelResult {
   label_id: string
   observation_id: string
@@ -445,6 +456,23 @@ export async function getLatestObservation(tabId: number, url: string): Promise<
     const response = await serverFetch(`/observations/latest?${params}`)
     if (!response?.ok) return null
     return response.json() as Promise<LatestObservation>
+  } catch {
+    return null
+  }
+}
+
+export async function getCurrentPageState(tabId: number, url: string): Promise<CurrentPageState | null> {
+  try {
+    const parsed = new URL(url)
+    const urlPathHash = await urlPathHashFor(url)
+    const params = new URLSearchParams({
+      tab_id: String(tabId),
+      url_host: parsed.hostname,
+      url_path_hash: urlPathHash,
+    })
+    const response = await serverFetch(`/observations/page-state?${params}`)
+    if (!response?.ok) return null
+    return response.json() as Promise<CurrentPageState>
   } catch {
     return null
   }

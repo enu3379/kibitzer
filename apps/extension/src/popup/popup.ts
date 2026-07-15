@@ -1,6 +1,8 @@
 import {
   ControllerType,
+  CurrentPageProcessingStage,
   FeedbackKind,
+  GoalInfo,
   HealthStatus,
   LatestObservation,
   PageLabel,
@@ -10,11 +12,10 @@ import {
   SessionState,
   SessionStats,
   Settings,
-  createSession,
   deleteAllActivityData,
   getCurrentSession,
   getHealthStatus,
-  getLatestObservation,
+  getCurrentPageState,
   getPersonas,
   getSessionReport,
   getSessionState,
@@ -25,7 +26,6 @@ import {
   postSessionEnd,
   postSessionSnooze,
   putSettings,
-  setGoal,
 } from "../lib/api"
 import {
   ExplorationHistoryEntry,
@@ -37,6 +37,7 @@ import { completeDashboardSnapshot } from "./dashboardSnapshot"
 import type { DashboardSnapshot } from "./dashboardSnapshot"
 
 const POLL_MS = 2000
+const PROCESSING_POLL_MS = 500
 const DEFAULT_OBSERVATION_SECONDS = 5
 const TRACKING_PILLS: Record<SessionState["tracking"], { label: string; tone: string }> = {
   coldstart: { label: "워밍업", tone: "gray" },
@@ -89,6 +90,7 @@ let serverDown = false
 let offlineView: "setup" | "dashboard" | null = null
 let devDiagnostics = false
 let currentGoalBudgetMinutes: number | null = null
+let pendingGoalText: string | null = null
 try {
   devDiagnostics = localStorage.getItem(DEV_DIAGNOSTICS_KEY) === "1"
 } catch {
@@ -133,11 +135,11 @@ function clearSnapshot(): void {
   }
 }
 
-function schedulePoll(): void {
+function schedulePoll(delayMs = POLL_MS): void {
   stopPoll()
   pollTimer = window.setTimeout(() => {
     void refresh()
-  }, POLL_MS)
+  }, delayMs)
 }
 
 function stopPoll(): void {
@@ -189,6 +191,7 @@ function header(pillLabel: string, pillTone: string): string {
 interface ActiveTab {
   id: number
   url: string
+  title: string
 }
 
 async function getActiveTab(): Promise<ActiveTab | null> {
@@ -196,7 +199,22 @@ async function getActiveTab(): Promise<ActiveTab | null> {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
     const tab = tabs[0]
     if (tab?.id === undefined || !tab.url) return null
-    return { id: tab.id, url: tab.url }
+    return { id: tab.id, url: tab.url, title: tab.title ?? "" }
+  } catch {
+    return null
+  }
+}
+
+type LocalPageProcessingStage = "tier0"
+
+async function getLocalPageProcessingStage(activeTab: ActiveTab): Promise<LocalPageProcessingStage | null> {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "kibitzer:get-page-processing-stage",
+      tabId: activeTab.id,
+      url: activeTab.url,
+    }) as { stage?: LocalPageProcessingStage | null } | undefined
+    return response?.stage ?? null
   } catch {
     return null
   }
@@ -212,7 +230,7 @@ async function refresh(): Promise<void> {
   // Reconnect: carry over anything typed into the offline goal input before
   // the online render replaces it.
   const typedGoal = serverDown
-    ? ((document.getElementById("goal-input") as HTMLInputElement | null)?.value ?? "")
+    ? (pendingGoalText ?? (document.getElementById("goal-input") as HTMLInputElement | null)?.value ?? "")
     : ""
   serverDown = false
   offlineView = null
@@ -231,13 +249,25 @@ async function refresh(): Promise<void> {
     return
   }
   const activeTab = await getActiveTab()
-  const [current, stats, health, page, settings] = await Promise.all([
+  const [current, stats, health, pageState, localStage, settings] = await Promise.all([
     getCurrentSession(),
     getSessionStats(),
     getHealthStatus(),
-    activeTab === null ? Promise.resolve(null) : getLatestObservation(activeTab.id, activeTab.url),
+    activeTab === null ? Promise.resolve(null) : getCurrentPageState(activeTab.id, activeTab.url),
+    activeTab === null ? Promise.resolve(null) : getLocalPageProcessingStage(activeTab),
     getSettings(),
   ])
+  const serverStage = pageState?.state === "processing" ? pageState.stage ?? null : null
+  const processingStage = serverStage ?? localStage
+  const page = !processingStage && pageState?.state === "judged" ? pageState.observation ?? null : null
+  const pageTitle = pageState?.title ?? activeTab?.title ?? null
+  const pageHost = pageState?.url_host ?? (() => {
+    try {
+      return activeTab ? new URL(activeTab.url).hostname : null
+    } catch {
+      return null
+    }
+  })()
   const dashboard = completeDashboardSnapshot(result.state, current, stats)
   if (!dashboard) {
     handleUnreachable()
@@ -254,8 +284,11 @@ async function refresh(): Promise<void> {
     page,
     false,
     settings?.dwell.observation_seconds ?? DEFAULT_OBSERVATION_SECONDS,
+    processingStage,
+    pageTitle,
+    pageHost,
   )
-  schedulePoll()
+  schedulePoll(processingStage ? PROCESSING_POLL_MS : POLL_MS)
 }
 
 // Server-down handling (issue #11): the popup keeps rendering — a red banner
@@ -288,7 +321,7 @@ function renderOffline(): void {
   }
   if (offlineView === "setup") return
   offlineView = "setup"
-  const typed = (document.getElementById("goal-input") as HTMLInputElement | null)?.value ?? ""
+  const typed = pendingGoalText ?? (document.getElementById("goal-input") as HTMLInputElement | null)?.value ?? ""
   renderSetup(false, typed, true)
 }
 
@@ -325,6 +358,35 @@ function renderSetup(sessionExists: boolean, currentGoal = "", offline = false):
   })
 }
 
+function renderGoalPreparing(): void {
+  stopPoll()
+  root.innerHTML = `
+    ${header("목표 준비 중", "gray")}
+    <p class="label">오늘의 목표</p>
+    <div class="page-card" aria-live="polite">
+      <p class="pc-empty">목표 기준을 준비하고 있어요</p>
+      <p class="pc-empty-hint">완료되면 현재 페이지부터 살펴볼게요.</p>
+    </div>`
+}
+
+async function setGoalAndResumeCurrentPage(
+  sessionExists: boolean,
+  rawGoalText: string,
+  availableTimeMinutes: number | null,
+): Promise<GoalInfo | null> {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "kibitzer:set-goal",
+      sessionExists,
+      rawGoalText,
+      availableTimeMinutes,
+    }) as { ok?: boolean; goal?: GoalInfo } | undefined
+    return response?.ok ? response.goal ?? null : null
+  } catch {
+    return null
+  }
+}
+
 async function submitGoal(sessionExists: boolean): Promise<void> {
   const input = document.getElementById("goal-input") as HTMLInputElement
   const budgetInput = document.getElementById("time-budget-input") as HTMLInputElement
@@ -345,19 +407,15 @@ async function submitGoal(sessionExists: boolean): Promise<void> {
     return
   }
   submit.disabled = true
-  if (!sessionExists) {
-    const session = await createSession()
-    if (!session) {
-      handleUnreachable()
-      return
-    }
-  }
-  const goal = await setGoal(text, availableTimeMinutes)
+  pendingGoalText = text
+  renderGoalPreparing()
+  const goal = await setGoalAndResumeCurrentPage(sessionExists, text, availableTimeMinutes)
   if (!goal) {
     handleUnreachable()
     return
   }
   currentGoalBudgetMinutes = goal.available_time_minutes ?? null
+  pendingGoalText = null
   editing = false
   notifyBadge()
   await refresh()
@@ -378,7 +436,14 @@ const TIER_NAMES: Record<number, string> = {
 function pageBelief(verdict: LatestObservation["verdict"]): { dot: string; text: string } {
   if (verdict === "OK") return { dot: "ok", text: "관련 있다고 보는 중" }
   if (verdict === "DRIFT") return { dot: "drift", text: "이탈로 보는 중" }
-  return { dot: "unknown", text: "아직 판단 전" }
+  return { dot: "unknown", text: "판정 정보를 확인할 수 없어요" }
+}
+
+type PageCardProcessingStage = CurrentPageProcessingStage
+
+const PAGE_PROCESSING_COPY: Record<PageCardProcessingStage, { text: string; hint?: string }> = {
+  tier0: { text: "Tier 0 · 관련성을 빠르게 판단하고 있어요" },
+  tier1: { text: "Tier 1 · 애매한 판단을 다시 확인하고 있어요" },
 }
 
 // The 맞아/아니 prefix agrees or disagrees with the displayed belief, but the
@@ -419,6 +484,9 @@ function pageCardHtml(
   page: LatestObservation | null,
   offline = false,
   observationSeconds = DEFAULT_OBSERVATION_SECONDS,
+  processingStage: PageCardProcessingStage | null = null,
+  processingTitle: string | null = null,
+  processingHost: string | null = null,
 ): string {
   if (offline) {
     return `
@@ -428,11 +496,22 @@ function pageCardHtml(
     </div>`
   }
   if (!page) {
+    if (processingStage) {
+      const copy = PAGE_PROCESSING_COPY[processingStage]
+      const host = processingHost ? ` · ${esc(processingHost)}` : ""
+      return `
+      <p class="label">지금 페이지${host}</p>
+      <div class="page-card" aria-live="polite">
+        ${processingTitle ? `<p class="pc-title">${esc(processingTitle)}</p>` : ""}
+        <p class="pc-belief"><span class="pc-dot unknown"></span>${copy.text}</p>
+        ${copy.hint ? `<p class="pc-empty-hint">${copy.hint}</p>` : ""}
+      </div>`
+    }
     return `
     <p class="label">지금 페이지</p>
     <div class="page-card">
       <p class="pc-empty">이 탭은 아직 관측 전이에요</p>
-      <p class="pc-empty-hint">${observationSeconds}초 이상 머문 일반 웹페이지만 봐요.</p>
+      <p class="pc-empty-hint">${observationSeconds}초 이상 머물면 관련성을 판단해요.</p>
     </div>`
   }
   const belief = pageBelief(page.verdict)
@@ -482,6 +561,9 @@ function renderDashboard(
   page: LatestObservation | null = null,
   offline = false,
   observationSeconds = DEFAULT_OBSERVATION_SECONDS,
+  processingStage: PageCardProcessingStage | null = null,
+  processingTitle: string | null = null,
+  processingHost: string | null = null,
 ): void {
   const pill = TRACKING_PILLS[state.tracking] ?? TRACKING_PILLS.tracking
   const pillLabel =
@@ -563,7 +645,7 @@ function renderDashboard(
       <p class="goal-text">${esc(goalText)}</p>
       <button id="goal-edit" class="icon-btn" title="목표 수정"${dis}>수정</button>
     </div>
-    ${pageCardHtml(page, offline, observationSeconds)}
+    ${pageCardHtml(page, offline, observationSeconds, processingStage, processingTitle, processingHost)}
     <p class="label">${driftLabel}</p>
     ${driftMeter}
     <p class="hint">${driftHint}</p>

@@ -67,8 +67,23 @@ class ObservationIntakeTest(unittest.TestCase):
         self.assertEqual(response.json()["action"], "none")
         self.assertIsNone(response.json()["observation_id"])
 
-    def test_browser_nav_with_session_records_minimized_observation(self) -> None:
+    def test_browser_nav_with_session_but_no_goal_is_noop(self) -> None:
         session_id = self.client.post("/sessions").json()["id"]
+        response = self.client.post(
+            "/observations/browser-nav",
+            json={
+                "source": "browser_nav",
+                "payload": {"url": "https://example.com/a", "title": "Example", "tab_id": 7},
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["observation_id"])
+        self.assertEqual(self.store.list_observations(session_id), [])
+
+    def test_browser_nav_with_goal_records_minimized_observation(self) -> None:
+        session_id = self.client.post("/sessions").json()["id"]
+        self.client.post("/sessions/current/goal", json={"raw_text": "Read API documentation"})
 
         response = self.client.post(
             "/observations/browser-nav",
@@ -103,12 +118,13 @@ class ObservationIntakeTest(unittest.TestCase):
                 "SELECT payload_json FROM event_log WHERE event_type = 'observation.recorded'"
             ).fetchone()[0]
         self.assertEqual(len(row[0]), 64)
-        self.assertEqual(json.loads(row[1])["tier_reached"], None)
+        self.assertEqual(json.loads(row[1])["tier_reached"], 0)
         self.assertNotIn("api_key", event_payload)
         self.assertNotIn("/deep/path", event_payload)
 
     def test_browser_nav_idempotency_key_replays_completed_result(self) -> None:
         session_id = self.client.post("/sessions").json()["id"]
+        self.client.post("/sessions/current/goal", json={"raw_text": "Read API documentation"})
         body = {
             "source": "browser_nav",
             "idempotency_key": "nav.7.12345",
@@ -139,6 +155,7 @@ class ObservationIntakeTest(unittest.TestCase):
 
     def test_browser_nav_rejects_idempotency_key_reuse_for_different_request(self) -> None:
         session_id = self.client.post("/sessions").json()["id"]
+        self.client.post("/sessions/current/goal", json={"raw_text": "Read API documentation"})
         first = self.client.post(
             "/observations/browser-nav",
             json={
@@ -163,6 +180,7 @@ class ObservationIntakeTest(unittest.TestCase):
 
     def test_browser_nav_failure_releases_unfinished_idempotency_claim(self) -> None:
         session_id = self.client.post("/sessions").json()["id"]
+        self.client.post("/sessions/current/goal", json={"raw_text": "Read API documentation"})
         body = {
             "source": "browser_nav",
             "idempotency_key": "nav-retry-after-failure",

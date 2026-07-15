@@ -87,6 +87,16 @@ export class PersistentDwellScheduler {
     await Promise.all(records.map((record) => this.cancelRecord(record)))
   }
 
+  async currentRecordForPage(tabId: number, url: string): Promise<DwellRecord | null> {
+    const records = (await listRecords())
+      .filter((record) => record.tabId === tabId && record.url === url)
+      .sort((left, right) => right.dueAt - left.dueAt)
+    for (const record of records) {
+      if (await tokenIsCurrent(record)) return record
+    }
+    return null
+  }
+
   private async run(name: string): Promise<void> {
     if (this.running.has(name)) return
     this.running.add(name)

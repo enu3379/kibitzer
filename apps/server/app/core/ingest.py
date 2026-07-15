@@ -57,11 +57,13 @@ async def ingest_browser_nav(
         )
         return PipelineResult(action=PipelineAction.NONE)
 
-    if not current:
+    if not current or not current.goal:
         return PipelineResult(action=PipelineAction.NONE)
 
     observation = normalize_browser_nav(raw, current.session.id)
-    if current.goal:
+    assert captured_goal_revision is not None
+    store.set_observation_processing_stage(observation, captured_goal_revision, "tier0")
+    try:
         tau_ok = float(runtime_settings(config, store)["relevance"]["tau_ok"])
         embedding_text = strip_repeated_title_suffix(
             browser_nav_embedding_text(observation),
@@ -92,6 +94,7 @@ async def ingest_browser_nav(
         )
         tier1_provider = runtime.tier1_provider()
         if observation.verdict == Verdict.DRIFT and tier1_provider:
+            store.set_observation_processing_stage(observation, captured_goal_revision, "tier1")
             recent = store.recent_observation_summaries(
                 current.session.id,
                 config.tier1.recent_observations,
@@ -133,8 +136,9 @@ async def ingest_browser_nav(
             verdict=observation.verdict,
             tier_reached=observation.features.tier_reached,
         )
-
-    store.record_observation(observation, goal_revision=captured_goal_revision)
+        store.record_observation(observation, goal_revision=captured_goal_revision)
+    finally:
+        store.clear_observation_processing_state(observation.id)
     if (
         captured_goal_revision is not None
         and not store.goal_revision_is_current(observation.session_id, captured_goal_revision)

@@ -38,6 +38,7 @@ GET  /reports/daily?date=YYYY-MM-DD
 GET  /personas
 GET|PUT /settings
 POST /observations/browser-nav
+GET  /observations/page-state?tab_id=&url_host=&url_path_hash=
 POST /observations/{id}/excerpt
 POST /feedback
 POST /interventions/{id}/delivery
