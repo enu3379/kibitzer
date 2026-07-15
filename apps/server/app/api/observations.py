@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import json
 import random
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -51,6 +53,7 @@ from ..storage.sqlite import (
     ControllerStateRecord,
     CurrentSessionRecord,
     DriftClockStateRecord,
+    IdempotencyConflictError,
     ObservationRecord,
     ReturnCandidateRecord,
     SQLiteStore,
@@ -182,7 +185,50 @@ async def label_observation(
 
 @router.post("/observations/browser-nav", response_model=PipelineResult)
 async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineResult:
-    current = _store(request).get_current_session()
+    store = _store(request)
+    current = store.get_current_session()
+    idempotency_key = raw.idempotency_key
+    if idempotency_key is None:
+        return await _ingest_browser_nav_once(request, raw, current)
+
+    request_fingerprint = _browser_nav_request_fingerprint(raw)
+    try:
+        request_record, claimed = store.claim_observation_request(
+            idempotency_key,
+            request_fingerprint,
+        )
+    except IdempotencyConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not claimed:
+        if request_record.result is not None:
+            return PipelineResult.model_validate(request_record.result)
+        raise HTTPException(
+            status_code=409,
+            detail="browser-nav request is still processing",
+            headers={"Retry-After": "1"},
+        )
+
+    try:
+        result = await _ingest_browser_nav_once(request, raw, current)
+    except Exception:
+        store.release_observation_request(idempotency_key, request_fingerprint)
+        raise
+
+    completed = store.complete_observation_request(
+        idempotency_key,
+        request_fingerprint,
+        result.model_dump(mode="json"),
+    )
+    if completed.result is None:
+        raise RuntimeError("completed browser-nav request has no stored result")
+    return PipelineResult.model_validate(completed.result)
+
+
+async def _ingest_browser_nav_once(
+    request: Request,
+    raw: RawObservation,
+    current: CurrentSessionRecord | None,
+) -> PipelineResult:
     session_id = current.session.id if current else None
 
     decision = drop_decision_for_url(str(raw.payload.url), _sensitive_domain_rules(request))
@@ -324,6 +370,12 @@ async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineR
         if celebration:
             return celebration
     return result
+
+
+def _browser_nav_request_fingerprint(raw: RawObservation) -> str:
+    request = raw.model_dump(mode="json", exclude={"idempotency_key", "ts"})
+    canonical = json.dumps(request, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _latest_observation_response(
@@ -591,13 +643,15 @@ async def _run_d7_review(
         next_review_boundary(mode_seconds, thresholds.total_seconds),
         now,
     )
-    silent = _handle_delivery_side_effects(
+    silent = _delivery_is_silent(settings)
+    _handle_delivery_side_effects(
         request,
         observation.session_id,
         intervention_id,
         message,
         settings,
         persona,
+        silent,
     )
     return PipelineResult(
         action=PipelineAction.NOTIFY,
@@ -631,19 +685,26 @@ async def confirm_observation_excerpt(
     if not candidate:
         raise HTTPException(status_code=409, detail="intervention candidate not found")
     if not claimed:
+        if candidate.status in {"confirmed", "cancelled"} and candidate.terminal_result is not None:
+            return PipelineResult.model_validate(candidate.terminal_result)
         if candidate.status == "expired":
             raise HTTPException(status_code=410, detail="intervention candidate expired")
         raise HTTPException(status_code=409, detail=f"intervention candidate is {candidate.status}")
 
     try:
         if verdict != Verdict.DRIFT:
-            store.resolve_intervention_candidate(candidate.id, "cancelled")
-            return PipelineResult(
+            terminal_result = PipelineResult(
                 action=PipelineAction.NONE,
                 observation_id=observation.id,
                 verdict=verdict,
                 page=_page_info(observation),
             )
+            store.resolve_intervention_candidate(
+                candidate.id,
+                "cancelled",
+                terminal_result=terminal_result.model_dump(mode="json"),
+            )
+            return terminal_result
 
         recent = store.recent_observation_summaries(
             observation.session_id,
@@ -676,16 +737,18 @@ async def confirm_observation_excerpt(
             max_sentences,
         )
 
-        store.record_tier2_result(
-            session_id=observation.session_id,
-            observation_id=observation.id,
-            confirm_drift=result.confirm_drift,
-            message=message if result.confirm_drift else result.message,
-        )
-
         if not result.confirm_drift:
-            store.resolve_intervention_candidate(candidate.id, "cancelled")
-            return PipelineResult(action=PipelineAction.NONE, observation_id=observation.id, verdict=verdict)
+            terminal_result = PipelineResult(
+                action=PipelineAction.NONE,
+                observation_id=observation.id,
+                verdict=verdict,
+            )
+            store.resolve_intervention_candidate(
+                candidate.id,
+                "cancelled",
+                terminal_result=terminal_result.model_dump(mode="json"),
+            )
+            return terminal_result
 
         controller_config = effective_controller_config(request.app.state.config, store)
         confirmed_at = datetime.now(timezone.utc)
@@ -695,31 +758,34 @@ async def confirm_observation_excerpt(
             observation.session_id,
             now=confirmed_at,
         )
+        silent = _delivery_is_silent(settings)
+        terminal_result = PipelineResult(
+            action=PipelineAction.NOTIFY,
+            observation_id=observation.id,
+            verdict=verdict,
+            message=message,
+            silent=silent,
+            page=_page_info(observation),
+        )
         intervention_id = store.commit_confirmed_intervention(
             candidate.id,
             observation.session_id,
             observation.id,
             message,
             controller_state,
+            terminal_result=terminal_result.model_dump(mode="json"),
             ts=confirmed_at,
         )
-        silent = _handle_delivery_side_effects(
+        _handle_delivery_side_effects(
             request,
             observation.session_id,
             intervention_id,
             message,
             settings,
             persona,
+            silent,
         )
-        return PipelineResult(
-            action=PipelineAction.NOTIFY,
-            observation_id=observation.id,
-            verdict=verdict,
-            message=message,
-            intervention_id=intervention_id,
-            silent=silent,
-            page=_page_info(observation),
-        )
+        return terminal_result.model_copy(update={"intervention_id": intervention_id})
     except BaseException:
         store.release_intervention_candidate(candidate.id)
         raise
@@ -926,16 +992,12 @@ def _handle_delivery_side_effects(
     message: str,
     settings: dict[str, object],
     persona: Persona | None,
-) -> bool:
+    silent: bool,
+) -> None:
     store = _store(request)
-    try:
-        silent = quiet_hours_active(settings["quiet_hours"])
-    except Exception:
-        silent = False
-
     if silent:
         store.record_delivery_suppressed_quiet_hours(session_id, intervention_id)
-        return True
+        return
 
     if settings.get("voice_enabled"):
         voice = request.app.state.config.delivery.voice.voice
@@ -945,4 +1007,10 @@ def _handle_delivery_side_effects(
             rate = persona.voice.rate or rate
         speak(message, voice, rate)
         store.record_voice_spoken(session_id, intervention_id)
-    return False
+
+
+def _delivery_is_silent(settings: dict[str, object]) -> bool:
+    try:
+        return quiet_hours_active(settings["quiet_hours"])
+    except Exception:
+        return False

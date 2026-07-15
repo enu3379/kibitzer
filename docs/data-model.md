@@ -60,6 +60,7 @@ sessions
 goals
 goal_exemplars
 observations
+observation_requests
 controller_states
 drift_clock_states
 drift_page_dwell_states
@@ -70,6 +71,12 @@ interventions
 feedback
 event_log
 ```
+
+`observation_requests` is the durable browser-navigation idempotency ledger.
+It stores only the opaque key, a hash of the canonical request, and the terminal
+response JSON—never the raw URL or page body. A null response marks the active
+claim. A completed row is replayed verbatim on transport retry; a key whose
+request hash differs is rejected.
 
 `drift_clock_states` stores the active observation and page identity
 (`url_host` + path hash), cumulative/continuous/current-page seconds, the next
@@ -94,12 +101,15 @@ requested_at
 expires_at
 updated_at
 intervention_id
+result_json         terminal PipelineResult for confirmed/cancelled candidates
 ```
 
 The pending lifetime includes the configured remaining Tier 2 dwell plus a
 60-second resume grace period. Tier 2 cancellation leaves controller evidence
 intact. Tier 2 confirmation consumes the evidence and links the candidate to a
-new intervention.
+new intervention. Candidate resolution, the Tier 2 result event, and the
+terminal response are committed together; retrying a resolved candidate does
+not call the judge or create another intervention.
 
 An intervention is created only after Tier 2 confirms drift:
 

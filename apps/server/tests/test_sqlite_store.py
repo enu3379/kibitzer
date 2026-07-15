@@ -203,6 +203,38 @@ class SQLiteStoreTest(unittest.TestCase):
         self.assertEqual(learned, [("gex_new", "obs_legacy")])
         self.assertIn("idx_observations_session_tab_latest", indexes)
 
+    def test_initialize_adds_idempotency_storage_to_existing_candidate_schema(self) -> None:
+        legacy_path = Path(self.tmpdir.name) / "candidate-legacy.sqlite3"
+        with closing(sqlite3.connect(legacy_path)) as conn:
+            conn.execute(
+                """
+                CREATE TABLE intervention_candidates (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    observation_id TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (
+                        status IN ('pending', 'in_flight', 'confirmed', 'cancelled', 'expired')
+                    ),
+                    requested_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    intervention_id TEXT
+                )
+                """
+            )
+
+        SQLiteStore(legacy_path).initialize()
+
+        with closing(sqlite3.connect(legacy_path)) as conn:
+            candidate_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(intervention_candidates)")
+            }
+            request_table = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'observation_requests'"
+            ).fetchone()
+        self.assertIn("result_json", candidate_columns)
+        self.assertIsNotNone(request_table)
+
 
 if __name__ == "__main__":
     unittest.main()

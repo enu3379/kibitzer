@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -105,6 +106,83 @@ class ObservationIntakeTest(unittest.TestCase):
         self.assertEqual(json.loads(row[1])["tier_reached"], None)
         self.assertNotIn("api_key", event_payload)
         self.assertNotIn("/deep/path", event_payload)
+
+    def test_browser_nav_idempotency_key_replays_completed_result(self) -> None:
+        session_id = self.client.post("/sessions").json()["id"]
+        body = {
+            "source": "browser_nav",
+            "idempotency_key": "nav.7.12345",
+            "payload": {
+                "url": "https://docs.example.com/idempotent?secret=not-stored",
+                "title": "Idempotent Docs",
+                "tab_id": 7,
+            },
+        }
+
+        first = self.client.post("/observations/browser-nav", json=body)
+        second = self.client.post("/observations/browser-nav", json=body)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.json(), first.json())
+        self.assertEqual(len(self.store.list_observations(session_id)), 1)
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            recorded = conn.execute(
+                "SELECT COUNT(*) FROM event_log WHERE event_type = 'observation.recorded'"
+            ).fetchone()[0]
+            request_row = conn.execute(
+                "SELECT request_fingerprint, result_json FROM observation_requests"
+            ).fetchone()
+        self.assertEqual(recorded, 1)
+        self.assertEqual(len(request_row[0]), 64)
+        self.assertNotIn("secret", request_row[1])
+
+    def test_browser_nav_rejects_idempotency_key_reuse_for_different_request(self) -> None:
+        session_id = self.client.post("/sessions").json()["id"]
+        first = self.client.post(
+            "/observations/browser-nav",
+            json={
+                "source": "browser_nav",
+                "idempotency_key": "nav-reused-key",
+                "payload": {"url": "https://example.com/first", "title": "First"},
+            },
+        )
+        second = self.client.post(
+            "/observations/browser-nav",
+            json={
+                "source": "browser_nav",
+                "idempotency_key": "nav-reused-key",
+                "payload": {"url": "https://example.com/second", "title": "Second"},
+            },
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 409)
+        self.assertEqual(len(self.store.list_observations(session_id)), 1)
+        self.assertNotIn("example.com", second.json()["detail"])
+
+    def test_browser_nav_failure_releases_unfinished_idempotency_claim(self) -> None:
+        session_id = self.client.post("/sessions").json()["id"]
+        body = {
+            "source": "browser_nav",
+            "idempotency_key": "nav-retry-after-failure",
+            "payload": {"url": "https://example.com/retry", "title": "Retry"},
+        }
+
+        with patch(
+            "apps.server.app.api.observations._ingest_browser_nav_once",
+            side_effect=RuntimeError("synthetic intake failure"),
+        ):
+            with self.assertRaises(RuntimeError):
+                self.client.post("/observations/browser-nav", json=body)
+
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            unfinished = conn.execute("SELECT COUNT(*) FROM observation_requests").fetchone()[0]
+        self.assertEqual(unfinished, 0)
+
+        retry = self.client.post("/observations/browser-nav", json=body)
+        self.assertEqual(retry.status_code, 200)
+        self.assertEqual(len(self.store.list_observations(session_id)), 1)
 
     def test_sensitive_browser_nav_with_session_is_dropped_without_raw_url_content(self) -> None:
         session_id = self.client.post("/sessions").json()["id"]
