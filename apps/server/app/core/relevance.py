@@ -70,10 +70,6 @@ def tier0_score(
     return tier0_score_parts(emb, exemplars, anchor, beta, derived_exemplars, derived_tau).score
 
 
-def tier0_verdict(score: float, tau_ok: float) -> str:
-    return "OK" if score >= tau_ok else "DRIFT"
-
-
 def tier1_final_relevance(verdict: Verdict) -> float:
     """Map a successful Tier 1 verdict onto the controller relevance scale."""
     if verdict == Verdict.OK:

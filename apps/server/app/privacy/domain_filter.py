@@ -29,10 +29,6 @@ def load_sensitive_domain_rules(path: str | Path) -> SensitiveDomainRules:
     )
 
 
-def host_from_url(url: str) -> str:
-    return urlparse(url).hostname or ""
-
-
 def drop_decision_for_url(url: str, rules: SensitiveDomainRules) -> DropDecision:
     parsed = urlparse(url)
     host = parsed.hostname or ""
