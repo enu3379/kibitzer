@@ -1,15 +1,25 @@
+import asyncio
 import json
 import os
 import sqlite3
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from apps.server.tests.support import TestClient
 
-from apps.server.app.config import AppConfig, ControllerConfig, ServerConfig, Tier1Config, Tier2Config
+from apps.server.app.config import (
+    AppConfig,
+    ControllerConfig,
+    GoalEnrichmentConfig,
+    ServerConfig,
+    Tier1Config,
+    Tier2Config,
+)
 from apps.server.app.core.tier1_payload import build_tier1_payload
 from apps.server.app.main import create_app
 from apps.server.app.providers.judges.base import Tier1Result
@@ -31,6 +41,25 @@ class FakeTier1Provider:
 
     async def complete_goal_enrichment(self, prompt: str, timeout_seconds: float) -> str:
         return '{"phrases":[]}'
+
+
+class FixedEmbeddingProvider:
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        return [
+            [0.0, 1.0] if "Sourdough" in text else [1.0, 0.0]
+            for text in texts
+        ]
+
+
+class BlockingTier1Provider:
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    async def classify_tier1(self, payload: dict[str, object]) -> Tier1Result:
+        self.started.set()
+        await asyncio.to_thread(self.release.wait)
+        return Tier1Result(verdict=Verdict.DRIFT, reason="unrelated")
 
 
 class Tier1ProviderTest(unittest.TestCase):
@@ -380,6 +409,82 @@ class Tier1ApiTest(unittest.TestCase):
         observation = store.list_observations(session_id)[0]
         self.assertEqual(observation.tier_reached, 0)
         self.assertEqual(observation.features["r_final"], observation.features["r0"])
+
+    def test_concurrent_browser_nav_keeps_request_order_across_slow_tier1(self) -> None:
+        store = SQLiteStore(self.db_path)
+        provider = BlockingTier1Provider()
+        config = AppConfig(
+            server=ServerConfig(db_path=str(self.db_path)),
+            tier1=Tier1Config(enabled=True),
+            controller=ControllerConfig(k=2, coldstart_observations=1),
+            goal_enrichment=GoalEnrichmentConfig(enabled=False),
+        )
+        client = TestClient(
+            create_app(
+                config=config,
+                store=store,
+                embedding_provider=FixedEmbeddingProvider(),
+                tier1_provider=provider,
+            )
+        )
+        client.__enter__()
+        try:
+            session_id = client.post("/sessions").json()["id"]
+            client.post(
+                "/sessions/current/goal",
+                json={"raw_text": "Kibitzer observation API"},
+            )
+            older_drift = {
+                "source": "browser_nav",
+                "ts": "2026-07-15T00:00:00Z",
+                "payload": {
+                    "url": "https://example.com/bread",
+                    "title": "Sourdough bread recipe",
+                },
+            }
+            newer_ok = {
+                "source": "browser_nav",
+                "ts": "2026-07-15T00:00:01Z",
+                "payload": {
+                    "url": "https://example.com/api",
+                    "title": "Kibitzer observation API docs",
+                },
+            }
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                first = executor.submit(
+                    client.post,
+                    "/observations/browser-nav",
+                    json=older_drift,
+                )
+                self.assertTrue(provider.started.wait(timeout=2))
+                second = executor.submit(
+                    client.post,
+                    "/observations/browser-nav",
+                    json=newer_ok,
+                )
+                try:
+                    with self.assertRaises(FutureTimeoutError):
+                        second.result(timeout=0.2)
+                finally:
+                    provider.release.set()
+                first_response = first.result(timeout=2)
+                second_response = second.result(timeout=2)
+        finally:
+            provider.release.set()
+            client.__exit__(None, None, None)
+
+        self.assertEqual(first_response.json()["verdict"], Verdict.DRIFT.value)
+        self.assertEqual(second_response.json()["verdict"], Verdict.OK.value)
+        state = store.get_controller_state(session_id)
+        self.assertEqual((state.obs_count, state.streak), (2, 0))
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            attachment = conn.execute(
+                "SELECT drift_started_at FROM attachment_states WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+        self.assertIsNotNone(attachment)
+        self.assertIsNone(attachment[0])
 
 
 if __name__ == "__main__":
