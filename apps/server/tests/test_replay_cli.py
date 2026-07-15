@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from dataclasses import dataclass, field
 from pathlib import Path
+from unittest import mock
 
 from apps.server.tests.support import TestClient
 
@@ -33,6 +34,19 @@ class FakeTier1Provider:
         return '{"phrases":[]}'
 
 
+class AnchorAdmissionEmbeddingProvider:
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        vectors = []
+        for text in texts:
+            if "Anchor seed" in text:
+                vectors.append([0.8, 0.6])
+            elif "Anchor-only return" in text:
+                vectors.append([0.0, 1.0])
+            else:
+                vectors.append([1.0, 0.0])
+        return vectors
+
+
 class ReplayCliTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmpdir = tempfile.TemporaryDirectory()
@@ -41,10 +55,18 @@ class ReplayCliTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmpdir.cleanup()
 
-    def _config(self, *, tier1_enabled: bool = False) -> AppConfig:
+    def _config(
+        self,
+        *,
+        tier1_enabled: bool = False,
+        derived_tau: float = 0.25,
+    ) -> AppConfig:
         return AppConfig(
             server=ServerConfig(db_path=str(self.db_path)),
-            goal_enrichment=GoalEnrichmentConfig(enabled=False),
+            goal_enrichment=GoalEnrichmentConfig(
+                enabled=False,
+                derived_tau=derived_tau,
+            ),
             tier1=Tier1Config(enabled=tier1_enabled),
             tier2=Tier2Config(enabled=False),
             controller=ControllerConfig(k=1, coldstart_observations=1, cooldown_seconds=0),
@@ -54,9 +76,17 @@ class ReplayCliTest(unittest.TestCase):
         self,
         config: AppConfig,
         tier1_provider: FakeTier1Provider | None = None,
+        embedding_provider: object | None = None,
     ) -> tuple[TestClient, SQLiteStore]:
         store = SQLiteStore(self.db_path)
-        client = TestClient(create_app(config=config, store=store, tier1_provider=tier1_provider))
+        client = TestClient(
+            create_app(
+                config=config,
+                store=store,
+                embedding_provider=embedding_provider,
+                tier1_provider=tier1_provider,
+            )
+        )
         client.__enter__()
         return client, store
 
@@ -266,6 +296,67 @@ class ReplayCliTest(unittest.TestCase):
         self.assertEqual(result.rows[0].verdict_replay, "OK")
         self.assertAlmostEqual(result.rows[0].derived_score_replay, 1.0, places=9)
         self.assertTrue(result.rows[0].anchor_eligible_replay)
+
+    def test_zero_derived_threshold_anchor_admission_matches_live_and_replay(self) -> None:
+        config = self._config(tier1_enabled=False, derived_tau=0.0)
+        provider = AnchorAdmissionEmbeddingProvider()
+        client, store = self._client(config, embedding_provider=provider)
+        try:
+            session_id = self._start_goal(client, "Anchor admission goal")
+            seed = self._visit(client, "Anchor seed")
+            without_derived = self._visit(client, "Anchor-only return without derived")
+            without_derived_observation = store.get_observation(
+                str(without_derived["observation_id"])
+            )
+
+            current = store.get_current_session()
+            self.assertIsNotNone(current)
+            assert current is not None and current.goal is not None
+            self.assertTrue(
+                store.replace_goal_derived_exemplars(
+                    session_id,
+                    [DerivedPhrase(phrase="Orthogonal derived phrase", vector=[1.0, 0.0])],
+                    goal_revision=current.goal.goal_revision,
+                    provider="test",
+                    latency_ms=1,
+                )
+            )
+            with_derived = self._visit(client, "Anchor-only return with derived")
+            with_derived_observation = store.get_observation(
+                str(with_derived["observation_id"])
+            )
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertEqual(seed["verdict"], "OK")
+        self.assertEqual(without_derived["verdict"], "OK")
+        self.assertIsNotNone(without_derived_observation)
+        assert without_derived_observation is not None
+        self.assertEqual(without_derived_observation.features["derived_score"], 0.0)
+        self.assertIs(without_derived_observation.features["anchor_eligible"], False)
+
+        self.assertEqual(with_derived["verdict"], "OK")
+        self.assertIsNotNone(with_derived_observation)
+        assert with_derived_observation is not None
+        self.assertEqual(with_derived_observation.features["derived_score"], 0.0)
+        self.assertIs(with_derived_observation.features["anchor_eligible"], True)
+
+        with mock.patch(
+            "apps.server.app.replay.core.create_embedding_provider",
+            return_value=provider,
+        ):
+            result = asyncio.run(
+                replay_session(self.db_path, session=session_id, config=config)
+            )
+
+        self.assertEqual(
+            [row.anchor_eligible_replay for row in result.rows],
+            [True, False, True],
+        )
+        self.assertEqual(
+            [row.derived_score_replay for row in result.rows],
+            [0.0, 0.0, 0.0],
+        )
 
     def test_derived_phrases_file_injects_after_goal_declaration(self) -> None:
         config = self._config(tier1_enabled=False)

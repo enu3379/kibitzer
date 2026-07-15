@@ -28,6 +28,22 @@ class Tier0Score:
     derived_score: float = 0.0
 
 
+def anchor_admission_eligible(
+    score: Tier0Score,
+    *,
+    has_derived_exemplars: bool,
+    anchor_epsilon: float,
+    derived_tau: float,
+    verdict: Verdict | None,
+    tier_reached: int | None,
+) -> bool:
+    return (
+        score.exemplar_score >= anchor_epsilon
+        or (has_derived_exemplars and score.derived_score >= derived_tau)
+        or (verdict == Verdict.OK and (tier_reached or 0) >= 1)
+    )
+
+
 def cosine(a: list[float], b: list[float]) -> float:
     if len(a) != len(b) or not a:
         return 0.0
