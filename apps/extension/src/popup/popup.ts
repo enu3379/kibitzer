@@ -29,6 +29,7 @@ import {
 import {
   ExplorationHistoryEntry,
   ExplorationResponseKind,
+  ExplorationVerdict,
   loadExplorationHistory,
 } from "../lib/history"
 
@@ -737,14 +738,11 @@ function renderHistory(entries: ExplorationHistoryEntry[]): void {
 }
 
 function renderHistoryItem(entry: ExplorationHistoryEntry): string {
-  const verdictClass = entry.verdict === "OK" ? " ok" : entry.verdict === "DRIFT" ? " drift" : ""
-  const ariaLabel =
-    entry.verdict === "OK" ? 'aria-label="목표 관련"' : entry.verdict === "DRIFT" ? 'aria-label="이탈"' : 'aria-hidden="true"'
   const responseIcon = renderHistoryResponseIcon(entry.responseKind)
   return `
     <div class="history-item">
       <div class="history-status">
-        <span class="history-light${verdictClass}" ${ariaLabel}></span>
+        ${renderHistoryLight(entry)}
         ${responseIcon}
       </div>
       <div class="history-main">
@@ -754,20 +752,45 @@ function renderHistoryItem(entry: ExplorationHistoryEntry): string {
     </div>`
 }
 
+const VERDICT_LABELS: Record<ExplorationVerdict, string> = { OK: "목표 관련", DRIFT: "이탈" }
+
+// The final (user-corrected) verdict fills the front light; when the user
+// overrode the pipeline verdict, the original one peeks out behind it as a
+// faded circle — a photo-stack: front = now, back = before.
+function renderHistoryLight(entry: ExplorationHistoryEntry): string {
+  const systemVerdict = entry.verdict
+  const finalVerdict = entry.userVerdict ?? systemVerdict
+  if (!finalVerdict) return `<span class="history-light" aria-hidden="true"></span>`
+  const finalClass = finalVerdict === "OK" ? "ok" : "drift"
+  if (!systemVerdict || systemVerdict === finalVerdict) {
+    return `<span class="history-light ${finalClass}" aria-label="${VERDICT_LABELS[finalVerdict]}"></span>`
+  }
+  const prevClass = systemVerdict === "OK" ? "ok" : "drift"
+  const label = `${VERDICT_LABELS[systemVerdict]} → ${VERDICT_LABELS[finalVerdict]} (직접 수정)`
+  return `
+      <span class="history-light-stack" role="img" aria-label="${label}" title="${label}">
+        <span class="prev ${prevClass}"></span>
+        <span class="final ${finalClass}"></span>
+      </span>`
+}
+
+// Icon shapes are Tabler Icons outlines (MIT): message-circle and sparkles.
 function renderHistoryResponseIcon(responseKind: ExplorationResponseKind | undefined): string {
   if (responseKind === "intervention") {
     return `
       <span class="history-response intervention" role="img" aria-label="훈수 발생" title="훈수 발생">
-        <svg viewBox="0 0 12 12" aria-hidden="true">
-          <path d="M2 2.25h8v5.5H5.2L2.7 9.8V7.75H2z" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" />
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 20l1.3 -3.9c-2.324 -3.437 -1.426 -7.872 2.1 -10.374c3.526 -2.501 8.59 -2.296 11.845 .48c3.255 2.777 3.695 7.266 1.029 10.501c-2.666 3.235 -7.615 4.215 -11.574 2.293z" />
         </svg>
       </span>`
   }
   if (responseKind === "celebration") {
     return `
       <span class="history-response celebration" role="img" aria-label="칭찬 발생" title="칭찬 발생">
-        <svg viewBox="0 0 12 12" aria-hidden="true">
-          <path d="M6 1.25C6.45 3.6 7.4 4.55 9.75 5 7.4 5.45 6.45 6.4 6 8.75 5.55 6.4 4.6 5.45 2.25 5 4.6 4.55 5.55 3.6 6 1.25Z" fill="currentColor" />
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M16 18a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2" />
+          <path d="M16 6a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2" />
+          <path d="M9 18a6 6 0 0 1 6 -6a6 6 0 0 1 -6 -6a6 6 0 0 1 -6 6a6 6 0 0 1 6 6" />
         </svg>
       </span>`
   }

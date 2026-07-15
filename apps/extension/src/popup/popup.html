@@ -169,7 +169,7 @@
         border-bottom: 1px solid var(--border);
       }
       .history-status {
-        width: 11px; padding-top: 4px; flex: 0 0 11px;
+        width: 15px; padding-top: 4px; flex: 0 0 15px;
         display: flex; flex-direction: column; align-items: center; gap: 6px;
       }
       .history-light {
@@ -178,6 +178,18 @@
       }
       .history-light.ok { background: var(--green-tx); border-color: var(--green-tx); }
       .history-light.drift { background: var(--amber); border-color: var(--amber); }
+      /* Photo-stack light for user-overridden verdicts: the front circle is the
+         final (user) verdict, the faded back circle is the pipeline verdict. */
+      .history-light-stack { position: relative; width: 15px; height: 14px; flex: 0 0 auto; }
+      .history-light-stack .prev,
+      .history-light-stack .final { position: absolute; border-radius: 50%; }
+      .history-light-stack .prev { top: 0; left: 0; width: 10px; height: 10px; opacity: 0.4; }
+      .history-light-stack .final {
+        bottom: 0; right: 0; width: 11px; height: 11px;
+        box-shadow: 0 0 0 1.5px var(--bg);
+      }
+      .history-light-stack .ok { background: var(--green-tx); }
+      .history-light-stack .drift { background: var(--amber); }
       .history-response { width: 15px; height: 15px; display: block; }
       .history-response.intervention { color: var(--amber); }
       .history-response.celebration { color: var(--green-tx); }

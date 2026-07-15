@@ -96,6 +96,15 @@ test("serializes response markers and verdict corrections for one observation", 
   assert.equal(storage.entries()[0].verdict, "OK")
 })
 
+test("keeps the pipeline verdict when a user correction is recorded", async () => {
+  const storage = installSessionStorage([historyEntry("existing")])
+
+  await updateExplorationHistoryByObservationId("obs_existing", { userVerdict: "OK" })
+
+  assert.equal(storage.entries()[0].verdict, "DRIFT")
+  assert.equal(storage.entries()[0].userVerdict, "OK")
+})
+
 test("continues processing mutations after a rejected write", async () => {
   const storage = installSessionStorage([], { rejectNextSet: true })
 
@@ -139,15 +148,17 @@ test("filters mistyped optional fields while keeping valid optional values", asy
     historyEntry("bad-ended", { endedAt: "later" }),
     historyEntry("bad-observation", { observationId: 3 }),
     historyEntry("bad-verdict", { verdict: "UNKNOWN" }),
+    historyEntry("bad-user-verdict", { userVerdict: "MAYBE" }),
     historyEntry("bad-response", { responseKind: "toast" }),
     historyEntry("bad-number", { tier2DwellMs: Number.NaN }),
-    historyEntry("valid", { responseKind: "celebration" }),
+    historyEntry("valid", { responseKind: "celebration", userVerdict: "OK" }),
   ])
 
   const entries = await listExplorationHistory()
 
   assert.deepEqual(entries.map((entry) => entry.id), ["valid"])
   assert.equal(entries[0].responseKind, "celebration")
+  assert.equal(entries[0].userVerdict, "OK")
 })
 
 test("returns a non-sensitive failure result when history storage rejects", async () => {
