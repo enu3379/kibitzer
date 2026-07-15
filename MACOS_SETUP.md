@@ -45,6 +45,12 @@ Then load the Chrome extension:
 3. Click Load unpacked.
 4. Select `apps/extension/dist`.
 
+On the first server start, copy the 64-character code printed in the server log
+(also stored temporarily in `data/pairing.code`) into the extension popup. The
+file is removed after successful pairing. If the browser loses its pairing key,
+stop the server, run `.venv/bin/python scripts/reset_pairing.py`, restart the
+server, and pair again.
+
 ## Optional Login Autostart
 
 Install a user LaunchAgent so the server starts at login in idle mode:

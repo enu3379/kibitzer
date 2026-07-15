@@ -4,6 +4,7 @@ import asyncio
 import logging
 
 _logged_missing_say = False
+SAY_BINARY = "/usr/bin/say"
 
 
 def speak(text: str, voice: str, rate: int) -> None:
@@ -17,11 +18,12 @@ async def _speak_once(text: str, voice: str, rate: int) -> None:
     global _logged_missing_say
     try:
         process = await asyncio.create_subprocess_exec(
-            "say",
+            SAY_BINARY,
             "-v",
             voice,
             "-r",
             str(rate),
+            "--",
             text,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,

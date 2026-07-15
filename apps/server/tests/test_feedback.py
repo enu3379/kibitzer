@@ -5,7 +5,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+from apps.server.tests.support import TestClient
 
 from apps.server.app.config import (
     AppConfig,
@@ -32,7 +32,7 @@ class FeedbackApiTest(unittest.TestCase):
 
     def _client(self, exemplar_cap: int = 20, break_duration_seconds: int = 300) -> TestClient:
         config = AppConfig(
-            server=ServerConfig(db_path=str(self.db_path)),
+            server=ServerConfig(auth_enabled=False, db_path=str(self.db_path)),
             tier1=Tier1Config(enabled=False),
             tier2=Tier2Config(enabled=False),
             relevance=RelevanceConfig(exemplar_cap=exemplar_cap),
@@ -44,7 +44,7 @@ class FeedbackApiTest(unittest.TestCase):
         return client
 
     def _start_goal(self, client: TestClient) -> str:
-        session_id = client.post("/sessions").json()["id"]
+        session_id = client.post("/sessions", json={}).json()["id"]
         client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
         return session_id
 

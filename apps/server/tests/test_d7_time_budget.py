@@ -84,7 +84,7 @@ class D7ApiTest(unittest.TestCase):
         self.store = SQLiteStore(self.db_path)
         self.provider = FakeTier2Provider(Tier2Result(confirm_drift=True, message="시간 예산과 무관한 페이지입니다."))
         self.config = AppConfig(
-            server=ServerConfig(db_path=str(self.db_path)),
+            server=ServerConfig(auth_enabled=False, db_path=str(self.db_path)),
             tier1=Tier1Config(enabled=False),
             tier2=Tier2Config(enabled=True, excerpt_char_limit=120),
             controller=ControllerConfig(k=1, coldstart_observations=1, cooldown_seconds=0),
@@ -99,7 +99,10 @@ class D7ApiTest(unittest.TestCase):
                 recent_excerpt_char_limit=40,
             ),
         )
-        self.client = TestClient(create_app(config=self.config, store=self.store, tier2_provider=self.provider))
+        self.client = TestClient(
+            create_app(config=self.config, store=self.store, tier2_provider=self.provider),
+            base_url="http://127.0.0.1:8765",
+        )
         self.client.__enter__()
         self.start = datetime(2026, 7, 14, 8, 0, tzinfo=timezone.utc)
 
@@ -108,7 +111,7 @@ class D7ApiTest(unittest.TestCase):
         self.tmpdir.cleanup()
 
     def _start_session_goal(self) -> None:
-        self.client.post("/sessions")
+        self.client.post("/sessions", json={})
         goal = self.client.post(
             "/sessions/current/goal",
             json={"raw_text": "Kibitzer observation API", "available_time_minutes": 18},
@@ -546,7 +549,7 @@ class D7ApiTest(unittest.TestCase):
         self._presence(observation_id, path_hash, "prune-active", "active", self.start)
         self._presence(observation_id, path_hash, "prune-heartbeat", "heartbeat", self.start + timedelta(seconds=60))
         old_session_id = self.client.get("/sessions/current/state").json()["session_id"]
-        self.client.post("/sessions")
+        self.client.post("/sessions", json={})
         with self.store._connect() as conn:
             excerpt_count = conn.execute(
                 "SELECT COUNT(*) FROM observation_excerpts WHERE session_id = ?",

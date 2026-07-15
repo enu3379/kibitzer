@@ -1,8 +1,19 @@
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, StringConstraints
+
+
+MAX_TITLE_LENGTH = 2000
+MAX_GOAL_LENGTH = 10000
+MAX_KEYWORDS = 50
+MAX_KEYWORD_LENGTH = 200
+MAX_EXCERPT_LENGTH = 50000
+Keyword = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_KEYWORD_LENGTH),
+]
 
 
 class Source(StrEnum):
@@ -18,8 +29,9 @@ class Verdict(StrEnum):
 
 class BrowserNavPayload(BaseModel):
     url: HttpUrl
-    title: str = ""
+    title: str = Field(default="", max_length=MAX_TITLE_LENGTH)
     tab_id: int | None = None
+    url_path_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 class RawObservation(BaseModel):
@@ -51,8 +63,8 @@ class Observation(BaseModel):
 
 
 class Goal(BaseModel):
-    raw_text: str
-    keywords: list[str] = Field(default_factory=list)
+    raw_text: str = Field(min_length=1, max_length=MAX_GOAL_LENGTH)
+    keywords: list[Keyword] = Field(default_factory=list, max_length=MAX_KEYWORDS)
     exemplars: list[list[float]] = Field(default_factory=list)
     provenance: Literal["declared"] = "declared"
 
@@ -86,8 +98,8 @@ class PipelineResult(BaseModel):
 
 
 class PageExcerpt(BaseModel):
-    title: str = ""
-    text: str = Field(default="", max_length=50000)
+    title: str = Field(default="", max_length=MAX_TITLE_LENGTH)
+    text: str = Field(default="", max_length=MAX_EXCERPT_LENGTH)
 
 
 class FeedbackKind(StrEnum):

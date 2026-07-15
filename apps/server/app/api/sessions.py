@@ -2,12 +2,13 @@ import asyncio
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..core.goal_enrichment import enrich_goal_derived_exemplars
 from ..core.runtime_settings import effective_controller_config
 from ..core.runtime_resources import RuntimeResources
 from ..core.time_budget import mode_clock_seconds, thresholds_for_budget
+from ..schemas import Keyword, MAX_GOAL_LENGTH, MAX_KEYWORDS
 from ..storage.sqlite import NoActiveSessionError, SessionReportRecord, SessionStatsRecord, SQLiteStore
 
 router = APIRouter()
@@ -20,9 +21,13 @@ class SessionResponse(BaseModel):
 
 
 class GoalRequest(BaseModel):
-    raw_text: str = Field(min_length=1)
-    keywords: list[str] = Field(default_factory=list)
+    raw_text: str = Field(min_length=1, max_length=MAX_GOAL_LENGTH)
+    keywords: list[Keyword] = Field(default_factory=list, max_length=MAX_KEYWORDS)
     available_time_minutes: int | None = Field(default=None, ge=1, le=1440)
+
+
+class MutationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
 
 class GoalResponse(BaseModel):
@@ -78,6 +83,8 @@ class SessionStateResponse(BaseModel):
 
 
 class SnoozeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     duration_seconds: int | None = Field(default=None, ge=0)
 
 
@@ -165,7 +172,7 @@ async def _embed_goal(request: Request, text: str) -> list[float]:
 
 
 @router.post("/sessions", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)
-async def create_session(request: Request) -> SessionResponse:
+async def create_session(request: Request, body: MutationRequest) -> SessionResponse:
     session = _store(request).create_session()
     return SessionResponse(
         id=session.id,
@@ -307,7 +314,7 @@ async def get_daily_report(request: Request, date: date) -> SessionReportRespons
 
 
 @router.post("/sessions/current/snooze", response_model=SnoozeResponse)
-async def snooze_current_session(request: Request, body: SnoozeRequest | None = None) -> SnoozeResponse:
+async def snooze_current_session(request: Request, body: SnoozeRequest) -> SnoozeResponse:
     store = _store(request)
     current = store.get_current_session()
     if not current:
@@ -315,7 +322,7 @@ async def snooze_current_session(request: Request, body: SnoozeRequest | None = 
 
     duration = (
         body.duration_seconds
-        if body is not None and body.duration_seconds is not None
+        if body.duration_seconds is not None
         else request.app.state.config.controller.snooze_seconds
     )
     session_id = current.session.id
@@ -337,7 +344,7 @@ async def snooze_current_session(request: Request, body: SnoozeRequest | None = 
 
 
 @router.post("/sessions/current/end", response_model=SessionStatsResponse)
-async def end_current_session(request: Request) -> SessionStatsResponse:
+async def end_current_session(request: Request, body: MutationRequest) -> SessionStatsResponse:
     store = _store(request)
     try:
         session = store.end_current_session()

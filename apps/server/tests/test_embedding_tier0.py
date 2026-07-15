@@ -6,7 +6,7 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+from apps.server.tests.support import TestClient
 
 from apps.server.app.config import AppConfig, ServerConfig
 from apps.server.app.core.relevance import cosine, tier0_score, tier0_score_parts
@@ -88,7 +88,7 @@ class Tier0ApiTest(unittest.TestCase):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.tmpdir.name) / "kibitzer.sqlite3"
         self.store = SQLiteStore(self.db_path)
-        config = AppConfig(server=ServerConfig(db_path=str(self.db_path)))
+        config = AppConfig(server=ServerConfig(auth_enabled=False, db_path=str(self.db_path)))
         self.client = TestClient(create_app(config=config, store=self.store))
         self.client.__enter__()
 
@@ -97,7 +97,7 @@ class Tier0ApiTest(unittest.TestCase):
         self.tmpdir.cleanup()
 
     def test_related_observation_gets_tier0_ok(self) -> None:
-        session_id = self.client.post("/sessions").json()["id"]
+        session_id = self.client.post("/sessions", json={}).json()["id"]
         self.client.post(
             "/sessions/current/goal",
             json={"raw_text": "Kibitzer observation API", "keywords": ["api"]},
@@ -123,7 +123,7 @@ class Tier0ApiTest(unittest.TestCase):
         self.assertIsInstance(observation.features["emb"], list)
 
     def test_unrelated_observation_gets_tier0_drift_and_does_not_update_anchor(self) -> None:
-        session_id = self.client.post("/sessions").json()["id"]
+        session_id = self.client.post("/sessions", json={}).json()["id"]
         self.client.post(
             "/sessions/current/goal",
             json={"raw_text": "Kibitzer observation API", "keywords": ["api"]},

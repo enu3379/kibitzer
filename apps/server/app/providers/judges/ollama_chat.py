@@ -8,6 +8,7 @@ from typing import Iterator
 import httpx
 
 from .base import Tier1Result, Tier2Result, ordered_api_keys
+from .http_utils import read_bounded_json_object
 from .openai_compatible import parse_tier1_json, parse_tier2_json
 
 
@@ -106,20 +107,21 @@ class OllamaChatJudgeProvider:
         last_response: httpx.Response | None = None
         async with httpx.AsyncClient(timeout=timeout_seconds or self.timeout_seconds) as client:
             for index, api_key in enumerate(api_keys):
-                response = await client.post(
+                async with client.stream(
+                    "POST",
                     self.api_url,
                     headers={"authorization": f"Bearer {api_key}", "content-type": "application/json"},
                     json=request_body,
-                )
-                last_response = response
-                if response.status_code in {401, 403, 429} and index + 1 < len(api_keys):
-                    continue
-                response.raise_for_status()
-                return response.json()
+                ) as response:
+                    last_response = response
+                    if response.status_code in {401, 403, 429} and index + 1 < len(api_keys):
+                        continue
+                    response.raise_for_status()
+                    return await read_bounded_json_object(response)
 
         assert last_response is not None
         last_response.raise_for_status()
-        return last_response.json()
+        raise RuntimeError("judge provider request completed without a response")
 
 
 def _message_content(response: dict[str, object]) -> str:

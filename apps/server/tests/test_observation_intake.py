@@ -6,7 +6,7 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+from apps.server.tests.support import TestClient
 
 from apps.server.app.config import AppConfig, ServerConfig
 from apps.server.app.core.normalization import normalize_browser_nav
@@ -20,7 +20,7 @@ class ObservationIntakeTest(unittest.TestCase):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.tmpdir.name) / "kibitzer.sqlite3"
         self.store = SQLiteStore(self.db_path)
-        config = AppConfig(server=ServerConfig(db_path=str(self.db_path)))
+        config = AppConfig(server=ServerConfig(auth_enabled=False, db_path=str(self.db_path)))
         self.client = TestClient(create_app(config=config, store=self.store))
         self.client.__enter__()
 
@@ -67,7 +67,7 @@ class ObservationIntakeTest(unittest.TestCase):
         self.assertIsNone(response.json()["observation_id"])
 
     def test_browser_nav_with_session_records_minimized_observation(self) -> None:
-        session_id = self.client.post("/sessions").json()["id"]
+        session_id = self.client.post("/sessions", json={}).json()["id"]
 
         response = self.client.post(
             "/observations/browser-nav",
@@ -107,7 +107,7 @@ class ObservationIntakeTest(unittest.TestCase):
         self.assertNotIn("/deep/path", event_payload)
 
     def test_sensitive_browser_nav_with_session_is_dropped_without_raw_url_content(self) -> None:
-        session_id = self.client.post("/sessions").json()["id"]
+        session_id = self.client.post("/sessions", json={}).json()["id"]
 
         response = self.client.post(
             "/observations/browser-nav",

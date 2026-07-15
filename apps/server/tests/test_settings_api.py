@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi.testclient import TestClient
+from apps.server.tests.support import TestClient
 
 from apps.server.app.config import (
     AppConfig,
@@ -33,7 +33,7 @@ class SettingsApiTest(unittest.TestCase):
         self.db_path = Path(self.tmpdir.name) / "kibitzer.sqlite3"
         self.store = SQLiteStore(self.db_path)
         config = AppConfig(
-            server=ServerConfig(db_path=str(self.db_path)),
+            server=ServerConfig(auth_enabled=False, db_path=str(self.db_path)),
             tier1=Tier1Config(enabled=False),
             tier2=Tier2Config(enabled=False),
             controller=ControllerConfig(k=1, coldstart_observations=1, cooldown_seconds=0),
@@ -143,7 +143,7 @@ class SettingsApiTest(unittest.TestCase):
         }
 
     def test_tau_ok_updates_apply_to_new_observations(self) -> None:
-        self.client.post("/sessions")
+        self.client.post("/sessions", json={})
         self.client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
 
         self.client.put("/settings", json={"relevance": {"tau_ok": 1.0}})

@@ -183,7 +183,10 @@ class RuntimeResources:
         if self._provided_tier1_provider is not None:
             self._tier1_provider = self._provided_tier1_provider
         else:
-            self._tier1_provider = create_tier1_judge_provider(self.config.tier1)
+            self._tier1_provider = self._create_judge_provider(
+                1,
+                lambda: create_tier1_judge_provider(self.config.tier1),
+            )
         self._tier1_initialized = True
         self._record_degraded_if_needed(1, self.config.tier1.enabled, self._tier1_provider)
 
@@ -193,9 +196,29 @@ class RuntimeResources:
         if self._provided_tier2_provider is not None:
             self._tier2_provider = self._provided_tier2_provider
         else:
-            self._tier2_provider = create_tier2_judge_provider(self.config.tier2)
+            self._tier2_provider = self._create_judge_provider(
+                2,
+                lambda: create_tier2_judge_provider(self.config.tier2),
+            )
         self._tier2_initialized = True
         self._record_degraded_if_needed(2, self.config.tier2.enabled, self._tier2_provider)
+
+    def _create_judge_provider(
+        self,
+        tier: int,
+        factory: Callable[[], JudgeProvider | None],
+    ) -> JudgeProvider | None:
+        try:
+            return factory()
+        except Exception as exc:
+            self._logger.warning(
+                "Tier %d provider configuration rejected (%s); running without it",
+                tier,
+                type(exc).__name__,
+            )
+            self.store.record_provider_degraded(tier=tier, reason="invalid_configuration")
+            self._degraded_recorded.add(tier)
+            return None
 
     def _record_degraded_if_needed(self, tier: int, enabled: bool, provider: JudgeProvider | None) -> None:
         if not enabled or provider is not None or tier in self._degraded_recorded:

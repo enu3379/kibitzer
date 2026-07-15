@@ -22,10 +22,20 @@ class DropDecision:
 
 def load_sensitive_domain_rules(path: str | Path) -> SensitiveDomainRules:
     config_path = Path(path)
-    data = yaml.safe_load(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+    if not config_path.is_file():
+        raise FileNotFoundError(f"sensitive-domain rules not found: {config_path}")
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("sensitive-domain rules must be a mapping")
+    blocked_hosts = data.get("blocked_hosts")
+    blocked_keywords = data.get("blocked_host_keywords")
+    if not isinstance(blocked_hosts, list) or not all(isinstance(item, str) for item in blocked_hosts):
+        raise ValueError("blocked_hosts must be a list of strings")
+    if not isinstance(blocked_keywords, list) or not all(isinstance(item, str) for item in blocked_keywords):
+        raise ValueError("blocked_host_keywords must be a list of strings")
     return SensitiveDomainRules(
-        blocked_hosts=list(data.get("blocked_hosts") or []),
-        blocked_host_keywords=list(data.get("blocked_host_keywords") or []),
+        blocked_hosts=list(blocked_hosts),
+        blocked_host_keywords=list(blocked_keywords),
     )
 
 

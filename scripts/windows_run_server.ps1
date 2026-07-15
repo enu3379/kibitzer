@@ -6,12 +6,14 @@ $ErrorActionPreference = "Stop"
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $Root
+. (Join-Path $PSScriptRoot "windows_security.ps1")
 
 if (-not (Test-Path ".venv\Scripts\python.exe")) {
   throw "Missing .venv. Run .\scripts\windows_setup.ps1 first."
 }
 
 New-Item -ItemType Directory -Force data | Out-Null
+Protect-KibitzerSecrets -Root $Root
 $env:PYTHONUNBUFFERED = "1"
 
 $Python = Join-Path $Root ".venv\Scripts\python.exe"

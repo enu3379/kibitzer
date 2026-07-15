@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LABEL="com.kibitzer.menubar"
@@ -9,6 +10,7 @@ LOG_DIR="$ROOT/data/logs"
 bash "$ROOT/scripts/macos_build_menu_bar.sh"
 
 mkdir -p "$HOME/Library/LaunchAgents" "$LOG_DIR" "$ROOT/data"
+chmod 700 "$LOG_DIR" "$ROOT/data"
 
 cat > "$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

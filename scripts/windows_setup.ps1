@@ -2,6 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $Root
+. (Join-Path $PSScriptRoot "windows_security.ps1")
 
 function Invoke-Native {
   param(
@@ -63,6 +64,7 @@ function Add-NodeToProcessPath {
 }
 
 New-Item -ItemType Directory -Force data | Out-Null
+Protect-KibitzerSecrets -Root $Root
 New-KibitzerVenv
 Add-NodeToProcessPath
 
@@ -72,11 +74,13 @@ Invoke-Native ".\.venv\Scripts\python.exe" @("scripts\download_embedding_model.p
 
 Push-Location "apps\extension"
 try {
-  Invoke-Native "npm" @("install")
+  Invoke-Native "npm" @("ci")
   Invoke-Native "npm" @("run", "build")
 }
 finally {
   Pop-Location
 }
+
+Protect-KibitzerSecrets -Root $Root
 
 Write-Host "Setup complete. Start the server with .\scripts\windows_run_server.ps1"

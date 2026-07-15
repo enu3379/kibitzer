@@ -1,9 +1,18 @@
+import { authenticatedFetch, privateLocationId } from "./auth.ts"
+
 const SERVER_BASE_URL = "http://127.0.0.1:8765"
+const MAX_TITLE_LENGTH = 2000
+const MAX_EXCERPT_LENGTH = 50000
+const MAX_MESSAGE_LENGTH = 4000
+const OBSERVATION_ID_PATTERN = /^obs_[0-9a-f]{32}$/
+const CANDIDATE_ID_PATTERN = /^cand_[0-9a-f]{32}$/
+const INTERVENTION_ID_PATTERN = /^int_[0-9a-f]{32}$/
 
 export interface BrowserNavPayload {
   url: string
   title: string
   tab_id?: number
+  url_path_hash?: string
 }
 
 export interface PipelineResult {
@@ -172,20 +181,43 @@ export interface SnoozeResult {
   snoozed_until: string
 }
 
+export interface DeleteActivityResult {
+  deleted: boolean
+  sessions: number
+  events: number
+  observations: number
+  interventions: number
+  feedback: number
+}
+
+export async function deleteAllActivityData(): Promise<DeleteActivityResult | null> {
+  const response = await authenticatedFetch(`${SERVER_BASE_URL}/data/delete`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ confirm: "DELETE" }),
+  })
+  if (!response?.ok) return null
+  return response.json() as Promise<DeleteActivityResult>
+}
+
 export async function getCurrentSession(): Promise<CurrentSession | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/sessions/current`).catch(() => null)
+  const response = await authenticatedFetch(`${SERVER_BASE_URL}/sessions/current`)
   if (!response?.ok) return null
   return response.json() as Promise<CurrentSession>
 }
 
 export async function createSession(): Promise<SessionInfo | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/sessions`, { method: "POST" }).catch(() => null)
+  const response = await authenticatedFetch(`${SERVER_BASE_URL}/sessions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  }).catch(() => null)
   if (!response?.ok) return null
   return response.json() as Promise<SessionInfo>
 }
 
 export async function setGoal(rawText: string, availableTimeMinutes?: number | null): Promise<GoalInfo | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/sessions/current/goal`, {
+  const response = await authenticatedFetch(`${SERVER_BASE_URL}/sessions/current/goal`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ raw_text: rawText, available_time_minutes: availableTimeMinutes ?? null }),
@@ -195,20 +227,20 @@ export async function setGoal(rawText: string, availableTimeMinutes?: number | n
 }
 
 export async function getSessionStats(): Promise<SessionStats | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/sessions/current/stats`).catch(() => null)
+  const response = await authenticatedFetch(`${SERVER_BASE_URL}/sessions/current/stats`)
   if (!response?.ok) return null
   return response.json() as Promise<SessionStats>
 }
 
 export async function getPersonas(): Promise<PersonaSummary[]> {
-  const response = await fetch(`${SERVER_BASE_URL}/personas`).catch(() => null)
+  const response = await authenticatedFetch(`${SERVER_BASE_URL}/personas`)
   if (!response?.ok) return []
   return response.json() as Promise<PersonaSummary[]>
 }
 
 export async function postSessionSnooze(durationSeconds?: number): Promise<SnoozeResult | null> {
   const body = durationSeconds === undefined ? {} : { duration_seconds: durationSeconds }
-  const response = await fetch(`${SERVER_BASE_URL}/sessions/current/snooze`, {
+  const response = await authenticatedFetch(`${SERVER_BASE_URL}/sessions/current/snooze`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -222,7 +254,7 @@ export async function postDeliveryReport(
   ok: boolean,
   error?: string,
 ): Promise<void> {
-  await fetch(`${SERVER_BASE_URL}/interventions/${interventionId}/delivery`, {
+  await authenticatedFetch(`${SERVER_BASE_URL}/interventions/${interventionId}/delivery`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ ok, error: error ?? null }),
@@ -230,7 +262,11 @@ export async function postDeliveryReport(
 }
 
 export async function postSessionEnd(): Promise<SessionStats | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/sessions/current/end`, { method: "POST" }).catch(() => null)
+  const response = await authenticatedFetch(`${SERVER_BASE_URL}/sessions/current/end`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  }).catch(() => null)
   if (!response?.ok) return null
   return response.json() as Promise<SessionStats>
 }
@@ -340,14 +376,14 @@ function clampFloat(value: unknown, fallback: number, min: number, max: number):
 }
 
 export async function getSettings(): Promise<Settings | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/settings`).catch(() => null)
+  const response = await authenticatedFetch(`${SERVER_BASE_URL}/settings`)
   if (!response?.ok) return null
   const body = (await response.json()) as Partial<Settings>
   return normalizeSettings(body)
 }
 
 export async function putSettings(patch: SettingsPatch): Promise<Settings | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/settings`, {
+  const response = await authenticatedFetch(`${SERVER_BASE_URL}/settings`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
@@ -358,7 +394,7 @@ export async function putSettings(patch: SettingsPatch): Promise<Settings | null
 }
 
 export async function getSessionState(): Promise<SessionStateResult> {
-  const response = await fetch(`${SERVER_BASE_URL}/sessions/current/state`).catch(() => null)
+  const response = await authenticatedFetch(`${SERVER_BASE_URL}/sessions/current/state`)
   if (!response) return { kind: "unreachable" }
   if (response.status === 404) return { kind: "no_session" }
   if (!response.ok) return { kind: "unreachable" }
@@ -367,20 +403,27 @@ export async function getSessionState(): Promise<SessionStateResult> {
 }
 
 export async function postBrowserNav(payload: BrowserNavPayload): Promise<PipelineResult | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/observations/browser-nav`, {
+  const sanitized = sanitizeBrowserNavPayload(payload)
+  if (!sanitized) return null
+  try {
+    sanitized.url_path_hash = await urlPathHashFor(payload.url)
+  } catch {
+    return null
+  }
+  const response = await authenticatedFetch(`${SERVER_BASE_URL}/observations/browser-nav`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ source: "browser_nav", payload }),
+    body: JSON.stringify({ source: "browser_nav", payload: sanitized }),
   }).catch(() => {
     // The extension must never interrupt browsing because the local server is down.
     return null
   })
   if (!response?.ok) return null
-  return response.json() as Promise<PipelineResult>
+  return response.json().then(parsePipelineResult).catch(() => null)
 }
 
 export async function postFeedback(payload: FeedbackPayload): Promise<FeedbackResult | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/feedback`, {
+  const response = await authenticatedFetch(`${SERVER_BASE_URL}/feedback`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -400,7 +443,8 @@ export async function getLatestObservation(tabId: number, url: string): Promise<
       url_host: parsed.hostname,
       url_path_hash: urlPathHash,
     })
-    const response = await fetch(`${SERVER_BASE_URL}/observations/latest?${params}`)
+    const response = await authenticatedFetch(`${SERVER_BASE_URL}/observations/latest?${params}`)
+    if (!response) return null
     if (!response.ok) return null
     return response.json() as Promise<LatestObservation>
   } catch {
@@ -411,16 +455,16 @@ export async function getLatestObservation(tabId: number, url: string): Promise<
 export async function urlPathHashFor(url: string): Promise<string> {
   const parsed = new URL(url)
   const location = `${parsed.pathname || "/"}${parsed.search}${parsed.hash}`
-  const pathBytes = new TextEncoder().encode(location)
-  const pathDigest = await crypto.subtle.digest("SHA-256", pathBytes)
-  return Array.from(new Uint8Array(pathDigest), (byte) => byte.toString(16).padStart(2, "0")).join("")
+  const identifier = await privateLocationId(location)
+  if (!identifier) throw new Error("local API pairing is required")
+  return identifier
 }
 
 export async function postObservationLabel(
   observationId: string,
   label: PageLabel,
 ): Promise<PageLabelResult | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/observations/${observationId}/label`, {
+  const response = await authenticatedFetch(`${SERVER_BASE_URL}/observations/${observationId}/label`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ label }),
@@ -435,25 +479,97 @@ export async function postObservationExcerpt(
   observationId: string,
   excerpt: PageExcerpt,
 ): Promise<PipelineResult | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/observations/${observationId}/excerpt`, {
+  const response = await authenticatedFetch(`${SERVER_BASE_URL}/observations/${observationId}/excerpt`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(excerpt),
+    body: JSON.stringify({
+      title: excerpt.title.slice(0, MAX_TITLE_LENGTH),
+      text: excerpt.text.slice(0, MAX_EXCERPT_LENGTH),
+    }),
   }).catch(() => {
     return null
   })
   if (!response?.ok) return null
-  return response.json() as Promise<PipelineResult>
+  return response.json().then(parsePipelineResult).catch(() => null)
+}
+
+export function sanitizeBrowserNavPayload(payload: BrowserNavPayload): BrowserNavPayload | null {
+  try {
+    const parsed = new URL(payload.url)
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null
+    parsed.username = ""
+    parsed.password = ""
+    parsed.pathname = "/"
+    parsed.search = ""
+    parsed.hash = ""
+    const sanitized: BrowserNavPayload = {
+      url: parsed.toString(),
+      title: payload.title.slice(0, MAX_TITLE_LENGTH),
+    }
+    if (payload.tab_id !== undefined && Number.isInteger(payload.tab_id)) {
+      sanitized.tab_id = payload.tab_id
+    }
+    return sanitized
+  } catch {
+    return null
+  }
+}
+
+export function parsePipelineResult(value: unknown): PipelineResult | null {
+  if (!isRecord(value)) return null
+  if (value.action !== "none" && value.action !== "request_excerpt" && value.action !== "notify") return null
+  if (value.kind !== undefined && value.kind !== "intervention" && value.kind !== "celebration") return null
+  if (value.verdict !== undefined && value.verdict !== null && value.verdict !== "OK" && value.verdict !== "DRIFT") {
+    return null
+  }
+  if (!validOptionalId(value.observation_id, OBSERVATION_ID_PATTERN)) return null
+  if (!validOptionalId(value.candidate_id, CANDIDATE_ID_PATTERN)) return null
+  if (!validOptionalId(value.intervention_id, INTERVENTION_ID_PATTERN)) return null
+  if (
+    value.action === "request_excerpt" &&
+    (typeof value.observation_id !== "string" || typeof value.candidate_id !== "string")
+  ) {
+    return null
+  }
+  if (value.message !== undefined && value.message !== null) {
+    if (typeof value.message !== "string" || value.message.length > MAX_MESSAGE_LENGTH) return null
+  }
+  if (value.action === "notify" && (typeof value.observation_id !== "string" || typeof value.message !== "string")) {
+    return null
+  }
+  if (value.silent !== undefined && typeof value.silent !== "boolean") return null
+  if (value.page !== undefined && value.page !== null) {
+    if (!isRecord(value.page)) return null
+    if (!validOptionalString(value.page.host, 253) || !validOptionalString(value.page.title, MAX_TITLE_LENGTH)) {
+      return null
+    }
+  }
+  return value as unknown as PipelineResult
+}
+
+function validOptionalId(value: unknown, pattern: RegExp): boolean {
+  return value === undefined || value === null || (typeof value === "string" && pattern.test(value))
+}
+
+function validOptionalString(value: unknown, maxLength: number): boolean {
+  return value === undefined || value === null || (typeof value === "string" && value.length <= maxLength)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 export async function postObservationContent(
   observationId: string,
   excerpt: PageExcerpt,
 ): Promise<ContentCaptureResult | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/observations/${observationId}/content`, {
+  const response = await authenticatedFetch(`${SERVER_BASE_URL}/observations/${observationId}/content`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(excerpt),
+    body: JSON.stringify({
+      title: excerpt.title.slice(0, MAX_TITLE_LENGTH),
+      text: excerpt.text.slice(0, MAX_EXCERPT_LENGTH),
+    }),
   }).catch(() => null)
   if (!response?.ok) return null
   return response.json() as Promise<ContentCaptureResult>
@@ -463,13 +579,13 @@ export async function postObservationPresence(
   observationId: string,
   payload: { event_id: string; kind: PresenceKind; tab_id: number; url_path_hash: string },
 ): Promise<PipelineResult | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/observations/${observationId}/presence`, {
+  const response = await authenticatedFetch(`${SERVER_BASE_URL}/observations/${observationId}/presence`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
   }).catch(() => null)
   if (!response?.ok) return null
-  return response.json() as Promise<PipelineResult>
+  return response.json().then(parsePipelineResult).catch(() => null)
 }
 
 export interface HealthTiers {
@@ -564,7 +680,7 @@ export interface SessionReport {
 }
 
 export async function getSessionReport(): Promise<SessionReport | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/sessions/current/report`).catch(() => null)
+  const response = await authenticatedFetch(`${SERVER_BASE_URL}/sessions/current/report`)
   if (!response?.ok) return null
   return response.json() as Promise<SessionReport>
 }

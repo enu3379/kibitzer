@@ -16,6 +16,7 @@ import {
   postObservationPresence,
   urlPathHashFor,
 } from "./lib/api"
+import { restrictAuthStorageToExtension } from "./lib/auth"
 import { shouldDropUrl } from "./lib/domainFilter"
 import {
   ExplorationResponseKind,
@@ -137,7 +138,7 @@ function scheduleTabObservation(tabId: number, observedUrl?: string): void {
   void getTab(tabId).then((tab) => {
     const pending = pendingTabObservations.get(tabId)
     if (!pending || pending.token !== token) return
-    if (!tab?.active || !tab.url || shouldDropUrl(tab.url)) {
+    if (!tab?.active || tab.incognito || !tab.url || shouldDropUrl(tab.url)) {
       pendingTabObservations.delete(tabId)
       return
     }
@@ -156,7 +157,7 @@ async function scheduleDwellCheck(tabId: number, token: number, url: string, sta
   const tab = await getTab(tabId)
   const pending = pendingTabObservations.get(tabId)
   if (!pending || pending.token !== token) return
-  if (!tab?.active) {
+  if (!tab?.active || tab.incognito || tab.url !== url) {
     pendingTabObservations.delete(tabId)
     return
   }
@@ -180,7 +181,7 @@ async function scheduleDwellCheck(tabId: number, token: number, url: string, sta
     if (!pending || pending.token !== token) return
     pendingTabObservations.delete(tabId)
     const tab = await getTab(tabId)
-    if (!tab || !tab.active || tab.url !== url || shouldDropUrl(url)) {
+    if (!tab || !tab.active || tab.incognito || tab.url !== url || shouldDropUrl(url)) {
       await finishHistoryEntry(pending.historyId)
       return
     }
@@ -473,7 +474,7 @@ function delay(ms: number): Promise<void> {
 
 async function tabStillOnObservedPage(tabId: number, url: string): Promise<boolean> {
   const tab = await getTab(tabId)
-  return Boolean(tab?.active && tab.url === url)
+  return Boolean(tab?.active && !tab.incognito && tab.url === url)
 }
 
 async function extractFromTab(tabId: number): Promise<PageExcerpt | null> {
@@ -542,7 +543,7 @@ function rememberPendingToast(
 
 async function displayPendingToast(toast: PendingToast, tabId: number, logFailure = false): Promise<boolean> {
   const tab = await getTab(tabId)
-  if (!tab?.active || !tab.url || !isInjectablePageUrl(tab.url)) return false
+  if (!tab?.active || tab.incognito || !tab.url || !isInjectablePageUrl(tab.url)) return false
 
   const displayToken = ++nextToastDisplayToken
   toast.displayToken = displayToken
@@ -894,4 +895,5 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   clearTabTimer(tabId)
 })
 
+void restrictAuthStorageToExtension()
 void refreshBadge()

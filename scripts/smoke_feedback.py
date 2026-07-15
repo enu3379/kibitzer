@@ -56,15 +56,15 @@ def main() -> int:
         store = SQLiteStore(db_path)
         app = create_app(
             config=AppConfig(
-                server=ServerConfig(db_path=str(db_path)),
+                server=ServerConfig(auth_enabled=False, db_path=str(db_path)),
                 tier1=Tier1Config(enabled=False),
                 tier2=Tier2Config(enabled=False),
                 controller=ControllerConfig(k=1, coldstart_observations=1, cooldown_seconds=0, snooze_seconds=900),
             ),
             store=store,
         )
-        with TestClient(app) as client:
-            session_id = client.post("/sessions").json()["id"]
+        with TestClient(app, base_url="http://127.0.0.1:8765") as client:
+            session_id = client.post("/sessions", json={}).json()["id"]
             client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
 
             related_notification = notify(client, "Sourdough bread recipe", marker)

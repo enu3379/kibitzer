@@ -6,28 +6,12 @@ import os
 import sqlite3
 import sys
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 
-BASE_URL = os.environ.get("KIBITZER_BASE_URL", "http://127.0.0.1:8765")
+from local_api import post_json
+
 DB_PATH = Path(os.environ.get("KIBITZER_DB_PATH", "data/kibitzer.sqlite3"))
 MARKER = f"TIER2_HTTP_REAL_MARKER_{int(time.time())}"
-
-
-def post_json(path: str, payload: dict[str, object] | None = None, timeout: int = 60) -> dict[str, object]:
-    data = json.dumps(payload or {}).encode("utf-8")
-    request = urllib.request.Request(
-        f"{BASE_URL}{path}",
-        data=data,
-        headers={"content-type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.URLError as exc:
-        raise SystemExit(f"request failed for {path}: {exc}") from exc
 
 
 def assert_true(condition: bool, message: str) -> None:

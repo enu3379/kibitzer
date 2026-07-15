@@ -1,9 +1,10 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import httpx
-from fastapi.testclient import TestClient
+from apps.server.tests.support import TestClient
 
 from apps.server.app.config import AppConfig, ServerConfig, Tier1Config, Tier2Config
 from apps.server.app.main import create_app
@@ -16,7 +17,7 @@ class RuntimeResourcesTest(unittest.TestCase):
         self.db_path = Path(self.tmpdir.name) / "kibitzer.sqlite3"
         self.store = SQLiteStore(self.db_path)
         self.config = AppConfig(
-            server=ServerConfig(db_path=str(self.db_path)),
+            server=ServerConfig(auth_enabled=False, db_path=str(self.db_path)),
             tier1=Tier1Config(enabled=False),
             tier2=Tier2Config(enabled=False),
         )
@@ -38,7 +39,7 @@ class RuntimeResourcesTest(unittest.TestCase):
             },
         )
 
-        self.client.post("/sessions")
+        self.client.post("/sessions", json={})
 
         self.assertEqual(self.client.get("/health").json()["mode"], "idle")
 
@@ -53,10 +54,10 @@ class RuntimeResourcesTest(unittest.TestCase):
         self.assertIsNotNone(active_health["active_since"])
 
     def test_session_end_releases_runtime_back_to_idle(self) -> None:
-        self.client.post("/sessions")
+        self.client.post("/sessions", json={})
         self.client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
 
-        response = self.client.post("/sessions/current/end")
+        response = self.client.post("/sessions/current/end", json={})
 
         self.assertEqual(response.status_code, 200)
         health = self.client.get("/health").json()
@@ -96,6 +97,21 @@ class RuntimeResourcesTest(unittest.TestCase):
         self.assertEqual(recovered["last_result"], "success")
         self.assertIsNone(recovered["reason"])
         self.assertIsNotNone(recovered["checked_at"])
+
+    def test_insecure_provider_url_degrades_without_breaking_runtime(self) -> None:
+        self.config.tier1 = Tier1Config(
+            enabled=True,
+            provider="openai_compatible",
+            base_url="http://api.example.com/v1",
+            api_key_env="KIBITZER_TEST_INSECURE_KEY",
+        )
+        runtime = self.client.app.state.runtime
+
+        with mock.patch.dict("os.environ", {"KIBITZER_TEST_INSECURE_KEY": "secret"}):
+            provider = runtime.tier1_provider()
+
+        self.assertIsNone(provider)
+        self.assertEqual(self.client.get("/health").json()["tiers"]["tier1"], "degraded")
 
 
 def _http_status_error(request: httpx.Request, status_code: int) -> httpx.HTTPStatusError:

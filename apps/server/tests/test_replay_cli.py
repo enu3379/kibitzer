@@ -7,7 +7,7 @@ import unittest
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+from apps.server.tests.support import TestClient
 
 from apps.server.app.config import AppConfig, ControllerConfig, GoalEnrichmentConfig, ServerConfig, Tier1Config, Tier2Config
 from apps.server.app.core.goal_enrichment import DerivedPhrase
@@ -43,7 +43,7 @@ class ReplayCliTest(unittest.TestCase):
 
     def _config(self, *, tier1_enabled: bool = False) -> AppConfig:
         return AppConfig(
-            server=ServerConfig(db_path=str(self.db_path)),
+            server=ServerConfig(auth_enabled=False, db_path=str(self.db_path)),
             goal_enrichment=GoalEnrichmentConfig(enabled=False),
             tier1=Tier1Config(enabled=tier1_enabled),
             tier2=Tier2Config(enabled=False),
@@ -61,7 +61,7 @@ class ReplayCliTest(unittest.TestCase):
         return client, store
 
     def _start_goal(self, client: TestClient, raw_text: str = "Kibitzer observation API") -> str:
-        session_id = client.post("/sessions").json()["id"]
+        session_id = client.post("/sessions", json={}).json()["id"]
         response = client.post("/sessions/current/goal", json={"raw_text": raw_text})
         self.assertEqual(response.status_code, 200)
         return session_id

@@ -46,6 +46,12 @@ Then load the Chrome extension:
 3. Click Load unpacked.
 4. Select `apps\extension\dist`.
 
+On the first server start, copy the 64-character code printed in the server log
+(also stored temporarily in `data\pairing.code`) into the extension popup. The
+file is removed after successful pairing. If the browser loses its pairing key,
+stop the server, run `.\.venv\Scripts\python.exe scripts\reset_pairing.py`,
+restart the server, and pair again.
+
 ## Optional Login Autostart
 
 Install a current-user Startup shortcut so the server starts at Windows logon in
@@ -103,5 +109,7 @@ session first activates those providers.
 
 - Do not copy `.venv` or `node_modules` between macOS and Windows.
 - `data\kibitzer.sqlite3` is created on first server start.
+- Setup and launch replace inherited ACLs for `data\`, `.env`, and
+  `configs\models.local.yaml` with a current-user-only ACL.
 - The current voice feature uses the macOS `say` command; leave voice off on
   Windows unless a Windows speech backend is added.

@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from unittest import mock
 
-from fastapi.testclient import TestClient
+from apps.server.tests.support import TestClient
 
 from apps.server.app.config import AppConfig, ControllerConfig, ServerConfig, Tier1Config, Tier2Config
 from apps.server.app.main import create_app
@@ -26,7 +26,7 @@ class PageLabelApiTest(unittest.TestCase):
 
     def _client(self) -> TestClient:
         config = AppConfig(
-            server=ServerConfig(db_path=str(self.db_path)),
+            server=ServerConfig(auth_enabled=False, db_path=str(self.db_path)),
             tier1=Tier1Config(enabled=False),
             tier2=Tier2Config(enabled=False),
             controller=ControllerConfig(k=3, coldstart_observations=1, cooldown_seconds=0),
@@ -36,7 +36,7 @@ class PageLabelApiTest(unittest.TestCase):
         return client
 
     def _start_goal(self, client: TestClient) -> str:
-        session_id = client.post("/sessions").json()["id"]
+        session_id = client.post("/sessions", json={}).json()["id"]
         client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
         return session_id
 
@@ -243,7 +243,7 @@ class PageLabelApiTest(unittest.TestCase):
         try:
             self._start_goal(client)
             observed = self._post_nav(client, "Sourdough bread recipe", 77, base)
-            client.post("/sessions")
+            client.post("/sessions", json={})
             response = client.post(
                 f"/observations/{observed['observation_id']}/label",
                 json={"label": "drift"},

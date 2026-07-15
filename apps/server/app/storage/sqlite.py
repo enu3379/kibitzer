@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -242,6 +243,19 @@ class SessionReportRecord:
     judgments: list[JudgmentReasonRecord] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class DataDeletionResult:
+    sessions: int
+    events: int
+    observations: int = 0
+    interventions: int = 0
+    feedback: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.sessions + self.events + self.observations + self.interventions + self.feedback
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -260,9 +274,78 @@ class SQLiteStore:
 
     def initialize(self) -> None:
         if self.db_path != ":memory:":
-            Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+            path = Path(self.db_path)
+            parent = path.parent
+            parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            if not path.exists():
+                try:
+                    descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                except FileExistsError:
+                    pass
+                else:
+                    os.close(descriptor)
         with self._connect() as conn:
             self._ensure_schema(conn)
+        if self.db_path != ":memory:" and os.name != "nt":
+            Path(self.db_path).chmod(0o600)
+
+    def purge_expired_data(
+        self,
+        retention_days: int,
+        *,
+        now: datetime | None = None,
+    ) -> DataDeletionResult:
+        cutoff = (now or _utc_now()) - timedelta(days=retention_days)
+        cutoff_text = cutoff.isoformat()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            sessions = conn.execute(
+                """
+                DELETE FROM sessions
+                WHERE active = 0 AND COALESCE(ended_at, created_at) < ?
+                """,
+                (cutoff_text,),
+            ).rowcount
+            conn.execute("DELETE FROM page_labels WHERE ts < ?", (cutoff_text,))
+            conn.execute(
+                "DELETE FROM intervention_candidates WHERE requested_at < ?",
+                (cutoff_text,),
+            )
+            feedback = conn.execute("DELETE FROM feedback WHERE ts < ?", (cutoff_text,)).rowcount
+            interventions = conn.execute(
+                "DELETE FROM interventions WHERE ts < ?",
+                (cutoff_text,),
+            ).rowcount
+            observations = conn.execute(
+                "DELETE FROM observations WHERE ts < ?",
+                (cutoff_text,),
+            ).rowcount
+            conn.execute("DELETE FROM attachment_states WHERE updated_at < ?", (cutoff_text,))
+            conn.execute("DELETE FROM controller_states WHERE updated_at < ?", (cutoff_text,))
+            events = conn.execute("DELETE FROM event_log WHERE ts < ?", (cutoff_text,)).rowcount
+        return DataDeletionResult(
+            sessions=sessions,
+            events=events,
+            observations=observations,
+            interventions=interventions,
+            feedback=feedback,
+        )
+
+    def delete_all_activity_data(self) -> DataDeletionResult:
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            observations = int(conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0])
+            interventions = int(conn.execute("SELECT COUNT(*) FROM interventions").fetchone()[0])
+            feedback = int(conn.execute("SELECT COUNT(*) FROM feedback").fetchone()[0])
+            sessions = conn.execute("DELETE FROM sessions").rowcount
+            events = conn.execute("DELETE FROM event_log").rowcount
+        return DataDeletionResult(
+            sessions=sessions,
+            events=events,
+            observations=observations,
+            interventions=interventions,
+            feedback=feedback,
+        )
 
     def create_session(self) -> SessionRecord:
         session_id = f"sess_{uuid.uuid4().hex}"
@@ -2685,6 +2768,7 @@ class SQLiteStore:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA secure_delete = ON")
         try:
             yield conn
             conn.commit()

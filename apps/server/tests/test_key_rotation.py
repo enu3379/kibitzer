@@ -8,6 +8,8 @@ from unittest import mock
 
 from apps.server.app.config import Tier1Config, Tier2Config
 from apps.server.app.providers.judges.factory import (
+    _is_local_url,
+    _validate_api_url,
     create_tier1_judge_provider,
     create_tier2_judge_provider,
 )
@@ -118,6 +120,24 @@ class FactoryPoolResolutionTest(unittest.TestCase):
             provider = create_tier2_judge_provider(config)
         assert provider is not None
         self.assertEqual(provider.api_keys, ("key-b", "key-c", "key-a"))
+
+
+class ProviderUrlSecurityTest(unittest.TestCase):
+    def test_recognizes_only_exact_loopback_hosts(self) -> None:
+        self.assertTrue(_is_local_url("http://localhost:11434/api/chat"))
+        self.assertTrue(_is_local_url("http://127.0.0.1:11434/api/chat"))
+        self.assertTrue(_is_local_url("http://[::1]:11434/api/chat"))
+        self.assertFalse(_is_local_url("https://localhost.attacker.example/api/chat"))
+        self.assertFalse(_is_local_url("https://example.com/?next=http://127.0.0.1"))
+
+    def test_requires_https_for_non_loopback_provider(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must use HTTPS"):
+            _validate_api_url("http://api.example.com/v1/chat")
+
+        self.assertEqual(
+            _validate_api_url("https://api.example.com/v1/chat"),
+            "https://api.example.com/v1/chat",
+        )
 
 
 if __name__ == "__main__":

@@ -17,7 +17,10 @@ def normalize_browser_nav(raw: RawObservation, session_id: str) -> Observation:
         location += f"#{parsed.fragment}"
     payload = {
         "url_host": parsed.hostname or "",
-        "url_path_hash": _hash_location(location),
+        # The extension computes this identity before removing raw query and
+        # fragment data from the URL sent to localhost. Direct API callers fall
+        # back to hashing the received location for compatibility.
+        "url_path_hash": raw.payload.url_path_hash or _hash_location(location),
         "title": raw.payload.title.strip(),
         "tab_id": raw.payload.tab_id,
     }

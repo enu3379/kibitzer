@@ -54,7 +54,7 @@ def run_case(case: dict[str, Any]) -> str:
 
         app = create_app(
             config=AppConfig(
-                server=ServerConfig(db_path=str(db_path)),
+                server=ServerConfig(auth_enabled=False, db_path=str(db_path)),
                 tier1=Tier1Config(enabled=False),
                 tier2=Tier2Config(enabled=tier2_enabled, excerpt_char_limit=160, recent_observations=4),
                 controller=ControllerConfig(k=1, coldstart_observations=1, cooldown_seconds=0),
@@ -62,8 +62,8 @@ def run_case(case: dict[str, Any]) -> str:
             store=SQLiteStore(db_path),
             tier2_provider=provider,
         )
-        with TestClient(app) as client:
-            client.post("/sessions")
+        with TestClient(app, base_url="http://127.0.0.1:8765") as client:
+            client.post("/sessions", json={})
             client.post("/sessions/current/goal", json={"raw_text": case["goal"]})
             first = client.post(
                 "/observations/browser-nav",

@@ -25,6 +25,8 @@ The server is the local SSOT for Kibitzer.
 
 ```text
 GET  /health                          (includes tier provider status)
+GET  /auth/status                     (public pairing state only)
+POST /auth/pair                       (exact extension origin required)
 POST /sessions
 GET  /sessions/current
 GET  /sessions/current/state
@@ -36,11 +38,22 @@ GET  /sessions/current/report
 GET  /reports/daily?date=YYYY-MM-DD
 GET  /personas
 GET|PUT /settings
+POST /data/delete                     (requires {"confirm":"DELETE"})
 POST /observations/browser-nav
 POST /observations/{id}/excerpt
 POST /feedback
 POST /interventions/{id}/delivery
 ```
+
+All `POST`, `PUT`, and `PATCH` requests must use `Content-Type:
+application/json`. Session creation and ending use an explicit empty JSON body
+(`{}`); browser cross-origin mutations are rejected by the local API security
+middleware.
+
+Except for `/health`, `/auth/status`, and the one-time `/auth/pair`, API calls
+must also carry a valid paired HMAC. The server binds signed responses to the
+request nonce and body so the extension can reject a process impersonating the
+server on port 8765. Pairing state lives in owner-only files under `data/`.
 
 When the controller returns `request_excerpt`, the response also contains a
 `candidate_id`. Candidate creation preserves streak/alignment state. Tier 2

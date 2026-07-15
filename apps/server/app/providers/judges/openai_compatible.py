@@ -9,6 +9,7 @@ import httpx
 
 from ...schemas import Verdict
 from .base import Tier1Result, Tier2Result, ordered_api_keys
+from .http_utils import read_bounded_json_object
 
 
 @dataclass(frozen=True)
@@ -44,7 +45,7 @@ class OpenAICompatibleJudgeProvider:
             "response_format": {"type": "json_object"},
         }
         response = await self._post_chat_completions(request_body)
-        content = response.json()["choices"][0]["message"]["content"]
+        content = response["choices"][0]["message"]["content"]
         return parse_tier1_json(content)
 
     async def complete_goal_enrichment(self, prompt: str, timeout_seconds: float) -> str:
@@ -55,7 +56,7 @@ class OpenAICompatibleJudgeProvider:
             "response_format": {"type": "json_object"},
         }
         response = await self._post_chat_completions(request_body, timeout_seconds=timeout_seconds)
-        return response.json()["choices"][0]["message"]["content"]
+        return response["choices"][0]["message"]["content"]
 
     async def confirm_tier2(
         self,
@@ -70,14 +71,14 @@ class OpenAICompatibleJudgeProvider:
             "response_format": {"type": "json_object"},
         }
         response = await self._post_chat_completions(request_body)
-        content = response.json()["choices"][0]["message"]["content"]
+        content = response["choices"][0]["message"]["content"]
         return parse_tier2_json(content)
 
     async def _post_chat_completions(
         self,
         request_body: dict[str, object],
         timeout_seconds: float | None = None,
-    ) -> httpx.Response:
+    ) -> dict[str, object]:
         url = _chat_completions_url(self.base_url)
         api_keys = ordered_api_keys(self.api_keys, self.api_key, self.fallback_api_key, self._rotation)
 
@@ -85,16 +86,16 @@ class OpenAICompatibleJudgeProvider:
         async with httpx.AsyncClient(timeout=timeout_seconds or self.timeout_seconds) as client:
             for index, api_key in enumerate(api_keys):
                 headers = {"authorization": f"Bearer {api_key}", "content-type": "application/json"}
-                response = await client.post(url, headers=headers, json=request_body)
-                last_response = response
-                if response.status_code in {401, 403, 429} and index + 1 < len(api_keys):
-                    continue
-                response.raise_for_status()
-                return response
+                async with client.stream("POST", url, headers=headers, json=request_body) as response:
+                    last_response = response
+                    if response.status_code in {401, 403, 429} and index + 1 < len(api_keys):
+                        continue
+                    response.raise_for_status()
+                    return await read_bounded_json_object(response)
 
         assert last_response is not None
         last_response.raise_for_status()
-        return last_response
+        raise RuntimeError("judge provider request completed without a response")
 
 
 def parse_tier1_json(content: str) -> Tier1Result:

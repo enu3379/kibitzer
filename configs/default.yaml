@@ -2,6 +2,16 @@ server:
   host: "127.0.0.1"
   port: 8765
   db_path: "./data/kibitzer.sqlite3"
+  allowed_hosts: ["127.0.0.1", "localhost"]
+  # Derived from apps/extension/manifest.json:key. Replace both values with the
+  # Chrome Web Store public key/id before the first published build.
+  allowed_origins: ["chrome-extension://pkfnofjnjaojkamahhoipkeaiaecdkgc"]
+  max_request_body_bytes: 524288
+  docs_enabled: false
+  auth_enabled: true
+  auth_key_path: "./data/auth.key"
+  pairing_code_path: "./data/pairing.code"
+  auth_timestamp_tolerance_seconds: 60
 
 embedding:
   provider: "onnx_cpu"
@@ -116,9 +126,10 @@ time_budget:
   recent_excerpt_char_limit: 600
 
 privacy:
-  sensitive_domains_file: "configs/sensitive_domains.yaml"
-  strip_query: true
-  hash_url_path: true
+  sensitive_domains_file: "configs/sensitive_domains.json"
+  # Activity older than this is removed on server startup. Active goals and
+  # settings remain until the session ends or the user chooses full deletion.
+  retention_days: 30
 
 delivery:
   channel: "chrome_notification"

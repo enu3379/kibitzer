@@ -17,7 +17,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+from apps.server.tests.support import TestClient
 
 from apps.server.app.config import AppConfig, ServerConfig
 from apps.server.app.core.normalization import strip_repeated_title_suffix
@@ -111,10 +111,10 @@ class WikiRabbitHoleRegressionTest(unittest.TestCase):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.tmpdir.name) / "kibitzer.sqlite3"
         self.store = SQLiteStore(self.db_path)
-        config = AppConfig(server=ServerConfig(db_path=str(self.db_path)))
+        config = AppConfig(server=ServerConfig(auth_enabled=False, db_path=str(self.db_path)))
         self.client = TestClient(create_app(config=config, store=self.store))
         self.client.__enter__()
-        self.client.post("/sessions")
+        self.client.post("/sessions", json={})
         self.client.post("/sessions/current/goal", json={"raw_text": "LG그램 수리"})
 
     def tearDown(self) -> None:
@@ -167,7 +167,7 @@ class HealthTierStatusTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmpdir = tempfile.TemporaryDirectory()
         db_path = Path(self.tmpdir.name) / "kibitzer.sqlite3"
-        config = AppConfig(server=ServerConfig(db_path=str(db_path)))
+        config = AppConfig(server=ServerConfig(auth_enabled=False, db_path=str(db_path)))
         self.client = TestClient(create_app(config=config, store=SQLiteStore(db_path)))
         self.client.__enter__()
 

@@ -7,7 +7,7 @@ from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+from apps.server.tests.support import TestClient
 
 from apps.server.app.config import AppConfig, ControllerConfig, ServerConfig, Tier1Config, Tier2Config
 from apps.server.app.core.tier1_payload import build_tier1_payload
@@ -124,13 +124,13 @@ class Tier1ResilienceAndFactoryTest(unittest.TestCase):
     def test_provider_error_keeps_tier0_verdict(self) -> None:
         store = SQLiteStore(self.db_path)
         config = AppConfig(
-            server=ServerConfig(db_path=str(self.db_path)),
+            server=ServerConfig(auth_enabled=False, db_path=str(self.db_path)),
             tier1=Tier1Config(enabled=True),
         )
         client = TestClient(create_app(config=config, store=store, tier1_provider=RaisingTier1Provider()))
         client.__enter__()
         try:
-            session_id = client.post("/sessions").json()["id"]
+            session_id = client.post("/sessions", json={}).json()["id"]
             client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
             response = client.post(
                 "/observations/browser-nav",
@@ -159,14 +159,14 @@ class Tier1ResilienceAndFactoryTest(unittest.TestCase):
     def test_provider_success_is_reported_in_health(self) -> None:
         store = SQLiteStore(self.db_path)
         config = AppConfig(
-            server=ServerConfig(db_path=str(self.db_path)),
+            server=ServerConfig(auth_enabled=False, db_path=str(self.db_path)),
             tier1=Tier1Config(enabled=True),
         )
         provider = FakeTier1Provider(Tier1Result(verdict=Verdict.OK, reason="normal subtopic"))
         client = TestClient(create_app(config=config, store=store, tier1_provider=provider))
         client.__enter__()
         try:
-            client.post("/sessions")
+            client.post("/sessions", json={})
             client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
             client.post(
                 "/observations/browser-nav",
@@ -215,7 +215,7 @@ class Tier1ResilienceAndFactoryTest(unittest.TestCase):
     def test_activation_records_provider_degraded_event(self) -> None:
         store = SQLiteStore(self.db_path)
         config = AppConfig(
-            server=ServerConfig(db_path=str(self.db_path)),
+            server=ServerConfig(auth_enabled=False, db_path=str(self.db_path)),
             tier1=Tier1Config(enabled=True),
             tier2=Tier2Config(enabled=False),
         )
@@ -230,7 +230,7 @@ class Tier1ResilienceAndFactoryTest(unittest.TestCase):
                     ).fetchall()
                 self.assertEqual(startup_rows, [])
 
-                client.post("/sessions")
+                client.post("/sessions", json={})
                 client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
 
                 with closing(sqlite3.connect(self.db_path)) as conn:
@@ -263,7 +263,7 @@ class Tier1ApiTest(unittest.TestCase):
     ) -> tuple[TestClient, SQLiteStore]:
         store = SQLiteStore(self.db_path)
         config = AppConfig(
-            server=ServerConfig(db_path=str(self.db_path)),
+            server=ServerConfig(auth_enabled=False, db_path=str(self.db_path)),
             tier1=Tier1Config(enabled=provider is not None),
             controller=controller or ControllerConfig(),
         )
@@ -283,7 +283,7 @@ class Tier1ApiTest(unittest.TestCase):
             ),
         )
         try:
-            session_id = client.post("/sessions").json()["id"]
+            session_id = client.post("/sessions", json={}).json()["id"]
             client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
             client.post(
                 "/observations/browser-nav",
@@ -336,7 +336,7 @@ class Tier1ApiTest(unittest.TestCase):
         provider = FakeTier1Provider(Tier1Result(verdict=Verdict.DRIFT, reason="unrelated entertainment"))
         client, store = self._client(provider)
         try:
-            session_id = client.post("/sessions").json()["id"]
+            session_id = client.post("/sessions", json={}).json()["id"]
             client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
             response = client.post(
                 "/observations/browser-nav",
@@ -361,7 +361,7 @@ class Tier1ApiTest(unittest.TestCase):
     def test_without_tier1_provider_tier0_drift_is_kept(self) -> None:
         client, store = self._client(None)
         try:
-            session_id = client.post("/sessions").json()["id"]
+            session_id = client.post("/sessions", json={}).json()["id"]
             client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
             response = client.post(
                 "/observations/browser-nav",

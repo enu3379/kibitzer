@@ -6,7 +6,7 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+from apps.server.tests.support import TestClient
 
 from apps.server.app.config import (
     AppConfig,
@@ -38,7 +38,7 @@ class AttachmentLoopTest(unittest.TestCase):
         quiet_hours: QuietHoursConfig | None = None,
     ) -> TestClient:
         config = AppConfig(
-            server=ServerConfig(db_path=str(self.db_path)),
+            server=ServerConfig(auth_enabled=False, db_path=str(self.db_path)),
             tier1=Tier1Config(enabled=False),
             tier2=Tier2Config(enabled=False),
             controller=ControllerConfig(k=2, coldstart_observations=1, cooldown_seconds=0),
@@ -55,7 +55,7 @@ class AttachmentLoopTest(unittest.TestCase):
         return client
 
     def _start_goal(self, client: TestClient) -> str:
-        session_id = client.post("/sessions").json()["id"]
+        session_id = client.post("/sessions", json={}).json()["id"]
         client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
         return session_id
 

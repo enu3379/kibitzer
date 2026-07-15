@@ -4,6 +4,7 @@ import test from "node:test"
 import {
   listExplorationHistory,
   loadExplorationHistory,
+  minimizeHistoryUrl,
   prependExplorationHistory,
   updateExplorationHistory,
 } from "../src/lib/history.ts"
@@ -159,4 +160,19 @@ test("returns a non-sensitive failure result when history storage rejects", asyn
   const loaded = await loadExplorationHistory()
 
   assert.deepEqual(loaded, { ok: false })
+})
+
+test("stores only the page origin and caps the title", async () => {
+  const storage = installSessionStorage()
+
+  await prependExplorationHistory(
+    historyEntry("private", {
+      url: "https://example.com/reset/token-secret?access_token=secret#fragment",
+      title: "x".repeat(2_100),
+    }),
+  )
+
+  assert.equal(storage.entries()[0].url, "https://example.com")
+  assert.equal(storage.entries()[0].title.length, 2_000)
+  assert.equal(minimizeHistoryUrl("file:///Users/alice/private.pdf"), null)
 })

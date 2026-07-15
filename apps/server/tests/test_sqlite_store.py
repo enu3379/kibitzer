@@ -3,6 +3,7 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import closing
+from datetime import datetime, timezone
 from pathlib import Path
 
 from apps.server.app.storage.sqlite import NoActiveSessionError, SQLiteStore
@@ -31,6 +32,66 @@ class SQLiteStoreTest(unittest.TestCase):
             first_active = conn.execute("SELECT active FROM sessions WHERE id = ?", (first.id,)).fetchone()[0]
         self.assertEqual(active_count, 1)
         self.assertEqual(first_active, 0)
+
+    def test_retention_purges_closed_sessions_and_old_active_session_activity(self) -> None:
+        old_session = self.store.create_session()
+        self.store.end_current_session()
+        active_session = self.store.create_session()
+        old_ts = "2026-05-01T00:00:00+00:00"
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            conn.execute(
+                "UPDATE sessions SET created_at = ?, ended_at = ?, active = 0 WHERE id = ?",
+                (old_ts, old_ts, old_session.id),
+            )
+            conn.execute(
+                """
+                INSERT INTO observations (
+                    id, session_id, ts, source, features_json, verdict, tier_reached
+                ) VALUES ('obs_expired', ?, ?, 'browser_nav', '{}', 'OK', 0)
+                """,
+                (active_session.id, old_ts),
+            )
+            conn.execute(
+                """
+                INSERT INTO event_log (ts, session_id, event_type, payload_json)
+                VALUES (?, ?, 'expired.test', '{}')
+                """,
+                (old_ts, active_session.id),
+            )
+            conn.commit()
+
+        result = self.store.purge_expired_data(
+            30,
+            now=datetime(2026, 7, 15, tzinfo=timezone.utc),
+        )
+
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            session_ids = {row[0] for row in conn.execute("SELECT id FROM sessions")}
+            expired_observations = conn.execute(
+                "SELECT COUNT(*) FROM observations WHERE id = 'obs_expired'"
+            ).fetchone()[0]
+            expired_events = conn.execute(
+                "SELECT COUNT(*) FROM event_log WHERE event_type = 'expired.test'"
+            ).fetchone()[0]
+        self.assertEqual(session_ids, {active_session.id})
+        self.assertEqual(expired_observations, 0)
+        self.assertEqual(expired_events, 0)
+        self.assertEqual(result.sessions, 1)
+        self.assertEqual(result.observations, 1)
+        self.assertGreaterEqual(result.events, 1)
+
+    def test_delete_all_activity_keeps_settings(self) -> None:
+        self.store.create_session()
+        self.store.set_current_goal("private goal")
+        self.store.update_settings({"persona": "quiet_coach"})
+
+        result = self.store.delete_all_activity_data()
+
+        self.assertIsNone(self.store.get_current_session())
+        self.assertGreaterEqual(result.sessions, 1)
+        self.assertGreaterEqual(result.events, 1)
+        self.assertEqual(self.store.get_settings()["persona"], "quiet_coach")
+        self.assertNotIn(b"private goal", self.db_path.read_bytes())
 
     def test_set_current_goal_requires_session(self) -> None:
         with self.assertRaises(NoActiveSessionError):

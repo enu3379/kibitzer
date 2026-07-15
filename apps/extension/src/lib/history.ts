@@ -21,12 +21,17 @@ export type ExplorationHistoryLoadResult =
 
 const HISTORY_STORAGE_KEY = "kibitzer:exploration-history"
 const MAX_HISTORY_ITEMS = 100
+const MAX_HISTORY_TITLE_LENGTH = 2000
 let historyMutationQueue: Promise<void> = Promise.resolve()
 
 export async function listExplorationHistory(): Promise<ExplorationHistoryEntry[]> {
   const result = await chrome.storage.session.get(HISTORY_STORAGE_KEY)
   const value = result[HISTORY_STORAGE_KEY]
-  return Array.isArray(value) ? value.filter(isHistoryEntry) : []
+  if (!Array.isArray(value)) return []
+  return value
+    .filter(isHistoryEntry)
+    .map(sanitizeHistoryEntry)
+    .filter((entry): entry is ExplorationHistoryEntry => entry !== null)
 }
 
 export async function loadExplorationHistory(): Promise<ExplorationHistoryLoadResult> {
@@ -38,11 +43,13 @@ export async function loadExplorationHistory(): Promise<ExplorationHistoryLoadRe
 }
 
 export async function prependExplorationHistory(entry: ExplorationHistoryEntry): Promise<void> {
+  const sanitized = sanitizeHistoryEntry(entry)
+  if (!sanitized) return
   return enqueueHistoryMutation(async () => {
     const entries = await listExplorationHistory()
-    const deduped = entries.filter((item) => item.id !== entry.id)
+    const deduped = entries.filter((item) => item.id !== sanitized.id)
     await chrome.storage.session.set({
-      [HISTORY_STORAGE_KEY]: [entry, ...deduped].slice(0, MAX_HISTORY_ITEMS),
+      [HISTORY_STORAGE_KEY]: [sanitized, ...deduped].slice(0, MAX_HISTORY_ITEMS),
     })
   })
 }
@@ -53,9 +60,39 @@ export async function updateExplorationHistory(
 ): Promise<void> {
   return enqueueHistoryMutation(async () => {
     const entries = await listExplorationHistory()
-    const next = entries.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry))
+    const next = entries.flatMap((entry) => {
+      if (entry.id !== id) return [entry]
+      const sanitized = sanitizeHistoryEntry({ ...entry, ...patch })
+      return sanitized ? [sanitized] : []
+    })
     await chrome.storage.session.set({ [HISTORY_STORAGE_KEY]: next.slice(0, MAX_HISTORY_ITEMS) })
   })
+}
+
+export async function clearExplorationHistory(): Promise<void> {
+  return enqueueHistoryMutation(async () => {
+    await chrome.storage.session.remove(HISTORY_STORAGE_KEY)
+  })
+}
+
+export function minimizeHistoryUrl(rawUrl: string): string | null {
+  try {
+    const parsed = new URL(rawUrl)
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null
+    return parsed.origin
+  } catch {
+    return null
+  }
+}
+
+function sanitizeHistoryEntry(entry: ExplorationHistoryEntry): ExplorationHistoryEntry | null {
+  const url = minimizeHistoryUrl(entry.url)
+  if (!url) return null
+  return {
+    ...entry,
+    url,
+    title: entry.title.slice(0, MAX_HISTORY_TITLE_LENGTH),
+  }
 }
 
 function enqueueHistoryMutation(mutation: () => Promise<void>): Promise<void> {

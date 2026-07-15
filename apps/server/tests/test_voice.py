@@ -23,7 +23,10 @@ class VoiceTest(unittest.TestCase):
         finally:
             voice.asyncio.create_subprocess_exec = original
 
-        self.assertEqual(calls[0][0][:6], ("say", "-v", "Yuna", "-r", "175", "hello"))
+        self.assertEqual(
+            calls[0][0][:7],
+            ("/usr/bin/say", "-v", "Yuna", "-r", "175", "--", "hello"),
+        )
 
 
 if __name__ == "__main__":

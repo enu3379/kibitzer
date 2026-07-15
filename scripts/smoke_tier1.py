@@ -37,12 +37,12 @@ def main() -> int:
         db_path = Path(tmp) / "kibitzer.sqlite3"
         provider = FakeTier1Provider(Tier1Result(verdict=Verdict.OK, reason="normal subtopic"))
         app = create_app(
-            config=AppConfig(server=ServerConfig(db_path=str(db_path))),
+            config=AppConfig(server=ServerConfig(auth_enabled=False, db_path=str(db_path))),
             store=SQLiteStore(db_path),
             tier1_provider=provider,
         )
-        with TestClient(app) as client:
-            session_id = client.post("/sessions").json()["id"]
+        with TestClient(app, base_url="http://127.0.0.1:8765") as client:
+            session_id = client.post("/sessions", json={}).json()["id"]
             client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
             response = client.post(
                 "/observations/browser-nav",

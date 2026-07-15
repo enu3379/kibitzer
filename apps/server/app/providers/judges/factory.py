@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import ipaddress
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -51,6 +53,7 @@ def create_tier1_judge_provider(config: Tier1Config) -> JudgeProvider | None:
     base_url = _expand_env(config.base_url)
     if not api_key or not base_url:
         return None
+    base_url = _validate_api_url(base_url)
 
     return OpenAICompatibleJudgeProvider(
         base_url=base_url,
@@ -112,6 +115,7 @@ def _resolve_direct_tier2_settings(config: Tier2Config) -> _ResolvedJudgeSetting
     fallback_api_key = os.environ.get(config.fallback_api_key_env) if config.fallback_api_key_env else None
     if not api_url or not api_key:
         return None
+    api_url = _validate_api_url(api_url)
     provider = "ollama_chat" if config.provider in {"ollama", "ollama_chat"} else config.provider
     return _ResolvedJudgeSettings(
         provider=provider,
@@ -165,6 +169,9 @@ def _resolve_experiment_model_settings(
     api_url = str(model_config.get("api_url") or "")
     api_style = str(model_config.get("api_style") or "")
     model = str(model_config.get("model_name") or model_config.get("ollama_model") or default_model)
+    if not api_url or not model:
+        return None
+    api_url = _validate_api_url(api_url)
     api_key = os.environ.get(api_key_env) or str(model_config.get("api_key") or "")
     if not api_key and _is_local_url(api_url):
         # Local Ollama ignores authorization; a placeholder keeps the header valid.
@@ -184,7 +191,7 @@ def _resolve_experiment_model_settings(
     )
     resolved_max_tokens = int(model_config.get("max_output_tokens") or max_output_tokens)
 
-    if not api_url or not api_key or not model:
+    if not api_key:
         return None
 
     provider = _provider_from_experiment_style(api_style, api_url)
@@ -201,7 +208,26 @@ def _resolve_experiment_model_settings(
 
 
 def _is_local_url(url: str) -> bool:
-    return "localhost" in url or "127.0.0.1" in url
+    hostname = urlsplit(url).hostname
+    if hostname == "localhost":
+        return True
+    if not hostname:
+        return False
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
+
+
+def _validate_api_url(url: str) -> str:
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("judge provider URL must be an absolute HTTP(S) URL")
+    if parsed.username or parsed.password:
+        raise ValueError("judge provider URL must not contain credentials")
+    if parsed.scheme == "http" and not _is_local_url(url):
+        raise ValueError("non-loopback judge provider URLs must use HTTPS")
+    return url
 
 
 def _provider_from_experiment_style(api_style: str, api_url: str) -> str:

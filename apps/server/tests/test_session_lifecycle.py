@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+from apps.server.tests.support import TestClient
 
 from apps.server.app.config import (
     AppConfig,
@@ -38,7 +38,7 @@ class SessionLifecycleApiTest(unittest.TestCase):
         theta_high: float = 0.3,
     ) -> TestClient:
         config = AppConfig(
-            server=ServerConfig(db_path=str(self.db_path)),
+            server=ServerConfig(auth_enabled=False, db_path=str(self.db_path)),
             tier1=Tier1Config(enabled=False),
             tier2=Tier2Config(enabled=False),
             controller=ControllerConfig(
@@ -82,12 +82,12 @@ class SessionLifecycleApiTest(unittest.TestCase):
         client = self._client()
         self.assertEqual(client.get("/sessions/current/state").status_code, 404)
         self.assertEqual(client.get("/sessions/current/stats").status_code, 404)
-        self.assertEqual(client.post("/sessions/current/snooze").status_code, 404)
-        self.assertEqual(client.post("/sessions/current/end").status_code, 404)
+        self.assertEqual(client.post("/sessions/current/snooze", json={}).status_code, 404)
+        self.assertEqual(client.post("/sessions/current/end", json={}).status_code, 404)
 
     def test_state_reports_goal_and_coldstart(self) -> None:
         client = self._client()
-        session_id = client.post("/sessions").json()["id"]
+        session_id = client.post("/sessions", json={}).json()["id"]
 
         state = client.get("/sessions/current/state").json()
         self.assertEqual(state["session_id"], session_id)
@@ -109,7 +109,7 @@ class SessionLifecycleApiTest(unittest.TestCase):
 
     def test_state_reports_alignment_controller_score(self) -> None:
         client = self._client(controller_type="alignment", theta_low=0.2, theta_high=0.6)
-        session_id = client.post("/sessions").json()["id"]
+        session_id = client.post("/sessions", json={}).json()["id"]
         client.post("/sessions/current/goal", json={"raw_text": "Plan a trip to Finland"})
         self.store.save_controller_state(
             session_id=session_id,
@@ -131,10 +131,10 @@ class SessionLifecycleApiTest(unittest.TestCase):
 
     def test_snooze_sets_state_and_zero_duration_clears_it(self) -> None:
         client = self._client(snooze_seconds=900)
-        client.post("/sessions").json()
+        client.post("/sessions", json={}).json()
 
         before = datetime.now(timezone.utc)
-        snooze = client.post("/sessions/current/snooze").json()
+        snooze = client.post("/sessions/current/snooze", json={}).json()
         snoozed_until = datetime.fromisoformat(snooze["snoozed_until"])
         delta = (snoozed_until - before).total_seconds()
         self.assertGreater(delta, 890)
@@ -151,7 +151,7 @@ class SessionLifecycleApiTest(unittest.TestCase):
 
     def test_snooze_honors_custom_duration(self) -> None:
         client = self._client(snooze_seconds=900)
-        client.post("/sessions").json()
+        client.post("/sessions", json={}).json()
 
         before = datetime.now(timezone.utc)
         snooze = client.post("/sessions/current/snooze", json={"duration_seconds": 1800}).json()
@@ -162,7 +162,7 @@ class SessionLifecycleApiTest(unittest.TestCase):
 
     def test_stats_aggregates_observations_and_interventions(self) -> None:
         client = self._client()
-        session_id = client.post("/sessions").json()["id"]
+        session_id = client.post("/sessions", json={}).json()["id"]
         client.post("/sessions/current/goal", json={"raw_text": "Plan a trip to Finland"})
 
         for _ in range(3):
@@ -190,7 +190,7 @@ class SessionLifecycleApiTest(unittest.TestCase):
 
     def test_stats_with_no_judged_observations(self) -> None:
         client = self._client()
-        client.post("/sessions").json()
+        client.post("/sessions", json={}).json()
 
         stats = client.get("/sessions/current/stats").json()
         self.assertEqual(stats["observations"], 0)
@@ -200,7 +200,7 @@ class SessionLifecycleApiTest(unittest.TestCase):
 
     def test_state_exposes_pending_intervention_until_feedback(self) -> None:
         client = self._client()
-        session_id = client.post("/sessions").json()["id"]
+        session_id = client.post("/sessions", json={}).json()["id"]
         client.post("/sessions/current/goal", json={"raw_text": "Plan a trip to Finland"})
         self.assertIsNone(client.get("/sessions/current/state").json()["pending_intervention"])
 
@@ -227,7 +227,7 @@ class SessionLifecycleApiTest(unittest.TestCase):
 
     def test_delivery_report_updates_intervention_status(self) -> None:
         client = self._client()
-        session_id = client.post("/sessions").json()["id"]
+        session_id = client.post("/sessions", json={}).json()["id"]
         client.post("/sessions/current/goal", json={"raw_text": "Plan a trip to Finland"})
         observation_id = self._seed_observation(session_id, Verdict.DRIFT, url_host="youtube.com")
         intervention_id = self.store.create_intervention(session_id, observation_id, "Drift detected.")
@@ -248,12 +248,12 @@ class SessionLifecycleApiTest(unittest.TestCase):
 
     def test_end_returns_summary_and_deactivates_session(self) -> None:
         client = self._client()
-        session_id = client.post("/sessions").json()["id"]
+        session_id = client.post("/sessions", json={}).json()["id"]
         client.post("/sessions/current/goal", json={"raw_text": "Plan a trip to Finland"})
         self._seed_observation(session_id, Verdict.OK)
         self._seed_observation(session_id, Verdict.DRIFT, url_host="youtube.com")
 
-        summary = client.post("/sessions/current/end").json()
+        summary = client.post("/sessions/current/end", json={}).json()
         self.assertEqual(summary["session_id"], session_id)
         self.assertIsNotNone(summary["ended_at"])
         self.assertEqual(summary["observations"], 2)
@@ -262,11 +262,11 @@ class SessionLifecycleApiTest(unittest.TestCase):
 
         self.assertEqual(client.get("/sessions/current").status_code, 404)
         self.assertEqual(client.get("/sessions/current/state").status_code, 404)
-        self.assertEqual(client.post("/sessions/current/end").status_code, 404)
+        self.assertEqual(client.post("/sessions/current/end", json={}).status_code, 404)
 
     def test_report_aggregates_session_and_daily_detail(self) -> None:
         client = self._client()
-        session_id = client.post("/sessions").json()["id"]
+        session_id = client.post("/sessions", json={}).json()["id"]
         client.post("/sessions/current/goal", json={"raw_text": "Plan a trip to Finland"})
         local_base = datetime.now().astimezone().replace(hour=10, minute=0, second=0, microsecond=0)
         base = local_base.astimezone(timezone.utc)

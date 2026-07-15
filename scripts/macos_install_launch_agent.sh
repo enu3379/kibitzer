@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LABEL="com.kibitzer.server"
@@ -12,6 +13,9 @@ if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
 fi
 
 mkdir -p "$HOME/Library/LaunchAgents" "$LOG_DIR" "$ROOT/data"
+chmod 700 "$LOG_DIR" "$ROOT/data"
+[[ ! -f "$ROOT/.env" ]] || chmod 600 "$ROOT/.env"
+[[ ! -f "$ROOT/configs/models.local.yaml" ]] || chmod 600 "$ROOT/configs/models.local.yaml"
 
 cat > "$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

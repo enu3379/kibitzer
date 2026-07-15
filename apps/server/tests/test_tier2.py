@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import httpx
 import yaml
-from fastapi.testclient import TestClient
+from apps.server.tests.support import TestClient
 
 from apps.server.app.config import (
     AppConfig,
@@ -132,7 +132,7 @@ class Tier2ApiTest(unittest.TestCase):
     ) -> tuple[TestClient, SQLiteStore]:
         store = SQLiteStore(self.db_path)
         config = AppConfig(
-            server=ServerConfig(db_path=str(self.db_path)),
+            server=ServerConfig(auth_enabled=False, db_path=str(self.db_path)),
             tier1=Tier1Config(enabled=False),
             tier2=Tier2Config(enabled=tier2_enabled, excerpt_char_limit=120, recent_observations=3),
             controller=controller or ControllerConfig(k=1, coldstart_observations=1, cooldown_seconds=0),
@@ -144,7 +144,7 @@ class Tier2ApiTest(unittest.TestCase):
         return client, store
 
     def _start_goal_and_request_excerpt(self, client: TestClient) -> dict[str, object]:
-        client.post("/sessions")
+        client.post("/sessions", json={})
         client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
         response = client.post(
             "/observations/browser-nav",
@@ -402,7 +402,7 @@ class Tier2ApiTest(unittest.TestCase):
         provider = FakeTier2Provider(Tier2Result(confirm_drift=True, message="목표와 다른 페이지입니다."))
         client, store = self._client(provider)
         try:
-            session_id = client.post("/sessions").json()["id"]
+            session_id = client.post("/sessions", json={}).json()["id"]
             client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
             store.record_observation(
                 Observation(

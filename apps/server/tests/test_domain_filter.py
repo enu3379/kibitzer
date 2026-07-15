@@ -51,6 +51,17 @@ class DomainFilterTest(unittest.TestCase):
         self.assertEqual(rules.blocked_hosts, ["example.com"])
         self.assertEqual(rules.blocked_host_keywords, ["secret"])
 
+    def test_missing_or_malformed_rules_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "missing.yaml"
+            malformed = Path(tmp) / "malformed.yaml"
+            malformed.write_text("blocked_hosts: example.com\n", encoding="utf-8")
+
+            with self.assertRaises(FileNotFoundError):
+                load_sensitive_domain_rules(missing)
+            with self.assertRaises(ValueError):
+                load_sensitive_domain_rules(malformed)
+
 
 if __name__ == "__main__":
     unittest.main()

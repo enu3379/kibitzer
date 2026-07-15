@@ -4,7 +4,7 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+from apps.server.tests.support import TestClient
 
 from apps.server.app.config import AppConfig, ServerConfig
 from apps.server.app.main import create_app
@@ -15,7 +15,7 @@ class SessionApiTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmpdir = tempfile.TemporaryDirectory()
         db_path = Path(self.tmpdir.name) / "kibitzer.sqlite3"
-        config = AppConfig(server=ServerConfig(db_path=str(db_path)))
+        config = AppConfig(server=ServerConfig(auth_enabled=False, db_path=str(db_path)))
         app = create_app(config=config, store=SQLiteStore(db_path))
         self.client = TestClient(app)
         self.client.__enter__()
@@ -25,7 +25,7 @@ class SessionApiTest(unittest.TestCase):
         self.tmpdir.cleanup()
 
     def test_create_session_then_set_goal(self) -> None:
-        session_response = self.client.post("/sessions")
+        session_response = self.client.post("/sessions", json={})
         self.assertEqual(session_response.status_code, 201)
         session_id = session_response.json()["id"]
 

@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+from apps.server.tests.support import TestClient
 
 from apps.server.app.config import AppConfig, ControllerConfig, ServerConfig, Tier1Config
 from apps.server.app.core.controllers.alignment import AlignmentController
@@ -29,7 +29,7 @@ class ControllerHandshakeTest(unittest.TestCase):
 
     def _client(self, controller: ControllerConfig) -> TestClient:
         config = AppConfig(
-            server=ServerConfig(db_path=str(self.db_path)),
+            server=ServerConfig(auth_enabled=False, db_path=str(self.db_path)),
             tier1=Tier1Config(enabled=False),
             controller=controller,
         )
@@ -38,7 +38,7 @@ class ControllerHandshakeTest(unittest.TestCase):
         return client
 
     def _start_goal(self, client: TestClient) -> str:
-        session_id = client.post("/sessions").json()["id"]
+        session_id = client.post("/sessions", json={}).json()["id"]
         client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
         return session_id
 

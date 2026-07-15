@@ -1,15 +1,45 @@
+import os
+import re
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+_EXTENSION_ORIGIN_PATTERN = re.compile(r"^chrome-extension://[a-p]{32}$")
 
 
 class ServerConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8765
     db_path: str = "./data/kibitzer.sqlite3"
+    allowed_hosts: list[str] = Field(default_factory=lambda: ["127.0.0.1", "localhost"])
+    allowed_origins: list[str] = Field(
+        default_factory=lambda: ["chrome-extension://pkfnofjnjaojkamahhoipkeaiaecdkgc"]
+    )
+    max_request_body_bytes: int = Field(default=524288, ge=262144, le=8388608)
+    docs_enabled: bool = False
+    auth_enabled: bool = True
+    auth_key_path: str = "./data/auth.key"
+    pairing_code_path: str = "./data/pairing.code"
+    auth_timestamp_tolerance_seconds: int = Field(default=60, ge=15, le=300)
+
+    @field_validator("allowed_hosts")
+    @classmethod
+    def _validate_loopback_hosts(cls, hosts: list[str]) -> list[str]:
+        allowed = {"127.0.0.1", "localhost"}
+        if not hosts or any(host not in allowed for host in hosts):
+            raise ValueError("allowed_hosts must contain only loopback hostnames without ports")
+        return hosts
+
+    @field_validator("allowed_origins")
+    @classmethod
+    def _validate_extension_origins(cls, origins: list[str]) -> list[str]:
+        if not origins or any(not _EXTENSION_ORIGIN_PATTERN.fullmatch(origin) for origin in origins):
+            raise ValueError("allowed_origins must contain only exact Chrome extension origins")
+        return origins
 
 
 class EmbeddingConfig(BaseModel):
@@ -126,9 +156,8 @@ class TimeBudgetConfig(BaseModel):
 
 
 class PrivacyConfig(BaseModel):
-    sensitive_domains_file: str = "configs/sensitive_domains.yaml"
-    strip_query: bool = True
-    hash_url_path: bool = True
+    sensitive_domains_file: str = "configs/sensitive_domains.json"
+    retention_days: int = Field(default=30, ge=1, le=3650)
 
 
 class VoiceConfig(BaseModel):
@@ -183,10 +212,12 @@ class AppConfig(BaseModel):
 
 
 def load_config(path: str | Path = "configs/default.yaml") -> AppConfig:
-    load_dotenv(Path(".env"), override=False)
+    dotenv_path = Path(".env")
+    load_dotenv(dotenv_path, override=False)
+    harden_local_secret_file(dotenv_path)
     config_path = Path(path)
     data = yaml.safe_load(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
-    return AppConfig(
+    config = AppConfig(
         raw=data or {},
         **{
             k: v
@@ -209,3 +240,12 @@ def load_config(path: str | Path = "configs/default.yaml") -> AppConfig:
             }
         },
     )
+    for models_file in {config.tier1.experiment_models_file, config.tier2.experiment_models_file}:
+        if models_file:
+            harden_local_secret_file(Path(os.path.expandvars(models_file)).expanduser())
+    return config
+
+
+def harden_local_secret_file(path: Path) -> None:
+    if os.name != "nt" and path.is_file():
+        path.chmod(0o600)

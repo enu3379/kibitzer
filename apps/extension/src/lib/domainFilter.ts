@@ -1,31 +1,7 @@
-const BLOCKED_HOSTS = [
-  "accounts.google.com",
-  "myaccount.google.com",
-  "bankofamerica.com",
-  "chase.com",
-  "paypal.com",
-  "stripe.com",
-  "checkout.stripe.com",
-  "docs.google.com",
-  "drive.google.com",
-  "mail.google.com",
-  "github.com/settings",
-  "localhost",
-  "127.0.0.1",
-]
+import sensitiveDomainRules from "../../../../configs/sensitive_domains.json" with { type: "json" }
 
-const BLOCKED_HOST_KEYWORDS = [
-  "bank",
-  "billing",
-  "checkout",
-  "payment",
-  "password",
-  "patient",
-  "medical",
-  "health",
-  "auth",
-  "login",
-]
+const BLOCKED_HOSTS = sensitiveDomainRules.blocked_hosts
+const BLOCKED_HOST_KEYWORDS = sensitiveDomainRules.blocked_host_keywords
 
 export function shouldDropUrl(rawUrl: string): boolean {
   let parsed: URL
@@ -34,6 +10,7 @@ export function shouldDropUrl(rawUrl: string): boolean {
   } catch {
     return true
   }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return true
 
   const host = parsed.hostname.toLowerCase()
   const path = parsed.pathname.toLowerCase() || "/"

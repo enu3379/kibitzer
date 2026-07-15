@@ -11,6 +11,7 @@ import {
   SessionStats,
   Settings,
   createSession,
+  deleteAllActivityData,
   getCurrentSession,
   getHealthStatus,
   getLatestObservation,
@@ -26,7 +27,13 @@ import {
   putSettings,
   setGoal,
 } from "../lib/api"
-import { ExplorationHistoryEntry, ExplorationResponseKind, loadExplorationHistory } from "../lib/history"
+import { getAuthStatus, hasClientAuthSecret, pairWithServer } from "../lib/auth"
+import {
+  ExplorationHistoryEntry,
+  ExplorationResponseKind,
+  clearExplorationHistory,
+  loadExplorationHistory,
+} from "../lib/history"
 
 const POLL_MS = 2000
 const DEFAULT_OBSERVATION_SECONDS = 5
@@ -190,6 +197,18 @@ async function getActiveTab(): Promise<ActiveTab | null> {
 
 async function refresh(): Promise<void> {
   if (editing || summary || settingsOpen || reportOpen || historyOpen) return
+  const [authStatus, clientHasSecret] = await Promise.all([getAuthStatus(), hasClientAuthSecret()])
+  if (!authStatus) {
+    handleUnreachable()
+    return
+  }
+  if (authStatus.enabled && (!authStatus.paired || !clientHasSecret)) {
+    serverDown = false
+    offlineView = null
+    stopPoll()
+    renderPairing(authStatus.paired)
+    return
+  }
   const result = await getSessionState()
   if (result.kind === "unreachable") {
     handleUnreachable()
@@ -237,6 +256,63 @@ async function refresh(): Promise<void> {
     settings?.dwell.observation_seconds ?? DEFAULT_OBSERVATION_SECONDS,
   )
   schedulePoll()
+}
+
+function renderPairing(serverAlreadyPaired: boolean): void {
+  if (serverAlreadyPaired) {
+    root.innerHTML = `
+      ${header("페어링 필요", "amber")}
+      <div class="card">
+        <p class="label">이 브라우저에는 인증 키가 없습니다</p>
+        <p class="subhint">서버를 중지하고 <code>python scripts/reset_pairing.py</code>를 실행한 뒤 다시 시작하세요. 새 페어링 코드로 이 화면에서 연결할 수 있습니다.</p>
+      </div>`
+    return
+  }
+
+  root.innerHTML = `
+    ${header("페어링 필요", "amber")}
+    <div class="card">
+      <p class="label">로컬 서버와 안전하게 연결</p>
+      <p class="subhint">서버 로그 또는 <code>data/pairing.code</code>에 표시된 64자리 코드를 입력하세요. 코드는 서버로 그대로 전송되지 않습니다.</p>
+      <input id="pairing-code" class="goal-input" type="password" maxlength="64"
+        autocomplete="off" spellcheck="false" placeholder="64자리 페어링 코드" />
+      <label class="subhint" style="display: flex; gap: 7px; align-items: flex-start;">
+        <input id="privacy-ack" type="checkbox" />
+        <span>클라우드 LLM을 구성한 경우 목표·페이지 제목·호스트와, 누적 이탈 확인 때 제한된 본문이 해당 제공자에게 전송될 수 있음을 확인했습니다.</span>
+      </label>
+      <button id="pairing-submit" class="btn primary" type="button">연결</button>
+      <p id="pairing-error" class="subhint" role="status"></p>
+    </div>`
+
+  const input = document.getElementById("pairing-code") as HTMLInputElement | null
+  const privacyAck = document.getElementById("privacy-ack") as HTMLInputElement | null
+  const submit = document.getElementById("pairing-submit") as HTMLButtonElement | null
+  const pair = async () => {
+    const code = input?.value.trim() ?? ""
+    const error = document.getElementById("pairing-error")
+    if (!/^[0-9a-fA-F]{64}$/.test(code)) {
+      if (error) error.textContent = "64자리 16진수 코드를 확인해 주세요."
+      return
+    }
+    if (!privacyAck?.checked) {
+      if (error) error.textContent = "클라우드 처리 가능성 안내를 확인해 주세요."
+      return
+    }
+    if (submit) submit.disabled = true
+    if (error) error.textContent = "연결을 확인하는 중…"
+    const paired = await pairWithServer(code)
+    if (!paired) {
+      if (submit) submit.disabled = false
+      if (error) error.textContent = "페어링에 실패했습니다. 코드와 서버 상태를 확인해 주세요."
+      return
+    }
+    void refresh()
+  }
+  submit?.addEventListener("click", () => void pair())
+  input?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") void pair()
+  })
+  input?.focus()
 }
 
 // Server-down handling (issue #11): the popup keeps rendering — a red banner
@@ -1007,7 +1083,12 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
       <span class="grow">개발자 진단</span>
       <input id="dev-toggle" type="checkbox" ${devDiagnostics ? "checked" : ""} />
     </div>
-    <p class="subhint">지금 페이지 카드에 판정 단계, r0/τ, 예시·앵커 수치와 판정 근거를 표시합니다.</p>`
+    <p class="subhint">지금 페이지 카드에 판정 단계, r0/τ, 예시·앵커 수치와 판정 근거를 표시합니다.</p>
+    <div class="setrow">
+      <span class="grow">저장된 활동 데이터</span>
+      <button id="delete-activity" class="btn" type="button" style="flex: 0 0 auto; color: var(--red-tx);">모두 삭제</button>
+    </div>
+    <p class="subhint">모든 세션·목표·관측·알림 기록과 이 확장 프로그램의 임시 탐색 기록을 삭제합니다. 설정과 페어링 키는 유지됩니다.</p>`
 
   document.getElementById("settings-back")?.addEventListener("click", closeSettings)
 
@@ -1107,6 +1188,36 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
       // Preference simply won't survive the popup closing.
     }
   })
+  document.getElementById("delete-activity")?.addEventListener("click", () => {
+    void deleteActivityData()
+  })
+}
+
+async function deleteActivityData(): Promise<void> {
+  if (!window.confirm("저장된 모든 활동 데이터를 삭제할까요? 이 작업은 되돌릴 수 없습니다.")) return
+  const deleted = await deleteAllActivityData()
+  if (!deleted?.deleted) {
+    handleUnreachable()
+    return
+  }
+  await clearExplorationHistory().catch(() => undefined)
+  const notificationIds = await new Promise<Record<string, boolean>>((resolve) => {
+    chrome.notifications.getAll((ids) => resolve(ids as Record<string, boolean>))
+  })
+  await Promise.all(
+    Object.keys(notificationIds).map((notificationId) =>
+      new Promise<void>((resolve) => {
+        chrome.notifications.clear(notificationId, () => resolve())
+      }),
+    ),
+  )
+  clearSnapshot()
+  summary = null
+  settingsOpen = false
+  reportOpen = false
+  historyOpen = false
+  notifyBadge()
+  void refresh()
 }
 
 async function applySettings(patch: Parameters<typeof putSettings>[0]): Promise<void> {
