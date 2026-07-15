@@ -298,6 +298,13 @@ class SQLiteStore:
         with self._connect() as conn:
             self._ensure_schema(conn)
 
+    def delete_all_activity_data(self) -> None:
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            conn.execute("DELETE FROM observation_requests")
+            conn.execute("DELETE FROM sessions")
+            conn.execute("DELETE FROM event_log")
+
     def create_session(self) -> SessionRecord:
         session_id = f"sess_{uuid.uuid4().hex}"
         now = _utc_now()
@@ -3248,6 +3255,7 @@ class SQLiteStore:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA secure_delete = ON")
         try:
             yield conn
             conn.commit()

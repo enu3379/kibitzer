@@ -175,6 +175,21 @@ export interface SnoozeResult {
   snoozed_until: string
 }
 
+export async function deleteAllActivityData(): Promise<boolean> {
+  const response = await serverFetch("/data/delete", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ confirm: "DELETE" }),
+  })
+  if (!response?.ok) return false
+  try {
+    const body = (await response.json()) as { deleted?: unknown }
+    return body.deleted === true
+  } catch {
+    return false
+  }
+}
+
 export async function getCurrentSession(): Promise<CurrentSession | null> {
   const response = await serverFetch("/sessions/current")
   if (!response?.ok) return null

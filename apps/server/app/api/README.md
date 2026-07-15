@@ -19,6 +19,7 @@ Current handlers:
 - `GET /sessions/current/report`, `GET /reports/daily`
 - `GET /personas`
 - `GET|PUT /settings`
+- `POST /data/delete` (requires `{"confirm":"DELETE"}`)
 - `POST /observations/browser-nav`, `POST /observations/{observation_id}/excerpt`
 - `POST /feedback`, `POST /interventions/{intervention_id}/delivery`
 

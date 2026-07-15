@@ -11,6 +11,7 @@ import {
   SessionStats,
   Settings,
   createSession,
+  deleteAllActivityData,
   getCurrentSession,
   getHealthStatus,
   getLatestObservation,
@@ -1065,7 +1066,12 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
       <span class="grow">개발자 진단</span>
       <input id="dev-toggle" type="checkbox" ${devDiagnostics ? "checked" : ""} />
     </div>
-    <p class="subhint">지금 페이지 카드에 판정 단계, r0/τ, 예시·앵커 수치와 판정 근거를 표시합니다.</p>`
+    <p class="subhint">지금 페이지 카드에 판정 단계, r0/τ, 예시·앵커 수치와 판정 근거를 표시합니다.</p>
+    <div class="setrow">
+      <span class="grow">저장된 활동 데이터</span>
+      <button id="delete-activity" class="btn" type="button" style="flex: 0 0 auto; color: var(--red-tx);">모두 삭제</button>
+    </div>
+    <p class="subhint">세션·목표·관측·알림 기록을 삭제합니다. 설정은 유지됩니다.</p>`
 
   document.getElementById("settings-back")?.addEventListener("click", closeSettings)
 
@@ -1165,6 +1171,32 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
       // Preference simply won't survive the popup closing.
     }
   })
+  document.getElementById("delete-activity")?.addEventListener("click", () => {
+    void deleteActivityData()
+  })
+}
+
+async function deleteActivityData(): Promise<void> {
+  if (!window.confirm("저장된 모든 활동 데이터를 삭제할까요? 이 작업은 되돌릴 수 없습니다.")) return
+  if (!(await deleteAllActivityData())) {
+    handleUnreachable()
+    return
+  }
+
+  await chrome.storage.session.clear().catch(() => undefined)
+  const notificationIds = await new Promise<string[]>((resolve) => {
+    chrome.notifications.getAll((notifications) => resolve(Object.keys(notifications)))
+  })
+  await Promise.all(
+    notificationIds.map(
+      (notificationId) =>
+        new Promise<void>((resolve) => {
+          chrome.notifications.clear(notificationId, () => resolve())
+        }),
+    ),
+  )
+  clearSnapshot()
+  chrome.runtime.reload()
 }
 
 async function applySettings(patch: Parameters<typeof putSettings>[0]): Promise<void> {
