@@ -9,8 +9,10 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from apps.server.app.ports import default_base_url
 
-BASE_URL = os.environ.get("KIBITZER_BASE_URL", "http://127.0.0.1:8765")
+
+BASE_URL = os.environ.get("KIBITZER_BASE_URL") or default_base_url()
 DB_PATH = Path(os.environ.get("KIBITZER_DB_PATH", "data/kibitzer.sqlite3"))
 
 

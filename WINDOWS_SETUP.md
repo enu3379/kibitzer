@@ -7,7 +7,7 @@ runtime database.
 ## Requirements
 
 - Windows 10 or 11
-- Python 3.11 or newer, preferably 3.11 or 3.12
+- Python 3.11 or newer (CI baseline: 3.11)
 - Node.js LTS with npm
 - Google Chrome
 
@@ -39,6 +39,10 @@ Start the local server:
 .\scripts\windows_run_server.ps1
 ```
 
+The launcher atomically selects the first available port from Kibitzer's five
+checked-in candidates and writes it to `data\kibitzer.port`. It reports an
+error instead of choosing a random port if all candidates are occupied.
+
 Then load the Chrome extension:
 
 1. Open `chrome://extensions`.
@@ -56,10 +60,13 @@ idle mode and shows a taskbar tray icon:
 ```
 
 The server responds to health checks while idle, but judging providers are
-initialized only after a goal-backed session starts. Check the mode with:
+initialized only after a goal-backed session starts. Check the identity and
+mode on the selected port with:
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:8765/health
+$Port = Get-Content .\data\kibitzer.port
+Invoke-RestMethod "http://127.0.0.1:$Port/identity"
+Invoke-RestMethod "http://127.0.0.1:$Port/health"
 ```
 
 Remove the Startup shortcut with:

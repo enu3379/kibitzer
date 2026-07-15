@@ -2,6 +2,6 @@
 
 Shared extension helpers live here.
 
-- `api.ts` talks to the local server.
+- `serverConnection.ts` discovers and validates the local server port.
+- `api.ts` sends product requests through that validated connection.
 - `domainFilter.ts` mirrors the server's sensitive-domain pre-drop rules.
-

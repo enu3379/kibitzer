@@ -72,7 +72,7 @@ Invoke-Native ".\.venv\Scripts\python.exe" @("scripts\download_embedding_model.p
 
 Push-Location "apps\extension"
 try {
-  Invoke-Native "npm" @("install")
+  Invoke-Native "npm" @("ci")
   Invoke-Native "npm" @("run", "build")
 }
 finally {

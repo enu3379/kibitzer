@@ -58,5 +58,5 @@ launchctl enable "gui/${UID}/${LABEL}"
 launchctl kickstart -k "gui/${UID}/${LABEL}"
 
 echo "Installed and started ${LABEL}."
-echo "Health: curl http://127.0.0.1:8765/health"
+echo "Effective port: ${ROOT}/data/kibitzer.port"
 echo "Logs: ${LOG_DIR}/macos-launch-agent.out.log and .err.log"

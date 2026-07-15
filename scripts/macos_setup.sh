@@ -23,7 +23,7 @@ fi
 ".venv/bin/python" -m pip install -e ".[test]"
 ".venv/bin/python" scripts/download_embedding_model.py
 
-npm --prefix apps/extension install
+npm --prefix apps/extension ci
 npm --prefix apps/extension run build
 
 echo "Setup complete. Start the server with bash scripts/macos_run_server.sh"

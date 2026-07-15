@@ -1,0 +1,5 @@
+{
+  "service": "kibitzer",
+  "protocol_version": 1,
+  "ports": [49187, 51387, 53587, 55787, 57987]
+}

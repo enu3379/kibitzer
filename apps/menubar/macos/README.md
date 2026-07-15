@@ -2,7 +2,7 @@
 
 This Swift menu bar app mirrors the Windows tray surface:
 
-- polls `http://127.0.0.1:8765/health`;
+- reads `data/kibitzer.port`, validates `/identity`, then polls `/health`;
 - shows `dead`, `idle`, `active`, or `unknown` in the macOS menu bar;
 - can kick the server LaunchAgent or fall back to `scripts/macos_run_server.sh`;
 - opens the logs folder from the menu.

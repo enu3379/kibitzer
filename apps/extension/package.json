@@ -4,9 +4,11 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "npm run test && node build.mjs",
+    "build": "npm run ports:check && npm run test && node build.mjs",
     "watch": "node build.mjs --watch",
-    "test": "node --experimental-strip-types --test && npm run typecheck"
+    "test": "node --experimental-strip-types --test && npm run typecheck",
+    "ports:generate": "node scripts/generatePortCandidates.mjs",
+    "ports:check": "node scripts/generatePortCandidates.mjs --check"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.287",

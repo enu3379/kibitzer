@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class ServerConfig(BaseModel):
     host: str = "127.0.0.1"
-    port: int = 8765
     db_path: str = "./data/kibitzer.sqlite3"
 
 
