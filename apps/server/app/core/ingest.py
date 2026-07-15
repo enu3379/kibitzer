@@ -187,9 +187,15 @@ async def ingest_browser_nav(
                 verdict=observation.verdict,
                 page=observation_page_info(observation),
             )
+    attachment_verdict = observation.verdict.value if observation.verdict else None
+    if (
+        observation.verdict == Verdict.OK
+        and observation.features.anchor_eligible is False
+    ):
+        attachment_verdict = None
     return_candidate = store.note_attachment_observation(
         observation.session_id,
-        observation.verdict.value if observation.verdict else None,
+        attachment_verdict,
         observation.ts,
         drift_confirmed,
     )
