@@ -2,6 +2,12 @@ server:
   host: "127.0.0.1"
   db_path: "./data/kibitzer.sqlite3"
 
+security:
+  # Stable unpacked-development ID derived from apps/extension/manifest.json.
+  # Add the production Web Store ID when assigned. A non-empty
+  # KIBITZER_EXTENSION_IDS value in .env overrides this list.
+  allowed_extension_ids: ["pkfnofjnjaojkamahhoipkeaiaecdkgc"]
+
 embedding:
   provider: "onnx_cpu"
   model: "./data/models/koen-e5-tiny-onnx/onnx/model_qint8_arm64.onnx"

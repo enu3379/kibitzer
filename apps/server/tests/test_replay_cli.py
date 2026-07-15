@@ -7,7 +7,7 @@ import unittest
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+from apps.server.tests.support import TestClient
 
 from apps.server.app.config import AppConfig, ControllerConfig, GoalEnrichmentConfig, ServerConfig, Tier1Config, Tier2Config
 from apps.server.app.core.goal_enrichment import DerivedPhrase
