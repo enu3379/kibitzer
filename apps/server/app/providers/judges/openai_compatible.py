@@ -8,7 +8,7 @@ from typing import Iterator
 import httpx
 
 from ...schemas import Verdict
-from .base import Tier1Result, Tier2Result, ordered_api_keys
+from .base import TIER2_GUARD_SYSTEM_PROMPT, Tier1Result, Tier2Result, ordered_api_keys
 
 
 @dataclass(frozen=True)
@@ -127,12 +127,7 @@ def _tier2_messages(
     return [
         {
             "role": "system",
-            "content": system_prompt or (
-                "You are Kibitzer, a quiet browser drift guard. Decide whether the current page is truly "
-                "off-goal after reading the minimized payload and page excerpt. Return strict JSON only: "
-                '{"confirm_drift":true|false,"message":"<=2 short Korean sentences if true, else empty string"}. '
-                "Confirm drift only when the excerpt is not useful for the declared goal."
-            ),
+            "content": system_prompt or TIER2_GUARD_SYSTEM_PROMPT,
         },
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]

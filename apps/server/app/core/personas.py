@@ -7,15 +7,14 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from ..providers.judges.base import TIER2_GUARD_SYSTEM_PROMPT
 from ..storage.sqlite import GoalRecord, ObservationRecord
 
 
-TIER2_SYSTEM_PROMPT = (
-    "You are Kibitzer, a quiet browser drift guard. Decide whether the current page is truly "
-    "off-goal after reading the minimized payload and page excerpt. Return strict JSON only: "
-    '{"confirm_drift":true|false,"message":"<=2 short Korean sentences if true, else empty string"}. '
-    "Confirm drift only when the excerpt is not useful for the declared goal."
-)
+# Re-exported under the historical name; the canonical text lives in
+# app/providers/judges/base.py so the persona composer and both judge providers
+# share one injection-hardened source of truth.
+TIER2_SYSTEM_PROMPT = TIER2_GUARD_SYSTEM_PROMPT
 
 
 class PersonaVoice(BaseModel):

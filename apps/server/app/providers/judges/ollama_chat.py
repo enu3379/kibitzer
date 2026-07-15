@@ -7,7 +7,7 @@ from typing import Iterator
 
 import httpx
 
-from .base import Tier1Result, Tier2Result, ordered_api_keys
+from .base import TIER2_GUARD_SYSTEM_PROMPT, Tier1Result, Tier2Result, ordered_api_keys
 from .openai_compatible import parse_tier1_json, parse_tier2_json
 
 
@@ -74,11 +74,7 @@ class OllamaChatJudgeProvider:
             [
                 {
                     "role": "system",
-                    "content": system_prompt or (
-                        "You are Kibitzer, a quiet browser drift guard. Decide whether the page excerpt is "
-                        "truly off-goal. Return strict JSON only: "
-                        '{"confirm_drift":true|false,"message":"<=2 short Korean sentences if true, else empty string"}.'
-                    ),
+                    "content": system_prompt or TIER2_GUARD_SYSTEM_PROMPT,
                 },
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ]
