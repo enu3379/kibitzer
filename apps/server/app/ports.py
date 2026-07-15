@@ -166,14 +166,14 @@ def main(runtime_paths: RuntimePaths | None = None) -> int:
         print(f"Kibitzer is already running on {LOOPBACK_HOST}:{port}")
         return 0
 
-    import uvicorn
-
-    config = uvicorn.Config(
-        "apps.server.app.main:app",
-        host=LOOPBACK_HOST,
-        port=port,
-    )
     try:
+        import uvicorn
+
+        config = uvicorn.Config(
+            "apps.server.app.main:app",
+            host=LOOPBACK_HOST,
+            port=port,
+        )
         uvicorn.Server(config).run(sockets=[bound_socket])
     except KeyboardInterrupt:
         pass

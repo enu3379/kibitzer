@@ -137,6 +137,32 @@ class PortSelectionTest(unittest.TestCase):
 
             self.assertEqual(paths.effective_port_file.read_text(encoding="utf-8"), "49187\n")
 
+    def test_owned_socket_and_port_file_are_cleaned_when_server_init_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            paths = RuntimePaths(
+                mode="packaged",
+                resource_root=root / "bundle",
+                data_dir=root / "profile",
+                user_config_dir=root / "profile" / "configs",
+                default_config_file=root / "bundle" / "configs" / "default.yaml",
+                env_file=root / "profile" / ".env",
+                custom_personas_file=root / "profile" / "configs" / "personas.yaml",
+            )
+            owned_socket = FakeSocket(set())
+            with (
+                patch(
+                    "apps.server.app.ports.acquire_server_socket",
+                    return_value=(49187, owned_socket),
+                ),
+                patch("uvicorn.Config", side_effect=RuntimeError("config failed")),
+                self.assertRaisesRegex(RuntimeError, "config failed"),
+            ):
+                serve_main(paths)
+
+            self.assertTrue(owned_socket.closed)
+            self.assertFalse(paths.effective_port_file.exists())
+
 
 class IdentityEndpointTest(unittest.TestCase):
     def test_identity_is_versioned_and_instance_scoped(self) -> None:
