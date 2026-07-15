@@ -7,7 +7,7 @@ are platform-specific.
 ## Requirements
 
 - macOS 13 or newer
-- Python 3.11 or newer, preferably 3.12
+- Python 3.11 or newer (CI baseline: 3.11)
 - Node.js LTS with npm
 - Google Chrome
 
@@ -38,6 +38,10 @@ Start the local server:
 bash scripts/macos_run_server.sh
 ```
 
+The launcher atomically selects the first available port from Kibitzer's five
+checked-in candidates and writes it to `data/kibitzer.port`. It reports an
+error instead of choosing a random port if all candidates are occupied.
+
 Then load the Chrome extension:
 
 1. Open `chrome://extensions`.
@@ -54,10 +58,13 @@ bash scripts/macos_install_launch_agent.sh
 ```
 
 The server responds to health checks while idle, but judging providers are
-initialized only after a goal-backed session starts. Check the mode with:
+initialized only after a goal-backed session starts. Check the identity and
+mode on the selected port with:
 
 ```bash
-curl http://127.0.0.1:8765/health
+PORT="$(cat data/kibitzer.port)"
+curl "http://127.0.0.1:${PORT}/identity"
+curl "http://127.0.0.1:${PORT}/health"
 ```
 
 Remove the LaunchAgent with:

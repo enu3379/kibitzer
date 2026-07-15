@@ -1,12 +1,12 @@
 $ErrorActionPreference = "Stop"
 
 $ShortcutName = "Kibitzer Server.lnk"
-$HealthUrl = "http://127.0.0.1:8765/health"
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $TrayScript = Join-Path $Root "scripts\windows_startup_tray.ps1"
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
 $LogDir = Join-Path $Root "data\logs"
+$PortFile = Join-Path $Root "data\kibitzer.port"
 $TrayPidFile = Join-Path $LogDir "windows-startup-tray.pid"
 $StartupDir = [Environment]::GetFolderPath([Environment+SpecialFolder]::Startup)
 
@@ -36,7 +36,20 @@ function Wait-KibitzerHealth {
   $Deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   while ((Get-Date) -lt $Deadline) {
     try {
-      return Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 2 -ErrorAction Stop
+      $Port = [int](Get-Content -LiteralPath $PortFile -Raw -ErrorAction Stop)
+      if ($Port -lt 1 -or $Port -gt 65535) {
+        throw "Invalid Kibitzer port file."
+      }
+      $BaseUrl = "http://127.0.0.1:$Port"
+      $Identity = Invoke-RestMethod -Uri "$BaseUrl/identity" -TimeoutSec 2 -ErrorAction Stop
+      if (
+        $Identity.service -ne "kibitzer" -or
+        $Identity.protocol_version -ne 1 -or
+        [string]::IsNullOrWhiteSpace([string]$Identity.instance_id)
+      ) {
+        throw "Port $Port is not a Kibitzer server."
+      }
+      return Invoke-RestMethod -Uri "$BaseUrl/health" -TimeoutSec 2 -ErrorAction Stop
     }
     catch {
       Start-Sleep -Milliseconds 500
@@ -77,7 +90,7 @@ $Shortcut.Description = "Starts the Kibitzer local server at Windows logon in id
 $Shortcut.Save()
 
 Write-Host "Installed Startup shortcut: $ShortcutPath"
-Write-Host "Health: $HealthUrl"
+Write-Host "Effective port: $PortFile"
 Write-Host "Logs: $(Join-Path $LogDir 'windows-startup-app.out.log') and .err.log"
 
 if (-not (Test-KibitzerTrayRunning)) {
@@ -90,5 +103,5 @@ if ($Health) {
   Write-Host "Health check ok. mode=$($Health.mode)"
 }
 else {
-  Write-Warning "Startup shortcut was installed, but $HealthUrl did not respond within 20 seconds. Check the logs above."
+  Write-Warning "Startup shortcut was installed, but Kibitzer did not respond within 20 seconds. Check the logs above."
 }

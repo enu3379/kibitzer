@@ -24,6 +24,7 @@ The server is the local SSOT for Kibitzer.
 ## API
 
 ```text
+GET  /identity                        (versioned local service discovery)
 GET  /health                          (includes tier provider status)
 POST /sessions
 GET  /sessions/current
@@ -41,6 +42,9 @@ POST /observations/{id}/excerpt
 POST /feedback
 POST /interventions/{id}/delivery
 ```
+
+`GET /identity` prevents local port discovery from accepting an unrelated
+service. It is a discovery marker, not an authentication boundary.
 
 When the controller returns `request_excerpt`, the response also contains a
 `candidate_id`. Candidate creation preserves streak/alignment state. Tier 2

@@ -10,6 +10,7 @@ Do not put relevance, controller, or provider policy in API handlers.
 
 Current handlers:
 
+- `GET /identity` (versioned local service discovery)
 - `GET /health` (mode + tier provider status)
 - `POST /sessions`, `GET /sessions/current`, `GET /sessions/current/state`,
   `GET /sessions/current/stats`

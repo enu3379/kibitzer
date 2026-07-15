@@ -5,10 +5,11 @@ is a process/status surface, not a second server.
 
 ## Contract
 
-The menu bar app observes:
+The menu bar app reads `data/kibitzer.port`, validates the service identity, and
+then observes:
 
 ```text
-GET http://127.0.0.1:8765/health
+GET http://127.0.0.1:<effective-port>/health
 ```
 
 State mapping:
@@ -54,7 +55,7 @@ Claude owns the shared icon artwork. The runtime contract to preserve:
 
 - states: `dead`, `idle`, `active`, `unknown`;
 - menu actions: refresh, start server, open logs, quit;
-- server state source: `/health`;
+- server state source: validated `/identity`, then `/health`;
 - no duplicated judging state.
 
 Current visual contract:

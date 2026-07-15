@@ -14,8 +14,8 @@ $IconCandidates = @(
   (Join-Path $Root "apps\extension\dist\icons\variants\monitor-v1-mono-48.png"),
   (Join-Path $Root "apps\extension\dist\icons\variants\monitor-v1-mono-32.png")
 )
-$HealthUrl = "http://127.0.0.1:8765/health"
 $LogDir = Join-Path $Root "data\logs"
+$PortFile = Join-Path $Root "data\kibitzer.port"
 $TrayLog = Join-Path $LogDir "windows-startup-tray.log"
 $TrayPidFile = Join-Path $LogDir "windows-startup-tray.pid"
 $StartupErrLog = Join-Path $LogDir "windows-startup-app.err.log"
@@ -63,7 +63,20 @@ function Get-WindowsPowerShell {
 
 function Get-KibitzerHealthStatus {
   try {
-    $Health = Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 2 -ErrorAction Stop
+    $Port = [int](Get-Content -LiteralPath $PortFile -Raw -ErrorAction Stop)
+    if ($Port -lt 1 -or $Port -gt 65535) {
+      throw "Invalid Kibitzer port file."
+    }
+    $BaseUrl = "http://127.0.0.1:$Port"
+    $Identity = Invoke-RestMethod -Uri "$BaseUrl/identity" -TimeoutSec 2 -ErrorAction Stop
+    if (
+      $Identity.service -ne "kibitzer" -or
+      $Identity.protocol_version -ne 1 -or
+      [string]::IsNullOrWhiteSpace([string]$Identity.instance_id)
+    ) {
+      throw "Port $Port is not a Kibitzer server."
+    }
+    $Health = Invoke-RestMethod -Uri "$BaseUrl/health" -TimeoutSec 2 -ErrorAction Stop
     $Mode = if ($Health.mode) { [string]$Health.mode } else { "unknown" }
     if ($Mode -eq "active") {
       return @{ Mode = "active"; IconKey = "active"; Text = "Kibitzer: active"; Message = "서버가 작동 중이며 활동을 관찰하고 있습니다." }
