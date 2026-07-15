@@ -36,6 +36,7 @@ raw_text
 keywords
 exemplars
 provenance
+available_time_minutes (optional)
 ```
 
 Stage 0 supports only `provenance = "declared"`.
@@ -47,6 +48,7 @@ goal
 anchor
 controller
 obs_count
+time_budget_clock
 ```
 
 The anchor is the average of the latest OK observation embeddings. DRIFT observations are never admitted.
@@ -59,11 +61,22 @@ goals
 goal_exemplars
 observations
 controller_states
+drift_clock_states
+drift_page_dwell_states
+observation_excerpts
+dwell_presence_events
 intervention_candidates
 interventions
 feedback
 event_log
 ```
+
+`drift_clock_states` stores the active observation and page identity
+(`url_host` + path hash), cumulative/continuous/current-page seconds, the next
+review boundary, and a timestamped review lock. `drift_page_dwell_states`
+retains the per-page dwell totals needed to survive tab flips within the
+current episode. `dwell_presence_events` keeps presence event IDs only for
+duplicate suppression. Both helper tables are pruned when the session ends.
 
 ## Interventions and Feedback
 
@@ -120,6 +133,13 @@ Goal exemplar cap enforcement preserves the declared-goal exemplar when possible
 
 ## Raw Data Retention
 
-Page excerpts are transient. They are used for Tier 2 and then discarded.
+When the D7 time-budget rule is enabled, each non-sensitive browser
+observation may retain one normalized, character-limited page excerpt locally.
+The store keeps only the current excerpt plus the configured recent context
+window; older excerpts are pruned transactionally and excerpts are deleted on
+both explicit and implicit session end. They are never copied into `event_log`,
+reports, or feedback.
+This enables the content half of D7's bounded Tier-2 comparison. With D7
+disabled, excerpts remain transient as in the original pipeline.
 
 Keystrokes are out of scope for Stage 0. If added later, raw keystroke text must never be written to disk.

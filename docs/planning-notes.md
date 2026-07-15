@@ -165,6 +165,75 @@ and attach it to a GitHub Release on tag, so a non-builder can download
 Rejected: committing `dist/` (git churn). Chrome Web Store stays a later option for
 true end-user distribution.
 
+### D7 — Time-budget drift rule → RESOLVED (design, 2026-07-14)
+
+Goal declaration gains an optional **available-time budget** ("몇 시간 사용").
+Drift stops being purely event-counted (streak k=3) and becomes time-aware:
+the nag should fire when drift has consumed a real slice of the declared
+budget, and Tier 2 should judge "is this page reasonable *for this time
+budget*" — e.g. dictionary lookups while reading a paper are off-goal by
+title but acceptable side-branches, so the nag defers instead of firing.
+
+**Clocks (corrected 2026-07-14): the time rule mirrors the existing
+controller duality** — 누적/연속 are not two simultaneous clocks but the
+time-measurement variants of the two existing drift rules. `controller.type`
+selects both the event rule and the trigger clock:
+- **연속 (streak)** → continuous drift since last OK (extends
+  `minutes_since_last_ok`; an OK resets it),
+- **누적 (alignment)** → cumulative session drift time (no reset within the
+  session).
+Both modes additionally track **current-page drift dwell**. All computed
+clocks still ride the Tier 2 payload as context.
+
+**Thresholds:**
+- `total` (cumulative) = budget × fraction (default **1/6**), floored at a
+  minimum (~5 min) for very short budgets; **fixed 15 min fallback** when no
+  budget was entered (time rule stays active without a budget).
+- `per_page` (e.g. 3 min): the current drift page must itself be read this
+  long before any nag — quick bounces are never nagged.
+- Single-page escape valve = `total / 2`: a page read that long can trigger
+  even when cumulative hasn't reached `total` yet.
+
+**Trigger (user's worked example, given for 누적 mode, 20 min total / 3 min
+per-page):** drift-rule condition holds AND `current_page ≥ per_page` AND
+(`mode_clock ≥ total` OR `current_page ≥ total/2`). Pages 1–2 at 3 min each →
+page 3 nags at 10 min (total/2 cap), not the naive 14; conversely pages 1–2
+at 10 min each (clock already 20) → page 3 still needs its own 3 min first.
+Working assumption: 연속 mode uses the identical structure (per-page floor +
+total/2 valve), only with the continuous clock as `mode_clock`.
+
+**Tier 2 rework:** the current fixed "15 s" path (5 s observation dwell +
+10 s tier2 dwell → excerpt → judge) is replaced by threshold-time-driven
+invocation. Tier 2 runs **two parallel judgments**: (a) titles — goal +
+ok_1..n titles + current drift title; (b) contents — recent j page excerpts +
+current page excerpt. Combined with the elapsed clocks, the outcome is either
+**nag now** or **defer to the next threshold crossing**.
+
+**Prerequisite:** excerpts are captured and stored for **every observation**
+(after the 5 s dwell), char-limited, sensitive-domain rules applied — today
+only the nag-moment page is excerpted, so recent-page content doesn't exist.
+
+**Sub-questions resolved (2026-07-14):**
+1. Sub-`per_page` drift dwell **counts toward the mode clock** — Tier 0/1
+   marks drift from the ~15 s observation point, so a page watched ≥15 s but
+   <`per_page` burns budget; it just lacks grounds for a nag. This creates an
+   explicit **pending state** ("유보"): currently drifting, Tier 2 not yet
+   fired — the pending window is deliberately "an opportunity given to the
+   user", not a bug.
+2. After an "acceptable" deferral, re-judge at the **next multiple of
+   `total` on the mode clock** (total, 2×total, 3×total…).
+3. Dwell detection = **extension heartbeat**: the service worker reports
+   "still on active tab" periodically (~30–60 s, `chrome.alarms`); the server
+   owns all clocks and threshold decisions. Survives sleep, tab switches, SW
+   teardown.
+4. Dual Tier-2 combination: **either judgment saying "acceptable" defers**
+   the nag — consistent with the standing "misses acceptable, false positives
+   not" principle (dictionary-lookup-while-reading-a-paper stays protected
+   even when the title looks unrelated).
+
+Branch: `feature/time-budget-drift` (worktree
+`~/kibitzer-worktrees/time-budget-drift`, based on dev @ 808afef).
+
 ## Backlog (consolidated 2026-07-08, post-P1)
 
 P0 + P1 + detection fixes + Ollama Cloud stack are all shipped. What remains,
@@ -236,6 +305,13 @@ the extension badge.
   large + retina; softens toward true 18px, where eyes + silhouette carry it.
 - 2026-07-08: Live-session audit evidence captured (see "Evidence" under the
   pivot section): dual-direction Tier-0 failures + silent tier degradation.
+- 2026-07-14: D7 time-budget drift rule fully designed via two Q&A rounds
+  (clocks, thresholds, per-page + total/2 rules, pending state, heartbeat,
+  dual Tier-2 judgment with either-defers combination, next-multiple recheck).
+  Worktree `time-budget-drift` opened off dev @ 808afef. Same-day correction:
+  누적/연속 are the time variants of the two existing drift rules
+  (`controller.type` picks the trigger clock), not two simultaneous trigger
+  clocks.
   Fixes 1–3 agreed for now; D3/D4 stay the structural track. Also agreed in
   principle: in-page toast notifications replacing OS notification popups
   (mockup approved-ish, implementation pending go), since macOS banners are

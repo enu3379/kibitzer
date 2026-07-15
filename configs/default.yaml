@@ -104,6 +104,17 @@ dwell:
   observation_seconds: 5
   tier2_seconds: 10
 
+time_budget:
+  enabled: true
+  total_fraction: 0.1666666667
+  min_total_seconds: 300
+  fallback_total_seconds: 900
+  per_page_seconds: 180
+  heartbeat_seconds: 60
+  max_heartbeat_gap_seconds: 90
+  recent_excerpts: 5
+  recent_excerpt_char_limit: 600
+
 privacy:
   sensitive_domains_file: "configs/sensitive_domains.yaml"
   strip_query: true
