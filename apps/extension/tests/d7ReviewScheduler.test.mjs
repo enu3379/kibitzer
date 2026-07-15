@@ -71,3 +71,40 @@ test("rescheduling an observation replaces its earlier review check", async () =
     clock.restore()
   }
 })
+
+test("overlapping reschedules serialize clear and replacement", async () => {
+  const clock = installFakeClock(1_000)
+  const harness = createChromeMock({ now: clock.now })
+  globalThis.chrome = harness.chrome
+  const handled = []
+  const originalClear = harness.chrome.alarms.clear.bind(harness.chrome.alarms)
+  let releaseFirstClear
+  let signalFirstClear
+  const firstClearStarted = new Promise((resolve) => { signalFirstClear = resolve })
+  const firstClearGate = new Promise((resolve) => { releaseFirstClear = resolve })
+  let clearCalls = 0
+  harness.chrome.alarms.clear = async (name) => {
+    clearCalls += 1
+    if (clearCalls === 1) {
+      signalFirstClear()
+      await firstClearGate
+    }
+    return originalClear(name)
+  }
+
+  try {
+    const scheduler = new D7ReviewScheduler(async (id) => handled.push(id))
+    const first = scheduler.schedule("obs-overlap", 10)
+    await firstClearStarted
+    const second = scheduler.schedule("obs-overlap", 20)
+    releaseFirstClear()
+    await Promise.all([first, second])
+
+    await clock.advanceTo(11_000)
+    assert.deepEqual(handled, [])
+    await clock.advanceTo(21_000)
+    assert.deepEqual(handled, ["obs-overlap"])
+  } finally {
+    clock.restore()
+  }
+})

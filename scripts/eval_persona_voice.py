@@ -150,16 +150,18 @@ async def evaluate_one(
             queue_wait_seconds = request_started - queued_at
             # Mirrors OllamaChatJudgeProvider.write_tier2_message() exactly,
             # but keeps the raw response for budget stats.
-            response = await provider._post_chat(
-                [
-                    {"role": "system", "content": compose_tier2_writer_system_prompt(persona)},
-                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-                ],
-                think=False,
-                num_predict=provider.writer_max_output_tokens,
-                json_mode=False,
-            )
-            request_latency_seconds = time.monotonic() - request_started
+            try:
+                response = await provider._post_chat(
+                    [
+                        {"role": "system", "content": compose_tier2_writer_system_prompt(persona)},
+                        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+                    ],
+                    think=False,
+                    num_predict=provider.writer_max_output_tokens,
+                    json_mode=False,
+                )
+            finally:
+                request_latency_seconds = time.monotonic() - request_started
         raw_content = _message_content(response)
         if _writer_output_budget_exhausted(response, provider.writer_max_output_tokens):
             raise ValueError("tier2 writer response exhausted output budget")
@@ -283,7 +285,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--concurrency", type=int, default=3)
     parser.add_argument("--persona", action="append", help="Persona key to include (repeatable)")
     parser.add_argument("--scenario", action="append", help="Scenario id to include (repeatable)")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.concurrency < 1:
+        parser.error("--concurrency must be at least 1")
+    return args
 
 
 if __name__ == "__main__":

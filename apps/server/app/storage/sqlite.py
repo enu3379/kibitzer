@@ -1899,26 +1899,21 @@ class SQLiteStore:
         now = ts or _utc_now()
         with self._connect() as conn:
             self._ensure_schema(conn)
-            current = conn.execute(
-                """
-                SELECT 1
-                FROM drift_clock_states
-                WHERE session_id = ?
-                  AND active_observation_id = ?
-                  AND review_observation_id = ?
-                  AND review_status = 'reviewing'
-                """,
-                (session_id, observation_id, observation_id),
-            ).fetchone()
-            if not current:
-                return False
-            conn.execute(
+            prepared = conn.execute(
                 """
                 INSERT INTO d7_prepared_reviews (
                     session_id, observation_id, goal_revision, deliver_after,
                     outcome_json, prepared_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                SELECT ?, ?, ?, ?, ?, ?
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM drift_clock_states
+                    WHERE session_id = ?
+                      AND active_observation_id = ?
+                      AND review_observation_id = ?
+                      AND review_status = 'reviewing'
+                )
                 ON CONFLICT(session_id) DO UPDATE SET
                     observation_id = excluded.observation_id,
                     goal_revision = excluded.goal_revision,
@@ -1933,8 +1928,13 @@ class SQLiteStore:
                     deliver_after.isoformat(),
                     json.dumps(outcome, ensure_ascii=False),
                     now.isoformat(),
+                    session_id,
+                    observation_id,
+                    observation_id,
                 ),
             )
+            if prepared.rowcount != 1:
+                return False
             self._append_event(
                 conn,
                 session_id,
@@ -1959,26 +1959,21 @@ class SQLiteStore:
         now = ts or _utc_now()
         with self._connect() as conn:
             self._ensure_schema(conn)
-            current = conn.execute(
-                """
-                SELECT 1
-                FROM drift_clock_states
-                WHERE session_id = ?
-                  AND active_observation_id = ?
-                  AND review_observation_id = ?
-                  AND review_status = 'reviewing'
-                """,
-                (session_id, observation_id, observation_id),
-            ).fetchone()
-            if not current:
-                return False
-            conn.execute(
+            queued = conn.execute(
                 """
                 INSERT INTO d7_prepared_reviews (
                     session_id, observation_id, goal_revision, deliver_after,
                     outcome_json, prepared_at
                 )
-                VALUES (?, ?, ?, ?, NULL, NULL)
+                SELECT ?, ?, ?, ?, NULL, NULL
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM drift_clock_states
+                    WHERE session_id = ?
+                      AND active_observation_id = ?
+                      AND review_observation_id = ?
+                      AND review_status = 'reviewing'
+                )
                 ON CONFLICT(session_id) DO UPDATE SET
                     observation_id = excluded.observation_id,
                     goal_revision = excluded.goal_revision,
@@ -1986,8 +1981,18 @@ class SQLiteStore:
                     outcome_json = NULL,
                     prepared_at = NULL
                 """,
-                (session_id, observation_id, goal_revision, deliver_after.isoformat()),
+                (
+                    session_id,
+                    observation_id,
+                    goal_revision,
+                    deliver_after.isoformat(),
+                    session_id,
+                    observation_id,
+                    observation_id,
+                ),
             )
+            if queued.rowcount != 1:
+                return False
             self._append_event(
                 conn,
                 session_id,
@@ -2095,6 +2100,105 @@ class SQLiteStore:
                 {"observation_id": observation_id, "next_review_mode_seconds": next_review_mode_seconds},
                 now,
             )
+
+    def commit_d7_review_notification(
+        self,
+        session_id: str,
+        observation_id: str,
+        message: str,
+        controller_state: ControllerStateRecord,
+        next_review_mode_seconds: int,
+        ts: datetime | None = None,
+    ) -> str | None:
+        """Atomically claim a prepared review and persist its notification."""
+        if controller_state.session_id != session_id:
+            raise ValueError("controller state belongs to another session")
+        now = ts or _utc_now()
+        intervention_id = f"int_{uuid.uuid4().hex}"
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            conn.execute("BEGIN IMMEDIATE")
+            claimed = conn.execute(
+                """
+                UPDATE drift_clock_states
+                SET review_status = 'committing', updated_at = ?
+                WHERE session_id = ?
+                  AND active_observation_id = ?
+                  AND review_observation_id = ?
+                  AND review_status = 'reviewing'
+                  AND EXISTS (
+                      SELECT 1
+                      FROM d7_prepared_reviews
+                      WHERE session_id = ?
+                        AND observation_id = ?
+                        AND outcome_json IS NOT NULL
+                        AND deliver_after <= ?
+                  )
+                """,
+                (
+                    now.isoformat(),
+                    session_id,
+                    observation_id,
+                    observation_id,
+                    session_id,
+                    observation_id,
+                    now.isoformat(),
+                ),
+            )
+            if claimed.rowcount != 1:
+                return None
+
+            self._append_event(
+                conn,
+                session_id,
+                "tier2.confirmed",
+                {
+                    "observation_id": observation_id,
+                    "confirm_drift": True,
+                    "message": message,
+                },
+                now,
+            )
+            self._write_controller_state(conn, controller_state)
+            self._insert_intervention(
+                conn,
+                intervention_id,
+                session_id,
+                observation_id,
+                message,
+                now,
+            )
+            completed = conn.execute(
+                """
+                UPDATE drift_clock_states
+                SET review_observation_id = NULL, review_started_at = NULL,
+                    review_status = 'notified', next_review_mode_seconds = ?,
+                    last_defer_reason = NULL, updated_at = ?
+                WHERE session_id = ?
+                  AND review_observation_id = ?
+                  AND review_status = 'committing'
+                """,
+                (
+                    next_review_mode_seconds,
+                    now.isoformat(),
+                    session_id,
+                    observation_id,
+                ),
+            )
+            if completed.rowcount != 1:
+                raise RuntimeError("failed to complete claimed D7 review")
+            conn.execute("DELETE FROM d7_prepared_reviews WHERE session_id = ?", (session_id,))
+            self._append_event(
+                conn,
+                session_id,
+                "d7.review_notified",
+                {
+                    "observation_id": observation_id,
+                    "next_review_mode_seconds": next_review_mode_seconds,
+                },
+                now,
+            )
+        return intervention_id
 
     def release_d7_review(
         self,

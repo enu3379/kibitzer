@@ -3,6 +3,7 @@ import tempfile
 import threading
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -10,6 +11,7 @@ from unittest.mock import patch
 from apps.server.tests.support import TestClient
 
 from apps.server.app.config import AppConfig, ControllerConfig, ServerConfig, Tier1Config, Tier2Config, TimeBudgetConfig
+from apps.server.app.core.controller_flow import controller_state_after_intervention
 from apps.server.app.core.time_budget import (
     TIER2_REVIEW_LEAD_SECONDS,
     next_review_boundary,
@@ -644,6 +646,62 @@ class D7ApiTest(unittest.TestCase):
                 (session_id,),
             ).fetchone()[0]
         self.assertEqual(count, 2)
+
+    def test_concurrent_prepared_delivery_commits_one_notification(self) -> None:
+        observation_id, path_hash = self._start_drift_observation()
+        self._presence(observation_id, path_hash, "atomic-active", "active", self.start)
+        self._presence(
+            observation_id,
+            path_hash,
+            "atomic-prefetch",
+            "heartbeat",
+            self.start + timedelta(seconds=60),
+        )
+        session_id = self.client.get("/sessions/current/state").json()["session_id"]
+        notified_at = self.start + timedelta(seconds=90)
+        controller_state = controller_state_after_intervention(
+            self.store,
+            self.config.controller,
+            session_id,
+            now=notified_at,
+        )
+        barrier = threading.Barrier(2)
+
+        def commit() -> str | None:
+            barrier.wait()
+            return self.store.commit_d7_review_notification(
+                session_id,
+                observation_id,
+                "한 번만 전달됩니다.",
+                controller_state,
+                180,
+                ts=notified_at,
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(lambda _index: commit(), range(2)))
+
+        self.assertEqual(len([result for result in results if result is not None]), 1)
+        with self.store._connect() as conn:
+            intervention_count = conn.execute(
+                "SELECT COUNT(*) FROM interventions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()[0]
+            event_counts = {
+                row["event_type"]: row["count"]
+                for row in conn.execute(
+                    """
+                    SELECT event_type, COUNT(*) AS count
+                    FROM event_log
+                    WHERE session_id = ?
+                      AND event_type IN ('tier2.confirmed', 'd7.review_notified')
+                    GROUP BY event_type
+                    """,
+                    (session_id,),
+                ).fetchall()
+            }
+        self.assertEqual(intervention_count, 1)
+        self.assertEqual(event_counts, {"d7.review_notified": 1, "tier2.confirmed": 1})
 
     def test_deferred_review_uses_presence_timestamp(self) -> None:
         observation_id, path_hash = self._start_drift_observation()

@@ -14,7 +14,6 @@ from pydantic import BaseModel, Field
 
 from ..config import ControllerConfig
 from ..core.controller_flow import (
-    confirm_controller_intervention,
     controller_state_after_intervention,
     time_review_is_eligible,
 )
@@ -867,32 +866,28 @@ def _commit_d7_review(
         outcome.message or fallback_drift_message(current.goal, observation),
         max_sentences,
     )
-    store.record_tier2_result(
-        session_id=observation.session_id,
-        observation_id=observation.id,
-        confirm_drift=True,
-        message=message,
-        ts=now,
-    )
-    intervention_id = store.create_intervention(
-        observation.session_id,
-        observation.id,
-        message,
-        ts=now,
-    )
-    confirm_controller_intervention(
+    controller_state = controller_state_after_intervention(
         store,
         controller_config,
         observation.session_id,
-        now,
+        now=now,
     )
     next_boundary = next_review_boundary(mode_seconds, total_seconds)
-    store.complete_d7_review_notification(
+    intervention_id = store.commit_d7_review_notification(
         observation.session_id,
         observation.id,
+        message,
+        controller_state,
         next_boundary,
-        now,
+        ts=now,
     )
+    if intervention_id is None:
+        return PipelineResult(
+            action=PipelineAction.NONE,
+            observation_id=observation.id,
+            verdict=verdict,
+            page=observation_page_info(observation),
+        )
     silent = _delivery_is_silent(settings)
     _handle_delivery_side_effects(
         request,

@@ -9,6 +9,7 @@ type DueHandler = (observationId: string) => Promise<void>
 export class D7ReviewScheduler {
   private readonly timers = new Map<string, number>()
   private readonly running = new Set<string>()
+  private readonly mutations = new Map<string, Promise<void>>()
   private readonly onDue: DueHandler
 
   constructor(onDue: DueHandler) {
@@ -18,25 +19,42 @@ export class D7ReviewScheduler {
   async schedule(observationId: string, delaySeconds: number): Promise<void> {
     if (!Number.isFinite(delaySeconds) || delaySeconds < 1) return
     const name = d7ReviewAlarmName(observationId)
-    const dueAt = Date.now() + Math.ceil(delaySeconds * 1000)
-    await this.clear(observationId)
-    await chrome.alarms.create(name, { when: dueAt })
+    await this.mutate(name, async () => {
+      const dueAt = Date.now() + Math.ceil(delaySeconds * 1000)
+      await this.clearNow(name)
+      await chrome.alarms.create(name, { when: dueAt })
 
-    const delay = Math.max(0, dueAt - Date.now())
-    if (delay > SHORT_TIMER_MAX_MS) return
-    const timer = globalThis.setTimeout(() => {
-      this.timers.delete(name)
-      void this.run(name)
-    }, delay)
-    this.timers.set(name, timer)
+      const delay = Math.max(0, dueAt - Date.now())
+      if (delay > SHORT_TIMER_MAX_MS) return
+      const timer = globalThis.setTimeout(() => {
+        this.timers.delete(name)
+        void this.run(name)
+      }, delay)
+      this.timers.set(name, timer)
+    })
   }
 
   async clear(observationId: string): Promise<void> {
     const name = d7ReviewAlarmName(observationId)
+    await this.mutate(name, () => this.clearNow(name))
+  }
+
+  private async clearNow(name: string): Promise<void> {
     const timer = this.timers.get(name)
     if (timer !== undefined) clearTimeout(timer)
     this.timers.delete(name)
     await chrome.alarms.clear(name)
+  }
+
+  private async mutate(name: string, mutation: () => Promise<void>): Promise<void> {
+    const previous = this.mutations.get(name) ?? Promise.resolve()
+    const current = previous.catch(() => undefined).then(mutation)
+    this.mutations.set(name, current)
+    try {
+      await current
+    } finally {
+      if (this.mutations.get(name) === current) this.mutations.delete(name)
+    }
   }
 
   async handleAlarm(name: string): Promise<boolean> {
