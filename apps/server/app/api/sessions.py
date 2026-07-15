@@ -476,4 +476,7 @@ def _schedule_goal_enrichment(
             if store.goal_revision_is_current(session_id, goal_revision):
                 store.record_goal_enrichment_failed(session_id, type(exc).__name__)
 
-    asyncio.create_task(_run())
+    task = asyncio.create_task(_run())
+    tasks: set[asyncio.Task[None]] = request.app.state.goal_enrichment_tasks
+    tasks.add(task)
+    task.add_done_callback(tasks.discard)

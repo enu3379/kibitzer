@@ -8,8 +8,14 @@ import unittest
 from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
+from unittest import mock
 
-from apps.server.app.config import AppConfig, GoalEnrichmentConfig
+from apps.server.app.api.sessions import _schedule_goal_enrichment
+from apps.server.app.config import (
+    AppConfig,
+    GoalEnrichmentConfig,
+    ServerConfig,
+)
 from apps.server.app.core.goal_enrichment import (
     build_goal_enrichment_prompt,
     enrich_goal_derived_exemplars,
@@ -19,6 +25,7 @@ from apps.server.app.core.goal_enrichment import (
 )
 from apps.server.app.core.normalization import strip_repeated_title_suffix
 from apps.server.app.core.relevance import tier0_score_parts
+from apps.server.app.main import create_app
 from apps.server.app.providers.embeddings.hash_cpu import HashCpuEmbeddingProvider
 from apps.server.app.storage.sqlite import SQLiteStore
 
@@ -194,6 +201,87 @@ class GoalEnrichmentTest(unittest.IsolatedAsyncioTestCase):
                     "SELECT COUNT(*) FROM event_log WHERE event_type = 'goal.enriched'"
                 ).fetchone()[0]
             self.assertEqual(enriched_events, 0)
+
+
+class GoalEnrichmentTaskLifecycleTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.tmpdir.name) / "kibitzer.sqlite3"
+        self.store = SQLiteStore(self.db_path)
+        config = AppConfig(
+            server=ServerConfig(db_path=str(self.db_path)),
+            goal_enrichment=GoalEnrichmentConfig(enabled=True),
+        )
+        self.app = create_app(
+            config=config,
+            store=self.store,
+            embedding_provider=FixedEmbeddingProvider(),
+            tier1_provider=FakeGoalProvider([]),
+        )
+        self.request = mock.Mock()
+        self.request.app = self.app
+
+    def tearDown(self) -> None:
+        self.tmpdir.cleanup()
+
+    async def _wait_for_task_count(self, expected: int) -> None:
+        for _ in range(100):
+            if len(self.app.state.goal_enrichment_tasks) == expected:
+                return
+            await asyncio.sleep(0)
+        self.assertEqual(len(self.app.state.goal_enrichment_tasks), expected)
+
+    async def test_retains_concurrent_tasks_and_removes_each_on_completion(self) -> None:
+        started = [asyncio.Event(), asyncio.Event()]
+        release = [asyncio.Event(), asyncio.Event()]
+        calls: list[str] = []
+
+        async def controlled_enrichment(**kwargs) -> None:
+            index = len(calls)
+            calls.append(kwargs["session_id"])
+            started[index].set()
+            await release[index].wait()
+
+        with mock.patch(
+            "apps.server.app.api.sessions.enrich_goal_derived_exemplars",
+            new=controlled_enrichment,
+        ):
+            async with self.app.router.lifespan_context(self.app):
+                _schedule_goal_enrichment(self.request, "session-1", "goal one", 1)
+                _schedule_goal_enrichment(self.request, "session-2", "goal two", 1)
+                await asyncio.gather(*(event.wait() for event in started))
+                self.assertEqual(len(self.app.state.goal_enrichment_tasks), 2)
+
+                release[0].set()
+                await self._wait_for_task_count(1)
+                release[1].set()
+                await self._wait_for_task_count(0)
+
+        self.assertEqual(calls, ["session-1", "session-2"])
+
+    async def test_shutdown_cancels_and_clears_pending_tasks(self) -> None:
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def blocking_enrichment(**kwargs) -> None:
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+        with mock.patch(
+            "apps.server.app.api.sessions.enrich_goal_derived_exemplars",
+            new=blocking_enrichment,
+        ):
+            async with self.app.router.lifespan_context(self.app):
+                _schedule_goal_enrichment(self.request, "session-1", "goal one", 1)
+                await started.wait()
+                self.assertEqual(len(self.app.state.goal_enrichment_tasks), 1)
+
+        self.assertTrue(cancelled.is_set())
+        self.assertEqual(self.app.state.goal_enrichment_tasks, set())
 
 
 class GoalEnrichmentCorpusRegressionTest(unittest.TestCase):
