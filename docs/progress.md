@@ -13,16 +13,24 @@ Completed:
 - Removed persona/nagging context from judgment and kept excerpts out of the
   Writer, preserving both decision independence and the over-the-shoulder
   persona privacy boundary.
-- Set Judge/Writer output budgets to 4096/1024 with backward-compatible
-  experiment-model settings and kept API-key rotation per HTTP call.
+- Set the code-default Judge/Writer output budgets to 4096/1024 with
+  backward-compatible experiment-model settings and kept API-key rotation per
+  HTTP call. The local MiniMax M3 profile uses Writer 2048 after the v5 audit.
 - Changed Judge failure to conservative defer, Writer failure to local persona
   fallback, and provider health to one logical outcome per review so a later
   successful review clears an older error.
+- Added one canonical prompt-injection trust boundary shared by the Judge,
+  Writer, and legacy provider fallbacks; browser/user payload values cannot
+  change the task or extract the system/persona layers.
+- Treat output-budget saturation as Writer failure (`eval_count` for Ollama,
+  `finish_reason=length` for OpenAI-compatible responses), and fixed sentence
+  clamping for punctuation without following whitespace while preserving
+  domains and decimals.
 
 Verified after rebasing onto latest `dev`:
 
-- `python -m pytest apps/server/tests -q`: 217 passed, 1 skipped, 31 subtests.
-- `apps/extension` `npm run build`: 33 unit tests, typecheck, and bundle passed.
+- `python -m pytest apps/server/tests -q`: 231 passed, 1 skipped, 31 subtests.
+- `apps/extension` `npm run build`: 34 unit tests, typecheck, and bundle passed.
 
 ## 2026-07-15 D7 time-budget drift review fixes
 

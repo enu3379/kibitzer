@@ -28,7 +28,10 @@ from apps.server.app.core.personas import (
 from apps.server.app.core.tier2_payload import build_tier2_message_payload
 from apps.server.app.providers.judges.base import Tier2Decision
 from apps.server.app.providers.judges.factory import create_tier2_judge_provider
-from apps.server.app.providers.judges.ollama_chat import _message_content
+from apps.server.app.providers.judges.ollama_chat import (
+    _message_content,
+    _writer_output_budget_exhausted,
+)
 
 
 SCENARIOS: list[dict[str, Any]] = [
@@ -158,6 +161,8 @@ async def evaluate_one(
             )
             request_latency_seconds = time.monotonic() - request_started
         raw_content = _message_content(response)
+        if _writer_output_budget_exhausted(response, provider.writer_max_output_tokens):
+            raise ValueError("tier2 writer response exhausted output budget")
         content = raw_content.strip()
         if not content:
             raise ValueError("tier2 writer response was empty")

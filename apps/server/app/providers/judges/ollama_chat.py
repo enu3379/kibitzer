@@ -7,7 +7,14 @@ from typing import Iterator
 
 import httpx
 
-from .base import Tier1Result, Tier2Decision, Tier2Result, ordered_api_keys
+from .base import (
+    TIER2_JUDGE_SYSTEM_PROMPT,
+    TIER2_LEGACY_SYSTEM_PROMPT,
+    Tier1Result,
+    Tier2Decision,
+    Tier2Result,
+    ordered_api_keys,
+)
 from .openai_compatible import parse_tier1_json, parse_tier2_decision_json, parse_tier2_json
 
 
@@ -75,11 +82,7 @@ class OllamaChatJudgeProvider:
             [
                 {
                     "role": "system",
-                    "content": system_prompt or (
-                        "You are Kibitzer, a quiet browser drift guard. Decide whether the page excerpt is "
-                        "truly off-goal. Return strict JSON only: "
-                        '{"confirm_drift":true|false,"message":"<=2 short Korean sentences if true, else empty string"}.'
-                    ),
+                    "content": system_prompt or TIER2_LEGACY_SYSTEM_PROMPT,
                 },
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ]
@@ -95,11 +98,7 @@ class OllamaChatJudgeProvider:
             [
                 {
                     "role": "system",
-                    "content": system_prompt or (
-                        "Decide whether the browsing context warrants an intervention. Return strict JSON "
-                        'only: {"decision":"notify|defer","reason_code":"off_goal|useful_side_branch|'
-                        'insufficient_evidence","basis":"title|content|both"}.'
-                    ),
+                    "content": system_prompt or TIER2_JUDGE_SYSTEM_PROMPT,
                 },
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ],
@@ -122,6 +121,8 @@ class OllamaChatJudgeProvider:
             num_predict=self.writer_max_output_tokens,
             json_mode=False,
         )
+        if _writer_output_budget_exhausted(response, self.writer_max_output_tokens):
+            raise ValueError("tier2 writer response exhausted output budget")
         content = _message_content(response).strip()
         if not content:
             raise ValueError("tier2 writer response was empty")
@@ -176,3 +177,13 @@ def _message_content(response: dict[str, object]) -> str:
     if isinstance(response_text, str):
         return response_text
     raise ValueError("Ollama response did not include message content")
+
+
+def _writer_output_budget_exhausted(response: dict[str, object], max_output_tokens: int) -> bool:
+    eval_count = response.get("eval_count")
+    pinned = (
+        isinstance(eval_count, int)
+        and not isinstance(eval_count, bool)
+        and eval_count >= max_output_tokens
+    )
+    return response.get("done_reason") == "length" or pinned

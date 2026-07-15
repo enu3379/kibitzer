@@ -8,7 +8,14 @@ from typing import Iterator
 import httpx
 
 from ...schemas import Verdict
-from .base import Tier1Result, Tier2Decision, Tier2Result, ordered_api_keys
+from .base import (
+    TIER2_JUDGE_SYSTEM_PROMPT,
+    TIER2_LEGACY_SYSTEM_PROMPT,
+    Tier1Result,
+    Tier2Decision,
+    Tier2Result,
+    ordered_api_keys,
+)
 
 
 @dataclass(frozen=True)
@@ -101,7 +108,10 @@ class OpenAICompatibleJudgeProvider:
             "max_tokens": self.writer_max_output_tokens,
         }
         response = await self._post_chat_completions(request_body)
-        content = _openai_message_content(response.json()).strip()
+        response_data = response.json()
+        if _openai_finish_reason(response_data) == "length":
+            raise ValueError("tier2 writer response exhausted output budget")
+        content = _openai_message_content(response_data).strip()
         if not content:
             raise ValueError("tier2 writer response was empty")
         return content[:320]
@@ -174,12 +184,7 @@ def _tier2_messages(
     return [
         {
             "role": "system",
-            "content": system_prompt or (
-                "You are Kibitzer, a quiet browser drift guard. Decide whether the current page is truly "
-                "off-goal after reading the minimized payload and page excerpt. Return strict JSON only: "
-                '{"confirm_drift":true|false,"message":"<=2 short Korean sentences if true, else empty string"}. '
-                "Confirm drift only when the excerpt is not useful for the declared goal."
-            ),
+            "content": system_prompt or TIER2_LEGACY_SYSTEM_PROMPT,
         },
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]
@@ -192,11 +197,7 @@ def _tier2_judge_messages(
     return [
         {
             "role": "system",
-            "content": system_prompt or (
-                "Decide whether the current browsing context warrants an intervention. Return strict JSON "
-                'only: {"decision":"notify|defer","reason_code":"off_goal|useful_side_branch|'
-                'insufficient_evidence","basis":"title|content|both"}.'
-            ),
+            "content": system_prompt or TIER2_JUDGE_SYSTEM_PROMPT,
         },
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]
@@ -220,6 +221,14 @@ def _openai_message_content(response: dict[str, object]) -> str:
     if not isinstance(message, dict) or not isinstance(message.get("content"), str):
         raise ValueError("OpenAI response did not include message content")
     return message["content"]
+
+
+def _openai_finish_reason(response: dict[str, object]) -> str | None:
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return None
+    finish_reason = choices[0].get("finish_reason")
+    return finish_reason if isinstance(finish_reason, str) else None
 
 
 def _chat_completions_url(base_url: str) -> str:

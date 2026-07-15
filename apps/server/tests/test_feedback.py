@@ -282,6 +282,11 @@ class FeedbackApiTest(unittest.TestCase):
         self.assertEqual(clamp_notification_message("세이프!! 돌아왔습니다!!", 2), "세이프!! 돌아왔습니다!!")
         self.assertEqual(clamp_notification_message("하나!! 둘!! 셋!!", 2), "하나!! 둘!!")
 
+    def test_clamp_counts_boundaries_without_following_spaces(self) -> None:
+        self.assertEqual(clamp_notification_message("하나!둘!셋!", 2), "하나! 둘!")
+        self.assertEqual(clamp_notification_message("하나。둘。셋。", 2), "하나。 둘。")
+        self.assertEqual(clamp_notification_message("하나.둘.셋.", 2), "하나. 둘.")
+
     def test_clamp_keeps_closing_brackets_and_quotes_with_sentence(self) -> None:
         self.assertEqual(clamp_notification_message("(진짜요?) 다음 문장입니다.", 1), "(진짜요?)")
         self.assertEqual(

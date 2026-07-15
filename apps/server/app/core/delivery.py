@@ -6,7 +6,6 @@ _BOUNDARIES = ".!?。！？"
 # and numbers ("3.6") from splitting a sentence, and counts stacked marks
 # ("세이프!!") as a single boundary instead of a bare-"!" sentence.
 _CLOSERS = "\"'”’»」』)]"
-_WHITESPACE = " \t"
 
 
 def clamp_notification_message(message: str, max_sentences: int) -> str:
@@ -27,7 +26,7 @@ def clamp_notification_message(message: str, max_sentences: int) -> str:
             while sentence_end + 1 < length and text[sentence_end + 1] in _CLOSERS:
                 sentence_end += 1
             next_char = text[sentence_end + 1] if sentence_end + 1 < length else ""
-            if next_char == "" or next_char in _WHITESPACE:
+            if text[index] != "." or _period_ends_sentence(text, index, next_char):
                 sentence = text[start : sentence_end + 1].strip()
                 if sentence:
                     sentences.append(sentence)
@@ -42,3 +41,16 @@ def clamp_notification_message(message: str, max_sentences: int) -> str:
     if tail and len(sentences) < max_sentences:
         sentences.append(tail)
     return " ".join(sentences)
+
+
+def _period_ends_sentence(text: str, index: int, next_char: str) -> bool:
+    if not next_char or next_char.isspace() or next_char in _CLOSERS:
+        return True
+    previous_char = text[index - 1] if index > 0 else ""
+    # A dot embedded between ASCII-ish identifier characters belongs to a
+    # domain, decimal, version, or abbreviation (youtube.com, 3.6, v1.2).
+    return not (_identifier_char(previous_char) and _identifier_char(next_char))
+
+
+def _identifier_char(char: str) -> bool:
+    return bool(char) and (char.isascii() and (char.isalnum() or char in "_-"))

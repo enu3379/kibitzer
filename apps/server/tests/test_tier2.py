@@ -228,6 +228,55 @@ class Tier2ProviderTest(unittest.TestCase):
         self.assertFalse(writer_kwargs["json_mode"])
         self.assertFalse(writer_kwargs["think"])
 
+    def test_ollama_writer_rejects_output_pinned_to_budget_even_with_content(self) -> None:
+        provider = OllamaChatJudgeProvider(
+            api_url="https://ollama.com/api/chat",
+            api_key="test",
+            model="model",
+            writer_max_output_tokens=1024,
+        )
+        response = {
+            "message": {"content": "패치노트 구경은 잠깐 벤치 휴식이에요. 예"},
+            "done_reason": "stop",
+            "eval_count": 1024,
+        }
+        with patch.object(
+            OllamaChatJudgeProvider,
+            "_post_chat",
+            new_callable=AsyncMock,
+            return_value=response,
+        ):
+            with self.assertRaisesRegex(ValueError, "exhausted output budget"):
+                asyncio.run(provider.write_tier2_message({"goal": "test"}, "writer"))
+
+    def test_openai_writer_rejects_length_finish_reason(self) -> None:
+        provider = OpenAICompatibleJudgeProvider(
+            base_url="https://api.example.com/v1",
+            api_key="test",
+            model="model",
+            writer_max_output_tokens=1024,
+        )
+        response = httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://api.example.com/v1/chat/completions"),
+            json={
+                "choices": [
+                    {
+                        "finish_reason": "length",
+                        "message": {"content": "문장 중간에서 잘린 출력"},
+                    }
+                ]
+            },
+        )
+        with patch.object(
+            OpenAICompatibleJudgeProvider,
+            "_post_chat_completions",
+            new_callable=AsyncMock,
+            return_value=response,
+        ):
+            with self.assertRaisesRegex(ValueError, "exhausted output budget"):
+                asyncio.run(provider.write_tier2_message({"goal": "test"}, "writer"))
+
     def test_factory_reads_ollama_experiment_model_without_copying_keys(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             models_file = Path(tmp) / "models.yaml"
