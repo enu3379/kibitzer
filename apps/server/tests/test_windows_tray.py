@@ -15,6 +15,7 @@ from apps.server.app.windows_tray import (
     ServerStatus,
     WindowsServerManager,
     WindowsTrayApp,
+    _tray_icon_path,
 )
 
 
@@ -32,6 +33,14 @@ def runtime_paths(root: Path, *, mode: str = "development") -> RuntimePaths:
 
 
 class WindowsServerManagerTest(unittest.TestCase):
+    def test_packaged_tray_icon_uses_bundled_resource_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            icon = root / "icons" / "monitor-v1-mono-128.png"
+            icon.parent.mkdir()
+            icon.touch()
+            self.assertEqual(_tray_icon_path(runtime_paths(root, mode="packaged")), icon)
+
     def test_status_discovers_candidate_and_maps_health_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = WindowsServerManager(runtime_paths(Path(tmpdir)))

@@ -35,6 +35,10 @@ STARTUP_TIMEOUT_SECONDS = 30.0
 STOP_TIMEOUT_SECONDS = 10.0
 
 
+class TrayAlreadyRunningError(RuntimeError):
+    pass
+
+
 class ServerState(str, Enum):
     DEAD = "dead"
     STARTING = "starting"
@@ -228,7 +232,7 @@ class WindowsSingleInstance(AbstractContextManager["WindowsSingleInstance"]):
             raise ctypes.WinError(ctypes.get_last_error())
         if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
             kernel32.CloseHandle(handle)
-            raise RuntimeError("Kibitzer tray is already running")
+            raise TrayAlreadyRunningError("Kibitzer tray is already running")
         self._kernel32 = kernel32
         self._handle = handle
         return self
@@ -400,6 +404,7 @@ class WindowsTrayApp:
 def _tray_icon_path(paths: RuntimePaths) -> Path:
     candidates = (
         paths.resource_root / "icons" / "tray.png",
+        paths.resource_root / "icons" / "monitor-v1-mono-128.png",
         paths.resource_root
         / "apps"
         / "extension"
@@ -422,12 +427,29 @@ def _configure_logging(paths: RuntimePaths) -> None:
     )
 
 
+def _smoke_packaged_tray(paths: RuntimePaths) -> None:
+    import pystray  # noqa: F401
+
+    manager = WindowsServerManager(paths)
+    WindowsTrayApp(manager)._make_images()
+    server_executable = Path(manager._server_command()[0])
+    if not server_executable.is_file():
+        raise FileNotFoundError(f"bundled server executable is missing: {server_executable}")
+
+
 def main() -> int:
     if sys.platform != "win32":
         print("The Kibitzer tray app is available on Windows only.", file=sys.stderr)
         return 2
     paths = resolve_runtime_paths()
     _configure_logging(paths)
+    if "--smoke" in sys.argv[1:]:
+        try:
+            _smoke_packaged_tray(paths)
+        except Exception:
+            LOGGER.exception("Windows tray package smoke failed")
+            return 1
+        return 0
     instance_id = uuid4().hex
     try:
         with WindowsSingleInstance():
@@ -450,9 +472,12 @@ def main() -> int:
             finally:
                 remove_if_instance_matches(paths.tray_exit_request_file, instance_id)
                 remove_if_instance_matches(paths.tray_control_file, instance_id)
-    except RuntimeError as exc:
+    except TrayAlreadyRunningError as exc:
         LOGGER.info("%s", exc)
         return 0
+    except Exception:
+        LOGGER.exception("Windows tray failed")
+        return 1
     return 0
 
 

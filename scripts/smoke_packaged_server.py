@@ -36,6 +36,25 @@ def executable_in(dist_dir: Path) -> Path:
     return executable
 
 
+def smoke_windows_tray(dist_dir: Path, env: dict[str, str]) -> None:
+    if sys.platform != "win32":
+        return
+    tray = dist_dir.resolve() / "Kibitzer.exe"
+    result = subprocess.run(
+        [str(tray), "--smoke"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"packaged tray smoke failed with {result.returncode}: "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+
+
 def run_json(executable: Path, args: list[str], env: dict[str, str]) -> dict[str, Any]:
     result = subprocess.run(
         [str(executable), *args],
@@ -157,6 +176,7 @@ tier2:
         env = dict(os.environ)
         env["KIBITZER_HOME"] = str(profile)
         paths = run_json(executable, ["paths"], env)
+        smoke_windows_tray(dist_dir, env)
         if paths.get("mode") != "packaged":
             raise RuntimeError(f"expected packaged runtime mode, got {paths.get('mode')!r}")
         if Path(str(paths["data_dir"])) != profile:
