@@ -20,6 +20,10 @@ class NoActiveSessionError(RuntimeError):
     pass
 
 
+class IdempotencyConflictError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class SessionRecord:
     id: str
@@ -161,6 +165,14 @@ class InterventionCandidateRecord:
     expires_at: datetime
     updated_at: datetime
     intervention_id: str | None = None
+    terminal_result: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class ObservationRequestRecord:
+    idempotency_key: str
+    request_fingerprint: str
+    result: dict[str, Any] | None
 
 
 @dataclass(frozen=True)
@@ -993,6 +1005,92 @@ class SQLiteStore:
                 {"error_type": error_type},
                 now,
             )
+
+    def claim_observation_request(
+        self,
+        idempotency_key: str,
+        request_fingerprint: str,
+    ) -> tuple[ObservationRequestRecord, bool]:
+        """Claim a browser-nav request without allowing a duplicate worker."""
+
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            inserted = conn.execute(
+                """
+                INSERT INTO observation_requests (
+                    idempotency_key, request_fingerprint, result_json
+                )
+                VALUES (?, ?, NULL)
+                ON CONFLICT(idempotency_key) DO NOTHING
+                """,
+                (idempotency_key, request_fingerprint),
+            )
+            row = conn.execute(
+                "SELECT * FROM observation_requests WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            if row is None:
+                raise RuntimeError("observation request disappeared after claim")
+            record = self._observation_request_from_row(row)
+            if record.request_fingerprint != request_fingerprint:
+                raise IdempotencyConflictError(
+                    "idempotency key was already used for a different browser-nav request"
+                )
+        return record, inserted.rowcount == 1
+
+    def complete_observation_request(
+        self,
+        idempotency_key: str,
+        request_fingerprint: str,
+        result: dict[str, Any],
+    ) -> ObservationRequestRecord:
+        result_json = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            updated = conn.execute(
+                """
+                UPDATE observation_requests
+                SET result_json = ?
+                WHERE idempotency_key = ?
+                  AND request_fingerprint = ?
+                  AND result_json IS NULL
+                """,
+                (result_json, idempotency_key, request_fingerprint),
+            )
+            row = conn.execute(
+                "SELECT * FROM observation_requests WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            if row is None:
+                raise RuntimeError("observation request disappeared before completion")
+            record = self._observation_request_from_row(row)
+            if record.request_fingerprint != request_fingerprint:
+                raise IdempotencyConflictError(
+                    "idempotency key was already used for a different browser-nav request"
+                )
+            if updated.rowcount != 1 and record.result != result:
+                raise RuntimeError("observation request already has a different result")
+        return record
+
+    def release_observation_request(
+        self,
+        idempotency_key: str,
+        request_fingerprint: str,
+    ) -> bool:
+        """Release an unfinished claim after request processing fails."""
+
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            deleted = conn.execute(
+                """
+                DELETE FROM observation_requests
+                WHERE idempotency_key = ?
+                  AND request_fingerprint = ?
+                  AND result_json IS NULL
+                """,
+                (idempotency_key, request_fingerprint),
+            )
+        return deleted.rowcount == 1
 
     def record_observation(self, observation: Observation) -> ObservationRecord:
         payload = observation.payload
@@ -1989,6 +2087,8 @@ class SQLiteStore:
         status: str,
         intervention_id: str | None = None,
         ts: datetime | None = None,
+        *,
+        terminal_result: dict[str, Any] | None = None,
     ) -> InterventionCandidateRecord | None:
         if status not in {"confirmed", "cancelled"}:
             raise ValueError(f"unsupported candidate resolution: {status}")
@@ -2000,6 +2100,7 @@ class SQLiteStore:
                 candidate_id,
                 status,
                 intervention_id=intervention_id,
+                terminal_result=terminal_result,
                 now=now,
             )
 
@@ -2009,6 +2110,7 @@ class SQLiteStore:
         candidate_id: str,
         status: str,
         intervention_id: str | None,
+        terminal_result: dict[str, Any] | None,
         now: datetime,
     ) -> InterventionCandidateRecord | None:
         row = conn.execute(
@@ -2025,11 +2127,32 @@ class SQLiteStore:
         conn.execute(
             """
             UPDATE intervention_candidates
-            SET status = ?, intervention_id = ?, updated_at = ?
+            SET status = ?, intervention_id = ?, result_json = ?, updated_at = ?
             WHERE id = ? AND status = 'in_flight'
             """,
-            (status, intervention_id, now.isoformat(), candidate_id),
+            (
+                status,
+                intervention_id,
+                json.dumps(terminal_result, ensure_ascii=False, separators=(",", ":"))
+                if terminal_result is not None
+                else None,
+                now.isoformat(),
+                candidate_id,
+            ),
         )
+        if terminal_result is not None:
+            confirm_drift = status == "confirmed"
+            self._append_event(
+                conn,
+                candidate.session_id,
+                "tier2.confirmed" if confirm_drift else "tier2.cancelled",
+                {
+                    "observation_id": candidate.observation_id,
+                    "confirm_drift": confirm_drift,
+                    "message": terminal_result.get("message"),
+                },
+                now,
+            )
         self._append_event(
             conn,
             candidate.session_id,
@@ -2122,6 +2245,8 @@ class SQLiteStore:
         message: str,
         controller_state: ControllerStateRecord,
         ts: datetime | None = None,
+        *,
+        terminal_result: dict[str, Any] | None = None,
     ) -> str:
         """Atomically consume controller evidence, create an intervention, and confirm its candidate."""
 
@@ -2129,6 +2254,9 @@ class SQLiteStore:
             raise ValueError("controller state belongs to another session")
         now = ts or _utc_now()
         intervention_id = f"int_{uuid.uuid4().hex}"
+        if terminal_result is not None:
+            terminal_result = dict(terminal_result)
+            terminal_result["intervention_id"] = intervention_id
         with self._connect() as conn:
             self._ensure_schema(conn)
             row = conn.execute(
@@ -2157,6 +2285,7 @@ class SQLiteStore:
                 candidate_id,
                 "confirmed",
                 intervention_id=intervention_id,
+                terminal_result=terminal_result,
                 now=now,
             )
             if not resolved or resolved.status != "confirmed":
@@ -2747,6 +2876,12 @@ class SQLiteStore:
                 tier_reached INTEGER
             );
 
+            CREATE TABLE IF NOT EXISTS observation_requests (
+                idempotency_key TEXT PRIMARY KEY,
+                request_fingerprint TEXT NOT NULL,
+                result_json TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS controller_states (
                 session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
                 streak INTEGER NOT NULL DEFAULT 0,
@@ -2777,7 +2912,8 @@ class SQLiteStore:
                 requested_at TEXT NOT NULL,
                 expires_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                intervention_id TEXT REFERENCES interventions(id) ON DELETE SET NULL
+                intervention_id TEXT REFERENCES interventions(id) ON DELETE SET NULL,
+                result_json TEXT
             );
 
             CREATE TABLE IF NOT EXISTS feedback (
@@ -2882,6 +3018,7 @@ class SQLiteStore:
             """
         )
         self._ensure_observation_columns(conn)
+        self._ensure_intervention_candidate_columns(conn)
         self._ensure_controller_columns(conn)
         self._ensure_goal_columns(conn)
         self._ensure_goal_exemplar_columns(conn)
@@ -3008,6 +3145,14 @@ class SQLiteStore:
             expires_at=_parse_dt(row["expires_at"]),
             updated_at=_parse_dt(row["updated_at"]),
             intervention_id=row["intervention_id"],
+            terminal_result=json.loads(row["result_json"]) if row["result_json"] else None,
+        )
+
+    def _observation_request_from_row(self, row: sqlite3.Row) -> ObservationRequestRecord:
+        return ObservationRequestRecord(
+            idempotency_key=row["idempotency_key"],
+            request_fingerprint=row["request_fingerprint"],
+            result=json.loads(row["result_json"]) if row["result_json"] else None,
         )
 
     def _controller_state_from_row(self, row: sqlite3.Row) -> ControllerStateRecord:
@@ -3076,6 +3221,13 @@ class SQLiteStore:
             conn.execute("ALTER TABLE observations ADD COLUMN tab_id INTEGER")
         if "tier1_reason" not in columns:
             conn.execute("ALTER TABLE observations ADD COLUMN tier1_reason TEXT")
+
+    def _ensure_intervention_candidate_columns(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(intervention_candidates)").fetchall()
+        }
+        if "result_json" not in columns:
+            conn.execute("ALTER TABLE intervention_candidates ADD COLUMN result_json TEXT")
 
     def _ensure_controller_columns(self, conn: sqlite3.Connection) -> None:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(controller_states)").fetchall()}
