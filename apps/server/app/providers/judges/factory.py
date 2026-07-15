@@ -204,10 +204,11 @@ def _resolve_experiment_model_settings(
     fallback_api_key = (
         os.environ.get(fallback_api_key_env) if fallback_api_key_env else None
     ) or model_config.get("fallback_api_key")
-    # Rotation pool: resolve each env name; only meaningful with >= 2 keys.
     pool = tuple(
         key for key in (os.environ.get(env) or "" for env in (api_key_pool_envs or [])) if key
     )
+    if not api_key and len(pool) == 1:
+        api_key = pool[0]
     api_keys = pool if len(pool) > 1 else None
     resolved_timeout = (
         _positive_float_setting(model_config, "timeout_sec", timeout_seconds)

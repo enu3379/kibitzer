@@ -89,6 +89,16 @@ class FactoryPoolResolutionTest(unittest.TestCase):
             experiment_model_key="gemma4",
         )
 
+    def _tier2_config(self) -> Tier2Config:
+        return Tier2Config(
+            provider="experiment",
+            api_key_env="ollama2",
+            fallback_api_key_env="ollama3",
+            api_key_pool_envs=["ollama2", "ollama3", "ollama1"],
+            experiment_models_file=str(self.models_file),
+            experiment_model_key="ollama_cloud_gemma4_31b",
+        )
+
     def test_pool_resolves_in_configured_order(self) -> None:
         env = {"ollama1": "key-a", "ollama2": "key-b", "ollama3": "key-c"}
         with mock.patch.dict(os.environ, env, clear=False):
@@ -104,18 +114,26 @@ class FactoryPoolResolutionTest(unittest.TestCase):
         self.assertIsNone(provider.api_keys)  # < 2 resolved keys → no rotation
         self.assertEqual(provider.api_key, "key-a")
 
+    def test_tier1_uses_only_available_pool_key(self) -> None:
+        env = {"ollama1": "", "ollama2": "key-b", "ollama3": ""}
+        with mock.patch.dict(os.environ, env, clear=False):
+            provider = create_tier1_judge_provider(self._tier1_config())
+        assert provider is not None
+        self.assertEqual(provider.api_key, "key-b")
+        self.assertIsNone(provider.api_keys)
+
+    def test_tier2_uses_only_available_pool_key(self) -> None:
+        env = {"ollama1": "key-a", "ollama2": "", "ollama3": ""}
+        with mock.patch.dict(os.environ, env, clear=False):
+            provider = create_tier2_judge_provider(self._tier2_config())
+        assert provider is not None
+        self.assertEqual(provider.api_key, "key-a")
+        self.assertIsNone(provider.api_keys)
+
     def test_tier2_pool_uses_its_own_order(self) -> None:
-        config = Tier2Config(
-            provider="experiment",
-            api_key_env="ollama2",
-            fallback_api_key_env="ollama3",
-            api_key_pool_envs=["ollama2", "ollama3", "ollama1"],
-            experiment_models_file=str(self.models_file),
-            experiment_model_key="ollama_cloud_gemma4_31b",
-        )
         env = {"ollama1": "key-a", "ollama2": "key-b", "ollama3": "key-c"}
         with mock.patch.dict(os.environ, env, clear=False):
-            provider = create_tier2_judge_provider(config)
+            provider = create_tier2_judge_provider(self._tier2_config())
         assert provider is not None
         self.assertEqual(provider.api_keys, ("key-b", "key-c", "key-a"))
 
