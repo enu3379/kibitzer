@@ -179,10 +179,9 @@ async def label_observation(
 @router.post("/observations/browser-nav", response_model=PipelineResult)
 async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineResult:
     store = _store(request)
-    current = store.get_current_session()
     idempotency_key = raw.idempotency_key
     if idempotency_key is None:
-        return await _ingest_browser_nav_once(request, raw, current)
+        return await _ingest_browser_nav_serialized(request, raw)
 
     request_fingerprint = _browser_nav_request_fingerprint(raw)
     try:
@@ -202,7 +201,7 @@ async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineR
         )
 
     try:
-        result = await _ingest_browser_nav_once(request, raw, current)
+        result = await _ingest_browser_nav_serialized(request, raw)
     except Exception:
         store.release_observation_request(idempotency_key, request_fingerprint)
         raise
@@ -215,6 +214,15 @@ async def ingest_browser_nav(request: Request, raw: RawObservation) -> PipelineR
     if completed.result is None:
         raise RuntimeError("completed browser-nav request has no stored result")
     return PipelineResult.model_validate(completed.result)
+
+
+async def _ingest_browser_nav_serialized(
+    request: Request,
+    raw: RawObservation,
+) -> PipelineResult:
+    async with request.app.state.browser_nav_lock:
+        current = _store(request).get_current_session()
+        return await _ingest_browser_nav_once(request, raw, current)
 
 
 async def _ingest_browser_nav_once(

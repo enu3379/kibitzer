@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from uuid import uuid4
@@ -47,6 +48,7 @@ def create_app(
         app.state.config = config
         app.state.store = store
         app.state.runtime = runtime
+        app.state.browser_nav_lock = asyncio.Lock()
         app.state.sensitive_domain_rules = load_sensitive_domain_rules(config.privacy.sensitive_domains_file)
         app.state.persona_set = _load_persona_set(config, logger)
         yield
