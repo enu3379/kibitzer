@@ -16,6 +16,7 @@ import {
   postObservationPresence,
   urlPathHashFor,
 } from "./lib/api"
+import { createBadgeRefresher } from "./lib/badgeRefresh"
 import { shouldDropUrl } from "./lib/domainFilter"
 import {
   ExplorationResponseKind,
@@ -715,7 +716,6 @@ const STATUS_BADGE_FALLBACK: Record<BadgeStatus, { text: string; color: string }
 
 const ACTION_ICON_SIZES = [16, 32] as const
 let baseIconBitmaps: Map<number, ImageBitmap> | null = null
-let lastAppliedStatus: BadgeStatus | null = null
 
 async function loadBaseIconBitmaps(): Promise<Map<number, ImageBitmap>> {
   if (baseIconBitmaps) return baseIconBitmaps
@@ -775,12 +775,7 @@ async function computeBadgeStatus(): Promise<BadgeStatus> {
   return "tracking"
 }
 
-async function refreshBadge(): Promise<void> {
-  const status = await computeBadgeStatus()
-  if (status === lastAppliedStatus) return
-  lastAppliedStatus = status
-  await applyStatusIcon(status)
-}
+const refreshBadge = createBadgeRefresher(computeBadgeStatus, applyStatusIcon)
 
 async function initBadge(): Promise<void> {
   await chrome.alarms.create(BADGE_ALARM, { periodInMinutes: 1 })
