@@ -167,6 +167,7 @@ async def _embed_goal(request: Request, text: str) -> list[float]:
 @router.post("/sessions", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)
 async def create_session(request: Request) -> SessionResponse:
     session = _store(request).create_session()
+    _runtime(request).enter_idle("session_replaced")
     return SessionResponse(
         id=session.id,
         created_at=session.created_at.isoformat(),
