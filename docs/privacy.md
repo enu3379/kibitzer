@@ -35,6 +35,19 @@ Tier 2 API sees bounded current/recent excerpts only when D7's elapsed-time
 review is due. The server applies the authoritative sensitive-domain gate
 before an observation can accept content.
 
+## Local Data Deletion
+
+**설정 → 저장된 활동 데이터 → 모두 삭제** removes sessions, goals,
+observations, feedback, intervention messages, event-log rows, idempotency
+response records, the extension's temporary activity state, popup snapshot,
+and outstanding Kibitzer notifications. Runtime settings remain available.
+
+SQLite secure deletion is enabled so future row deletions overwrite deleted
+content in database pages. Filesystem snapshots, backups, and SSD wear-leveling
+remain outside Kibitzer's deletion guarantee. Kibitzer does not automatically
+expire activity data; automatic retention needs a separate product decision
+because replay and future usage analysis depend on that history.
+
 ## Failure Mode
 
 If a domain is mistakenly allowed, the server still persists only an opaque

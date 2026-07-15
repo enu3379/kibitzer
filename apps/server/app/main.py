@@ -6,6 +6,7 @@ from uuid import uuid4
 from fastapi import FastAPI
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from .api.data import router as data_router
 from .api.feedback import router as feedback_router
 from .api.health import router as health_router
 from .api.observations import router as observations_router
@@ -73,6 +74,7 @@ def create_app(
     app.include_router(observations_router)
     app.include_router(feedback_router)
     app.include_router(settings_router)
+    app.include_router(data_router)
     return app
 
 
