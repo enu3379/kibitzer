@@ -28,10 +28,24 @@ TIER2_JUDGE_SYSTEM_PROMPT = (
 )
 
 TIER2_WRITER_SYSTEM_PROMPT = (
-    "Write only the user-facing Kibitzer intervention in Korean plain text. The context judge's "
-    "decision is final: do not reconsider, explain, or reverse it. Use only the supplied page title "
-    "or host as the page reference. Do not invent page-body details. Keep the message within the "
-    "configured persona sentence limit and do not return JSON or Markdown."
+    "You write Kibitzer's short Korean nudge shown when the user drifts from their declared goal. "
+    "The context judge already decided to notify; that decision is final. Never re-judge, justify, "
+    "soften, or reverse it, and never mention the judgment, the payload, or yourself as a system.\n"
+    "Output: the message text itself, in Korean, as plain text. No JSON, no Markdown, no quotes "
+    "around the whole message, no labels, no explanation before or after.\n"
+    "Evidence: you only glanced over the user's shoulder. You know the page title, the URL host, "
+    "and the goal — nothing else. Pick at most one concrete word from the title or host as your "
+    "material. Never invent page-body details such as prices, view counts, comments, timers, or "
+    "product names.\n"
+    "Length: default to one sentence; two only when the persona trades in a setup and a jab. "
+    "A standalone interjection also counts as a sentence. The shorter, the sharper.\n"
+    "Signals: nagging_context.nag_count_today is how many nudges were already delivered today "
+    "BEFORE this one — as an ordinal, this nudge is nag_count_today + 1. drift_minutes is how long "
+    "the user has been off-goal, last_nag_ignored means the previous nudge changed nothing, "
+    "repeat_host means they came back to the same site. Fold at most one of these signals "
+    "naturally into the message — never stack counts, minutes, and revisits like a ledger, and "
+    "never invent numbers the payload does not contain. If time_budget is present, treat it as "
+    "background pressure only; do not recite its raw seconds."
 )
 
 
@@ -71,6 +85,9 @@ def load_personas(
 
     personas: dict[str, Persona] = {}
     personas.update(_validated_personas(base_data.get("personas"), str(Path(path).expanduser()), logger))
+    for fragment_path in _persona_fragment_paths(path):
+        fragment = _read_persona_yaml(fragment_path, missing_ok=True)
+        personas.update(_validated_personas(_fragment_personas(fragment), str(fragment_path), logger))
     if user_path:
         personas.update(_validated_personas(user_data.get("personas"), str(Path(user_path).expanduser()), logger))
 
@@ -99,7 +116,11 @@ def compose_tier2_writer_system_prompt(persona: Persona | None) -> str:
     style_prompt = persona.style_prompt.strip()
     if not style_prompt:
         return TIER2_WRITER_SYSTEM_PROMPT
-    return f"{TIER2_WRITER_SYSTEM_PROMPT}\n\nPersona style layer:\n{style_prompt}"
+    return (
+        f"{TIER2_WRITER_SYSTEM_PROMPT}\n\n"
+        "The persona style layer below owns voice, tone, and forbidden expressions.\n"
+        f"Persona style layer:\n{style_prompt}"
+    )
 
 
 def resolve_persona(
@@ -145,6 +166,26 @@ def format_celebration_template(template: str, goal: GoalRecord, return_minutes:
         return template.format(**values)
     except Exception:
         return None
+
+
+def _persona_fragment_paths(base_path: str | Path) -> list[Path]:
+    directory = Path(base_path).expanduser().with_suffix("")
+    if not directory.is_dir():
+        return []
+    return sorted(
+        entry
+        for entry in directory.iterdir()
+        if entry.is_file() and entry.suffix in (".yaml", ".yml")
+    )
+
+
+def _fragment_personas(data: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return {}
+    nested = data.get("personas")
+    if isinstance(nested, dict):
+        return nested
+    return data
 
 
 def _read_persona_yaml(path: str | Path | None, missing_ok: bool) -> dict[str, Any]:
