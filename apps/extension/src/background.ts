@@ -100,7 +100,8 @@ function ensureD7ObservationsRestored(): Promise<void> {
           if (!activeD7Observations.has(tabId)) activeD7Observations.set(tabId, tracked)
         }
       } catch {
-        // Start empty; the heartbeat recovery path remains the fallback.
+        // Start empty and allow a later event to retry transient storage failures.
+        d7ObservationsRestorePromise = null
       }
     })()
   }

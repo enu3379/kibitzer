@@ -381,6 +381,65 @@ class D7ApiTest(unittest.TestCase):
             ).fetchone()[0]
         self.assertEqual(count, 2)
 
+    def test_deferred_review_uses_presence_timestamp(self) -> None:
+        observation_id, path_hash = self._start_drift_observation()
+        self.provider.result = Tier2Result(confirm_drift=False, message=None)
+        self._presence(observation_id, path_hash, "defer-active", "active", self.start)
+        self._presence(
+            observation_id,
+            path_hash,
+            "defer-minute",
+            "heartbeat",
+            self.start + timedelta(seconds=60),
+        )
+        reviewed_at = self.start + timedelta(seconds=120)
+        result = self._presence(
+            observation_id,
+            path_hash,
+            "defer-two-minutes",
+            "heartbeat",
+            reviewed_at,
+        )
+        self.assertEqual(result["action"], "none")
+        with self.store._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT ts, event_type
+                FROM event_log
+                WHERE event_type IN ('tier2.cancelled', 'd7.review_deferred')
+                ORDER BY id
+                """
+            ).fetchall()
+        self.assertEqual([row["event_type"] for row in rows], ["tier2.cancelled", "d7.review_deferred"])
+        self.assertEqual({row["ts"] for row in rows}, {reviewed_at.isoformat()})
+
+    def test_review_transition_events_require_matching_lock(self) -> None:
+        observation_id, _path_hash = self._start_drift_observation()
+        session_id = self.client.get("/sessions/current/state").json()["session_id"]
+        stale_id = f"stale-{observation_id}"
+        self.store.defer_d7_review(
+            session_id,
+            stale_id,
+            next_review_mode_seconds=180,
+            reason="stale_review",
+            ts=self.start,
+        )
+        self.store.complete_d7_review_notification(
+            session_id,
+            stale_id,
+            next_review_mode_seconds=180,
+            ts=self.start,
+        )
+        with self.store._connect() as conn:
+            count = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM event_log
+                WHERE event_type IN ('d7.review_deferred', 'd7.review_notified')
+                """
+            ).fetchone()[0]
+        self.assertEqual(count, 0)
+
     def test_stale_review_lock_expires_on_presence(self) -> None:
         observation_id, path_hash = self._start_drift_observation()
         self._presence(observation_id, path_hash, "stale-active", "active", self.start)

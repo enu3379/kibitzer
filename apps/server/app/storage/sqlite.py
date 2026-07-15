@@ -1485,7 +1485,7 @@ class SQLiteStore:
         now = ts or _utc_now()
         with self._connect() as conn:
             self._ensure_schema(conn)
-            conn.execute(
+            updated = conn.execute(
                 """
                 UPDATE drift_clock_states
                 SET next_review_mode_seconds = ?, review_observation_id = NULL, review_started_at = NULL,
@@ -1494,6 +1494,8 @@ class SQLiteStore:
                 """,
                 (next_review_mode_seconds, reason, now.isoformat(), session_id, observation_id),
             )
+            if updated.rowcount != 1:
+                return
             self._append_event(
                 conn,
                 session_id,
@@ -1519,7 +1521,7 @@ class SQLiteStore:
         now = ts or _utc_now()
         with self._connect() as conn:
             self._ensure_schema(conn)
-            conn.execute(
+            updated = conn.execute(
                 """
                 UPDATE drift_clock_states
                 SET review_observation_id = NULL, review_started_at = NULL, review_status = 'notified',
@@ -1528,6 +1530,8 @@ class SQLiteStore:
                 """,
                 (next_review_mode_seconds, now.isoformat(), session_id, observation_id),
             )
+            if updated.rowcount != 1:
+                return
             self._append_event(
                 conn,
                 session_id,

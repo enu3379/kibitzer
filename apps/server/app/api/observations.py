@@ -557,6 +557,7 @@ async def _run_d7_review(
             thresholds.total_seconds,
             mode_seconds,
             "acceptable_side_branch",
+            now,
         )
 
     max_sentences = (
@@ -825,6 +826,7 @@ def _defer_d7_review(
     total_seconds: int,
     mode_seconds: int,
     reason: str,
+    now: datetime,
 ) -> PipelineResult:
     next_boundary = next_review_boundary(mode_seconds, total_seconds)
     store.record_tier2_result(
@@ -832,12 +834,14 @@ def _defer_d7_review(
         observation_id=observation.id,
         confirm_drift=False,
         message=f"d7_deferred:{reason}",
+        ts=now,
     )
     store.defer_d7_review(
         session_id=observation.session_id,
         observation_id=observation.id,
         next_review_mode_seconds=next_boundary,
         reason=reason,
+        ts=now,
     )
     verdict = Verdict(observation.verdict) if observation.verdict else None
     return PipelineResult(
