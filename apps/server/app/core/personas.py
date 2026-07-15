@@ -54,6 +54,12 @@ def load_personas(
 
     personas: dict[str, Persona] = {}
     personas.update(_validated_personas(base_data.get("personas"), str(Path(path).expanduser()), logger))
+    # Fragment directory: a sibling directory named after the base file without
+    # its suffix (configs/personas.yaml -> configs/personas/) holds one persona
+    # per file, merged in sorted filename order on top of the base file.
+    for fragment_path in _persona_fragment_paths(path):
+        fragment = _read_persona_yaml(fragment_path, missing_ok=True)
+        personas.update(_validated_personas(_fragment_personas(fragment), str(fragment_path), logger))
     if user_path:
         personas.update(_validated_personas(user_data.get("personas"), str(Path(user_path).expanduser()), logger))
 
@@ -115,6 +121,26 @@ def format_celebration_template(template: str, goal: GoalRecord, return_minutes:
         return template.format(**values)
     except Exception:
         return None
+
+
+def _persona_fragment_paths(base_path: str | Path) -> list[Path]:
+    directory = Path(base_path).expanduser().with_suffix("")
+    if not directory.is_dir():
+        return []
+    return sorted(
+        entry
+        for entry in directory.iterdir()
+        if entry.is_file() and entry.suffix in (".yaml", ".yml")
+    )
+
+
+def _fragment_personas(data: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return {}
+    nested = data.get("personas")
+    if isinstance(nested, dict):
+        return nested
+    return data
 
 
 def _read_persona_yaml(path: str | Path | None, missing_ok: bool) -> dict[str, Any]:

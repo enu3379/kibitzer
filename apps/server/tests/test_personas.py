@@ -38,6 +38,38 @@ class PersonaTest(unittest.TestCase):
         self.assertIn('"confirm_drift":true|false', prompt)
         self.assertIn("Use a concise style.", prompt)
 
+    def test_load_personas_merges_fragment_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = Path(tmp) / "personas.yaml"
+            fragment_dir = Path(tmp) / "personas"
+            fragment_dir.mkdir()
+            base_path.write_text(
+                yaml.safe_dump(
+                    {
+                        "version": 1,
+                        "default": "split_a",
+                        "personas": {"inline": {"name": "Inline", "style_prompt": "Inline style."}},
+                    }
+                )
+            )
+            # Bare-mapping fragment (one persona per file, no personas: wrapper).
+            (fragment_dir / "10-split_a.yaml").write_text(
+                yaml.safe_dump({"split_a": {"name": "Split A", "style_prompt": "A style."}})
+            )
+            # Wrapped fragment and an override of the inline persona.
+            (fragment_dir / "20-split_b.yaml").write_text(
+                yaml.safe_dump(
+                    {"personas": {"split_b": {"name": "Split B"}, "inline": {"name": "Inline Overridden"}}}
+                )
+            )
+
+            persona_set = load_personas(base_path)
+
+        self.assertEqual(persona_set.default, "split_a")
+        self.assertEqual(persona_set.personas["split_a"].name, "Split A")
+        self.assertEqual(persona_set.personas["split_b"].name, "Split B")
+        self.assertEqual(persona_set.personas["inline"].name, "Inline Overridden")
+
     def test_load_personas_merges_user_file_and_skips_invalid_entries(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base_path = Path(tmp) / "personas.yaml"
