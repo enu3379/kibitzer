@@ -89,6 +89,22 @@ class FactoryPoolResolutionTest(unittest.TestCase):
             experiment_model_key="gemma4",
         )
 
+    def _tier1_edge_config(self, provider: str) -> Tier1Config:
+        return Tier1Config(
+            provider=provider,
+            base_url="https://api.example.com/v1",
+            api_key_env="tier1_primary",
+            fallback_api_key_env="tier1_fallback",
+            api_key_pool_envs=[
+                "tier1_pool_1",
+                "tier1_pool_2",
+                "tier1_pool_3",
+            ],
+            model="direct-model",
+            experiment_models_file=str(self.models_file),
+            experiment_model_key="gemma4",
+        )
+
     def _tier2_config(self) -> Tier2Config:
         return Tier2Config(
             provider="experiment",
@@ -105,6 +121,64 @@ class FactoryPoolResolutionTest(unittest.TestCase):
             provider = create_tier1_judge_provider(self._tier1_config())
         assert provider is not None
         self.assertEqual(provider.api_keys, ("key-a", "key-c", "key-b"))
+
+    def test_direct_tier1_resolves_fallback_and_pool(self) -> None:
+        env = {
+            "tier1_primary": "key-a",
+            "tier1_fallback": "key-c",
+            "tier1_pool_1": "key-a",
+            "tier1_pool_2": "key-c",
+            "tier1_pool_3": "key-b",
+        }
+        with mock.patch.dict(os.environ, env, clear=True):
+            provider = create_tier1_judge_provider(
+                self._tier1_edge_config("openai_compatible")
+            )
+        assert provider is not None
+        self.assertEqual(provider.fallback_api_key, "key-c")
+        self.assertEqual(provider.api_keys, ("key-a", "key-c", "key-b"))
+
+    def test_direct_and_experiment_tier1_share_pool_edge_cases(self) -> None:
+        cases = [
+            (
+                "empty_pool",
+                {"tier1_primary": "primary", "tier1_fallback": "backup"},
+                ("primary", "backup", None),
+            ),
+            (
+                "single_pool_key",
+                {"tier1_pool_2": "only"},
+                ("only", None, None),
+            ),
+            (
+                "duplicate_pool_keys",
+                {
+                    "tier1_primary": "primary",
+                    "tier1_fallback": "backup",
+                    "tier1_pool_1": "duplicate",
+                    "tier1_pool_2": "duplicate",
+                },
+                ("primary", "backup", ("duplicate", "duplicate")),
+            ),
+        ]
+        for name, env, expected in cases:
+            with self.subTest(name=name), mock.patch.dict(os.environ, env, clear=True):
+                direct = create_tier1_judge_provider(
+                    self._tier1_edge_config("openai_compatible")
+                )
+                experiment = create_tier1_judge_provider(
+                    self._tier1_edge_config("experiment")
+                )
+            assert direct is not None
+            assert experiment is not None
+            direct_keys = (direct.api_key, direct.fallback_api_key, direct.api_keys)
+            experiment_keys = (
+                experiment.api_key,
+                experiment.fallback_api_key,
+                experiment.api_keys,
+            )
+            self.assertEqual(direct_keys, expected)
+            self.assertEqual(experiment_keys, expected)
 
     def test_missing_pool_keys_degrade_to_primary_fallback(self) -> None:
         env = {"ollama1": "key-a", "ollama2": "", "ollama3": ""}

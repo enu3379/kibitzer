@@ -59,7 +59,15 @@ def create_tier1_judge_provider(config: Tier1Config) -> JudgeProvider | None:
     if config.provider != "openai_compatible":
         raise JudgeProviderConfigError(field="provider", error_type="ValueError")
 
-    api_key = os.environ.get(config.api_key_env)
+    api_key, fallback_api_key, api_keys = _resolve_api_keys(
+        api_key=os.environ.get(config.api_key_env),
+        fallback_api_key=(
+            os.environ.get(config.fallback_api_key_env)
+            if config.fallback_api_key_env
+            else None
+        ),
+        api_key_pool_envs=config.api_key_pool_envs,
+    )
     base_url = _expand_env(config.base_url)
     if not api_key or not base_url:
         return None
@@ -67,6 +75,8 @@ def create_tier1_judge_provider(config: Tier1Config) -> JudgeProvider | None:
     return OpenAICompatibleJudgeProvider(
         base_url=base_url,
         api_key=api_key,
+        fallback_api_key=fallback_api_key,
+        api_keys=api_keys,
         model=config.model,
         timeout_seconds=config.timeout_seconds,
     )
@@ -112,6 +122,22 @@ def _expand_env(value: str) -> str | None:
     if value.startswith("${") and value.endswith("}"):
         return os.environ.get(value[2:-1])
     return value
+
+
+def _resolve_api_keys(
+    *,
+    api_key: str | None,
+    fallback_api_key: str | None,
+    api_key_pool_envs: list[str] | None,
+) -> tuple[str | None, str | None, tuple[str, ...] | None]:
+    pool = tuple(
+        key
+        for key in (os.environ.get(env) or "" for env in (api_key_pool_envs or []))
+        if key
+    )
+    if not api_key and len(pool) == 1:
+        api_key = pool[0]
+    return api_key or None, fallback_api_key or None, pool if len(pool) > 1 else None
 
 
 def _resolve_tier2_settings(config: Tier2Config) -> _ResolvedJudgeSettings | None:
@@ -204,12 +230,11 @@ def _resolve_experiment_model_settings(
     fallback_api_key = (
         os.environ.get(fallback_api_key_env) if fallback_api_key_env else None
     ) or model_config.get("fallback_api_key")
-    pool = tuple(
-        key for key in (os.environ.get(env) or "" for env in (api_key_pool_envs or [])) if key
+    api_key, fallback_api_key, api_keys = _resolve_api_keys(
+        api_key=api_key,
+        fallback_api_key=str(fallback_api_key) if fallback_api_key else None,
+        api_key_pool_envs=api_key_pool_envs,
     )
-    if not api_key and len(pool) == 1:
-        api_key = pool[0]
-    api_keys = pool if len(pool) > 1 else None
     resolved_timeout = (
         _positive_float_setting(model_config, "timeout_sec", timeout_seconds)
         if use_model_file_timeout
@@ -229,7 +254,7 @@ def _resolve_experiment_model_settings(
         provider=provider,
         api_url=api_url,
         api_key=api_key,
-        fallback_api_key=str(fallback_api_key) if fallback_api_key else None,
+        fallback_api_key=fallback_api_key,
         api_keys=api_keys,
         model=model,
         timeout_seconds=resolved_timeout,
