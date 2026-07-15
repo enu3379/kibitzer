@@ -1,5 +1,4 @@
 server:
-  host: "127.0.0.1"
   db_path: "./data/kibitzer.sqlite3"
 
 security:
@@ -42,9 +41,7 @@ tier1:
   send:
     title: true
     url_host: true
-    url_path: false
     recent_titles: true
-    page_excerpt: false
 
 tier2:
   enabled: true
@@ -124,7 +121,6 @@ privacy:
   sensitive_domains_file: "configs/sensitive_domains.json"
 
 delivery:
-  channel: "chrome_notification"
   persona: "dry_kibitzer"
   personas_file: "configs/personas.yaml"
   custom_personas_file: "~/.kibitzer/personas.yaml"
