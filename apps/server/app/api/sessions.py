@@ -419,9 +419,13 @@ def _report_response(report: SessionReportRecord) -> SessionReportResponse:
 
 
 @router.post("/sessions/current/goal", response_model=GoalResponse)
-async def set_current_goal(request: Request, body: GoalRequest) -> GoalResponse:
+async def set_current_goal(
+    request: Request,
+    body: GoalRequest,
+    ensure_session: bool = False,
+) -> GoalResponse:
     store = _store(request)
-    if not store.get_current_session():
+    if not ensure_session and not store.get_current_session():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no active session")
     try:
         exemplar = await _embed_goal(request, body.raw_text)
@@ -429,6 +433,7 @@ async def set_current_goal(request: Request, body: GoalRequest) -> GoalResponse:
             body.raw_text,
             exemplar=exemplar,
             available_time_minutes=body.available_time_minutes,
+            ensure_session=ensure_session,
         )
         _schedule_goal_enrichment(
             request,

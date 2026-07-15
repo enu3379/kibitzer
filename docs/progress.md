@@ -881,6 +881,9 @@ Verified:
   original dwell start. A page that already passed `observation_seconds`
   therefore enters Tier 0 without a reload or tab switch; a shorter dwell keeps
   only the remaining observation delay.
+- Popup goal submission no longer carries a cached session-exists flag. The
+  server atomically creates a session when needed and stores the goal while
+  preserving any active session that already exists.
 - Browser navigation intake no longer persists an unjudged observation while
   the active session has no goal. This removes the goal/session timing race that
   produced a permanent goal-less current-page result.
@@ -890,11 +893,13 @@ Verified:
   from a genuinely unobserved page.
 - Updated the current-page and goal-preparation Korean copy and added explicit
   Tier 0 and Tier 1 processing messages.
+- Session replacement and end paths now remove transient page-processing rows
+  alongside the existing excerpt and dwell cleanup.
 
 Verified:
 
-- `.venv\\Scripts\\python.exe -m pytest apps/server/tests -q` passes (222
+- `.venv\\Scripts\\python.exe -m pytest apps/server/tests -q` passes (229
   tests, 1 skipped, 35 subtests).
-- `npm.cmd run build` in `apps/extension` passes (35 tests, type-check, bundle).
+- `npm.cmd run build` in `apps/extension` passes (41 tests, type-check, bundle).
 - Direct async transition tests observe `tier0` during embedding and `tier1`
   during provider classification, then verify cleanup after completion.

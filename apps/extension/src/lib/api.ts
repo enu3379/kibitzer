@@ -212,8 +212,13 @@ export async function createSession(): Promise<SessionInfo | null> {
   return response.json() as Promise<SessionInfo>
 }
 
-export async function setGoal(rawText: string, availableTimeMinutes?: number | null): Promise<GoalInfo | null> {
-  const response = await serverFetch("/sessions/current/goal", {
+export async function setGoal(
+  rawText: string,
+  availableTimeMinutes?: number | null,
+  ensureSession = false,
+): Promise<GoalInfo | null> {
+  const path = ensureSession ? "/sessions/current/goal?ensure_session=true" : "/sessions/current/goal"
+  const response = await serverFetch(path, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ raw_text: rawText, available_time_minutes: availableTimeMinutes ?? null }),

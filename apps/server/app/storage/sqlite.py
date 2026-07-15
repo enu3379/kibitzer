@@ -333,6 +333,9 @@ class SQLiteStore:
             conn.execute(
                 "DELETE FROM drift_page_dwell_states WHERE session_id IN (SELECT id FROM sessions WHERE active = 1)"
             )
+            conn.execute(
+                "DELETE FROM observation_processing_states WHERE session_id IN (SELECT id FROM sessions WHERE active = 1)"
+            )
             conn.execute("UPDATE sessions SET active = 0, ended_at = ? WHERE active = 1", (now_text,))
             conn.execute(
                 "INSERT INTO sessions (id, created_at, active) VALUES (?, ?, 1)",
@@ -392,6 +395,7 @@ class SQLiteStore:
             conn.execute("DELETE FROM observation_excerpts WHERE session_id = ?", (row["id"],))
             conn.execute("DELETE FROM dwell_presence_events WHERE session_id = ?", (row["id"],))
             conn.execute("DELETE FROM drift_page_dwell_states WHERE session_id = ?", (row["id"],))
+            conn.execute("DELETE FROM observation_processing_states WHERE session_id = ?", (row["id"],))
             self._append_event(conn, row["id"], "session.ended", {}, now)
         return SessionRecord(id=row["id"], created_at=_parse_dt(row["created_at"]), active=False)
 
@@ -909,6 +913,7 @@ class SQLiteStore:
         raw_text: str,
         exemplar: list[float] | None = None,
         available_time_minutes: int | None = None,
+        ensure_session: bool = False,
     ) -> GoalRecord:
         normalized_goal = raw_text.strip()
         if not normalized_goal:
@@ -925,9 +930,25 @@ class SQLiteStore:
                 "SELECT id FROM sessions WHERE active = 1 ORDER BY created_at DESC LIMIT 1"
             ).fetchone()
             if not session_row:
-                raise NoActiveSessionError("create a session before setting a goal")
-
-            session_id = session_row["id"]
+                if not ensure_session:
+                    raise NoActiveSessionError("create a session before setting a goal")
+                session_id = f"sess_{uuid.uuid4().hex}"
+                conn.execute(
+                    "INSERT INTO sessions (id, created_at, active) VALUES (?, ?, 1)",
+                    (session_id, now_text),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO controller_states (
+                        session_id, streak, obs_count, last_intervention_ts, snoozed_until, updated_at
+                    )
+                    VALUES (?, 0, 0, NULL, NULL, ?)
+                    """,
+                    (session_id, now_text),
+                )
+                self._append_event(conn, session_id, "session.created", {"active": True}, now)
+            else:
+                session_id = session_row["id"]
             previous_goal = conn.execute(
                 """
                 SELECT raw_text, available_time_minutes, goal_revision

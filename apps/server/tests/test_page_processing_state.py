@@ -86,6 +86,24 @@ class PageProcessingStateApiTest(unittest.TestCase):
             }
         )
 
+    def _seed_processing_state(self, url: str = "https://example.com/kibitzer-api") -> str:
+        current = self.store.get_current_session()
+        assert current and current.goal
+        observation = normalize_browser_nav(self._raw(url), self.session_id)
+        self.store.set_observation_processing_stage(
+            observation,
+            current.goal.goal_revision,
+            "tier0",
+        )
+        return current.session.id
+
+    def _processing_state_count(self, session_id: str) -> int:
+        with self.store._connect() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM observation_processing_states WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()[0]
+
     def test_page_state_reports_tier0_and_tier1_processing(self) -> None:
         url = "https://example.com/kibitzer-api"
         current = self.store.get_current_session()
@@ -131,6 +149,23 @@ class PageProcessingStateApiTest(unittest.TestCase):
         with self.store._connect() as conn:
             remaining = conn.execute("SELECT COUNT(*) FROM observation_processing_states").fetchone()[0]
         self.assertEqual(remaining, 0)
+
+    def test_replacing_session_clears_processing_state(self) -> None:
+        session_id = self._seed_processing_state()
+
+        replacement = self.store.create_session()
+
+        self.assertNotEqual(replacement.id, session_id)
+        self.assertEqual(self._processing_state_count(session_id), 0)
+
+    def test_ending_session_clears_processing_state(self) -> None:
+        session_id = self._seed_processing_state()
+
+        ended = self.store.end_current_session()
+
+        self.assertEqual(ended.id, session_id)
+        self.assertEqual(self._processing_state_count(session_id), 0)
+
 
 class PageProcessingStateTransitionTest(unittest.IsolatedAsyncioTestCase):
     def _raw(self) -> RawObservation:

@@ -238,14 +238,14 @@ async function refresh(): Promise<void> {
     clearSnapshot()
     stopPoll()
     currentGoalBudgetMinutes = null
-    renderSetup(false, typedGoal)
+    renderSetup(typedGoal)
     return
   }
   if (!result.state.has_goal) {
     clearSnapshot()
     stopPoll()
     currentGoalBudgetMinutes = null
-    renderSetup(true, typedGoal)
+    renderSetup(typedGoal)
     return
   }
   const activeTab = await getActiveTab()
@@ -322,10 +322,10 @@ function renderOffline(): void {
   if (offlineView === "setup") return
   offlineView = "setup"
   const typed = pendingGoalText ?? (document.getElementById("goal-input") as HTMLInputElement | null)?.value ?? ""
-  renderSetup(false, typed, true)
+  renderSetup(typed, true)
 }
 
-function renderSetup(sessionExists: boolean, currentGoal = "", offline = false): void {
+function renderSetup(currentGoal = "", offline = false): void {
   root.innerHTML = `
     ${header(offline ? "연결 안 됨" : "목표 없음", offline ? "red" : "amber")}
     ${offline ? offlineBannerHtml("서버가 켜지면 자동으로 다시 연결돼요.") : ""}
@@ -345,10 +345,10 @@ function renderSetup(sessionExists: boolean, currentGoal = "", offline = false):
   input.focus()
   input.setSelectionRange(input.value.length, input.value.length)
   input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !serverDown) void submitGoal(sessionExists)
+    if (event.key === "Enter" && !serverDown) void submitGoal()
   })
   submit.addEventListener("click", () => {
-    void submitGoal(sessionExists)
+    void submitGoal()
   })
   document.getElementById("goal-cancel")?.addEventListener("click", () => {
     editing = false
@@ -370,14 +370,12 @@ function renderGoalPreparing(): void {
 }
 
 async function setGoalAndResumeCurrentPage(
-  sessionExists: boolean,
   rawGoalText: string,
   availableTimeMinutes: number | null,
 ): Promise<GoalInfo | null> {
   try {
     const response = await chrome.runtime.sendMessage({
       type: "kibitzer:set-goal",
-      sessionExists,
       rawGoalText,
       availableTimeMinutes,
     }) as { ok?: boolean; goal?: GoalInfo } | undefined
@@ -387,7 +385,7 @@ async function setGoalAndResumeCurrentPage(
   }
 }
 
-async function submitGoal(sessionExists: boolean): Promise<void> {
+async function submitGoal(): Promise<void> {
   const input = document.getElementById("goal-input") as HTMLInputElement
   const budgetInput = document.getElementById("time-budget-input") as HTMLInputElement
   const submit = document.getElementById("goal-submit") as HTMLButtonElement
@@ -409,7 +407,7 @@ async function submitGoal(sessionExists: boolean): Promise<void> {
   submit.disabled = true
   pendingGoalText = text
   renderGoalPreparing()
-  const goal = await setGoalAndResumeCurrentPage(sessionExists, text, availableTimeMinutes)
+  const goal = await setGoalAndResumeCurrentPage(text, availableTimeMinutes)
   if (!goal) {
     handleUnreachable()
     return
@@ -697,7 +695,7 @@ function renderDashboard(
   document.getElementById("goal-edit")?.addEventListener("click", () => {
     editing = true
     stopPoll()
-    renderSetup(true, goalText)
+    renderSetup(goalText)
   })
   document.getElementById("snooze-toggle")?.addEventListener("click", () => {
     void toggleSnooze(snoozed)
@@ -1022,7 +1020,7 @@ function renderSummary(stats: SessionStats): void {
 
   document.getElementById("new-session")?.addEventListener("click", () => {
     summary = null
-    renderSetup(false)
+    renderSetup()
   })
 }
 

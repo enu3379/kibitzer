@@ -6,7 +6,6 @@ import {
   PageInfo,
   PageExcerpt,
   PipelineResult,
-  createSession,
   getLatestObservation,
   getSettings,
   getSessionState,
@@ -75,7 +74,6 @@ interface RuntimeMessage {
   type?: string
   tabId?: number
   url?: string
-  sessionExists?: boolean
   rawGoalText?: string
   availableTimeMinutes?: number | null
   notificationId?: string
@@ -240,13 +238,11 @@ async function scheduleCurrentPageForReadyGoal(): Promise<{ ok: boolean; immedia
 }
 
 async function setGoalAndScheduleCurrentPage(
-  sessionExists: boolean,
   rawGoalText: string,
   availableTimeMinutes: number | null,
 ): Promise<{ ok: boolean; goal?: GoalInfo; immediate: boolean }> {
   return runGoalObservationTask(async () => {
-    if (!sessionExists && !(await createSession())) return { ok: false, immediate: false }
-    const goal = await setGoal(rawGoalText, availableTimeMinutes)
+    const goal = await setGoal(rawGoalText, availableTimeMinutes, true)
     if (!goal) return { ok: false, immediate: false }
     const scheduled = await scheduleCurrentPageForReadyGoal()
     return { ok: true, goal, immediate: scheduled.immediate }
@@ -915,11 +911,9 @@ chrome.runtime.onMessage.addListener(
     }
     if (
       message?.type === "kibitzer:set-goal"
-      && typeof message.sessionExists === "boolean"
       && typeof message.rawGoalText === "string"
     ) {
       void setGoalAndScheduleCurrentPage(
-        message.sessionExists,
         message.rawGoalText,
         message.availableTimeMinutes ?? null,
       ).then(
