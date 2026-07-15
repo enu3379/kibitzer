@@ -220,6 +220,13 @@ class FeedbackApiTest(unittest.TestCase):
         self.assertEqual(clamp_notification_message("세이프!! 돌아왔습니다!!", 2), "세이프!! 돌아왔습니다!!")
         self.assertEqual(clamp_notification_message("하나!! 둘!! 셋!!", 2), "하나!! 둘!!")
 
+    def test_clamp_keeps_closing_brackets_and_quotes_with_sentence(self) -> None:
+        self.assertEqual(clamp_notification_message("(진짜요?) 다음 문장입니다.", 1), "(진짜요?)")
+        self.assertEqual(
+            clamp_notification_message("\"정말입니다.\" 라고 말했다. 셋째 문장입니다.", 1),
+            "\"정말입니다.\"",
+        )
+
     def test_clamp_respects_three_sentence_budget(self) -> None:
         message = "제법이잖아. …차, 착각하지 마, 칭찬 아니야. 원래 했어야 할 일이잖아."
         self.assertEqual(clamp_notification_message(message, 3), message)

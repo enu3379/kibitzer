@@ -1,18 +1,18 @@
 # Kibitzer personas — manifest. Individual persona definitions live in
 # configs/personas/<NN>-<key>.yaml (one persona per file, merged by the server
-# in sorted filename order; see app/core/personas.py). Shared authoring rules:
+# in sorted filename order; see apps/server/app/core/personas.py). Shared authoring rules:
 # - style_prompt is a STYLE layer only; the strict-JSON output contract is
 #   composed in code and must never be duplicated or overridden here.
 # - Template placeholders: {goal} {title} {host} {nag_count} {return_minutes}
 # - celebrate_templates fire on drift-departure -> return; picked at random.
-# - fallback_templates are indexed by nag_count (sequential) — order them as an
-#   escalation ladder where the persona has one (e.g. baseball bases).
+# - fallback_templates are indexed by nag_count (sequential and cyclic) — order
+#   the first cycle as a progression where useful (e.g. baseball bases).
 # - Server clamps messages at max_sentences (default 2; per-persona override).
 #   Never put a punchline in sentence 3 unless the persona sets max_sentences: 3.
 # - Few-shot pools are mandatory: one lone example gets parroted by minimax-m3.
 #
-# Design brief v2 (2026-07-15, likability revamp): 10 personas rebuilt from a
-# curated meme corpus — see docs/planning-notes.md "persona voice revamp".
+# Design brief v4 (2026-07-15, likability revamp): 10 personas rebuilt from a
+# curated meme corpus — see docs/persona-voice-revamp.md.
 
 version: 1
 default: dry_kibitzer

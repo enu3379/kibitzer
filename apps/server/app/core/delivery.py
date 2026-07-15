@@ -5,7 +5,8 @@ _BOUNDARIES = ".!?。！？"
 # quote/bracket, or end-of-text. This keeps dots inside domains ("youtube.com")
 # and numbers ("3.6") from splitting a sentence, and counts stacked marks
 # ("세이프!!") as a single boundary instead of a bare-"!" sentence.
-_AFTER_BOUNDARY = " \t\"'”’»」』)]"
+_CLOSERS = "\"'”’»」』)]"
+_WHITESPACE = " \t"
 
 
 def clamp_notification_message(message: str, max_sentences: int) -> str:
@@ -22,15 +23,18 @@ def clamp_notification_message(message: str, max_sentences: int) -> str:
             end = index
             while end + 1 < length and text[end + 1] in _BOUNDARIES:
                 end += 1
-            next_char = text[end + 1] if end + 1 < length else ""
-            if next_char == "" or next_char in _AFTER_BOUNDARY:
-                sentence = text[start : end + 1].strip()
+            sentence_end = end
+            while sentence_end + 1 < length and text[sentence_end + 1] in _CLOSERS:
+                sentence_end += 1
+            next_char = text[sentence_end + 1] if sentence_end + 1 < length else ""
+            if next_char == "" or next_char in _WHITESPACE:
+                sentence = text[start : sentence_end + 1].strip()
                 if sentence:
                     sentences.append(sentence)
-                start = end + 1
+                start = sentence_end + 1
                 if len(sentences) >= max_sentences:
                     return " ".join(sentences)
-            index = end + 1
+            index = sentence_end + 1
             continue
         index += 1
 
