@@ -62,7 +62,7 @@ def run_case(case: dict[str, Any]) -> str:
             store=SQLiteStore(db_path),
             tier2_provider=provider,
         )
-        with TestClient(app) as client:
+        with TestClient(app, base_url="http://127.0.0.1") as client:
             client.post("/sessions")
             client.post("/sessions/current/goal", json={"raw_text": case["goal"]})
             first = client.post(

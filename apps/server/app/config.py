@@ -1,14 +1,31 @@
+import os
+import re
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+CHROME_EXTENSION_ID_PATTERN = re.compile(r"^[a-p]{32}$")
 
 
 class ServerConfig(BaseModel):
     host: str = "127.0.0.1"
     db_path: str = "./data/kibitzer.sqlite3"
+
+
+class SecurityConfig(BaseModel):
+    allowed_extension_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("allowed_extension_ids")
+    @classmethod
+    def _validate_extension_ids(cls, values: list[str]) -> list[str]:
+        for value in values:
+            if not CHROME_EXTENSION_ID_PATTERN.fullmatch(value):
+                raise ValueError("Chrome extension IDs must be 32 lowercase letters from a to p")
+        return list(dict.fromkeys(values))
 
 
 class EmbeddingConfig(BaseModel):
@@ -166,6 +183,7 @@ class AppConfig(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     server: ServerConfig = Field(default_factory=ServerConfig)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     relevance: RelevanceConfig = Field(default_factory=RelevanceConfig)
     goal_enrichment: GoalEnrichmentConfig = Field(default_factory=GoalEnrichmentConfig)
@@ -185,26 +203,36 @@ def load_config(path: str | Path = "configs/default.yaml") -> AppConfig:
     load_dotenv(Path(".env"), override=False)
     config_path = Path(path)
     data = yaml.safe_load(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+    values = {
+        k: v
+        for k, v in (data or {}).items()
+        if k
+        in {
+            "server",
+            "security",
+            "embedding",
+            "relevance",
+            "goal_enrichment",
+            "tier1",
+            "tier2",
+            "controller",
+            "celebration",
+            "break",
+            "dwell",
+            "time_budget",
+            "privacy",
+            "delivery",
+        }
+    }
+    extension_ids = os.environ.get("KIBITZER_EXTENSION_IDS")
+    if extension_ids:
+        security = dict(values.get("security") or {})
+        security["allowed_extension_ids"] = [
+            value.strip() for value in extension_ids.split(",") if value.strip()
+        ]
+        values["security"] = security
+
     return AppConfig(
         raw=data or {},
-        **{
-            k: v
-            for k, v in (data or {}).items()
-            if k
-            in {
-                "server",
-                "embedding",
-                "relevance",
-                "goal_enrichment",
-                "tier1",
-                "tier2",
-                "controller",
-                "celebration",
-                "break",
-                "dwell",
-                "time_budget",
-                "privacy",
-                "delivery",
-            }
-        },
+        **values,
     )

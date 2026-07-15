@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi.testclient import TestClient
+from apps.server.tests.support import TestClient
 
 from apps.server.app.config import (
     AppConfig,

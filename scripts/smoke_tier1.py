@@ -41,7 +41,7 @@ def main() -> int:
             store=SQLiteStore(db_path),
             tier1_provider=provider,
         )
-        with TestClient(app) as client:
+        with TestClient(app, base_url="http://127.0.0.1") as client:
             session_id = client.post("/sessions").json()["id"]
             client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})
             response = client.post(

@@ -7,7 +7,7 @@ from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+from apps.server.tests.support import TestClient
 
 from apps.server.app.config import AppConfig, ControllerConfig, ServerConfig, Tier1Config, Tier2Config
 from apps.server.app.core.tier1_payload import build_tier1_payload

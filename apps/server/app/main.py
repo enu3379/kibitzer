@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from uuid import uuid4
 
 from fastapi import FastAPI
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .api.feedback import router as feedback_router
 from .api.health import router as health_router
@@ -13,6 +14,7 @@ from .config import AppConfig
 from .config import load_config
 from .core.personas import load_personas, resolve_persona
 from .core.runtime_resources import RuntimeResources
+from .core.security import OriginBoundaryMiddleware
 from .privacy.domain_filter import load_sensitive_domain_rules
 from .ports import identity_payload
 from .providers.embeddings.base import EmbeddingProvider
@@ -50,6 +52,15 @@ def create_app(
         yield
 
     app = FastAPI(title="Kibitzer Local Server", lifespan=lifespan)
+    app.add_middleware(
+        OriginBoundaryMiddleware,
+        allowed_extension_ids=config.security.allowed_extension_ids,
+    )
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=["127.0.0.1", "localhost"],
+        www_redirect=False,
+    )
 
     @app.get("/identity")
     async def identity() -> dict[str, str | int]:

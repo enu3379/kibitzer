@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
+from apps.server.tests.support import TestClient
 
 from apps.server.app.config import AppConfig, ControllerConfig, ServerConfig, Tier1Config, Tier2Config, TimeBudgetConfig
 from apps.server.app.core.time_budget import next_review_boundary, review_is_due, thresholds_for_budget

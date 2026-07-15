@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+from apps.server.tests.support import TestClient
 
 from apps.server.app.config import AppConfig, ServerConfig, Tier1Config, Tier2Config
 from apps.server.app.main import create_app

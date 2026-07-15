@@ -17,7 +17,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+from apps.server.tests.support import TestClient
 
 from apps.server.app.config import AppConfig, ServerConfig
 from apps.server.app.core.normalization import strip_repeated_title_suffix

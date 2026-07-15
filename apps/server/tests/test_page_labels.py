@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from unittest import mock
 
-from fastapi.testclient import TestClient
+from apps.server.tests.support import TestClient
 
 from apps.server.app.config import AppConfig, ControllerConfig, ServerConfig, Tier1Config, Tier2Config
 from apps.server.app.main import create_app

@@ -50,6 +50,20 @@ Then load the Chrome extension:
 3. Click Load unpacked.
 4. Select `apps\extension\dist`.
 
+The checked-in manifest key gives unpacked development builds a stable ID that
+the server already allows. If you use a differently signed development build
+or a Web Store build with another ID, list the exact ID in the ignored `.env`
+file and restart the server:
+
+```dotenv
+KIBITZER_EXTENSION_IDS=your_extension_id_here
+```
+
+Kibitzer accepts API writes only from extension IDs listed here or from the
+same local dashboard origin. Separate development and Web Store IDs with a
+comma when both are needed. Requests without an `Origin` header remain
+available to loopback CLI clients such as `Invoke-RestMethod`.
+
 ## Optional Login Autostart
 
 Install a current-user Startup shortcut so the server starts at Windows logon in
