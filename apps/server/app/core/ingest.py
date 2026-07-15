@@ -20,7 +20,11 @@ from .normalization import (
     strip_repeated_title_suffix,
 )
 from .personas import PersonaSet, format_celebration_template, resolve_persona
-from .relevance import tier0_score_parts, tier1_final_relevance
+from .relevance import (
+    anchor_admission_eligible,
+    tier0_score_parts,
+    tier1_final_relevance,
+)
 from .runtime_resources import RuntimeResources
 from .runtime_settings import effective_controller_config, quiet_hours_active, runtime_settings
 from .tier1_payload import build_tier1_payload
@@ -121,13 +125,13 @@ async def ingest_browser_nav(
         # Anchor admission guard: only pages with genuine goal affinity — direct
         # exemplar similarity, or an LLM-vetted OK — may steer the anchor. An OK
         # that rode the anchor alone keeps its verdict but gets no vote.
-        observation.features.anchor_eligible = (
-            score.exemplar_score >= config.relevance.anchor_epsilon
-            or score.derived_score >= config.goal_enrichment.derived_tau
-            or (
-                observation.verdict == Verdict.OK
-                and (observation.features.tier_reached or 0) >= 1
-            )
+        observation.features.anchor_eligible = anchor_admission_eligible(
+            score,
+            has_derived_exemplars=bool(current.goal.derived_vectors),
+            anchor_epsilon=config.relevance.anchor_epsilon,
+            derived_tau=config.goal_enrichment.derived_tau,
+            verdict=observation.verdict,
+            tier_reached=observation.features.tier_reached,
         )
 
     store.record_observation(observation, goal_revision=captured_goal_revision)

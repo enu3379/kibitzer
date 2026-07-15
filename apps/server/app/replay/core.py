@@ -16,7 +16,11 @@ import yaml
 from ..config import AppConfig
 from ..core.controller_flow import apply_controller, confirm_controller_intervention
 from ..core.normalization import strip_repeated_title_suffix
-from ..core.relevance import tier0_score_parts, tier1_final_relevance
+from ..core.relevance import (
+    anchor_admission_eligible,
+    tier0_score_parts,
+    tier1_final_relevance,
+)
 from ..providers.embeddings.factory import create_embedding_provider
 from ..schemas import Observation, ObservationFeatures, PipelineAction, Source, Verdict
 from ..storage.sqlite import ControllerStateRecord
@@ -613,10 +617,13 @@ async def _replay_observation(
 
     final_relevance = tier1_final_relevance(verdict_replay) if tier_replay >= 1 else score.score
 
-    anchor_eligible = (
-        score.exemplar_score >= state.config.relevance.anchor_epsilon
-        or score.derived_score >= state.config.goal_enrichment.derived_tau
-        or (verdict_replay == Verdict.OK and tier_replay >= 1)
+    anchor_eligible = anchor_admission_eligible(
+        score,
+        has_derived_exemplars=bool(state.derived_vectors),
+        anchor_epsilon=state.config.relevance.anchor_epsilon,
+        derived_tau=state.config.goal_enrichment.derived_tau,
+        verdict=verdict_replay,
+        tier_reached=tier_replay,
     )
 
     row.r0_replay = score.score
