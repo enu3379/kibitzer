@@ -393,11 +393,14 @@ export async function getSessionState(): Promise<SessionStateResult> {
   return { kind: "state", state }
 }
 
-export async function postBrowserNav(payload: BrowserNavPayload): Promise<PipelineResult | null> {
+export async function postBrowserNav(
+  payload: BrowserNavPayload,
+  idempotencyKey: string,
+): Promise<PipelineResult | null> {
   const response = await serverFetch("/observations/browser-nav", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ source: "browser_nav", payload }),
+    body: JSON.stringify({ source: "browser_nav", payload, idempotency_key: idempotencyKey }),
   })
   if (!response?.ok) return null
   return response.json() as Promise<PipelineResult>

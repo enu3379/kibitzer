@@ -23,6 +23,14 @@ import {
   prependExplorationHistory,
   updateExplorationHistory,
 } from "./lib/history"
+import {
+  DWELL_RECORD_VERSION,
+  DwellOutcome,
+  DwellRecord,
+  ObservationDwellRecord,
+  PersistentDwellScheduler,
+  Tier2DwellRecord,
+} from "./lib/persistentDwell"
 
 const DEFAULT_OBSERVATION_DWELL_MS = 5000
 const DEFAULT_TIER2_DWELL_MS = 10000
@@ -42,15 +50,6 @@ const FEEDBACK_BUTTON_TITLES: Record<FeedbackKind, string> = {
   snooze: "30분 조용히",
   break: "5분만",
 }
-interface PendingTabObservation {
-  token: number
-  url: string
-  startedAt: number
-  timer: number
-  historyId?: string
-  tier2DwellMs: number
-}
-
 type ToastKind = "intervention" | "celebration"
 
 interface PendingToast {
@@ -75,9 +74,8 @@ interface ActiveD7Observation {
   contentRetryAttempted: boolean
 }
 
-let nextObservationToken = 0
 let nextToastDisplayToken = 0
-const pendingTabObservations = new Map<number, PendingTabObservation>()
+const latestObservationTokens = new Map<number, string>()
 const pendingToasts = new Map<string, PendingToast>()
 const activeD7Observations = new Map<number, ActiveD7Observation>()
 
@@ -117,99 +115,61 @@ function persistD7Observations(): Promise<void> {
   return d7ObservationsPersistTail
 }
 
-function scheduleTabObservation(tabId: number, observedUrl?: string): void {
+const dwellScheduler = new PersistentDwellScheduler(processDwellRecord, async (record) => {
+  await finishHistoryEntry(record.historyId)
+})
+
+async function scheduleTabObservation(tabId: number, observedUrl?: string): Promise<void> {
   void deactivateD7Observation(tabId)
-  clearTabTimer(tabId)
-  const token = ++nextObservationToken
+  const token = makeObservationToken()
   const startedAt = Date.now()
-  pendingTabObservations.set(tabId, {
-    token,
-    url: "",
-    startedAt,
-    timer: 0,
-    tier2DwellMs: DEFAULT_TIER2_DWELL_MS,
-  })
-  if (observedUrl) {
-    void scheduleDwellCheck(tabId, token, observedUrl, startedAt)
-    return
-  }
+  latestObservationTokens.set(tabId, token)
+  await dwellScheduler.startNavigation(tabId, token)
+  if (latestObservationTokens.get(tabId) !== token) return
 
-  void getTab(tabId).then((tab) => {
-    const pending = pendingTabObservations.get(tabId)
-    if (!pending || pending.token !== token) return
-    if (!tab?.active || !tab.url || shouldDropUrl(tab.url)) {
-      pendingTabObservations.delete(tabId)
-      return
-    }
-    void scheduleDwellCheck(tabId, token, tab.url, startedAt)
-  })
-}
-
-async function scheduleDwellCheck(tabId: number, token: number, url: string, startedAt: number): Promise<void> {
-  if (shouldDropUrl(url)) {
-    pendingTabObservations.delete(tabId)
-    return
-  }
-  const dwell = await loadDwellSettings()
-  const pendingBeforeTab = pendingTabObservations.get(tabId)
-  if (!pendingBeforeTab || pendingBeforeTab.token !== token) return
   const tab = await getTab(tabId)
-  const pending = pendingTabObservations.get(tabId)
-  if (!pending || pending.token !== token) return
-  if (!tab?.active) {
-    pendingTabObservations.delete(tabId)
-    return
-  }
+  const url = observedUrl ?? tab?.url
+  if (!tab?.active || !url || tab.url !== url || shouldDropUrl(url)) return
+  const dwell = await loadDwellSettings()
+  if (latestObservationTokens.get(tabId) !== token) return
+  const currentTab = await getTab(tabId)
+  if (!currentTab?.active || currentTab.url !== url) return
+
   const historyId = makeHistoryId(token)
   await prependExplorationHistory({
     id: historyId,
     tabId,
     url,
-    title: tab.url === url ? tab.title ?? "" : "",
+    title: currentTab.title ?? "",
     startedAt,
     observationDwellMs: dwell.observationDwellMs,
     tier2DwellMs: dwell.tier2DwellMs,
   })
-  const pendingAfterHistory = pendingTabObservations.get(tabId)
-  if (!pendingAfterHistory || pendingAfterHistory.token !== token) {
+  if (latestObservationTokens.get(tabId) !== token) {
     await finishHistoryEntry(historyId)
     return
   }
-  const timer = globalThis.setTimeout(async () => {
-    const pending = pendingTabObservations.get(tabId)
-    if (!pending || pending.token !== token) return
-    pendingTabObservations.delete(tabId)
-    const tab = await getTab(tabId)
-    if (!tab || !tab.active || tab.url !== url || shouldDropUrl(url)) {
-      await finishHistoryEntry(pending.historyId)
-      return
-    }
-    const result = await postBrowserNav({
-      url,
-      title: tab.title ?? "",
-      tab_id: tab.id,
-    })
-    await updateHistoryWithPipelineResult(pending.historyId, result, tab.title ?? "")
-    await handlePipelineResult(tabId, result, {
-      url,
-      startedAt,
-      historyId: pending.historyId,
-      tier2DwellMs: pending.tier2DwellMs,
-    })
-    void refreshBadge()
-  }, dwell.observationDwellMs)
-  pendingTabObservations.set(tabId, {
+
+  const record: ObservationDwellRecord = {
+    version: DWELL_RECORD_VERSION,
+    stage: "observation",
     token,
+    tabId,
     url,
     startedAt,
-    timer,
+    dueAt: startedAt + dwell.observationDwellMs,
     historyId,
     tier2DwellMs: dwell.tier2DwellMs,
-  })
+  }
+  if (!(await dwellScheduler.schedule(record))) await finishHistoryEntry(historyId)
 }
 
-function makeHistoryId(token: number): string {
-  return `hist_${Date.now()}_${token}`
+function makeObservationToken(): string {
+  return `nav_${crypto.randomUUID().replaceAll("-", "")}`
+}
+
+function makeHistoryId(token: string): string {
+  return `hist_${Date.now()}_${token.slice(-8)}`
 }
 
 interface DwellTiming {
@@ -240,18 +200,12 @@ async function getTab(tabId: number): Promise<chrome.tabs.Tab | null> {
   }
 }
 
-function clearTabTimer(tabId: number): void {
-  const pending = pendingTabObservations.get(tabId)
-  if (!pending) return
-  clearTimeout(pending.timer)
-  pendingTabObservations.delete(tabId)
-  void finishHistoryEntry(pending.historyId)
-}
-
-function clearInactiveTabTimers(activeTabId: number): void {
-  for (const tabId of pendingTabObservations.keys()) {
-    if (tabId !== activeTabId) clearTabTimer(tabId)
+function cancelInactiveTabWork(activeTabId: number): void {
+  for (const tabId of latestObservationTokens.keys()) {
+    if (tabId === activeTabId) continue
+    latestObservationTokens.delete(tabId)
   }
+  void dwellScheduler.cancelOtherTabs(activeTabId)
   void deactivateInactiveD7Observations(activeTabId)
 }
 
@@ -305,37 +259,6 @@ function historyResponseKind(result: PipelineResult | null): ExplorationResponse
   if (result.kind === "celebration") return "celebration"
   if (result.kind === "intervention" || result.intervention_id) return "intervention"
   return undefined
-}
-
-async function handlePipelineResult(
-  tabId: number,
-  result: PipelineResult | null,
-  observation: { url: string; startedAt: number; historyId?: string; tier2DwellMs: number },
-): Promise<void> {
-  if (!result?.observation_id) return
-  await captureD7ContentAndActivate(tabId, result.observation_id, observation.url)
-  // Celebrations arrive directly on the browser-nav response (no excerpt round
-  // trip). Show only if the user is still on the page they returned to.
-  if (result.action === "notify" && result.kind === "celebration" && result.message) {
-    if (!(await tabStillOnObservedPage(tabId, observation.url))) return
-    await showNotification(result, tabId)
-    return
-  }
-  if (result.action !== "request_excerpt") return
-  const remainingDwellMs = observation.tier2DwellMs - (Date.now() - observation.startedAt)
-  if (remainingDwellMs > 0) {
-    await delay(remainingDwellMs)
-  }
-  if (!(await tabStillOnObservedPage(tabId, observation.url))) return
-  const excerpt = await extractFromTab(tabId)
-  if (!excerpt) return
-  if (!(await tabStillOnObservedPage(tabId, observation.url))) return
-  const finalResult = await postObservationExcerpt(result.observation_id, excerpt)
-  await updateHistoryResponse(observation.historyId, finalResult)
-  if (finalResult?.action === "notify" && finalResult.message) {
-    if (!(await tabStillOnObservedPage(tabId, observation.url))) return
-    await showNotification(finalResult, tabId)
-  }
 }
 
 function newPresenceEventId(): string {
@@ -465,10 +388,72 @@ async function tabStillActivelyViewed(tabId: number, url: string): Promise<boole
   }
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    globalThis.setTimeout(resolve, ms)
-  })
+async function processDwellRecord(record: DwellRecord): Promise<DwellOutcome> {
+  return record.stage === "observation"
+    ? processObservationDwell(record)
+    : processTier2Dwell(record)
+}
+
+async function processObservationDwell(record: ObservationDwellRecord): Promise<DwellOutcome> {
+  const tab = await getTab(record.tabId)
+  if (!tab?.active || tab.url !== record.url || shouldDropUrl(record.url)) return "cancel"
+
+  const result = await postBrowserNav(
+    { url: record.url, title: tab.title ?? "", tab_id: tab.id },
+    record.token,
+  )
+  if (!result) return "retry"
+  await updateHistoryWithPipelineResult(record.historyId, result, tab.title ?? "")
+  if (result.observation_id) {
+    await captureD7ContentAndActivate(record.tabId, result.observation_id, record.url)
+  }
+
+  if (
+    result.action === "request_excerpt" &&
+    result.observation_id &&
+    result.candidate_id
+  ) {
+    const tier2: Tier2DwellRecord = {
+      version: DWELL_RECORD_VERSION,
+      stage: "tier2",
+      token: record.token,
+      tabId: record.tabId,
+      url: record.url,
+      dueAt: record.startedAt + record.tier2DwellMs,
+      historyId: record.historyId,
+      observationId: result.observation_id,
+    }
+    if (!(await dwellScheduler.schedule(tier2))) return "cancel"
+  } else if (
+    result.action === "notify" &&
+    result.kind === "celebration" &&
+    result.message &&
+    (await tabStillOnObservedPage(record.tabId, record.url))
+  ) {
+    await showNotification(result, record.tabId)
+  }
+  void refreshBadge()
+  return "complete"
+}
+
+async function processTier2Dwell(record: Tier2DwellRecord): Promise<DwellOutcome> {
+  if (!(await tabStillOnObservedPage(record.tabId, record.url))) return "cancel"
+  const excerpt = await extractFromTab(record.tabId)
+  if (!excerpt) return "cancel"
+  if (!(await tabStillOnObservedPage(record.tabId, record.url))) return "cancel"
+
+  const result = await postObservationExcerpt(record.observationId, excerpt)
+  if (!result) return "retry"
+  await updateHistoryResponse(record.historyId, result)
+  if (
+    result.action === "notify" &&
+    result.message &&
+    (await tabStillOnObservedPage(record.tabId, record.url))
+  ) {
+    await showNotification(result, record.tabId)
+  }
+  void refreshBadge()
+  return "complete"
 }
 
 async function tabStillOnObservedPage(tabId: number, url: string): Promise<boolean> {
@@ -803,8 +788,13 @@ chrome.runtime.onStartup.addListener(() => {
 })
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === BADGE_ALARM) void refreshBadge()
-  if (alarm.name === D7_HEARTBEAT_ALARM) void heartbeatD7Observation()
+  if (alarm.name === BADGE_ALARM) {
+    void refreshBadge()
+  } else if (alarm.name === D7_HEARTBEAT_ALARM) {
+    void heartbeatD7Observation()
+  } else {
+    void dwellScheduler.handleAlarm(alarm.name)
+  }
 })
 
 chrome.runtime.onMessage.addListener(
@@ -853,12 +843,12 @@ async function submitNotificationFeedback(
 }
 
 chrome.webNavigation.onCommitted.addListener((details) => {
-  if (details.frameId === 0) scheduleTabObservation(details.tabId, details.url)
+  if (details.frameId === 0) void scheduleTabObservation(details.tabId, details.url)
 })
 
 chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
   if (details.frameId === 0) {
-    scheduleTabObservation(details.tabId, details.url)
+    void scheduleTabObservation(details.tabId, details.url)
     void redisplayLatestPendingToast(details.tabId)
   }
 })
@@ -868,8 +858,8 @@ chrome.webNavigation.onCompleted.addListener((details) => {
 })
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
-  clearInactiveTabTimers(activeInfo.tabId)
-  scheduleTabObservation(activeInfo.tabId)
+  cancelInactiveTabWork(activeInfo.tabId)
+  void scheduleTabObservation(activeInfo.tabId)
   void redisplayLatestPendingToast(activeInfo.tabId)
 })
 
@@ -891,7 +881,9 @@ chrome.idle.onStateChanged.addListener((state) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   void deactivateD7Observation(tabId)
-  clearTabTimer(tabId)
+  latestObservationTokens.delete(tabId)
+  void dwellScheduler.cancelTab(tabId)
 })
 
+void dwellScheduler.restore()
 void refreshBadge()
