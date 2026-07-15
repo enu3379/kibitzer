@@ -41,7 +41,7 @@ def main() -> int:
     session_id = str(session["id"])
     post_json(
         "/sessions/current/goal",
-        {"raw_text": "Kibitzer observation API", "keywords": ["api"]},
+        {"raw_text": "Kibitzer observation API"},
     )
 
     ok = post_json(

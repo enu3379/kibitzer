@@ -39,7 +39,6 @@ The server persists minimized URL metadata:
 
 ```text
 raw_text
-keywords
 exemplars
 provenance
 available_time_minutes (optional)

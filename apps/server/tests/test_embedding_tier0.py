@@ -100,7 +100,7 @@ class Tier0ApiTest(unittest.TestCase):
         session_id = self.client.post("/sessions").json()["id"]
         self.client.post(
             "/sessions/current/goal",
-            json={"raw_text": "Kibitzer observation API", "keywords": ["api"]},
+            json={"raw_text": "Kibitzer observation API"},
         )
 
         response = self.client.post(
@@ -126,7 +126,7 @@ class Tier0ApiTest(unittest.TestCase):
         session_id = self.client.post("/sessions").json()["id"]
         self.client.post(
             "/sessions/current/goal",
-            json={"raw_text": "Kibitzer observation API", "keywords": ["api"]},
+            json={"raw_text": "Kibitzer observation API"},
         )
 
         drift_response = self.client.post(

@@ -58,7 +58,6 @@ class Observation(BaseModel):
 
 class Goal(BaseModel):
     raw_text: str
-    keywords: list[str] = Field(default_factory=list)
     exemplars: list[list[float]] = Field(default_factory=list)
     provenance: Literal["declared"] = "declared"
 

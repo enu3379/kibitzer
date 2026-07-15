@@ -138,7 +138,6 @@ export interface SessionInfo {
 export interface GoalInfo {
   session_id: string
   raw_text: string
-  keywords: string[]
   provenance: string
   updated_at: string
   available_time_minutes?: number | null
