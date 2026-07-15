@@ -165,6 +165,16 @@ class DriftClockStateRecord:
 
 
 @dataclass(frozen=True)
+class PreparedD7ReviewRecord:
+    session_id: str
+    observation_id: str
+    goal_revision: int
+    deliver_after: datetime
+    outcome: dict[str, Any] | None
+    prepared_at: datetime | None
+
+
+@dataclass(frozen=True)
 class InterventionRecord:
     id: str
     session_id: str
@@ -336,6 +346,9 @@ class SQLiteStore:
             conn.execute(
                 "DELETE FROM observation_processing_states WHERE session_id IN (SELECT id FROM sessions WHERE active = 1)"
             )
+            conn.execute(
+                "DELETE FROM d7_prepared_reviews WHERE session_id IN (SELECT id FROM sessions WHERE active = 1)"
+            )
             conn.execute("UPDATE sessions SET active = 0, ended_at = ? WHERE active = 1", (now_text,))
             conn.execute(
                 "INSERT INTO sessions (id, created_at, active) VALUES (?, ?, 1)",
@@ -396,6 +409,7 @@ class SQLiteStore:
             conn.execute("DELETE FROM dwell_presence_events WHERE session_id = ?", (row["id"],))
             conn.execute("DELETE FROM drift_page_dwell_states WHERE session_id = ?", (row["id"],))
             conn.execute("DELETE FROM observation_processing_states WHERE session_id = ?", (row["id"],))
+            conn.execute("DELETE FROM d7_prepared_reviews WHERE session_id = ?", (row["id"],))
             self._append_event(conn, row["id"], "session.ended", {}, now)
         return SessionRecord(id=row["id"], created_at=_parse_dt(row["created_at"]), active=False)
 
@@ -649,7 +663,11 @@ class SQLiteStore:
             ).fetchone()
         return bool(row and row["status"] in {"pending", "delivered", "delivery_failed"})
 
-    def minutes_since_last_ok(self, session_id: str) -> int | None:
+    def minutes_since_last_ok(
+        self,
+        session_id: str,
+        as_of: datetime | None = None,
+    ) -> int | None:
         with self._connect() as conn:
             self._ensure_schema(conn)
             goal_revision = self._current_goal_revision_in_conn(conn, session_id)
@@ -672,7 +690,7 @@ class SQLiteStore:
             ).fetchone()
         if not row:
             return None
-        seconds = max(0, int((_utc_now() - _parse_dt(row["ts"])).total_seconds()))
+        seconds = max(0, int(((as_of or _utc_now()) - _parse_dt(row["ts"])).total_seconds()))
         return seconds // 60
 
     def note_attachment_observation(
@@ -1583,6 +1601,7 @@ class SQLiteStore:
         )
         self._append_event(conn, session_id, "d7.clock_reset", {}, now)
         conn.execute("DELETE FROM drift_page_dwell_states WHERE session_id = ?", (session_id,))
+        conn.execute("DELETE FROM d7_prepared_reviews WHERE session_id = ?", (session_id,))
 
     def record_drift_presence(
         self,
@@ -1619,6 +1638,7 @@ class SQLiteStore:
                     """,
                     (now.isoformat(), session_id),
                 )
+                conn.execute("DELETE FROM d7_prepared_reviews WHERE session_id = ?", (session_id,))
                 self._append_event(
                     conn,
                     session_id,
@@ -1688,6 +1708,10 @@ class SQLiteStore:
                     review_started_at = state.review_started_at
                     review_status = state.review_status
                     if review_observation_id and review_observation_id != observation_id:
+                        conn.execute(
+                            "DELETE FROM d7_prepared_reviews WHERE session_id = ?",
+                            (session_id,),
+                        )
                         review_observation_id = None
                         review_started_at = None
                         review_status = "none"
@@ -1863,6 +1887,147 @@ class SQLiteStore:
             ).fetchone()
         return row is not None
 
+    def prepare_d7_review(
+        self,
+        session_id: str,
+        observation_id: str,
+        goal_revision: int,
+        deliver_after: datetime,
+        outcome: dict[str, Any],
+        ts: datetime | None = None,
+    ) -> bool:
+        now = ts or _utc_now()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            current = conn.execute(
+                """
+                SELECT 1
+                FROM drift_clock_states
+                WHERE session_id = ?
+                  AND active_observation_id = ?
+                  AND review_observation_id = ?
+                  AND review_status = 'reviewing'
+                """,
+                (session_id, observation_id, observation_id),
+            ).fetchone()
+            if not current:
+                return False
+            conn.execute(
+                """
+                INSERT INTO d7_prepared_reviews (
+                    session_id, observation_id, goal_revision, deliver_after,
+                    outcome_json, prepared_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    observation_id = excluded.observation_id,
+                    goal_revision = excluded.goal_revision,
+                    deliver_after = excluded.deliver_after,
+                    outcome_json = excluded.outcome_json,
+                    prepared_at = excluded.prepared_at
+                """,
+                (
+                    session_id,
+                    observation_id,
+                    goal_revision,
+                    deliver_after.isoformat(),
+                    json.dumps(outcome, ensure_ascii=False),
+                    now.isoformat(),
+                ),
+            )
+            self._append_event(
+                conn,
+                session_id,
+                "d7.review_prepared",
+                {
+                    "observation_id": observation_id,
+                    "goal_revision": goal_revision,
+                    "deliver_after": deliver_after.isoformat(),
+                },
+                now,
+            )
+        return True
+
+    def queue_d7_review(
+        self,
+        session_id: str,
+        observation_id: str,
+        goal_revision: int,
+        deliver_after: datetime,
+        ts: datetime | None = None,
+    ) -> bool:
+        now = ts or _utc_now()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            current = conn.execute(
+                """
+                SELECT 1
+                FROM drift_clock_states
+                WHERE session_id = ?
+                  AND active_observation_id = ?
+                  AND review_observation_id = ?
+                  AND review_status = 'reviewing'
+                """,
+                (session_id, observation_id, observation_id),
+            ).fetchone()
+            if not current:
+                return False
+            conn.execute(
+                """
+                INSERT INTO d7_prepared_reviews (
+                    session_id, observation_id, goal_revision, deliver_after,
+                    outcome_json, prepared_at
+                )
+                VALUES (?, ?, ?, ?, NULL, NULL)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    observation_id = excluded.observation_id,
+                    goal_revision = excluded.goal_revision,
+                    deliver_after = excluded.deliver_after,
+                    outcome_json = NULL,
+                    prepared_at = NULL
+                """,
+                (session_id, observation_id, goal_revision, deliver_after.isoformat()),
+            )
+            self._append_event(
+                conn,
+                session_id,
+                "d7.review_queued",
+                {
+                    "observation_id": observation_id,
+                    "goal_revision": goal_revision,
+                    "deliver_after": deliver_after.isoformat(),
+                },
+                now,
+            )
+        return True
+
+    def get_prepared_d7_review(
+        self,
+        session_id: str,
+        observation_id: str,
+    ) -> PreparedD7ReviewRecord | None:
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute(
+                """
+                SELECT session_id, observation_id, goal_revision, deliver_after,
+                       outcome_json, prepared_at
+                FROM d7_prepared_reviews
+                WHERE session_id = ? AND observation_id = ?
+                """,
+                (session_id, observation_id),
+            ).fetchone()
+        if not row:
+            return None
+        return PreparedD7ReviewRecord(
+            session_id=row["session_id"],
+            observation_id=row["observation_id"],
+            goal_revision=int(row["goal_revision"]),
+            deliver_after=_parse_dt(row["deliver_after"]),
+            outcome=json.loads(row["outcome_json"]) if row["outcome_json"] else None,
+            prepared_at=_parse_dt(row["prepared_at"]) if row["prepared_at"] else None,
+        )
+
     def defer_d7_review(
         self,
         session_id: str,
@@ -1885,6 +2050,7 @@ class SQLiteStore:
             )
             if updated.rowcount != 1:
                 return
+            conn.execute("DELETE FROM d7_prepared_reviews WHERE session_id = ?", (session_id,))
             self._append_event(
                 conn,
                 session_id,
@@ -1921,6 +2087,7 @@ class SQLiteStore:
             )
             if updated.rowcount != 1:
                 return
+            conn.execute("DELETE FROM d7_prepared_reviews WHERE session_id = ?", (session_id,))
             self._append_event(
                 conn,
                 session_id,
@@ -1951,6 +2118,7 @@ class SQLiteStore:
             )
             if updated.rowcount != 1:
                 return False
+            conn.execute("DELETE FROM d7_prepared_reviews WHERE session_id = ?", (session_id,))
             self._append_event(
                 conn,
                 session_id,
@@ -3564,6 +3732,15 @@ class SQLiteStore:
                 review_status TEXT NOT NULL DEFAULT 'none',
                 last_defer_reason TEXT,
                 updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS d7_prepared_reviews (
+                session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+                observation_id TEXT NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+                goal_revision INTEGER NOT NULL,
+                deliver_after TEXT NOT NULL,
+                outcome_json TEXT,
+                prepared_at TEXT
             );
 
             CREATE TABLE IF NOT EXISTS dwell_presence_events (

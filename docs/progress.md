@@ -26,11 +26,19 @@ Completed:
   `finish_reason=length` for OpenAI-compatible responses), and fixed sentence
   clamping for punctuation without following whitespace while preserving
   domains and decimals.
+- Added threshold-ahead D7 orchestration: the server returns a targeted
+  `threshold - 30 s` scheduling hint, runs Judge/Writer with clock inputs
+  projected to the threshold in a detached server task, persists the result,
+  and commits it only on a threshold presence after revalidating page, goal,
+  verdict, and eligibility. Slow generation is polled without holding the MV3
+  request open.
+- Added restart-safe one-shot extension alarms with short in-memory timers for
+  sub-30-second precision; the existing minute heartbeat remains the fallback.
 
 Verified after rebasing onto latest `dev`:
 
-- `python -m pytest apps/server/tests -q`: 231 passed, 1 skipped, 31 subtests.
-- `apps/extension` `npm run build`: 34 unit tests, typecheck, and bundle passed.
+- `python -m pytest apps/server/tests -q`: 238 passed, 1 skipped, 35 subtests.
+- `apps/extension` `npm run build`: 37 unit tests, typecheck, and bundle passed.
 
 ## 2026-07-15 D7 time-budget drift review fixes
 

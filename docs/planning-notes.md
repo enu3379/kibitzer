@@ -212,6 +212,17 @@ over current title/excerpt, up to 30 compressed recent titles, bounded recent
 excerpts, and elapsed clocks. The Judge returns only `notify|defer`, reason, and
 evidence basis. Only `notify` invokes a separate persona **Message Writer**.
 
+**Threshold delivery correction (2026-07-16):** invoke the combined Tier 2
+review at `threshold - 30 s`, but project all elapsed-time inputs to the
+threshold itself. Generation runs in a server background task, and an early
+result is stored in the server database rather than returned to the extension.
+It is not delivered until a one-shot presence check at the threshold. The server then
+rechecks active observation, goal revision, effective page-label verdict, and
+controller eligibility before committing it. A page/tab/focus change deletes
+the prepared result; a slow result is briefly re-polled after the threshold and
+sent as soon as it is ready and still valid. Chrome's periodic heartbeat remains fallback only,
+so the extension still does not own clocks, judgment, or notification state.
+
 **Prerequisite:** excerpts are captured and stored for **every observation**
 (after the 5 s dwell), char-limited, sensitive-domain rules applied — today
 only the nag-moment page is excerpted, so recent-page content doesn't exist.

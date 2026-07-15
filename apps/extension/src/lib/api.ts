@@ -16,6 +16,7 @@ export interface PipelineResult {
   intervention_id?: string | null
   page?: PageInfo | null
   silent?: boolean
+  next_review_check_seconds?: number | null
 }
 
 export interface PageInfo {

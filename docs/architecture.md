@@ -69,8 +69,10 @@ browser event
      -> combined Tier 2 Context Judge
      -> notify only: persona Message Writer
   -> time budget on: D7 bounded content capture + server-owned presence heartbeat
-     -> optional combined time-budget Context Judge
-     -> notify only: persona Message Writer
+     -> server schedules a one-shot review check for threshold - 30 s
+     -> combined time-budget Context Judge + conditional persona Message Writer
+     -> prepared result persists on the server until the threshold presence
+     -> revalidate active page, goal revision, effective verdict, and eligibility
   -> confirmed drift consumes controller evidence
   -> notification
 ```
@@ -88,6 +90,17 @@ tab; it sends `inactive` when Chrome loses OS focus or the user becomes
 idle/locked. Heartbeats extend only the server-owned active clock, while a
 later `active` event can safely recover it after tab/window changes or service
 worker teardown.
+
+D7 starts Tier 2 up to 30 seconds before the computed review threshold. The
+clock values sent to both Judge and Writer are projected to the threshold, not
+sampled from the earlier invocation time. The server runs generation in a
+background task so the MV3 worker receives its scheduling response immediately.
+If generation finishes early, the server persists the prepared outcome;
+the extension reports presence again at the threshold and never owns the
+decision or message. If generation runs past the threshold, the extension
+rechecks briefly until the still-valid result is ready. Navigation, focus loss,
+goal revision, page label correction, snooze/cooldown, or server-side lock loss
+discards the prepared outcome. The minute heartbeat remains a recovery fallback.
 
 ## Extension-to-Server Actions
 

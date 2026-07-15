@@ -1,4 +1,7 @@
+import asyncio
 import tempfile
+import threading
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -7,7 +10,13 @@ from unittest.mock import patch
 from apps.server.tests.support import TestClient
 
 from apps.server.app.config import AppConfig, ControllerConfig, ServerConfig, Tier1Config, Tier2Config, TimeBudgetConfig
-from apps.server.app.core.time_budget import next_review_boundary, review_is_due, thresholds_for_budget
+from apps.server.app.core.time_budget import (
+    TIER2_REVIEW_LEAD_SECONDS,
+    next_review_boundary,
+    review_is_due,
+    seconds_until_review_due,
+    thresholds_for_budget,
+)
 from apps.server.app.main import create_app
 from apps.server.app.providers.judges.base import Tier1Result, Tier2Decision, Tier2Result
 from apps.server.app.schemas import Verdict
@@ -50,6 +59,20 @@ class FakeTier2Provider:
     ) -> str:
         self.writer_payloads.append(payload)
         return self.result.message or ""
+
+
+class BlockingTier2Provider(FakeTier2Provider):
+    def __init__(self, result: Tier2Result) -> None:
+        super().__init__(result)
+        self.gate = threading.Event()
+
+    async def decide_tier2(
+        self,
+        payload: dict[str, object],
+        system_prompt: str | None = None,
+    ) -> Tier2Decision:
+        await asyncio.to_thread(self.gate.wait)
+        return await super().decide_tier2(payload, system_prompt)
 
 
 def clock_state(**changes: object) -> DriftClockStateRecord:
@@ -96,6 +119,19 @@ class TimeBudgetPolicyTest(unittest.TestCase):
         )
         self.assertFalse(review_is_due(deferred, "streak", thresholds, event_eligible=True))
         self.assertEqual(deferred.next_review_mode_seconds, 1200)
+
+    def test_remaining_time_combines_all_review_gates(self) -> None:
+        thresholds = thresholds_for_budget(
+            TimeBudgetConfig(enabled=True, fallback_total_seconds=180, per_page_seconds=60),
+            None,
+        )
+        state = clock_state(current_page_drift_seconds=60, continuous_drift_seconds=60)
+        self.assertEqual(
+            seconds_until_review_due(state, "streak", thresholds, event_eligible=True),
+            TIER2_REVIEW_LEAD_SECONDS,
+        )
+        due = clock_state(current_page_drift_seconds=90, continuous_drift_seconds=90)
+        self.assertEqual(seconds_until_review_due(due, "streak", thresholds, True), 0)
 
 
 class D7ApiTest(unittest.TestCase):
@@ -169,7 +205,14 @@ class D7ApiTest(unittest.TestCase):
             "Sourdough bread recipe",
         )
 
-    def _presence(self, observation_id: str, path_hash: str, event_id: str, kind: str, at: datetime) -> dict[str, object]:
+    def _presence(
+        self,
+        observation_id: str,
+        path_hash: str,
+        event_id: str,
+        kind: str,
+        at: datetime,
+    ) -> dict[str, object]:
         with patch("apps.server.app.api.observations.datetime") as mocked_datetime:
             mocked_datetime.now.return_value = at
             response = self.client.post(
@@ -184,8 +227,18 @@ class D7ApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         return response.json()
 
-    def test_budget_is_returned_and_combined_review_notifies_only_after_dwell(self) -> None:
-        observation_id, path_hash = self._start_drift_observation()
+    def test_review_precomputes_at_lead_time_with_threshold_projected_context(self) -> None:
+        self._start_session_goal()
+        self._post_observation(
+            "https://example.com/kibitzer",
+            "Kibitzer observation API",
+            self.start - timedelta(seconds=31),
+        )
+        observation_id, path_hash = self._post_observation(
+            "https://example.com/bread",
+            "Sourdough bread recipe",
+            self.start,
+        )
         content = self.client.post(
             f"/observations/{observation_id}/content",
             json={"title": "Bread", "text": "A long recipe unrelated to Kibitzer."},
@@ -195,16 +248,167 @@ class D7ApiTest(unittest.TestCase):
 
         first = self._presence(observation_id, path_hash, "active", "active", self.start)
         second = self._presence(observation_id, path_hash, "one-minute", "heartbeat", self.start + timedelta(seconds=60))
-        third = self._presence(observation_id, path_hash, "two-minutes", "heartbeat", self.start + timedelta(seconds=120))
+        third = self._presence(
+            observation_id,
+            path_hash,
+            "threshold",
+            "heartbeat",
+            self.start + timedelta(seconds=90),
+        )
 
         self.assertEqual(first["action"], "none")
+        self.assertEqual(first["next_review_check_seconds"], 60)
         self.assertEqual(second["action"], "none")
+        self.assertEqual(second["next_review_check_seconds"], 30)
         self.assertEqual(third["action"], "notify")
+        self.assertEqual(third["next_review_check_seconds"], 60)
         self.assertEqual(len(self.provider.payloads), 1)
         self.assertEqual(self.provider.payloads[0]["review_kind"], "combined")
+        self.assertEqual(self.provider.payloads[0]["time_budget"]["current_page_drift_seconds"], 90)
+        self.assertEqual(self.provider.payloads[0]["time_budget"]["mode_clock_seconds"], 90)
         self.assertEqual(len(self.provider.writer_payloads), 1)
+        self.assertEqual(self.provider.writer_payloads[0]["nagging_context"]["drift_minutes"], 2)
         state = self.store.get_drift_clock_state(self.client.get("/sessions/current/state").json()["session_id"])
-        self.assertEqual(state.current_page_drift_seconds, 120)
+        self.assertEqual(state.current_page_drift_seconds, 90)
+
+    def test_precomputed_review_is_discarded_when_page_leaves_before_threshold(self) -> None:
+        observation_id, path_hash = self._start_drift_observation()
+        self._presence(observation_id, path_hash, "leave-active", "active", self.start)
+        session_id = self.client.get("/sessions/current/state").json()["session_id"]
+
+        prepared = self._presence(
+            observation_id,
+            path_hash,
+            "leave-prefetch",
+            "heartbeat",
+            self.start + timedelta(seconds=60),
+        )
+        result = self._presence(
+            observation_id,
+            path_hash,
+            "leave-before-threshold",
+            "inactive",
+            self.start + timedelta(seconds=89),
+        )
+
+        self.assertEqual(prepared["next_review_check_seconds"], 30)
+        self.assertEqual(result["action"], "none")
+        self.assertIsNone(self.store.get_prepared_d7_review(session_id, observation_id))
+        with self.store._connect() as conn:
+            intervention_count = conn.execute(
+                "SELECT COUNT(*) FROM interventions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()[0]
+        self.assertEqual(intervention_count, 0)
+        state = self.store.get_drift_clock_state(session_id)
+        self.assertIsNone(state.active_observation_id)
+        self.assertEqual(state.review_status, "retry")
+
+    def test_precomputed_review_survives_server_restart_without_second_llm_call(self) -> None:
+        observation_id, path_hash = self._start_drift_observation()
+        self._presence(observation_id, path_hash, "restart-active", "active", self.start)
+        prepared = self._presence(
+            observation_id,
+            path_hash,
+            "restart-prefetch",
+            "heartbeat",
+            self.start + timedelta(seconds=60),
+        )
+        self.assertEqual(prepared["next_review_check_seconds"], 30)
+        self.assertEqual(len(self.provider.payloads), 1)
+
+        self.client.__exit__(None, None, None)
+        self.client = TestClient(
+            create_app(config=self.config, store=self.store, tier2_provider=self.provider),
+        )
+        self.client.__enter__()
+
+        result = self._presence(
+            observation_id,
+            path_hash,
+            "restart-threshold",
+            "heartbeat",
+            self.start + timedelta(seconds=90),
+        )
+        self.assertEqual(result["action"], "notify")
+        self.assertEqual(len(self.provider.payloads), 1)
+        self.assertIsNone(self.store.get_prepared_d7_review(
+            self.client.get("/sessions/current/state").json()["session_id"],
+            observation_id,
+        ))
+
+    def test_slow_precompute_returns_immediately_and_threshold_poll_retries(self) -> None:
+        blocking = BlockingTier2Provider(
+            Tier2Result(confirm_drift=True, message="시간 예산과 무관한 페이지입니다."),
+        )
+        self.provider = blocking
+        self.client.app.state.runtime._provided_tier2_provider = blocking
+        self.client.app.state.runtime._tier2_provider = blocking
+        observation_id, path_hash = self._start_drift_observation()
+        self._presence(observation_id, path_hash, "slow-active", "active", self.start)
+
+        started = time.monotonic()
+        queued = self._presence(
+            observation_id,
+            path_hash,
+            "slow-prefetch",
+            "heartbeat",
+            self.start + timedelta(seconds=60),
+        )
+        self.assertLess(time.monotonic() - started, 0.5)
+        self.assertEqual(queued["next_review_check_seconds"], 30)
+
+        waiting = self._presence(
+            observation_id,
+            path_hash,
+            "slow-threshold",
+            "heartbeat",
+            self.start + timedelta(seconds=90),
+        )
+        self.assertEqual(waiting["action"], "none")
+        self.assertEqual(waiting["next_review_check_seconds"], 1)
+
+        blocking.gate.set()
+        session_id = self.client.get("/sessions/current/state").json()["session_id"]
+        prepared = None
+        for _ in range(100):
+            prepared = self.store.get_prepared_d7_review(session_id, observation_id)
+            if prepared and prepared.outcome is not None:
+                break
+            time.sleep(0.01)
+        self.assertIsNotNone(prepared)
+        self.assertIsNotNone(prepared.outcome)
+
+        result = self._presence(
+            observation_id,
+            path_hash,
+            "slow-ready",
+            "heartbeat",
+            self.start + timedelta(seconds=91),
+        )
+        self.assertEqual(result["action"], "notify")
+
+    def test_related_page_label_immediately_discards_precomputed_review(self) -> None:
+        observation_id, path_hash = self._start_drift_observation()
+        self._presence(observation_id, path_hash, "label-active", "active", self.start)
+        prepared = self._presence(
+            observation_id,
+            path_hash,
+            "label-prefetch",
+            "heartbeat",
+            self.start + timedelta(seconds=60),
+        )
+        self.assertEqual(prepared["next_review_check_seconds"], 30)
+
+        response = self.client.post(
+            f"/observations/{observation_id}/label",
+            json={"label": "related"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["verdict"], "OK")
+        session_id = self.client.get("/sessions/current/state").json()["session_id"]
+        self.assertIsNone(self.store.get_prepared_d7_review(session_id, observation_id))
+        self.assertEqual(self.store.get_drift_clock_state(session_id).review_status, "retry")
 
     def test_duplicate_presence_does_not_double_count(self) -> None:
         observation_id, path_hash = self._start_drift_observation()
@@ -231,13 +435,20 @@ class D7ApiTest(unittest.TestCase):
             self.start + timedelta(seconds=5),
         )
         self._presence(observation_id, path_hash, "active-k3", "active", self.start + timedelta(seconds=5))
-        self._presence(observation_id, path_hash, "minute-k3", "heartbeat", self.start + timedelta(seconds=65))
+        prepared = self._presence(
+            observation_id,
+            path_hash,
+            "minute-k3",
+            "heartbeat",
+            self.start + timedelta(seconds=65),
+        )
+        self.assertEqual(prepared["next_review_check_seconds"], 30)
         result = self._presence(
             observation_id,
             path_hash,
-            "two-minutes-k3",
+            "threshold-k3",
             "heartbeat",
-            self.start + timedelta(seconds=125),
+            self.start + timedelta(seconds=95),
         )
         self.assertEqual(result["action"], "notify")
 
@@ -281,27 +492,42 @@ class D7ApiTest(unittest.TestCase):
     def test_same_page_return_preserves_per_page_dwell(self) -> None:
         observation_id, path_hash = self._start_drift_observation()
         self._presence(observation_id, path_hash, "page-active", "active", self.start)
-        self._presence(observation_id, path_hash, "page-minute", "heartbeat", self.start + timedelta(seconds=60))
-        self._presence(observation_id, path_hash, "page-away", "inactive", self.start + timedelta(seconds=70))
+        self._presence(observation_id, path_hash, "page-forty", "heartbeat", self.start + timedelta(seconds=40))
+        self._presence(observation_id, path_hash, "page-away", "inactive", self.start + timedelta(seconds=50))
         other_id, other_hash = self._post_observation(
             "https://example.com/games",
             "Unrelated games",
-            self.start + timedelta(seconds=75),
+            self.start + timedelta(seconds=55),
         )
-        self._presence(other_id, other_hash, "page-other", "active", self.start + timedelta(seconds=80))
-        self._presence(other_id, other_hash, "page-other-away", "inactive", self.start + timedelta(seconds=85))
+        self._presence(other_id, other_hash, "page-other", "active", self.start + timedelta(seconds=60))
+        self._presence(other_id, other_hash, "page-other-away", "inactive", self.start + timedelta(seconds=65))
         returned_id, returned_hash = self._post_observation(
             "https://example.com/bread",
             "Sourdough bread recipe",
-            self.start + timedelta(seconds=90),
+            self.start + timedelta(seconds=70),
         )
-        self._presence(returned_id, returned_hash, "page-return", "active", self.start + timedelta(seconds=95))
+        returned = self._presence(
+            returned_id,
+            returned_hash,
+            "page-return",
+            "active",
+            self.start + timedelta(seconds=75),
+        )
         session_id = self.client.get("/sessions/current/state").json()["session_id"]
-        self.assertEqual(self.store.get_drift_clock_state(session_id).current_page_drift_seconds, 70)
+        self.assertEqual(self.store.get_drift_clock_state(session_id).current_page_drift_seconds, 50)
+        self.assertEqual(returned["next_review_check_seconds"], 10)
+        prepared = self._presence(
+            returned_id,
+            returned_hash,
+            "page-return-prefetch",
+            "heartbeat",
+            self.start + timedelta(seconds=85),
+        )
+        self.assertEqual(prepared["next_review_check_seconds"], 30)
         result = self._presence(
             returned_id,
             returned_hash,
-            "page-return-dwell",
+            "page-return-threshold",
             "heartbeat",
             self.start + timedelta(seconds=115),
         )
@@ -329,13 +555,20 @@ class D7ApiTest(unittest.TestCase):
     def test_missing_excerpt_runs_one_title_capable_review(self) -> None:
         observation_id, path_hash = self._start_drift_observation()
         self._presence(observation_id, path_hash, "no-content-active", "active", self.start)
-        self._presence(observation_id, path_hash, "no-content-minute", "heartbeat", self.start + timedelta(seconds=60))
+        prepared = self._presence(
+            observation_id,
+            path_hash,
+            "no-content-minute",
+            "heartbeat",
+            self.start + timedelta(seconds=60),
+        )
+        self.assertEqual(prepared["next_review_check_seconds"], 30)
         result = self._presence(
             observation_id,
             path_hash,
-            "no-content-two-minutes",
+            "no-content-threshold",
             "heartbeat",
-            self.start + timedelta(seconds=120),
+            self.start + timedelta(seconds=90),
         )
         self.assertEqual(result["action"], "notify")
         self.assertEqual([payload["review_kind"] for payload in self.provider.payloads], ["combined"])
@@ -345,13 +578,20 @@ class D7ApiTest(unittest.TestCase):
         observation_id, path_hash = self._start_drift_observation()
         self.client.app.state.runtime._tier2_provider = None
         self._presence(observation_id, path_hash, "fallback-active", "active", self.start)
-        self._presence(observation_id, path_hash, "fallback-minute", "heartbeat", self.start + timedelta(seconds=60))
+        prepared = self._presence(
+            observation_id,
+            path_hash,
+            "fallback-minute",
+            "heartbeat",
+            self.start + timedelta(seconds=60),
+        )
+        self.assertEqual(prepared["next_review_check_seconds"], 30)
         result = self._presence(
             observation_id,
             path_hash,
-            "fallback-two-minutes",
+            "fallback-threshold",
             "heartbeat",
-            self.start + timedelta(seconds=120),
+            self.start + timedelta(seconds=90),
         )
         self.assertEqual(result["action"], "none")
         session_id = self.client.get("/sessions/current/state").json()["session_id"]
@@ -363,39 +603,39 @@ class D7ApiTest(unittest.TestCase):
     def test_notification_consumes_review_window(self) -> None:
         observation_id, path_hash = self._start_drift_observation()
         self._presence(observation_id, path_hash, "window-active", "active", self.start)
-        self._presence(observation_id, path_hash, "window-minute", "heartbeat", self.start + timedelta(seconds=60))
+        prepared = self._presence(
+            observation_id,
+            path_hash,
+            "window-minute",
+            "heartbeat",
+            self.start + timedelta(seconds=60),
+        )
+        self.assertEqual(prepared["next_review_check_seconds"], 30)
         result = self._presence(
             observation_id,
             path_hash,
-            "window-two-minutes",
+            "window-threshold",
             "heartbeat",
-            self.start + timedelta(seconds=120),
+            self.start + timedelta(seconds=90),
         )
         self.assertEqual(result["action"], "notify")
         session_id = self.client.get("/sessions/current/state").json()["session_id"]
         self.assertEqual(self.store.get_drift_clock_state(session_id).next_review_mode_seconds, 180)
-        reassert = self._presence(
+        first_check = self._presence(
             observation_id,
             path_hash,
-            "window-reassert",
-            "active",
-            self.start + timedelta(seconds=130),
-        )
-        self.assertEqual(reassert["action"], "none")
-        blocked = self._presence(
-            observation_id,
-            path_hash,
-            "window-blocked",
+            "window-next-check",
             "heartbeat",
             self.start + timedelta(seconds=150),
         )
-        self.assertEqual(blocked["action"], "none")
+        self.assertEqual(first_check["action"], "none")
+        self.assertEqual(first_check["next_review_check_seconds"], 30)
         renag = self._presence(
             observation_id,
             path_hash,
             "window-renag",
             "heartbeat",
-            self.start + timedelta(seconds=215),
+            self.start + timedelta(seconds=180),
         )
         self.assertEqual(renag["action"], "notify")
         with self.store._connect() as conn:
@@ -409,18 +649,19 @@ class D7ApiTest(unittest.TestCase):
         observation_id, path_hash = self._start_drift_observation()
         self.provider.result = Tier2Result(confirm_drift=False, message=None)
         self._presence(observation_id, path_hash, "defer-active", "active", self.start)
-        self._presence(
+        prepared = self._presence(
             observation_id,
             path_hash,
             "defer-minute",
             "heartbeat",
             self.start + timedelta(seconds=60),
         )
-        reviewed_at = self.start + timedelta(seconds=120)
+        self.assertEqual(prepared["next_review_check_seconds"], 30)
+        reviewed_at = self.start + timedelta(seconds=90)
         result = self._presence(
             observation_id,
             path_hash,
-            "defer-two-minutes",
+            "defer-threshold",
             "heartbeat",
             reviewed_at,
         )
@@ -467,7 +708,6 @@ class D7ApiTest(unittest.TestCase):
     def test_stale_review_lock_expires_on_presence(self) -> None:
         observation_id, path_hash = self._start_drift_observation()
         self._presence(observation_id, path_hash, "stale-active", "active", self.start)
-        self._presence(observation_id, path_hash, "stale-minute", "heartbeat", self.start + timedelta(seconds=60))
         session_id = self.client.get("/sessions/current/state").json()["session_id"]
         with self.store._connect() as conn:
             conn.execute(
@@ -479,12 +719,20 @@ class D7ApiTest(unittest.TestCase):
                 """,
                 (observation_id, (self.start - timedelta(minutes=5)).isoformat(), session_id),
             )
+        prepared = self._presence(
+            observation_id,
+            path_hash,
+            "stale-minute",
+            "heartbeat",
+            self.start + timedelta(seconds=60),
+        )
+        self.assertEqual(prepared["next_review_check_seconds"], 30)
         result = self._presence(
             observation_id,
             path_hash,
-            "stale-two-minutes",
+            "stale-threshold",
             "heartbeat",
-            self.start + timedelta(seconds=120),
+            self.start + timedelta(seconds=90),
         )
         self.assertEqual(result["action"], "notify")
 
@@ -584,7 +832,14 @@ class D7ApiTest(unittest.TestCase):
                 "SELECT COUNT(*) FROM drift_page_dwell_states WHERE session_id = ?",
                 (old_session_id,),
             ).fetchone()[0]
-        self.assertEqual((excerpt_count, presence_count, page_dwell_count), (0, 0, 0))
+            prepared_count = conn.execute(
+                "SELECT COUNT(*) FROM d7_prepared_reviews WHERE session_id = ?",
+                (old_session_id,),
+            ).fetchone()[0]
+        self.assertEqual(
+            (excerpt_count, presence_count, page_dwell_count, prepared_count),
+            (0, 0, 0, 0),
+        )
 
 
 if __name__ == "__main__":

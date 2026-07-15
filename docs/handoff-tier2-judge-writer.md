@@ -184,7 +184,9 @@ flow). Keep the external `/health.provider_calls.tier2` schema unchanged.
 
 - Preserve existing `tier2.confirmed`, `tier2.cancelled`,
   `tier2.provider_error`, D7 review, intervention, and delivery event schemas.
-- Preserve popup/API response schemas; no extension change should be required.
+- Preserve existing popup fields. D7 presence responses may add the optional
+  `next_review_check_seconds` scheduling hint; the extension uses it only for a
+  restart-safe one-shot presence alarm and never stores the judgment/message.
 - Preserve quiet hours, voice delivery, message clamping, page-label override,
   goal-revision safety, candidate idempotency, and D7 review locking.
 - Keep local fallback rotation exactly as implemented by the persona engine.
