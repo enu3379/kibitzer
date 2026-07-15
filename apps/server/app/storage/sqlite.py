@@ -16,6 +16,15 @@ from ..schemas import Observation
 INTERVENTION_CANDIDATE_IN_FLIGHT_STALE_AFTER = timedelta(minutes=15)
 
 
+def effective_observation_verdict(verdict: str | None, label: str | None) -> str | None:
+    """Return the product verdict after applying the user's page-fact label."""
+    if label == "related":
+        return "OK"
+    if label == "drift":
+        return "DRIFT"
+    return verdict
+
+
 class NoActiveSessionError(RuntimeError):
     pass
 
@@ -121,6 +130,16 @@ class ControllerStateRecord:
     alignment_score: float | None
     drift_latched: bool
     updated_at: datetime
+
+
+@dataclass(frozen=True)
+class ControllerReplayEvent:
+    kind: str
+    ts: datetime
+    observation_id: str | None = None
+    verdict: str | None = None
+    r_final: float | None = None
+    label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -363,20 +382,33 @@ class SQLiteStore:
                 raise ValueError("session not found")
             verdict_rows = conn.execute(
                 """
-                SELECT verdict, COUNT(*) AS n
+                SELECT CASE page_labels.label
+                         WHEN 'related' THEN 'OK'
+                         WHEN 'drift' THEN 'DRIFT'
+                         ELSE observations.verdict
+                       END AS verdict,
+                       COUNT(*) AS n
                 FROM observations
-                WHERE session_id = ?
+                LEFT JOIN page_labels ON page_labels.observation_id = observations.id
+                WHERE observations.session_id = ?
                 GROUP BY verdict
                 """,
                 (session_id,),
             ).fetchall()
             top_drift_row = conn.execute(
                 """
-                SELECT url_host, COUNT(*) AS n
+                SELECT observations.url_host, COUNT(*) AS n
                 FROM observations
-                WHERE session_id = ? AND verdict = 'DRIFT' AND url_host IS NOT NULL
-                GROUP BY url_host
-                ORDER BY n DESC, url_host ASC
+                LEFT JOIN page_labels ON page_labels.observation_id = observations.id
+                WHERE observations.session_id = ?
+                  AND CASE page_labels.label
+                        WHEN 'related' THEN 'OK'
+                        WHEN 'drift' THEN 'DRIFT'
+                        ELSE observations.verdict
+                      END = 'DRIFT'
+                  AND observations.url_host IS NOT NULL
+                GROUP BY observations.url_host
+                ORDER BY n DESC, observations.url_host ASC
                 LIMIT 1
                 """,
                 (session_id,),
@@ -423,10 +455,18 @@ class SQLiteStore:
             self._ensure_schema(conn)
             observation_rows = conn.execute(
                 """
-                SELECT id, ts, verdict, url_host, title, tier_reached, tier1_reason
+                SELECT observations.id, observations.ts,
+                       CASE page_labels.label
+                         WHEN 'related' THEN 'OK'
+                         WHEN 'drift' THEN 'DRIFT'
+                         ELSE observations.verdict
+                       END AS verdict,
+                       observations.url_host, observations.title,
+                       observations.tier_reached, observations.tier1_reason
                 FROM observations
-                WHERE session_id = ?
-                ORDER BY ts ASC, id ASC
+                LEFT JOIN page_labels ON page_labels.observation_id = observations.id
+                WHERE observations.session_id = ?
+                ORDER BY observations.ts ASC, observations.id ASC
                 """,
                 (session_id,),
             ).fetchall()
@@ -469,10 +509,18 @@ class SQLiteStore:
             self._ensure_schema(conn)
             observation_rows = conn.execute(
                 """
-                SELECT id, ts, verdict, url_host, title, tier_reached, tier1_reason
+                SELECT observations.id, observations.ts,
+                       CASE page_labels.label
+                         WHEN 'related' THEN 'OK'
+                         WHEN 'drift' THEN 'DRIFT'
+                         ELSE observations.verdict
+                       END AS verdict,
+                       observations.url_host, observations.title,
+                       observations.tier_reached, observations.tier1_reason
                 FROM observations
-                WHERE ts >= ? AND ts < ?
-                ORDER BY ts ASC, id ASC
+                LEFT JOIN page_labels ON page_labels.observation_id = observations.id
+                WHERE observations.ts >= ? AND observations.ts < ?
+                ORDER BY observations.ts ASC, observations.id ASC
                 """,
                 (start_utc, end_utc),
             ).fetchall()
@@ -576,10 +624,16 @@ class SQLiteStore:
             self._ensure_schema(conn)
             row = conn.execute(
                 """
-                SELECT ts
+                SELECT observations.ts
                 FROM observations
-                WHERE session_id = ? AND verdict = 'OK'
-                ORDER BY ts DESC, id DESC
+                LEFT JOIN page_labels ON page_labels.observation_id = observations.id
+                WHERE observations.session_id = ?
+                  AND CASE page_labels.label
+                        WHEN 'related' THEN 'OK'
+                        WHEN 'drift' THEN 'DRIFT'
+                        ELSE observations.verdict
+                      END = 'OK'
+                ORDER BY observations.ts DESC, observations.id DESC
                 LIMIT 1
                 """,
                 (session_id,),
@@ -2247,7 +2301,7 @@ class SQLiteStore:
         ts: datetime | None = None,
         *,
         terminal_result: dict[str, Any] | None = None,
-    ) -> str:
+    ) -> str | None:
         """Atomically consume controller evidence, create an intervention, and confirm its candidate."""
 
         if controller_state.session_id != session_id:
@@ -2266,10 +2320,31 @@ class SQLiteStore:
             if not row:
                 raise ValueError("intervention candidate not found")
             candidate = self._intervention_candidate_from_row(row)
-            if candidate.status != "in_flight":
-                raise ValueError(f"intervention candidate is {candidate.status}")
             if candidate.session_id != session_id or candidate.observation_id != observation_id:
                 raise ValueError("intervention candidate does not match the confirmed observation")
+
+            observation = conn.execute(
+                """
+                SELECT observations.verdict, page_labels.label
+                FROM observations
+                LEFT JOIN page_labels ON page_labels.observation_id = observations.id
+                WHERE observations.id = ? AND observations.session_id = ?
+                """,
+                (observation_id, session_id),
+            ).fetchone()
+            if not observation:
+                raise ValueError("observation not found")
+            verdict = effective_observation_verdict(observation["verdict"], observation["label"])
+            if verdict != "DRIFT":
+                self._cancel_active_intervention_candidates_for_observation_in_conn(
+                    conn,
+                    session_id,
+                    observation_id,
+                    now,
+                )
+                return None
+            if candidate.status != "in_flight":
+                raise ValueError(f"intervention candidate is {candidate.status}")
 
             self._write_controller_state(conn, controller_state)
             self._insert_intervention(
@@ -2367,6 +2442,44 @@ class SQLiteStore:
                 now,
             )
 
+    def resolve_unhandled_interventions_for_observation(
+        self,
+        session_id: str,
+        observation_id: str,
+        status: str = "related",
+        ts: datetime | None = None,
+    ) -> int:
+        now = ts or _utc_now()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                """
+                SELECT id
+                FROM interventions
+                WHERE session_id = ? AND observation_id = ?
+                  AND status IN ('pending', 'delivered', 'delivery_failed')
+                """,
+                (session_id, observation_id),
+            ).fetchall()
+            for row in rows:
+                conn.execute(
+                    "UPDATE interventions SET status = ? WHERE id = ?",
+                    (status, row["id"]),
+                )
+                self._append_event(
+                    conn,
+                    session_id,
+                    "intervention.updated",
+                    {
+                        "intervention_id": row["id"],
+                        "observation_id": observation_id,
+                        "status": status,
+                        "source": "page_label",
+                    },
+                    now,
+                )
+        return len(rows)
+
     def get_observation(self, observation_id: str) -> ObservationRecord | None:
         with self._connect() as conn:
             self._ensure_schema(conn)
@@ -2450,6 +2563,14 @@ class SQLiteStore:
                 now,
             )
 
+            if label == "related":
+                self._cancel_active_intervention_candidates_for_observation_in_conn(
+                    conn,
+                    session_id,
+                    observation_id,
+                    now,
+                )
+
             exemplar_count: int | None = None
             if label == "related":
                 exemplar_count, exemplar_id = self._add_goal_exemplar_from_observation(
@@ -2478,6 +2599,61 @@ class SQLiteStore:
 
         return PageLabelRecord(id=label_id, observation_id=observation_id, label=label, ts=now), exemplar_count
 
+    def cancel_active_intervention_candidates_for_observation(
+        self,
+        session_id: str,
+        observation_id: str,
+        ts: datetime | None = None,
+    ) -> int:
+        now = ts or _utc_now()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            return self._cancel_active_intervention_candidates_for_observation_in_conn(
+                conn,
+                session_id,
+                observation_id,
+                now,
+            )
+
+    def _cancel_active_intervention_candidates_for_observation_in_conn(
+        self,
+        conn: sqlite3.Connection,
+        session_id: str,
+        observation_id: str,
+        now: datetime,
+    ) -> int:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM intervention_candidates
+            WHERE session_id = ? AND observation_id = ?
+              AND status IN ('pending', 'in_flight')
+            """,
+            (session_id, observation_id),
+        ).fetchall()
+        for row in rows:
+            candidate = self._intervention_candidate_from_row(row)
+            conn.execute(
+                """
+                UPDATE intervention_candidates
+                SET status = 'cancelled', updated_at = ?
+                WHERE id = ? AND status IN ('pending', 'in_flight')
+                """,
+                (now.isoformat(), candidate.id),
+            )
+            self._append_event(
+                conn,
+                candidate.session_id,
+                "intervention.candidate_cancelled",
+                {
+                    "candidate_id": candidate.id,
+                    "observation_id": candidate.observation_id,
+                    "intervention_id": None,
+                },
+                now,
+            )
+        return len(rows)
+
     def page_label_for_observation(self, observation_id: str) -> str | None:
         with self._connect() as conn:
             self._ensure_schema(conn)
@@ -2486,6 +2662,52 @@ class SQLiteStore:
                 (observation_id,),
             ).fetchone()
         return row["label"] if row else None
+
+    def controller_replay_timeline(self, session_id: str) -> list[ControllerReplayEvent]:
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                """
+                SELECT kind, ts, sort_order, sort_id, observation_id, verdict, features_json, label
+                FROM (
+                    SELECT 'observation' AS kind, observations.ts AS ts, 0 AS sort_order,
+                           observations.id AS sort_id, observations.id AS observation_id,
+                           observations.verdict AS verdict, observations.features_json AS features_json,
+                           page_labels.label AS label
+                    FROM observations
+                    LEFT JOIN page_labels ON page_labels.observation_id = observations.id
+                    WHERE observations.session_id = ?
+                    UNION ALL
+                    SELECT 'intervention' AS kind, interventions.ts AS ts, 1 AS sort_order,
+                           interventions.id AS sort_id, interventions.observation_id AS observation_id,
+                           NULL AS verdict, NULL AS features_json, NULL AS label
+                    FROM interventions
+                    WHERE interventions.session_id = ?
+                )
+                ORDER BY ts ASC, sort_order ASC, sort_id ASC
+                """,
+                (session_id, session_id),
+            ).fetchall()
+
+        events: list[ControllerReplayEvent] = []
+        for row in rows:
+            r_final = None
+            if row["features_json"]:
+                features = json.loads(row["features_json"])
+                value = features.get("r_final")
+                if isinstance(value, (int, float)):
+                    r_final = float(value)
+            events.append(
+                ControllerReplayEvent(
+                    kind=row["kind"],
+                    ts=_parse_dt(row["ts"]),
+                    observation_id=row["observation_id"],
+                    verdict=row["verdict"],
+                    r_final=r_final,
+                    label=row["label"],
+                )
+            )
+        return events
 
     def record_feedback_once(
         self,
@@ -2586,10 +2808,16 @@ class SQLiteStore:
             self._ensure_schema(conn)
             rows = conn.execute(
                 """
-                SELECT features_json
+                SELECT observations.features_json, page_labels.label
                 FROM observations
-                WHERE session_id = ? AND verdict = 'OK'
-                ORDER BY ts DESC, id DESC
+                LEFT JOIN page_labels ON page_labels.observation_id = observations.id
+                WHERE observations.session_id = ?
+                  AND CASE page_labels.label
+                        WHEN 'related' THEN 'OK'
+                        WHEN 'drift' THEN 'DRIFT'
+                        ELSE observations.verdict
+                      END = 'OK'
+                ORDER BY observations.ts DESC, observations.id DESC
                 LIMIT ?
                 """,
                 (session_id, limit),
@@ -2600,7 +2828,7 @@ class SQLiteStore:
             features = json.loads(row["features_json"])
             # Anchor admission guard: anchor-only OKs (anchor_eligible False) must
             # not steer the anchor. Rows from before the flag existed pass through.
-            if features.get("anchor_eligible") is False:
+            if features.get("anchor_eligible") is False and row["label"] != "related":
                 continue
             emb = features.get("emb")
             if isinstance(emb, list):
@@ -2641,10 +2869,16 @@ class SQLiteStore:
             self._ensure_schema(conn)
             rows = conn.execute(
                 """
-                SELECT title, verdict
+                SELECT observations.title,
+                       CASE page_labels.label
+                         WHEN 'related' THEN 'OK'
+                         WHEN 'drift' THEN 'DRIFT'
+                         ELSE observations.verdict
+                       END AS verdict
                 FROM observations
-                WHERE session_id = ?
-                ORDER BY ts DESC, id DESC
+                LEFT JOIN page_labels ON page_labels.observation_id = observations.id
+                WHERE observations.session_id = ?
+                ORDER BY observations.ts DESC, observations.id DESC
                 LIMIT ?
                 """,
                 (session_id, limit),
@@ -2665,12 +2899,21 @@ class SQLiteStore:
             self._ensure_schema(conn)
             rows = conn.execute(
                 """
-                SELECT verdict
+                SELECT CASE page_labels.label
+                         WHEN 'related' THEN 'OK'
+                         WHEN 'drift' THEN 'DRIFT'
+                         ELSE observations.verdict
+                       END AS verdict
                 FROM observations
-                WHERE session_id = ?
-                  AND verdict IS NOT NULL
-                  AND (? IS NULL OR ts > ?)
-                ORDER BY ts DESC, id DESC
+                LEFT JOIN page_labels ON page_labels.observation_id = observations.id
+                WHERE observations.session_id = ?
+                  AND CASE page_labels.label
+                        WHEN 'related' THEN 'OK'
+                        WHEN 'drift' THEN 'DRIFT'
+                        ELSE observations.verdict
+                      END IS NOT NULL
+                  AND (? IS NULL OR observations.ts > ?)
+                ORDER BY observations.ts DESC, observations.id DESC
                 LIMIT ?
                 """,
                 (session_id, after_text, after_text, limit),

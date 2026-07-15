@@ -28,7 +28,13 @@ from ..core.personas import (
     format_persona_fallback,
     resolve_persona,
 )
-from ..core.relevance import tier0_score_parts, tier1_final_relevance
+from ..core.page_labels import apply_page_label_override
+from ..core.relevance import (
+    DRIFT_RELEVANCE,
+    RELATED_RELEVANCE,
+    tier0_score_parts,
+    tier1_final_relevance,
+)
 from ..core.runtime_settings import effective_controller_config, quiet_hours_active, runtime_settings
 from ..core.runtime_resources import RuntimeResources
 from ..core.tier1_payload import build_tier1_payload
@@ -57,6 +63,7 @@ from ..storage.sqlite import (
     ObservationRecord,
     ReturnCandidateRecord,
     SQLiteStore,
+    effective_observation_verdict,
 )
 
 router = APIRouter()
@@ -66,6 +73,7 @@ CANDIDATE_RESUME_TTL_SECONDS = 60
 
 class LatestObservationFeatures(BaseModel):
     r0: float | None = None
+    r_override: float | None = None
     exemplar_score: float | None = None
     derived_score: float | None = None
     anchor_eligible: bool | None = None
@@ -93,6 +101,7 @@ class PageLabelResponse(BaseModel):
     label_id: str
     observation_id: str
     label: Literal["related", "drift"]
+    verdict: Literal["OK", "DRIFT"] | None = None
     exemplar_count: int | None = None
 
 
@@ -168,9 +177,10 @@ async def label_observation(
         if not isinstance(emb, list) or not emb:
             raise HTTPException(status_code=400, detail="observation has no embedding")
 
-    page_label, exemplar_count = store.record_page_label(
-        session_id=observation.session_id,
-        observation_id=observation.id,
+    page_label, exemplar_count, verdict = apply_page_label_override(
+        store,
+        effective_controller_config(request.app.state.config, store),
+        observation,
         label=body.label,
         exemplar_cap=request.app.state.config.relevance.exemplar_cap,
     )
@@ -179,6 +189,7 @@ async def label_observation(
         label_id=page_label.id,
         observation_id=page_label.observation_id,
         label=body.label,
+        verdict=verdict,
         exemplar_count=exemplar_count,
     )
 
@@ -388,9 +399,14 @@ def _latest_observation_response(
         observation_id=observation.id,
         title=observation.title,
         url_host=observation.url_host,
-        verdict=observation.verdict,
+        verdict=effective_observation_verdict(observation.verdict, label),
         features=LatestObservationFeatures(
             r0=features.get("r0"),
+            r_override=(
+                RELATED_RELEVANCE
+                if label == "related"
+                else DRIFT_RELEVANCE if label == "drift" else None
+            ),
             exemplar_score=features.get("exemplar_score"),
             derived_score=features.get("derived_score"),
             anchor_eligible=features.get("anchor_eligible"),
@@ -676,7 +692,23 @@ async def confirm_observation_excerpt(
     if not current or not current.goal or not observation or observation.session_id != current.session.id:
         raise HTTPException(status_code=404, detail="observation not found")
 
-    verdict = Verdict(observation.verdict) if observation.verdict else None
+    effective_value = effective_observation_verdict(
+        observation.verdict,
+        store.page_label_for_observation(observation.id),
+    )
+    verdict = Verdict(effective_value) if effective_value else None
+    if verdict != Verdict.DRIFT:
+        store.cancel_active_intervention_candidates_for_observation(
+            observation.session_id,
+            observation.id,
+        )
+        return PipelineResult(
+            action=PipelineAction.NONE,
+            observation_id=observation.id,
+            verdict=verdict,
+            page=_page_info(observation),
+        )
+
     candidate = store.get_intervention_candidate_for_observation(observation.id)
     if not candidate:
         raise HTTPException(status_code=409, detail="observation has no intervention candidate")
@@ -692,20 +724,6 @@ async def confirm_observation_excerpt(
         raise HTTPException(status_code=409, detail=f"intervention candidate is {candidate.status}")
 
     try:
-        if verdict != Verdict.DRIFT:
-            terminal_result = PipelineResult(
-                action=PipelineAction.NONE,
-                observation_id=observation.id,
-                verdict=verdict,
-                page=_page_info(observation),
-            )
-            store.resolve_intervention_candidate(
-                candidate.id,
-                "cancelled",
-                terminal_result=terminal_result.model_dump(mode="json"),
-            )
-            return terminal_result
-
         recent = store.recent_observation_summaries(
             observation.session_id,
             request.app.state.config.tier2.recent_observations,
@@ -750,6 +768,23 @@ async def confirm_observation_excerpt(
             )
             return terminal_result
 
+        effective_value = effective_observation_verdict(
+            observation.verdict,
+            store.page_label_for_observation(observation.id),
+        )
+        verdict = Verdict(effective_value) if effective_value else None
+        if verdict != Verdict.DRIFT:
+            store.cancel_active_intervention_candidates_for_observation(
+                observation.session_id,
+                observation.id,
+            )
+            return PipelineResult(
+                action=PipelineAction.NONE,
+                observation_id=observation.id,
+                verdict=verdict,
+                page=_page_info(observation),
+            )
+
         controller_config = effective_controller_config(request.app.state.config, store)
         confirmed_at = datetime.now(timezone.utc)
         controller_state = controller_state_after_intervention(
@@ -776,6 +811,17 @@ async def confirm_observation_excerpt(
             terminal_result=terminal_result.model_dump(mode="json"),
             ts=confirmed_at,
         )
+        if intervention_id is None:
+            effective_value = effective_observation_verdict(
+                observation.verdict,
+                store.page_label_for_observation(observation.id),
+            )
+            return PipelineResult(
+                action=PipelineAction.NONE,
+                observation_id=observation.id,
+                verdict=Verdict(effective_value) if effective_value else None,
+                page=_page_info(observation),
+            )
         _handle_delivery_side_effects(
             request,
             observation.session_id,

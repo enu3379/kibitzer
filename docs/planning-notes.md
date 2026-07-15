@@ -234,6 +234,20 @@ only the nag-moment page is excerpted, so recent-page content doesn't exist.
 Branch: `feature/time-budget-drift` (worktree
 `~/kibitzer-worktrees/time-budget-drift`, based on dev @ 808afef).
 
+### D8 — Page labels override the product verdict → RESOLVED (2026-07-14)
+
+When the user explicitly says the current page is related or drift, that answer
+becomes the product's effective verdict immediately. The popup, session/report
+statistics, recent judgment context, and anchor policy follow the effective
+verdict. A false-DRIFT correction also clears accumulated drift and any unhandled
+intervention for that observation under the streak controller. Under the
+alignment controller, it replaces the corrected observation's relevance with
+`0.85` (the same deliberate mapping used by Tier 1 OK), recomputes `A_t`, and
+reapplies the alignment thresholds. The matching exploration-history light is
+updated too. The detector's original stored verdict remains immutable so Replay
+CLI can still measure false-OK/false-DRIFT against the page label. User-declared
+drift does not synthesize a new nag at click time.
+
 ## Backlog (consolidated 2026-07-08, post-P1)
 
 P0 + P1 + detection fixes + Ollama Cloud stack are all shipped. What remains,

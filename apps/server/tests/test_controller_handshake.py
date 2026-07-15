@@ -167,6 +167,67 @@ class ControllerHandshakeTest(unittest.TestCase):
             conn.close()
         self.assertEqual(active_count, 1)
 
+    def test_related_label_cancels_pending_candidate_before_excerpt(self) -> None:
+        client = self._client(ControllerConfig(k=1, coldstart_observations=1, cooldown_seconds=0))
+        try:
+            self._start_goal(client)
+            request = self._post_drift(client, 1)
+            label = client.post(
+                f"/observations/{request['observation_id']}/label",
+                json={"label": "related"},
+            )
+            excerpt = client.post(
+                f"/observations/{request['observation_id']}/excerpt",
+                json={"title": "Bread", "text": "Bread recipe"},
+            )
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertEqual(label.status_code, 200)
+        self.assertEqual(label.json()["verdict"], "OK")
+        self.assertEqual(excerpt.status_code, 200)
+        self.assertEqual(excerpt.json()["action"], "none")
+        self.assertEqual(excerpt.json()["verdict"], "OK")
+        candidate = self.store.get_intervention_candidate_for_observation(str(request["observation_id"]))
+        self.assertIsNotNone(candidate)
+        assert candidate is not None
+        self.assertEqual(candidate.status, "cancelled")
+
+    def test_related_label_wins_against_in_flight_intervention_commit(self) -> None:
+        client = self._client(ControllerConfig(k=1, coldstart_observations=1, cooldown_seconds=0))
+        try:
+            session_id = self._start_goal(client)
+            request = self._post_drift(client, 1)
+            candidate, claimed = self.store.claim_intervention_candidate(str(request["candidate_id"]))
+            self.assertTrue(claimed)
+            self.assertIsNotNone(candidate)
+            assert candidate is not None
+            client.post(
+                f"/observations/{request['observation_id']}/label",
+                json={"label": "related"},
+            )
+            intervention_id = self.store.commit_confirmed_intervention(
+                candidate.id,
+                session_id,
+                candidate.observation_id,
+                "late confirmation",
+                self.store.get_controller_state(session_id),
+            )
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertIsNone(intervention_id)
+        resolved = self.store.get_intervention_candidate_for_observation(str(request["observation_id"]))
+        self.assertIsNotNone(resolved)
+        assert resolved is not None
+        self.assertEqual(resolved.status, "cancelled")
+        conn = sqlite3.connect(self.db_path)
+        try:
+            count = conn.execute("SELECT COUNT(*) FROM interventions").fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(count, 0)
+
     def test_alignment_controller_uses_ewma_hysteresis(self) -> None:
         now = datetime.now(timezone.utc)
         controller = AlignmentController(

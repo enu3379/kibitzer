@@ -12,6 +12,12 @@ features
 verdict
 ```
 
+`observations.verdict` is the detector's original output and remains immutable
+for replay and confusion-matrix auditing. When an observation has a `page_labels`
+row, the label defines the product's effective verdict: `related` maps to `OK`
+and `drift` maps to `DRIFT`. Current-page UI, session/report statistics, recent
+judgment context, and anchor admission use that effective verdict.
+
 For `browser_nav`, payload contains:
 
 ```json
@@ -51,7 +57,9 @@ obs_count
 time_budget_clock
 ```
 
-The anchor is the average of the latest OK observation embeddings. DRIFT observations are never admitted.
+The anchor is the average of the latest effectively-OK observation embeddings.
+DRIFT observations are never admitted. An explicit user `related` label is
+eligible even when the detector's original anchor-admission flag was false.
 
 ## SQLite Tables
 
@@ -60,6 +68,7 @@ sessions
 goals
 goal_exemplars
 observations
+page_labels
 observation_requests
 controller_states
 drift_clock_states
@@ -140,6 +149,14 @@ Supported kinds:
 - `snooze`: set controller `snoozed_until`, then mark the intervention `snoozed`.
 
 Goal exemplar cap enforcement preserves the declared-goal exemplar when possible and removes older feedback exemplars first.
+
+Page labels are observation-scoped and do not require an intervention. A
+`related` correction adds the observation embedding as an exemplar and resolves
+an unhandled intervention for that observation. The streak controller clears its
+accumulated streak. The alignment controller instead replaces only the latest
+observation's relevance with `0.85`, recomputes `A_t`, and reapplies its
+thresholds. The extension also updates the matching exploration-history verdict.
+The original detector verdict is retained for audit.
 
 ## Raw Data Retention
 

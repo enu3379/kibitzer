@@ -51,6 +51,7 @@ export interface FeedbackResult {
   intervention_id: string
   observation_id?: string | null
   intervention_status: string
+  verdict?: "OK" | "DRIFT" | null
   exemplar_count?: number | null
   snoozed_until?: string | null
 }
@@ -59,6 +60,7 @@ export type PageLabel = "related" | "drift"
 
 export interface LatestObservationFeatures {
   r0?: number | null
+  r_override?: number | null
   exemplar_score?: number | null
   derived_score?: number | null
   anchor_eligible?: boolean | null
@@ -80,6 +82,7 @@ export interface PageLabelResult {
   label_id: string
   observation_id: string
   label: PageLabel
+  verdict: "OK" | "DRIFT" | null
   exemplar_count?: number | null
 }
 

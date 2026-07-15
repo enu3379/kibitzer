@@ -22,6 +22,7 @@ import {
   ExplorationVerdict,
   prependExplorationHistory,
   updateExplorationHistory,
+  updateExplorationHistoryByObservationId,
 } from "./lib/history"
 import {
   DWELL_RECORD_VERSION,
@@ -64,6 +65,15 @@ interface PendingToast {
   displayToken: number
   deliveryReported: boolean
   autoDismissMs: number
+}
+
+interface RuntimeMessage {
+  type?: string
+  notificationId?: string
+  kind?: string
+  displayToken?: number
+  observationId?: string
+  verdict?: ExplorationVerdict
 }
 
 interface ActiveD7Observation {
@@ -798,7 +808,20 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 })
 
 chrome.runtime.onMessage.addListener(
-  (message: { type?: string; notificationId?: string; kind?: string; displayToken?: number } | undefined) => {
+  (message: RuntimeMessage | undefined, _sender, sendResponse) => {
+    if (
+      message?.type === "kibitzer:update-history-verdict" &&
+      message.observationId &&
+      (message.verdict === "OK" || message.verdict === "DRIFT")
+    ) {
+      void updateExplorationHistoryByObservationId(message.observationId, {
+        verdict: message.verdict,
+      }).then(
+        () => sendResponse({ ok: true }),
+        () => sendResponse({ ok: false }),
+      )
+      return true
+    }
     if (message?.type === "kibitzer:refresh-badge") void refreshBadge()
     if (message?.type === "kibitzer:toast-feedback" && message.notificationId) {
       const kind = message.kind
@@ -809,6 +832,7 @@ chrome.runtime.onMessage.addListener(
         void dismissPendingToast(message.notificationId, message.displayToken)
       }
     }
+    return false
   },
 )
 
@@ -831,11 +855,19 @@ async function submitNotificationFeedback(
   const toast = pendingToasts.get(notificationId)
   if (!toast || !kind) return
   if (toast.kind === "intervention" && toast.interventionId) {
-    await postFeedback({
+    const result = await postFeedback({
       kind,
       intervention_id: toast.interventionId,
       observation_id: toast.observationId,
     })
+    if (
+      result?.observation_id &&
+      (result.verdict === "OK" || result.verdict === "DRIFT")
+    ) {
+      await updateExplorationHistoryByObservationId(result.observation_id, {
+        verdict: result.verdict,
+      }).catch(() => undefined)
+    }
   }
   pendingToasts.delete(notificationId)
   await clearSystemNotification(notificationId)

@@ -26,7 +26,11 @@ import {
   putSettings,
   setGoal,
 } from "../lib/api"
-import { ExplorationHistoryEntry, ExplorationResponseKind, loadExplorationHistory } from "../lib/history"
+import {
+  ExplorationHistoryEntry,
+  ExplorationResponseKind,
+  loadExplorationHistory,
+} from "../lib/history"
 
 const POLL_MS = 2000
 const DEFAULT_OBSERVATION_SECONDS = 5
@@ -144,6 +148,17 @@ function stopPoll(): void {
 
 function notifyBadge(): void {
   void chrome.runtime.sendMessage({ type: "kibitzer:refresh-badge" }).catch(() => undefined)
+}
+
+async function syncExplorationHistoryVerdict(
+  observationId: string,
+  verdict: "OK" | "DRIFT",
+): Promise<void> {
+  await chrome.runtime.sendMessage({
+    type: "kibitzer:update-history-verdict",
+    observationId,
+    verdict,
+  }).catch(() => undefined)
 }
 
 function formatDuration(totalSeconds: number): string {
@@ -345,10 +360,10 @@ async function submitGoal(sessionExists: boolean): Promise<void> {
 }
 
 // ---- 지금 페이지 card (D5) ----
-// Pull-only: reports what the system believes about the page behind the popup
-// and takes page-fact labels ("이 페이지가 목표와 관련 있냐") — it never grades
-// the system and never prompts. `related` labels feed the exemplar path;
-// `drift` labels are record-only until D4 decides otherwise.
+// Pull-only: reports the effective verdict for the page behind the popup and
+// takes page-fact labels ("이 페이지가 목표와 관련 있냐"). A label overrides
+// the product verdict while the detector's original verdict remains available
+// to replay/audit. `related` also feeds the exemplar path; labeling never prompts.
 
 const TIER_NAMES: Record<number, string> = {
   0: "Tier 0 · 어휘 매칭",
@@ -370,6 +385,13 @@ function pageLabelButtons(page: LatestObservation): { related: string; drift: st
   return { related: "관련 있어", drift: "이탈이야" }
 }
 
+function relevanceDiagnosticHtml(page: LatestObservation): string {
+  const original = formatScore(page.features?.r0)
+  const override = page.features?.r_override
+  if (override === null || override === undefined) return original
+  return `<span class="pc-r-original">${original}</span><span class="pc-r-arrow">&rarr;</span><span class="pc-r-override">${formatScore(override)}</span>`
+}
+
 function pageDiagnosticsHtml(page: LatestObservation): string {
   const features = page.features ?? {}
   const tier = features.tier_reached
@@ -382,7 +404,7 @@ function pageDiagnosticsHtml(page: LatestObservation): string {
   return `
     <div class="pc-diag">
       <div class="row"><span class="k">판정 단계</span><span>${tierName}</span></div>
-      <div class="row"><span class="k">r0 / τ</span><span>${formatScore(features.r0)} / ${formatScore(page.tau_ok)}</span></div>
+      <div class="row"><span class="k">r0 / τ</span><span>${relevanceDiagnosticHtml(page)} / ${formatScore(page.tau_ok)}</span></div>
       <div class="row"><span class="k">예시 유사도</span><span>${formatScore(features.exemplar_score)}</span></div>
       <div class="row"><span class="k">앵커 반영</span><span>${anchor}</span></div>
     </div>
@@ -438,7 +460,13 @@ async function submitPageLabel(page: LatestObservation, label: PageLabel): Promi
     const button = document.getElementById(id) as HTMLButtonElement | null
     if (button) button.disabled = true
   }
-  await postObservationLabel(page.observation_id, label)
+  const result = await postObservationLabel(page.observation_id, label)
+  if (result) {
+    if (result.verdict === "OK" || result.verdict === "DRIFT") {
+      await syncExplorationHistoryVerdict(result.observation_id, result.verdict)
+    }
+    notifyBadge()
+  }
   await refresh()
 }
 
@@ -618,11 +646,17 @@ async function submitInterventionFeedback(
   pending: PendingIntervention,
   kind: FeedbackKind,
 ): Promise<void> {
-  await postFeedback({
+  const result = await postFeedback({
     kind,
     intervention_id: pending.intervention_id,
     observation_id: pending.observation_id ?? null,
   })
+  if (
+    result?.observation_id &&
+    (result.verdict === "OK" || result.verdict === "DRIFT")
+  ) {
+    await syncExplorationHistoryVerdict(result.observation_id, result.verdict)
+  }
   notifyBadge()
   await refresh()
 }

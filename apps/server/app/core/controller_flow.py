@@ -4,9 +4,14 @@ from datetime import datetime, timedelta, timezone
 
 from ..config import ControllerConfig
 from ..schemas import Observation, PageInfo, PipelineAction, PipelineResult, Verdict
-from ..storage.sqlite import ControllerStateRecord, SQLiteStore
+from ..storage.sqlite import (
+    ControllerStateRecord,
+    SQLiteStore,
+    effective_observation_verdict,
+)
 from .controllers.alignment import AlignmentController
 from .controllers.streak import StreakController
+from .relevance import DRIFT_RELEVANCE, RELATED_RELEVANCE
 
 
 def apply_controller(
@@ -134,6 +139,46 @@ def controller_state_after_intervention(
         drift_latched=state.drift_latched,
         updated_at=confirmed_at,
     )
+
+
+def rebuild_controller_state(
+    store: SQLiteStore,
+    config: ControllerConfig,
+    session_id: str,
+    now: datetime | None = None,
+) -> None:
+    """Replay final observation facts and confirmed intervention moments."""
+
+    current = store.get_controller_state(session_id)
+    replayed_at = now or datetime.now(timezone.utc)
+    empty = ControllerStateRecord(
+        session_id=session_id,
+        streak=0,
+        obs_count=0,
+        last_intervention_ts=None,
+        snoozed_until=current.snoozed_until,
+        alignment_score=None,
+        drift_latched=False,
+        updated_at=replayed_at,
+    )
+    controller = _controller_from_state(config, empty)
+    for event in store.controller_replay_timeline(session_id):
+        if event.kind == "intervention":
+            controller.on_intervened(event.ts)
+            continue
+
+        effective = effective_observation_verdict(event.verdict, event.label)
+        if effective not in (Verdict.OK.value, Verdict.DRIFT.value):
+            continue
+        if event.label == "related":
+            relevance = RELATED_RELEVANCE
+        elif event.label == "drift":
+            relevance = DRIFT_RELEVANCE
+        else:
+            relevance = event.r_final
+        controller.update(Verdict(effective), relevance)
+
+    _save_controller_state(store, session_id, controller, current, replayed_at)
 
 
 def _controller_from_state(

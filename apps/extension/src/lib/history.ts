@@ -64,6 +64,19 @@ function enqueueHistoryMutation(mutation: () => Promise<void>): Promise<void> {
   return result
 }
 
+export async function updateExplorationHistoryByObservationId(
+  observationId: string,
+  patch: Partial<ExplorationHistoryEntry>,
+): Promise<void> {
+  return enqueueHistoryMutation(async () => {
+    const entries = await listExplorationHistory()
+    const next = entries.map((entry) =>
+      entry.observationId === observationId ? { ...entry, ...patch } : entry,
+    )
+    await chrome.storage.session.set({ [HISTORY_STORAGE_KEY]: next.slice(0, MAX_HISTORY_ITEMS) })
+  })
+}
+
 function isHistoryEntry(value: unknown): value is ExplorationHistoryEntry {
   if (!value || typeof value !== "object") return false
   const item = value as Partial<ExplorationHistoryEntry>

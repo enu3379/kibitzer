@@ -30,13 +30,19 @@ class FeedbackApiTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmpdir.cleanup()
 
-    def _client(self, exemplar_cap: int = 20, break_duration_seconds: int = 300) -> TestClient:
+    def _client(
+        self,
+        exemplar_cap: int = 20,
+        break_duration_seconds: int = 300,
+        controller: ControllerConfig | None = None,
+    ) -> TestClient:
         config = AppConfig(
             server=ServerConfig(db_path=str(self.db_path)),
             tier1=Tier1Config(enabled=False),
             tier2=Tier2Config(enabled=False),
             relevance=RelevanceConfig(exemplar_cap=exemplar_cap),
-            controller=ControllerConfig(k=1, coldstart_observations=1, cooldown_seconds=0, snooze_seconds=900),
+            controller=controller
+            or ControllerConfig(k=1, coldstart_observations=1, cooldown_seconds=0, snooze_seconds=900),
             intentional_break=BreakConfig(duration_seconds=break_duration_seconds),
         )
         client = TestClient(create_app(config=config, store=self.store))
@@ -93,13 +99,63 @@ class FeedbackApiTest(unittest.TestCase):
 
         self.assertFalse(feedback["duplicate"])
         self.assertEqual(feedback["intervention_status"], "related")
+        self.assertEqual(feedback["verdict"], "OK")
         self.assertEqual(feedback["exemplar_count"], 2)
         self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(duplicate["verdict"], "OK")
         self.assertEqual(duplicate["exemplar_count"], 2)
         self.assertEqual(self.store.goal_exemplar_count(session_id), 2)
+        observation_id = str(notification["observation_id"])
+        self.assertEqual(self.store.page_label_for_observation(observation_id), "related")
+        self.assertEqual(self.store.get_observation(observation_id).verdict, "DRIFT")
         with closing(sqlite3.connect(self.db_path)) as conn:
             feedback_count = conn.execute("SELECT COUNT(*) FROM feedback WHERE kind = 'related'").fetchone()[0]
         self.assertEqual(feedback_count, 1)
+
+    def test_related_feedback_replays_historical_alignment_with_point_eighty_five(self) -> None:
+        client = self._client(
+            controller=ControllerConfig(
+                type="alignment",
+                alignment_alpha=0.5,
+                theta_low=0.3,
+                theta_high=0.6,
+                coldstart_observations=1,
+                cooldown_seconds=0,
+            )
+        )
+        try:
+            self._start_goal(client)
+            notification = self._notify(client)
+            later = client.post(
+                "/observations/browser-nav",
+                json={
+                    "source": "browser_nav",
+                    "payload": {
+                        "url": "https://example.com/kibitzer-api",
+                        "title": "Kibitzer observation API docs",
+                    },
+                },
+            ).json()
+            later_observation = self.store.get_observation(str(later["observation_id"]))
+            feedback = client.post(
+                "/feedback",
+                json={
+                    "kind": "related",
+                    "intervention_id": notification["intervention_id"],
+                    "observation_id": notification["observation_id"],
+                },
+            ).json()
+            state = client.get("/sessions/current/state").json()
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertEqual(feedback["verdict"], "OK")
+        self.assertIsNotNone(later_observation)
+        assert later_observation is not None
+        later_r = later_observation.features.get("r_final")
+        self.assertIsNotNone(later_r)
+        self.assertAlmostEqual(state["alignment_score"], 0.5 * 0.85 + 0.5 * float(later_r))
+        self.assertEqual(state["obs_count"], 2)
 
     def test_related_feedback_respects_exemplar_cap(self) -> None:
         client = self._client(exemplar_cap=2)

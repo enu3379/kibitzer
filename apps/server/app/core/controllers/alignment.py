@@ -25,6 +25,12 @@ class AlignmentController:
         previous = float(r) if self.alignment_score is None else self.alignment_score
         self.alignment_score = alpha * previous + (1.0 - alpha) * float(r)
 
+        self._refresh_drift_state()
+
+    def _refresh_drift_state(self) -> None:
+        if self.alignment_score is None:
+            return
+
         if self.alignment_score > self.theta_high:
             self.drift_latched = False
             self.armed = 0
