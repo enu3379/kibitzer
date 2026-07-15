@@ -285,6 +285,11 @@ export interface SettingsPatch {
   quiet_hours?: Partial<QuietHours>
 }
 
+export type SettingsUpdateResult =
+  | { kind: "updated"; settings: Settings }
+  | { kind: "unreachable" }
+  | { kind: "http_error"; status: number; detail: string | null }
+
 export function normalizeSettings(value: Partial<Settings>): Settings {
   const rawRelevance = (value.relevance ?? {}) as Partial<RelevanceSettings>
   const rawController = (value.controller ?? {}) as Partial<ControllerSettings>
@@ -346,15 +351,37 @@ export async function getSettings(): Promise<Settings | null> {
   return normalizeSettings(body)
 }
 
-export async function putSettings(patch: SettingsPatch): Promise<Settings | null> {
+export async function putSettings(patch: SettingsPatch): Promise<SettingsUpdateResult> {
   const response = await fetch(`${SERVER_BASE_URL}/settings`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
   }).catch(() => null)
-  if (!response?.ok) return null
+  if (!response) return { kind: "unreachable" }
+  if (!response.ok) {
+    return {
+      kind: "http_error",
+      status: response.status,
+      detail: await readHttpErrorDetail(response),
+    }
+  }
   const body = (await response.json()) as Partial<Settings>
-  return normalizeSettings(body)
+  return { kind: "updated", settings: normalizeSettings(body) }
+}
+
+async function readHttpErrorDetail(response: Response): Promise<string | null> {
+  try {
+    const body = (await response.json()) as { detail?: unknown }
+    if (typeof body.detail === "string") return body.detail
+    if (!Array.isArray(body.detail)) return null
+    const issue = body.detail.find(
+      (item): item is { msg: string } =>
+        Boolean(item) && typeof item === "object" && typeof (item as { msg?: unknown }).msg === "string",
+    )
+    return issue?.msg ?? null
+  } catch {
+    return null
+  }
 }
 
 export async function getSessionState(): Promise<SessionStateResult> {
