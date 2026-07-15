@@ -1,6 +1,6 @@
-import asyncio
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
@@ -18,7 +18,8 @@ from ..core.ingest import ingest_browser_nav as ingest_browser_nav_core
 from ..core.ingest import observation_page_info
 from ..core.personas import (
     Persona,
-    compose_tier2_system_prompt,
+    compose_tier2_judge_system_prompt,
+    compose_tier2_writer_system_prompt,
     format_persona_fallback,
     resolve_persona,
 )
@@ -27,9 +28,8 @@ from ..core.relevance import DRIFT_RELEVANCE, RELATED_RELEVANCE
 from ..core.runtime_resources import RuntimeResources
 from ..core.runtime_settings import effective_controller_config, quiet_hours_active, runtime_settings
 from ..core.tier2_payload import (
-    build_d7_content_payload,
-    build_d7_title_payload,
-    build_tier2_payload,
+    build_tier2_message_payload,
+    build_tier2_review_payload,
     fallback_drift_message,
 )
 from ..core.time_budget import (
@@ -40,7 +40,7 @@ from ..core.time_budget import (
     thresholds_for_budget,
 )
 from ..core.voice import speak
-from ..providers.judges.base import Tier2Result
+from ..providers.judges.base import Tier2Decision
 from ..schemas import PageExcerpt, PipelineAction, PipelineResult, RawObservation, Verdict
 from ..storage.sqlite import (
     CurrentSessionRecord,
@@ -504,10 +504,7 @@ async def _run_d7_review(
         settings,
         request.app.state.config.delivery.persona,
     )
-    system_prompt = compose_tier2_system_prompt(persona) if persona else None
-    title_payload = build_d7_title_payload(current.goal, observation, recent_titles, time_context)
-    _inject_nagging_context(store, title_payload, observation.session_id, observation.url_host)
-    payloads = [title_payload]
+    recent_content = []
     if current_excerpt and current_excerpt.text:
         recent_content = [
             item
@@ -518,29 +515,25 @@ async def _run_d7_review(
             )
             if item.observation_id != observation.id
         ][-config.recent_excerpts :]
-        content_payload = build_d7_content_payload(
-            current.goal,
-            observation,
-            current_excerpt.text,
-            recent_content,
-            time_context,
-        )
-        _inject_nagging_context(store, content_payload, observation.session_id, observation.url_host)
-        payloads.append(content_payload)
     else:
         store.record_d7_content_unavailable(observation.session_id, observation.id, now)
 
-    results = await asyncio.gather(
-        *(
-            _confirm_d7_tier2(
-                request,
-                observation.session_id,
-                observation.id,
-                payload,
-                system_prompt,
-            )
-            for payload in payloads
-        )
+    payload = build_tier2_review_payload(
+        current.goal,
+        observation,
+        recent_titles,
+        current_excerpt.text if current_excerpt else None,
+        recent_content,
+        time_context,
+        request.app.state.config.tier2,
+    )
+    outcome = await _review_tier2(
+        request,
+        current,
+        observation,
+        payload,
+        time_context,
+        persona,
     )
     if not store.d7_review_is_current(observation.session_id, observation.id):
         return PipelineResult(
@@ -549,14 +542,13 @@ async def _run_d7_review(
             verdict=verdict,
             page=observation_page_info(observation),
         )
-    available_results = [result for result in results if result is not None]
-    if any(not result.confirm_drift for result in available_results):
+    if outcome.decision is None or outcome.decision.decision == "defer":
         return _defer_d7_review(
             store,
             observation,
             thresholds.total_seconds,
             mode_seconds,
-            "acceptable_side_branch",
+            outcome.decision.reason_code if outcome.decision else "provider_error",
             now,
         )
 
@@ -565,15 +557,8 @@ async def _run_d7_review(
         if persona and persona.max_sentences is not None
         else request.app.state.config.delivery.max_sentences
     )
-    provider_message = next(
-        (result.message for result in reversed(available_results) if result.message),
-        None,
-    )
-    if not available_results:
-        nag_count = store.nag_count_today(observation.session_id) + 1
-        provider_message = format_persona_fallback(persona, current.goal, observation, nag_count)
     message = clamp_notification_message(
-        provider_message or fallback_drift_message(current.goal, observation),
+        outcome.message or fallback_drift_message(current.goal, observation),
         max_sentences,
     )
     store.record_tier2_result(
@@ -666,22 +651,28 @@ async def confirm_observation_excerpt(
             observation.session_id,
             request.app.state.config.tier2.recent_observations,
         )
-        payload = build_tier2_payload(current.goal, observation, recent, excerpt, request.app.state.config.tier2)
-        _inject_nagging_context(store, payload, observation.session_id, observation.url_host)
+        payload = build_tier2_review_payload(
+            current.goal,
+            observation,
+            recent,
+            excerpt.text,
+            [],
+            None,
+            request.app.state.config.tier2,
+        )
         settings = runtime_settings(request.app.state.config, store)
         persona = resolve_persona(
             getattr(request.app.state, "persona_set", None),
             settings,
             request.app.state.config.delivery.persona,
         )
-        system_prompt = compose_tier2_system_prompt(persona) if persona else None
-        result = await _confirm_tier2(
+        outcome = await _review_tier2(
             request,
-            observation.session_id,
-            observation.id,
+            current,
+            observation,
             payload,
-            system_prompt=system_prompt,
-            persona=persona,
+            None,
+            persona,
         )
         if not store.goal_revision_is_current(
             observation.session_id,
@@ -693,17 +684,7 @@ async def confirm_observation_excerpt(
                 verdict=verdict,
                 page=observation_page_info(observation),
             )
-        max_sentences = (
-            persona.max_sentences
-            if persona and persona.max_sentences is not None
-            else request.app.state.config.delivery.max_sentences
-        )
-        message = clamp_notification_message(
-            result.message or fallback_drift_message(current.goal, observation),
-            max_sentences,
-        )
-
-        if not result.confirm_drift:
+        if outcome.decision is None or outcome.decision.decision == "defer":
             terminal_result = PipelineResult(
                 action=PipelineAction.NONE,
                 observation_id=observation.id,
@@ -715,6 +696,16 @@ async def confirm_observation_excerpt(
                 terminal_result=terminal_result.model_dump(mode="json"),
             )
             return terminal_result
+
+        max_sentences = (
+            persona.max_sentences
+            if persona and persona.max_sentences is not None
+            else request.app.state.config.delivery.max_sentences
+        )
+        message = clamp_notification_message(
+            outcome.message or fallback_drift_message(current.goal, observation),
+            max_sentences,
+        )
 
         effective_value = effective_observation_verdict(
             observation.verdict,
@@ -817,66 +808,99 @@ def _defer_d7_review(
     )
 
 
-async def _confirm_d7_tier2(
+@dataclass(frozen=True)
+class Tier2ReviewOutcome:
+    decision: Tier2Decision | None
+    message: str | None = None
+
+
+async def _review_tier2(
     request: Request,
-    session_id: str,
-    observation_id: str,
-    payload: dict[str, object],
-    system_prompt: str | None,
-) -> Tier2Result | None:
+    current: CurrentSessionRecord,
+    observation: ObservationRecord,
+    judge_payload: dict[str, object],
+    time_context: dict[str, object] | None,
+    persona: Persona | None,
+) -> Tier2ReviewOutcome:
+    assert current.goal is not None
     runtime = _runtime(request)
+    store = _store(request)
     provider = runtime.tier2_provider()
     if not provider:
-        return None
+        if not request.app.state.config.tier2.enabled:
+            return Tier2ReviewOutcome(decision=None)
+        exc = RuntimeError("tier2 provider unavailable")
+        runtime.record_provider_call_failure(2, exc)
+        store.record_tier2_provider_error(
+            observation.session_id,
+            observation.id,
+            "ProviderUnavailable",
+        )
+        return Tier2ReviewOutcome(decision=None)
+
     try:
-        result = await provider.confirm_tier2(payload, system_prompt=system_prompt)
+        decision = await provider.decide_tier2(
+            judge_payload,
+            system_prompt=compose_tier2_judge_system_prompt(),
+        )
     except Exception as exc:
         runtime.record_provider_call_failure(2, exc)
-        _store(request).record_tier2_provider_error(session_id, observation_id, type(exc).__name__)
-        return None
-    runtime.record_provider_call_success(2)
-    return result
-
-
-async def _confirm_tier2(
-    request: Request,
-    session_id: str,
-    observation_id: str,
-    payload: dict[str, object],
-    system_prompt: str | None = None,
-    persona: Persona | None = None,
-) -> Tier2Result:
-    runtime = _runtime(request)
-    provider = runtime.tier2_provider()
-    if provider:
-        try:
-            result = await provider.confirm_tier2(payload, system_prompt=system_prompt)
-        except Exception as exc:
-            runtime.record_provider_call_failure(2, exc)
-            _store(request).record_tier2_provider_error(session_id, observation_id, type(exc).__name__)
-        else:
-            runtime.record_provider_call_success(2)
-            return result
-    current = _store(request).get_current_session()
-    observation = _store(request).get_observation(observation_id)
-    if current and current.goal and observation:
-        nag_count = _store(request).nag_count_today(session_id) + 1
-        message = format_persona_fallback(persona, current.goal, observation, nag_count)
-        return Tier2Result(
-            confirm_drift=True,
-            message=message or fallback_drift_message(current.goal, observation),
+        store.record_tier2_provider_error(
+            observation.session_id,
+            observation.id,
+            type(exc).__name__,
         )
-    return Tier2Result(confirm_drift=False, message=None)
+        return Tier2ReviewOutcome(decision=None)
+
+    if decision.decision == "defer":
+        runtime.record_provider_call_success(2)
+        return Tier2ReviewOutcome(decision=decision)
+
+    nagging_context = _nagging_context(
+        store,
+        observation.session_id,
+        observation.url_host,
+    )
+    writer_payload = build_tier2_message_payload(
+        current.goal,
+        observation,
+        decision,
+        time_context,
+        nagging_context,
+    )
+    try:
+        message = await provider.write_tier2_message(
+            writer_payload,
+            system_prompt=compose_tier2_writer_system_prompt(persona),
+        )
+        message = message.strip()
+        if not message:
+            raise ValueError("tier2 writer response was empty")
+    except Exception as exc:
+        runtime.record_provider_call_failure(2, exc)
+        store.record_tier2_provider_error(
+            observation.session_id,
+            observation.id,
+            type(exc).__name__,
+        )
+        nag_count = store.nag_count_today(observation.session_id) + 1
+        fallback = format_persona_fallback(persona, current.goal, observation, nag_count)
+        return Tier2ReviewOutcome(
+            decision=decision,
+            message=fallback or fallback_drift_message(current.goal, observation),
+        )
+
+    runtime.record_provider_call_success(2)
+    return Tier2ReviewOutcome(decision=decision, message=message)
 
 
-def _inject_nagging_context(
+def _nagging_context(
     store: SQLiteStore,
-    payload: dict[str, object],
     session_id: str,
     current_host: str | None,
-) -> None:
+) -> dict[str, object]:
     previous_host = store.latest_intervention_observation_host(session_id)
-    payload["nagging_context"] = {
+    return {
         "nag_count_today": store.nag_count_today(session_id),
         "last_nag_ignored": store.last_intervention_ignored(session_id),
         "drift_minutes": store.minutes_since_last_ok(session_id),

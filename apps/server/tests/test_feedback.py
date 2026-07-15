@@ -5,7 +5,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
-from apps.server.tests.support import TestClient
+from apps.server.tests.support import AlwaysNotifyTier2Provider, TestClient
 
 from apps.server.app.config import (
     AppConfig,
@@ -45,7 +45,13 @@ class FeedbackApiTest(unittest.TestCase):
             or ControllerConfig(k=1, coldstart_observations=1, cooldown_seconds=0, snooze_seconds=900),
             intentional_break=BreakConfig(duration_seconds=break_duration_seconds),
         )
-        client = TestClient(create_app(config=config, store=self.store))
+        client = TestClient(
+            create_app(
+                config=config,
+                store=self.store,
+                tier2_provider=AlwaysNotifyTier2Provider(),
+            )
+        )
         client.__enter__()
         return client
 

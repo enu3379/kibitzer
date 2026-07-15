@@ -4,7 +4,11 @@ from pathlib import Path
 
 import yaml
 
-from apps.server.app.core.personas import compose_tier2_system_prompt, load_personas
+from apps.server.app.core.personas import (
+    compose_tier2_judge_system_prompt,
+    compose_tier2_writer_system_prompt,
+    load_personas,
+)
 
 
 class PersonaTest(unittest.TestCase):
@@ -33,10 +37,13 @@ class PersonaTest(unittest.TestCase):
 
         self.assertEqual(persona_set.default, "test")
         self.assertIn("test", persona_set.personas)
-        prompt = compose_tier2_system_prompt(persona_set.personas["test"])
-        self.assertIn("Return strict JSON only", prompt)
-        self.assertIn('"confirm_drift":true|false', prompt)
-        self.assertIn("Use a concise style.", prompt)
+        judge_prompt = compose_tier2_judge_system_prompt()
+        writer_prompt = compose_tier2_writer_system_prompt(persona_set.personas["test"])
+        self.assertIn("Return strict JSON only", judge_prompt)
+        self.assertIn('"decision":"notify|defer"', judge_prompt)
+        self.assertNotIn("Use a concise style.", judge_prompt)
+        self.assertIn("plain text", writer_prompt)
+        self.assertIn("Use a concise style.", writer_prompt)
 
     def test_load_personas_merges_user_file_and_skips_invalid_entries(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

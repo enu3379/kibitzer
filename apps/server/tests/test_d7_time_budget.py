@@ -9,7 +9,7 @@ from apps.server.tests.support import TestClient
 from apps.server.app.config import AppConfig, ControllerConfig, ServerConfig, Tier1Config, Tier2Config, TimeBudgetConfig
 from apps.server.app.core.time_budget import next_review_boundary, review_is_due, thresholds_for_budget
 from apps.server.app.main import create_app
-from apps.server.app.providers.judges.base import Tier1Result, Tier2Result
+from apps.server.app.providers.judges.base import Tier1Result, Tier2Decision, Tier2Result
 from apps.server.app.schemas import Verdict
 from apps.server.app.storage.sqlite import DriftClockStateRecord, SQLiteStore
 
@@ -18,6 +18,7 @@ class FakeTier2Provider:
     def __init__(self, result: Tier2Result) -> None:
         self.result = result
         self.payloads: list[dict[str, object]] = []
+        self.writer_payloads: list[dict[str, object]] = []
 
     async def classify_tier1(self, payload: dict[str, object]) -> Tier1Result:
         return Tier1Result(verdict=Verdict.DRIFT, reason="unused")
@@ -29,6 +30,26 @@ class FakeTier2Provider:
     ) -> Tier2Result:
         self.payloads.append(payload)
         return self.result
+
+    async def decide_tier2(
+        self,
+        payload: dict[str, object],
+        system_prompt: str | None = None,
+    ) -> Tier2Decision:
+        self.payloads.append(payload)
+        return Tier2Decision(
+            decision="notify" if self.result.confirm_drift else "defer",
+            reason_code="off_goal" if self.result.confirm_drift else "useful_side_branch",
+            basis="both",
+        )
+
+    async def write_tier2_message(
+        self,
+        payload: dict[str, object],
+        system_prompt: str,
+    ) -> str:
+        self.writer_payloads.append(payload)
+        return self.result.message or ""
 
 
 def clock_state(**changes: object) -> DriftClockStateRecord:
@@ -163,7 +184,7 @@ class D7ApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         return response.json()
 
-    def test_budget_is_returned_and_dual_review_notifies_only_after_dwell(self) -> None:
+    def test_budget_is_returned_and_combined_review_notifies_only_after_dwell(self) -> None:
         observation_id, path_hash = self._start_drift_observation()
         content = self.client.post(
             f"/observations/{observation_id}/content",
@@ -179,8 +200,9 @@ class D7ApiTest(unittest.TestCase):
         self.assertEqual(first["action"], "none")
         self.assertEqual(second["action"], "none")
         self.assertEqual(third["action"], "notify")
-        self.assertEqual(len(self.provider.payloads), 2)
-        self.assertEqual({payload["review_kind"] for payload in self.provider.payloads}, {"title", "content"})
+        self.assertEqual(len(self.provider.payloads), 1)
+        self.assertEqual(self.provider.payloads[0]["review_kind"], "combined")
+        self.assertEqual(len(self.provider.writer_payloads), 1)
         state = self.store.get_drift_clock_state(self.client.get("/sessions/current/state").json()["session_id"])
         self.assertEqual(state.current_page_drift_seconds, 120)
 
@@ -304,7 +326,7 @@ class D7ApiTest(unittest.TestCase):
         session_id = self.client.get("/sessions/current/state").json()["session_id"]
         self.assertEqual(self.store.get_drift_clock_state(session_id).current_page_drift_seconds, 0)
 
-    def test_missing_excerpt_runs_title_only_review(self) -> None:
+    def test_missing_excerpt_runs_one_title_capable_review(self) -> None:
         observation_id, path_hash = self._start_drift_observation()
         self._presence(observation_id, path_hash, "no-content-active", "active", self.start)
         self._presence(observation_id, path_hash, "no-content-minute", "heartbeat", self.start + timedelta(seconds=60))
@@ -316,9 +338,10 @@ class D7ApiTest(unittest.TestCase):
             self.start + timedelta(seconds=120),
         )
         self.assertEqual(result["action"], "notify")
-        self.assertEqual([payload["review_kind"] for payload in self.provider.payloads], ["title"])
+        self.assertEqual([payload["review_kind"] for payload in self.provider.payloads], ["combined"])
+        self.assertIsNone(self.provider.payloads[0]["current"]["page_excerpt"])
 
-    def test_missing_judge_uses_fallback_and_consumes_window(self) -> None:
+    def test_missing_judge_defers_and_consumes_window(self) -> None:
         observation_id, path_hash = self._start_drift_observation()
         self.client.app.state.runtime._tier2_provider = None
         self._presence(observation_id, path_hash, "fallback-active", "active", self.start)
@@ -330,11 +353,12 @@ class D7ApiTest(unittest.TestCase):
             "heartbeat",
             self.start + timedelta(seconds=120),
         )
-        self.assertEqual(result["action"], "notify")
+        self.assertEqual(result["action"], "none")
         session_id = self.client.get("/sessions/current/state").json()["session_id"]
         state = self.store.get_drift_clock_state(session_id)
         self.assertEqual(state.next_review_mode_seconds, 180)
-        self.assertEqual(state.review_status, "notified")
+        self.assertEqual(state.review_status, "deferred")
+        self.assertEqual(state.last_defer_reason, "provider_error")
 
     def test_notification_consumes_review_window(self) -> None:
         observation_id, path_hash = self._start_drift_observation()

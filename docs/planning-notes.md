@@ -202,12 +202,15 @@ at 10 min each (clock already 20) → page 3 still needs its own 3 min first.
 Working assumption: 연속 mode uses the identical structure (per-page floor +
 total/2 valve), only with the continuous clock as `mode_clock`.
 
-**Tier 2 rework:** the current fixed "15 s" path (5 s observation dwell +
-10 s tier2 dwell → excerpt → judge) is replaced by threshold-time-driven
-invocation. Tier 2 runs **two parallel judgments**: (a) titles — goal +
-ok_1..n titles + current drift title; (b) contents — recent j page excerpts +
-current page excerpt. Combined with the elapsed clocks, the outcome is either
-**nag now** or **defer to the next threshold crossing**.
+**Tier 2 rework (updated 2026-07-16):** the fixed "15 s" path (5 s observation
+dwell + 10 s tier2 dwell → excerpt → judge) is replaced by
+threshold-time-driven invocation. The original implementation used parallel
+title and content judgments. Live comparison found that the two calls duplicated
+message generation and could both reject a useful side branch when a generic
+title hid relevant content. It is superseded by one combined **Context Judge**
+over current title/excerpt, up to 30 compressed recent titles, bounded recent
+excerpts, and elapsed clocks. The Judge returns only `notify|defer`, reason, and
+evidence basis. Only `notify` invokes a separate persona **Message Writer**.
 
 **Prerequisite:** excerpts are captured and stored for **every observation**
 (after the 5 s dwell), char-limited, sensitive-domain rules applied — today
@@ -226,13 +229,13 @@ only the nag-moment page is excerpted, so recent-page content doesn't exist.
    "still on active tab" periodically (~30–60 s, `chrome.alarms`); the server
    owns all clocks and threshold decisions. Survives sleep, tab switches, SW
    teardown.
-4. Dual Tier-2 combination: **either judgment saying "acceptable" defers**
-   the nag — consistent with the standing "misses acceptable, false positives
-   not" principle (dictionary-lookup-while-reading-a-paper stays protected
-   even when the title looks unrelated).
+4. Combined Tier-2 judgment: content evidence outweighs a generic title and
+   uncertain/useful side branches defer. Persona and nagging context are absent
+   from the Judge and appear only in the conditional Writer, so voice cannot
+   bias the decision.
 
-Branch: `feature/time-budget-drift` (worktree
-`~/kibitzer-worktrees/time-budget-drift`, based on dev @ 808afef).
+The original D7 implementation landed in PR #49. The Judge/Writer split is
+prepared from current `dev` on `codex/tier2-judge-writer`.
 
 ### D8 — Page labels override the product verdict → RESOLVED (2026-07-14)
 

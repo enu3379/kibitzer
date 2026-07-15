@@ -93,9 +93,12 @@ class Tier2Config(BaseModel):
     api_key_pool_envs: list[str] | None = None
     model: str = "qwen3.5:27b"
     timeout_seconds: float = 8
-    recent_observations: int = 5
+    recent_observations: int = 30
     excerpt_char_limit: int = 3000
-    max_output_tokens: int = 512
+    # Backward-compatible Judge budget key. Experiment model entries may still
+    # provide max_output_tokens; the Writer has an independent smaller budget.
+    max_output_tokens: int = 4096
+    writer_max_output_tokens: int = 1024
     experiment_models_file: str | None = None
     experiment_model_key: str | None = None
 

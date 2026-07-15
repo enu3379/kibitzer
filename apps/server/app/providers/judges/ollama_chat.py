@@ -7,8 +7,8 @@ from typing import Iterator
 
 import httpx
 
-from .base import Tier1Result, Tier2Result, ordered_api_keys
-from .openai_compatible import parse_tier1_json, parse_tier2_json
+from .base import Tier1Result, Tier2Decision, Tier2Result, ordered_api_keys
+from .openai_compatible import parse_tier1_json, parse_tier2_decision_json, parse_tier2_json
 
 
 # Output budgets for the one-shot goal-enrichment call: with thinking disabled
@@ -26,6 +26,7 @@ class OllamaChatJudgeProvider:
     timeout_seconds: float = 120
     fallback_api_key: str | None = None
     max_output_tokens: int = 512
+    writer_max_output_tokens: int = 1024
     # Optional rotation pool: when set (>= 2 keys), each call starts from the
     # next key in the pool and the rest queue up as fallbacks.
     api_keys: tuple[str, ...] | None = None
@@ -85,20 +86,63 @@ class OllamaChatJudgeProvider:
         )
         return parse_tier2_json(_message_content(response))
 
+    async def decide_tier2(
+        self,
+        payload: dict[str, object],
+        system_prompt: str | None = None,
+    ) -> Tier2Decision:
+        response = await self._post_chat(
+            [
+                {
+                    "role": "system",
+                    "content": system_prompt or (
+                        "Decide whether the browsing context warrants an intervention. Return strict JSON "
+                        'only: {"decision":"notify|defer","reason_code":"off_goal|useful_side_branch|'
+                        'insufficient_evidence","basis":"title|content|both"}.'
+                    ),
+                },
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            num_predict=self.max_output_tokens,
+            json_mode=True,
+        )
+        return parse_tier2_decision_json(_message_content(response))
+
+    async def write_tier2_message(
+        self,
+        payload: dict[str, object],
+        system_prompt: str,
+    ) -> str:
+        response = await self._post_chat(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            think=False,
+            num_predict=self.writer_max_output_tokens,
+            json_mode=False,
+        )
+        content = _message_content(response).strip()
+        if not content:
+            raise ValueError("tier2 writer response was empty")
+        return content[:320]
+
     async def _post_chat(
         self,
         messages: list[dict[str, str]],
         timeout_seconds: float | None = None,
         think: bool | None = None,
         num_predict: int | None = None,
+        json_mode: bool = True,
     ) -> dict[str, object]:
         request_body: dict[str, object] = {
             "model": self.model,
             "messages": messages,
             "stream": False,
-            "format": "json",
             "options": {"temperature": 0, "num_predict": num_predict or self.max_output_tokens},
         }
+        if json_mode:
+            request_body["format"] = "json"
         if think is not None:
             request_body["think"] = think
         api_keys = ordered_api_keys(self.api_keys, self.api_key, self.fallback_api_key, self._rotation)

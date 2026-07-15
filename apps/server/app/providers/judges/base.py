@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Iterator, Protocol
+from typing import Iterator, Literal, Protocol
 
 from ...schemas import Verdict
 
@@ -16,6 +16,18 @@ class Tier2Result:
     message: str | None
 
 
+Tier2DecisionValue = Literal["notify", "defer"]
+Tier2ReasonCode = Literal["off_goal", "useful_side_branch", "insufficient_evidence"]
+Tier2EvidenceBasis = Literal["title", "content", "both"]
+
+
+@dataclass(frozen=True)
+class Tier2Decision:
+    decision: Tier2DecisionValue
+    reason_code: Tier2ReasonCode
+    basis: Tier2EvidenceBasis
+
+
 class JudgeProvider(Protocol):
     async def classify_tier1(self, payload: dict[str, object]) -> Tier1Result:
         ...
@@ -28,6 +40,20 @@ class JudgeProvider(Protocol):
         payload: dict[str, object],
         system_prompt: str | None = None,
     ) -> Tier2Result:
+        ...
+
+    async def decide_tier2(
+        self,
+        payload: dict[str, object],
+        system_prompt: str | None = None,
+    ) -> Tier2Decision:
+        ...
+
+    async def write_tier2_message(
+        self,
+        payload: dict[str, object],
+        system_prompt: str,
+    ) -> str:
         ...
 
 

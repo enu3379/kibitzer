@@ -8,7 +8,7 @@ from typing import Iterator
 import httpx
 
 from ...schemas import Verdict
-from .base import Tier1Result, Tier2Result, ordered_api_keys
+from .base import Tier1Result, Tier2Decision, Tier2Result, ordered_api_keys
 
 
 @dataclass(frozen=True)
@@ -19,6 +19,7 @@ class OpenAICompatibleJudgeProvider:
     timeout_seconds: float = 3
     fallback_api_key: str | None = None
     max_output_tokens: int = 512
+    writer_max_output_tokens: int = 1024
     # Optional rotation pool: when set (>= 2 keys), each call starts from the
     # next key in the pool and the rest queue up as fallbacks.
     api_keys: tuple[str, ...] | None = None
@@ -73,6 +74,38 @@ class OpenAICompatibleJudgeProvider:
         content = response.json()["choices"][0]["message"]["content"]
         return parse_tier2_json(content)
 
+    async def decide_tier2(
+        self,
+        payload: dict[str, object],
+        system_prompt: str | None = None,
+    ) -> Tier2Decision:
+        request_body = {
+            "model": self.model,
+            "messages": _tier2_judge_messages(payload, system_prompt),
+            "temperature": 0,
+            "max_tokens": self.max_output_tokens,
+            "response_format": {"type": "json_object"},
+        }
+        response = await self._post_chat_completions(request_body)
+        return parse_tier2_decision_json(_openai_message_content(response.json()))
+
+    async def write_tier2_message(
+        self,
+        payload: dict[str, object],
+        system_prompt: str,
+    ) -> str:
+        request_body = {
+            "model": self.model,
+            "messages": _tier2_writer_messages(payload, system_prompt),
+            "temperature": 0,
+            "max_tokens": self.writer_max_output_tokens,
+        }
+        response = await self._post_chat_completions(request_body)
+        content = _openai_message_content(response.json()).strip()
+        if not content:
+            raise ValueError("tier2 writer response was empty")
+        return content[:320]
+
     async def _post_chat_completions(
         self,
         request_body: dict[str, object],
@@ -120,6 +153,20 @@ def parse_tier2_json(content: str) -> Tier2Result:
     return Tier2Result(confirm_drift=confirm, message=message)
 
 
+def parse_tier2_decision_json(content: str) -> Tier2Decision:
+    data = _load_json_object(content)
+    decision = data.get("decision")
+    reason_code = data.get("reason_code")
+    basis = data.get("basis")
+    if decision not in {"notify", "defer"}:
+        raise ValueError("tier2 decision must be notify or defer")
+    if reason_code not in {"off_goal", "useful_side_branch", "insufficient_evidence"}:
+        raise ValueError("tier2 reason_code is invalid")
+    if basis not in {"title", "content", "both"}:
+        raise ValueError("tier2 basis is invalid")
+    return Tier2Decision(decision=decision, reason_code=reason_code, basis=basis)
+
+
 def _tier2_messages(
     payload: dict[str, object],
     system_prompt: str | None = None,
@@ -136,6 +183,43 @@ def _tier2_messages(
         },
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]
+
+
+def _tier2_judge_messages(
+    payload: dict[str, object],
+    system_prompt: str | None,
+) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": system_prompt or (
+                "Decide whether the current browsing context warrants an intervention. Return strict JSON "
+                'only: {"decision":"notify|defer","reason_code":"off_goal|useful_side_branch|'
+                'insufficient_evidence","basis":"title|content|both"}.'
+            ),
+        },
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+    ]
+
+
+def _tier2_writer_messages(
+    payload: dict[str, object],
+    system_prompt: str,
+) -> list[dict[str, str]]:
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+    ]
+
+
+def _openai_message_content(response: dict[str, object]) -> str:
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise ValueError("OpenAI response did not include choices")
+    message = choices[0].get("message")
+    if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+        raise ValueError("OpenAI response did not include message content")
+    return message["content"]
 
 
 def _chat_completions_url(base_url: str) -> str:

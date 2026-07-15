@@ -31,9 +31,11 @@ Both extension and server enforce this. The server gate is authoritative.
 
 Tier 1 API sees titles and hosts only.
 
-Tier 2 API sees bounded current/recent excerpts only when D7's elapsed-time
-review is due. The server applies the authoritative sensitive-domain gate
-before an observation can accept content.
+The Tier 2 Context Judge sees bounded current/recent excerpts only when D7's
+elapsed-time review is due. The conditional persona Writer never receives page
+body or recent excerpt text; it sees only the current title/host, the accepted
+decision, time state, and nagging context. The server applies the authoritative
+sensitive-domain gate before an observation can accept content.
 
 ## Local Data Deletion
 

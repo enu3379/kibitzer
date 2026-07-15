@@ -18,7 +18,7 @@ Local Server
 
 External APIs
   Tier 1 cheap classifier
-  Tier 2 confirmation and message generation
+  Tier 2 context Judge and conditional persona Writer
 ```
 
 ## Server as SSOT
@@ -66,12 +66,21 @@ browser event
   -> optional Tier 1 classifier
   -> controller update
   -> time budget off: optional candidate + request_excerpt (controller evidence retained)
-     -> Tier 2 confirmation/message
+     -> combined Tier 2 Context Judge
+     -> notify only: persona Message Writer
   -> time budget on: D7 bounded content capture + server-owned presence heartbeat
-     -> optional time-budget Tier 2 title/content confirmation
+     -> optional combined time-budget Context Judge
+     -> notify only: persona Message Writer
   -> confirmed drift consumes controller evidence
   -> notification
 ```
+
+The Context Judge sees the current title/excerpt, compressed recent title
+history, bounded recent excerpts, and D7 clock context in one call. It does not
+receive persona or nagging instructions. A `defer` decision ends the review;
+only `notify` invokes the plain-text Writer with title/host, time state, nagging
+context, and the selected persona. Judge failures defer conservatively, while
+Writer failures use the local persona fallback.
 
 D7 navigation records do not activate a dwell clock by themselves. The
 extension must assert an `active` presence for the focused, non-idle Chrome

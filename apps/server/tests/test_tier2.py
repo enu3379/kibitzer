@@ -1,3 +1,4 @@
+import asyncio
 import json
 import sqlite3
 import tempfile
@@ -7,7 +8,7 @@ from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import yaml
@@ -25,12 +26,17 @@ from apps.server.app.config import (
     VoiceConfig,
 )
 from apps.server.app.main import create_app
-from apps.server.app.providers.judges.base import Tier1Result, Tier2Result
+from apps.server.app.core.tier2_payload import compress_recent_titles
+from apps.server.app.providers.judges.base import Tier1Result, Tier2Decision, Tier2Result
 from apps.server.app.providers.judges.factory import create_tier2_judge_provider
 from apps.server.app.providers.judges.ollama_chat import OllamaChatJudgeProvider
-from apps.server.app.providers.judges.openai_compatible import parse_tier2_json
+from apps.server.app.providers.judges.openai_compatible import (
+    OpenAICompatibleJudgeProvider,
+    parse_tier2_decision_json,
+    parse_tier2_json,
+)
 from apps.server.app.schemas import Observation, ObservationFeatures, Source, Verdict
-from apps.server.app.storage.sqlite import SQLiteStore
+from apps.server.app.storage.sqlite import ObservationSummary, SQLiteStore
 
 
 @dataclass
@@ -38,6 +44,8 @@ class FakeTier2Provider:
     result: Tier2Result
     payloads: list[dict[str, object]] = field(default_factory=list)
     system_prompts: list[str | None] = field(default_factory=list)
+    writer_payloads: list[dict[str, object]] = field(default_factory=list)
+    writer_system_prompts: list[str] = field(default_factory=list)
 
     async def classify_tier1(self, payload: dict[str, object]) -> Tier1Result:
         return Tier1Result(verdict=Verdict.DRIFT, reason="unused")
@@ -50,6 +58,28 @@ class FakeTier2Provider:
         self.payloads.append(payload)
         self.system_prompts.append(system_prompt)
         return self.result
+
+    async def decide_tier2(
+        self,
+        payload: dict[str, object],
+        system_prompt: str | None = None,
+    ) -> Tier2Decision:
+        self.payloads.append(payload)
+        self.system_prompts.append(system_prompt)
+        return Tier2Decision(
+            decision="notify" if self.result.confirm_drift else "defer",
+            reason_code="off_goal" if self.result.confirm_drift else "useful_side_branch",
+            basis="both",
+        )
+
+    async def write_tier2_message(
+        self,
+        payload: dict[str, object],
+        system_prompt: str,
+    ) -> str:
+        self.writer_payloads.append(payload)
+        self.writer_system_prompts.append(system_prompt)
+        return self.result.message or ""
 
 
 class RaisingTier2Provider:
@@ -64,8 +94,42 @@ class RaisingTier2Provider:
         request = httpx.Request("POST", "https://provider.invalid/chat")
         raise httpx.ConnectError("offline", request=request)
 
+    async def decide_tier2(
+        self,
+        payload: dict[str, object],
+        system_prompt: str | None = None,
+    ) -> Tier2Decision:
+        request = httpx.Request("POST", "https://provider.invalid/chat")
+        raise httpx.ConnectError("offline", request=request)
+
+    async def write_tier2_message(
+        self,
+        payload: dict[str, object],
+        system_prompt: str,
+    ) -> str:
+        raise AssertionError("writer must not run after judge failure")
+
 
 class Tier2ProviderTest(unittest.TestCase):
+    def test_tier2_defaults_to_thirty_titles_and_compresses_consecutive_duplicates(self) -> None:
+        self.assertEqual(Tier2Config().recent_observations, 30)
+        compressed = compress_recent_titles(
+            [
+                ObservationSummary(title="Docs", verdict="OK"),
+                ObservationSummary(title="Docs", verdict="OK"),
+                ObservationSummary(title="Social", verdict="DRIFT"),
+                ObservationSummary(title="Docs", verdict="OK"),
+            ]
+        )
+        self.assertEqual(
+            compressed,
+            [
+                {"title": "Docs", "verdict": "OK", "repeat_count": 2},
+                {"title": "Social", "verdict": "DRIFT", "repeat_count": 1},
+                {"title": "Docs", "verdict": "OK", "repeat_count": 1},
+            ],
+        )
+
     def test_parse_tier2_json_accepts_confirm_and_cancel(self) -> None:
         confirm = parse_tier2_json('{"confirm_drift":true,"message":"목표에서 벗어났습니다."}')
         cancel = parse_tier2_json('{"confirm_drift":false,"message":""}')
@@ -80,6 +144,90 @@ class Tier2ProviderTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_tier2_json('{"confirm_drift":"yes","message":"bad"}')
 
+    def test_parse_tier2_decision_accepts_fenced_json_and_rejects_unknown_enums(self) -> None:
+        decision = parse_tier2_decision_json(
+            '```json\n{"decision":"defer","reason_code":"useful_side_branch","basis":"content"}\n```'
+        )
+        self.assertEqual(decision.decision, "defer")
+        self.assertEqual(decision.reason_code, "useful_side_branch")
+        self.assertEqual(decision.basis, "content")
+        with self.assertRaises(ValueError):
+            parse_tier2_decision_json(
+                '{"decision":"maybe","reason_code":"off_goal","basis":"both"}'
+            )
+
+    def test_openai_provider_uses_json_4096_judge_and_plain_1024_writer(self) -> None:
+        provider = OpenAICompatibleJudgeProvider(
+            base_url="https://api.example.com/v1",
+            api_key="test",
+            model="model",
+            max_output_tokens=4096,
+            writer_max_output_tokens=1024,
+        )
+        judge_response = httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://api.example.com/v1/chat/completions"),
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"decision":"notify","reason_code":"off_goal","basis":"both"}'
+                        }
+                    }
+                ]
+            },
+        )
+        writer_response = httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://api.example.com/v1/chat/completions"),
+            json={"choices": [{"message": {"content": "짧은 훈수입니다."}}]},
+        )
+        with patch.object(
+            OpenAICompatibleJudgeProvider,
+            "_post_chat_completions",
+            new_callable=AsyncMock,
+            side_effect=[judge_response, writer_response],
+        ) as post:
+            decision = asyncio.run(provider.decide_tier2({"goal": "test"}, "judge"))
+            message = asyncio.run(provider.write_tier2_message({"goal": "test"}, "writer"))
+
+        self.assertEqual(decision.decision, "notify")
+        self.assertEqual(message, "짧은 훈수입니다.")
+        judge_body = post.await_args_list[0].args[0]
+        writer_body = post.await_args_list[1].args[0]
+        self.assertEqual(judge_body["max_tokens"], 4096)
+        self.assertEqual(judge_body["response_format"], {"type": "json_object"})
+        self.assertEqual(writer_body["max_tokens"], 1024)
+        self.assertNotIn("response_format", writer_body)
+
+    def test_ollama_provider_uses_json_judge_and_plain_nonthinking_writer(self) -> None:
+        provider = OllamaChatJudgeProvider(
+            api_url="https://ollama.com/api/chat",
+            api_key="test",
+            model="model",
+            max_output_tokens=4096,
+            writer_max_output_tokens=1024,
+        )
+        with patch.object(
+            OllamaChatJudgeProvider,
+            "_post_chat",
+            new_callable=AsyncMock,
+            side_effect=[
+                {"message": {"content": '{"decision":"notify","reason_code":"off_goal","basis":"both"}'}},
+                {"message": {"content": "짧은 훈수입니다."}},
+            ],
+        ) as post:
+            asyncio.run(provider.decide_tier2({"goal": "test"}, "judge"))
+            asyncio.run(provider.write_tier2_message({"goal": "test"}, "writer"))
+
+        judge_kwargs = post.await_args_list[0].kwargs
+        writer_kwargs = post.await_args_list[1].kwargs
+        self.assertEqual(judge_kwargs["num_predict"], 4096)
+        self.assertTrue(judge_kwargs["json_mode"])
+        self.assertEqual(writer_kwargs["num_predict"], 1024)
+        self.assertFalse(writer_kwargs["json_mode"])
+        self.assertFalse(writer_kwargs["think"])
+
     def test_factory_reads_ollama_experiment_model_without_copying_keys(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             models_file = Path(tmp) / "models.yaml"
@@ -92,6 +240,7 @@ class Tier2ProviderTest(unittest.TestCase):
                             "model_name": "qwen3.5:27b",
                             "timeout_sec": 12,
                             "max_output_tokens": 128,
+                            "writer_max_output_tokens": 96,
                             "api_key": "primary-test-key",
                             "fallback_api_key": "fallback-test-key",
                         }
@@ -112,6 +261,8 @@ class Tier2ProviderTest(unittest.TestCase):
         self.assertEqual(provider.model, "qwen3.5:27b")
         self.assertEqual(provider.api_url, "https://ollama.com/api/chat")
         self.assertEqual(provider.timeout_seconds, 12)
+        self.assertEqual(provider.max_output_tokens, 128)
+        self.assertEqual(provider.writer_max_output_tokens, 96)
 
 
 class Tier2ApiTest(unittest.TestCase):
@@ -186,7 +337,7 @@ class Tier2ApiTest(unittest.TestCase):
         self.assertEqual(provider_status["last_result"], "success")
         self.assertIsNone(provider_status["reason"])
         payload = provider.payloads[0]
-        self.assertLessEqual(len(str(payload["page_excerpt"])), 120)
+        self.assertLessEqual(len(str(payload["current"]["page_excerpt"])), 120)
         self.assertEqual(payload["current"]["url_host"], "example.com")
         self.assertNotIn("secret=not-stored", json.dumps(payload))
 
@@ -226,6 +377,7 @@ class Tier2ApiTest(unittest.TestCase):
         self.assertEqual(replay.json(), response.json())
         self.assertEqual(response.json()["action"], "none")
         self.assertEqual(len(provider.payloads), 1)
+        self.assertEqual(len(provider.writer_payloads), 0)
         with closing(sqlite3.connect(self.db_path)) as conn:
             intervention_count = conn.execute("SELECT COUNT(*) FROM interventions").fetchone()[0]
             cancelled = conn.execute("SELECT COUNT(*) FROM event_log WHERE event_type = 'tier2.cancelled'").fetchone()[0]
@@ -446,7 +598,7 @@ class Tier2ApiTest(unittest.TestCase):
         assert candidate is not None
         self.assertEqual(int((candidate.expires_at - candidate.requested_at).total_seconds()), 175)
 
-    def test_missing_provider_falls_back_to_local_message(self) -> None:
+    def test_missing_provider_defers_without_local_judgment(self) -> None:
         client, _store = self._client(None, tier2_enabled=False)
         try:
             request = self._start_goal_and_request_excerpt(client)
@@ -454,15 +606,17 @@ class Tier2ApiTest(unittest.TestCase):
                 f"/observations/{request['observation_id']}/excerpt",
                 json={"title": "Bread", "text": "A recipe with unrelated steps."},
             )
+            provider_status = client.get("/health").json()["provider_calls"]["tier2"]
         finally:
             client.__exit__(None, None, None)
 
         result = response.json()
-        self.assertEqual(result["action"], "notify")
-        self.assertIn("Kibitzer observation API", result["message"])
+        self.assertEqual(result["action"], "none")
+        self.assertIsNone(result["message"])
+        self.assertEqual(provider_status["last_result"], "none")
         with closing(sqlite3.connect(self.db_path)) as conn:
             confirmed = conn.execute("SELECT COUNT(*) FROM event_log WHERE event_type = 'tier2.confirmed'").fetchone()[0]
-        self.assertEqual(confirmed, 1)
+        self.assertEqual(confirmed, 0)
 
     def test_provider_failure_is_reported_in_health(self) -> None:
         client, _store = self._client(RaisingTier2Provider())
@@ -476,9 +630,48 @@ class Tier2ApiTest(unittest.TestCase):
         finally:
             client.__exit__(None, None, None)
 
-        self.assertEqual(response.json()["action"], "notify")
+        self.assertEqual(response.json()["action"], "none")
         self.assertEqual(provider_status["last_result"], "error")
         self.assertEqual(provider_status["reason"], "connection")
+
+    def test_writer_failure_uses_fallback_and_next_success_clears_health_error(self) -> None:
+        provider = FakeTier2Provider(Tier2Result(confirm_drift=True, message=""))
+        client, _store = self._client(provider)
+        try:
+            first_request = self._start_goal_and_request_excerpt(client)
+            first = client.post(
+                f"/observations/{first_request['observation_id']}/excerpt",
+                json={"title": "Bread", "text": "A recipe with unrelated steps."},
+            ).json()
+            failed_status = client.get("/health").json()["provider_calls"]["tier2"]
+
+            provider.result = Tier2Result(confirm_drift=True, message="정상 Writer 메시지입니다.")
+            second_request = client.post(
+                "/observations/browser-nav",
+                json={
+                    "source": "browser_nav",
+                    "payload": {
+                        "url": "https://shop.example.com/keyboard",
+                        "title": "Mechanical keyboard deals",
+                    },
+                },
+            ).json()
+            second = client.post(
+                f"/observations/{second_request['observation_id']}/excerpt",
+                json={"title": "Keyboard", "text": "Unrelated shopping details."},
+            ).json()
+            recovered_status = client.get("/health").json()["provider_calls"]["tier2"]
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertEqual(first["action"], "notify")
+        self.assertTrue(first["message"])
+        self.assertEqual(failed_status["last_result"], "error")
+        self.assertEqual(failed_status["reason"], "invalid_response")
+        self.assertEqual(second["action"], "notify")
+        self.assertEqual(second["message"], "정상 Writer 메시지입니다.")
+        self.assertEqual(recovered_status["last_result"], "success")
+        self.assertIsNone(recovered_status["reason"])
 
     def test_tier2_provider_receives_persona_prompt_and_escalation_context(self) -> None:
         provider = FakeTier2Provider(Tier2Result(confirm_drift=True, message="목표와 다른 페이지입니다."))
@@ -531,8 +724,12 @@ class Tier2ApiTest(unittest.TestCase):
         self.assertEqual(response.json()["action"], "notify")
         self.assertEqual(len(provider.payloads), 1)
         self.assertIn("Return strict JSON only", provider.system_prompts[0])
-        self.assertIn("Persona style layer", provider.system_prompts[0])
-        context = provider.payloads[0]["nagging_context"]
+        self.assertNotIn("Persona style layer", provider.system_prompts[0])
+        self.assertNotIn("nagging_context", provider.payloads[0])
+        self.assertEqual(len(provider.writer_payloads), 1)
+        self.assertIn("Persona style layer", provider.writer_system_prompts[0])
+        self.assertNotIn("page_excerpt", json.dumps(provider.writer_payloads[0]))
+        context = provider.writer_payloads[0]["nagging_context"]
         self.assertEqual(context["nag_count_today"], 1)
         self.assertTrue(context["last_nag_ignored"])
         self.assertTrue(context["repeat_host"])
