@@ -8,6 +8,7 @@ import {
   updateExplorationHistory,
   updateExplorationHistoryByObservationId,
 } from "../src/lib/history.ts"
+import { createChromeMock } from "./helpers/chrome.mjs"
 
 const HISTORY_STORAGE_KEY = "kibitzer:exploration-history"
 
@@ -28,32 +29,15 @@ function historyEntry(id, overrides = {}) {
 }
 
 function installSessionStorage(initialEntries = [], options = {}) {
-  let entries = structuredClone(initialEntries)
-  let rejectNextSet = options.rejectNextSet ?? false
-  let rejectGet = options.rejectGet ?? false
-
-  globalThis.chrome = {
-    storage: {
-      session: {
-        async get() {
-          await new Promise((resolve) => setImmediate(resolve))
-          if (rejectGet) throw new Error("synthetic get failure")
-          return { [HISTORY_STORAGE_KEY]: structuredClone(entries) }
-        },
-        async set(values) {
-          await new Promise((resolve) => setImmediate(resolve))
-          if (rejectNextSet) {
-            rejectNextSet = false
-            throw new Error("synthetic set failure")
-          }
-          entries = structuredClone(values[HISTORY_STORAGE_KEY])
-        },
-      },
-    },
-  }
+  const harness = createChromeMock({
+    session: { [HISTORY_STORAGE_KEY]: initialEntries },
+  })
+  if (options.rejectNextSet) harness.storage.session.failNext("set")
+  if (options.rejectGet) harness.storage.session.failNext("get")
+  globalThis.chrome = harness.chrome
 
   return {
-    entries: () => structuredClone(entries),
+    entries: () => harness.storage.session.snapshot()[HISTORY_STORAGE_KEY] ?? [],
   }
 }
 

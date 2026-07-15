@@ -50,7 +50,6 @@ enum KibitzerMode: String {
 
 final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
     private let rootURL: URL
-    private let healthURL: URL
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private let statusMenuItem = NSMenuItem(title: "Kibitzer: starting", action: nil, keyEquivalent: "")
@@ -64,7 +63,6 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
 
     init(rootURL: URL) {
         self.rootURL = rootURL
-        self.healthURL = KibitzerMenuBarApp.makeHealthURL()
         super.init()
         configureMenu()
         updateStatus(autostartIfDead: true)
@@ -104,23 +102,54 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
     }
 
     private func fetchMode(completion: @escaping (KibitzerMode) -> Void) {
-        var request = URLRequest(url: healthURL)
-        request.timeoutInterval = 2
-        URLSession.shared.dataTask(with: request) { data, _, error in
-            let mode: KibitzerMode
-            defer {
-                DispatchQueue.main.async {
-                    completion(mode)
-                }
+        let finish: (KibitzerMode) -> Void = { mode in
+            DispatchQueue.main.async {
+                completion(mode)
             }
+        }
+        guard let baseURL = effectiveBaseURL() else {
+            finish(.dead)
+            return
+        }
+
+        var identityRequest = URLRequest(url: baseURL.appendingPathComponent("identity"))
+        identityRequest.timeoutInterval = 2
+        URLSession.shared.dataTask(with: identityRequest) { data, _, error in
             guard error == nil, let data else {
-                mode = .dead
+                finish(.dead)
                 return
             }
-            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            let rawMode = object?["mode"] as? String
-            mode = KibitzerMode(rawValue: rawMode ?? "") ?? .unknown
+            let identity = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            guard identity?["service"] as? String == "kibitzer",
+                  identity?["protocol_version"] as? Int == 1,
+                  let instanceID = identity?["instance_id"] as? String,
+                  !instanceID.isEmpty else {
+                finish(.dead)
+                return
+            }
+
+            var healthRequest = URLRequest(url: baseURL.appendingPathComponent("health"))
+            healthRequest.timeoutInterval = 2
+            URLSession.shared.dataTask(with: healthRequest) { healthData, _, healthError in
+                guard healthError == nil, let healthData else {
+                    finish(.dead)
+                    return
+                }
+                let health = try? JSONSerialization.jsonObject(with: healthData) as? [String: Any]
+                let rawMode = health?["mode"] as? String
+                finish(KibitzerMode(rawValue: rawMode ?? "") ?? .unknown)
+            }.resume()
         }.resume()
+    }
+
+    private func effectiveBaseURL() -> URL? {
+        let portFile = rootURL.appendingPathComponent("data/kibitzer.port")
+        guard let rawPort = try? String(contentsOf: portFile, encoding: .utf8),
+              let port = Int(rawPort.trimmingCharacters(in: .whitespacesAndNewlines)),
+              (1...65535).contains(port) else {
+            return nil
+        }
+        return URL(string: "http://127.0.0.1:\(port)")
     }
 
     private func render(mode: KibitzerMode) {
@@ -268,11 +297,6 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
-    private static func makeHealthURL() -> URL {
-        let rawPort = ProcessInfo.processInfo.environment["KIBITZER_PORT"] ?? "8765"
-        let port = Int(rawPort).flatMap { (1...65535).contains($0) ? $0 : nil } ?? 8765
-        return URL(string: "http://127.0.0.1:\(port)/health")!
-    }
 }
 
 let rootPath = CommandLine.arguments.dropFirst().first ?? FileManager.default.currentDirectoryPath

@@ -33,7 +33,11 @@ The server owns:
 - event log
 - intervention history
 
-The extension owns no durable state. This follows Chrome MV3 service-worker constraints and keeps replay deterministic.
+The extension owns no authoritative session state. It keeps only versioned,
+short-lived dwell checkpoints in `chrome.storage.session`, paired with
+`chrome.alarms`, so an MV3 service-worker restart cannot lose pending work.
+Each navigation keeps the same idempotency key across retries; policy and
+committed results remain server-owned.
 
 ## Runtime Modes
 
@@ -61,11 +65,20 @@ browser event
   -> Tier 0 relevance
   -> optional Tier 1 classifier
   -> controller update
-  -> optional candidate + request_excerpt (controller evidence retained)
-  -> Tier 2 confirmation/message
+  -> time budget off: optional candidate + request_excerpt (controller evidence retained)
+     -> Tier 2 confirmation/message
+  -> time budget on: D7 bounded content capture + server-owned presence heartbeat
+     -> optional time-budget Tier 2 title/content confirmation
   -> confirmed drift consumes controller evidence
   -> notification
 ```
+
+D7 navigation records do not activate a dwell clock by themselves. The
+extension must assert an `active` presence for the focused, non-idle Chrome
+tab; it sends `inactive` when Chrome loses OS focus or the user becomes
+idle/locked. Heartbeats extend only the server-owned active clock, while a
+later `active` event can safely recover it after tab/window changes or service
+worker teardown.
 
 ## Extension-to-Server Actions
 

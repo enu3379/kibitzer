@@ -1,4 +1,4 @@
-const SERVER_BASE_URL = "http://127.0.0.1:8765"
+import { serverFetch } from "./serverConnection.ts"
 
 export interface BrowserNavPayload {
   url: string
@@ -26,6 +26,14 @@ export interface PageInfo {
 export interface PageExcerpt {
   title: string
   text: string
+}
+
+export type PresenceKind = "active" | "heartbeat" | "inactive"
+
+export interface ContentCaptureResult {
+  observation_id: string
+  stored: boolean
+  char_count: number
 }
 
 export type FeedbackKind = "related" | "accepted" | "snooze" | "break"
@@ -102,6 +110,18 @@ export interface SessionState {
   snoozed_until?: string | null
   cooldown_until?: string | null
   pending_intervention?: PendingIntervention | null
+  time_budget?: TimeBudgetState | null
+}
+
+export interface TimeBudgetState {
+  available_time_minutes?: number | null
+  total_seconds: number
+  per_page_seconds: number
+  current_page_drift_seconds: number
+  mode_clock_seconds: number
+  next_review_mode_seconds: number
+  status: string
+  last_defer_reason?: string | null
 }
 
 export type SessionStateResult =
@@ -121,6 +141,7 @@ export interface GoalInfo {
   keywords: string[]
   provenance: string
   updated_at: string
+  available_time_minutes?: number | null
 }
 
 export interface CurrentSession {
@@ -155,46 +176,46 @@ export interface SnoozeResult {
 }
 
 export async function getCurrentSession(): Promise<CurrentSession | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/sessions/current`).catch(() => null)
+  const response = await serverFetch("/sessions/current")
   if (!response?.ok) return null
   return response.json() as Promise<CurrentSession>
 }
 
 export async function createSession(): Promise<SessionInfo | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/sessions`, { method: "POST" }).catch(() => null)
+  const response = await serverFetch("/sessions", { method: "POST" })
   if (!response?.ok) return null
   return response.json() as Promise<SessionInfo>
 }
 
-export async function setGoal(rawText: string): Promise<GoalInfo | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/sessions/current/goal`, {
+export async function setGoal(rawText: string, availableTimeMinutes?: number | null): Promise<GoalInfo | null> {
+  const response = await serverFetch("/sessions/current/goal", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ raw_text: rawText }),
-  }).catch(() => null)
+    body: JSON.stringify({ raw_text: rawText, available_time_minutes: availableTimeMinutes ?? null }),
+  })
   if (!response?.ok) return null
   return response.json() as Promise<GoalInfo>
 }
 
 export async function getSessionStats(): Promise<SessionStats | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/sessions/current/stats`).catch(() => null)
+  const response = await serverFetch("/sessions/current/stats")
   if (!response?.ok) return null
   return response.json() as Promise<SessionStats>
 }
 
 export async function getPersonas(): Promise<PersonaSummary[]> {
-  const response = await fetch(`${SERVER_BASE_URL}/personas`).catch(() => null)
+  const response = await serverFetch("/personas")
   if (!response?.ok) return []
   return response.json() as Promise<PersonaSummary[]>
 }
 
 export async function postSessionSnooze(durationSeconds?: number): Promise<SnoozeResult | null> {
   const body = durationSeconds === undefined ? {} : { duration_seconds: durationSeconds }
-  const response = await fetch(`${SERVER_BASE_URL}/sessions/current/snooze`, {
+  const response = await serverFetch("/sessions/current/snooze", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
-  }).catch(() => null)
+  })
   if (!response?.ok) return null
   return response.json() as Promise<SnoozeResult>
 }
@@ -204,15 +225,15 @@ export async function postDeliveryReport(
   ok: boolean,
   error?: string,
 ): Promise<void> {
-  await fetch(`${SERVER_BASE_URL}/interventions/${interventionId}/delivery`, {
+  await serverFetch(`/interventions/${interventionId}/delivery`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ ok, error: error ?? null }),
-  }).catch(() => null)
+  })
 }
 
 export async function postSessionEnd(): Promise<SessionStats | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/sessions/current/end`, { method: "POST" }).catch(() => null)
+  const response = await serverFetch("/sessions/current/end", { method: "POST" })
   if (!response?.ok) return null
   return response.json() as Promise<SessionStats>
 }
@@ -267,7 +288,12 @@ export interface SettingsPatch {
   quiet_hours?: Partial<QuietHours>
 }
 
-function normalizeSettings(value: Partial<Settings>): Settings {
+export type SettingsUpdateResult =
+  | { kind: "updated"; settings: Settings }
+  | { kind: "unreachable" }
+  | { kind: "http_error"; status: number; detail: string | null }
+
+export function normalizeSettings(value: Partial<Settings>): Settings {
   const rawRelevance = (value.relevance ?? {}) as Partial<RelevanceSettings>
   const rawController = (value.controller ?? {}) as Partial<ControllerSettings>
   const rawCooldown = (value.cooldown ?? {}) as Partial<Cooldown>
@@ -277,7 +303,7 @@ function normalizeSettings(value: Partial<Settings>): Settings {
   const controllerType: ControllerType = rawType === "alignment" || rawType === "window" ? "alignment" : "streak"
   const k = clampInt(rawController.k, 3, 1, 20)
   const alignmentAlpha = clampFloat(rawController.alignment_alpha, 0.85, 0, 0.99)
-  const thetaLow = clampFloat(rawController.theta_low, 0.15, 0, 1)
+  const thetaLow = clampFloat(rawController.theta_low, 0.15, 0, 0.99)
   const thetaHigh = Math.max(thetaLow + 0.01, clampFloat(rawController.theta_high, 0.3, 0, 1))
 
   return {
@@ -322,25 +348,47 @@ function clampFloat(value: unknown, fallback: number, min: number, max: number):
 }
 
 export async function getSettings(): Promise<Settings | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/settings`).catch(() => null)
+  const response = await serverFetch("/settings")
   if (!response?.ok) return null
   const body = (await response.json()) as Partial<Settings>
   return normalizeSettings(body)
 }
 
-export async function putSettings(patch: SettingsPatch): Promise<Settings | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/settings`, {
+export async function putSettings(patch: SettingsPatch): Promise<SettingsUpdateResult> {
+  const response = await serverFetch("/settings", {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
-  }).catch(() => null)
-  if (!response?.ok) return null
+  })
+  if (!response) return { kind: "unreachable" }
+  if (!response.ok) {
+    return {
+      kind: "http_error",
+      status: response.status,
+      detail: await readHttpErrorDetail(response),
+    }
+  }
   const body = (await response.json()) as Partial<Settings>
-  return normalizeSettings(body)
+  return { kind: "updated", settings: normalizeSettings(body) }
+}
+
+async function readHttpErrorDetail(response: Response): Promise<string | null> {
+  try {
+    const body = (await response.json()) as { detail?: unknown }
+    if (typeof body.detail === "string") return body.detail
+    if (!Array.isArray(body.detail)) return null
+    const issue = body.detail.find(
+      (item): item is { msg: string } =>
+        Boolean(item) && typeof item === "object" && typeof (item as { msg?: unknown }).msg === "string",
+    )
+    return issue?.msg ?? null
+  } catch {
+    return null
+  }
 }
 
 export async function getSessionState(): Promise<SessionStateResult> {
-  const response = await fetch(`${SERVER_BASE_URL}/sessions/current/state`).catch(() => null)
+  const response = await serverFetch("/sessions/current/state")
   if (!response) return { kind: "unreachable" }
   if (response.status === 404) return { kind: "no_session" }
   if (!response.ok) return { kind: "unreachable" }
@@ -348,26 +396,24 @@ export async function getSessionState(): Promise<SessionStateResult> {
   return { kind: "state", state }
 }
 
-export async function postBrowserNav(payload: BrowserNavPayload): Promise<PipelineResult | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/observations/browser-nav`, {
+export async function postBrowserNav(
+  payload: BrowserNavPayload,
+  idempotencyKey: string,
+): Promise<PipelineResult | null> {
+  const response = await serverFetch("/observations/browser-nav", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ source: "browser_nav", payload }),
-  }).catch(() => {
-    // The extension must never interrupt browsing because the local server is down.
-    return null
+    body: JSON.stringify({ source: "browser_nav", payload, idempotency_key: idempotencyKey }),
   })
   if (!response?.ok) return null
   return response.json() as Promise<PipelineResult>
 }
 
 export async function postFeedback(payload: FeedbackPayload): Promise<FeedbackResult | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/feedback`, {
+  const response = await serverFetch("/feedback", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
-  }).catch(() => {
-    return null
   })
   if (!response?.ok) return null
   return response.json() as Promise<FeedbackResult>
@@ -376,35 +422,36 @@ export async function postFeedback(payload: FeedbackPayload): Promise<FeedbackRe
 export async function getLatestObservation(tabId: number, url: string): Promise<LatestObservation | null> {
   try {
     const parsed = new URL(url)
-    const location = `${parsed.pathname || "/"}${parsed.search}${parsed.hash}`
-    const pathBytes = new TextEncoder().encode(location)
-    const pathDigest = await crypto.subtle.digest("SHA-256", pathBytes)
-    const urlPathHash = Array.from(new Uint8Array(pathDigest), (byte) =>
-      byte.toString(16).padStart(2, "0"),
-    ).join("")
+    const urlPathHash = await urlPathHashFor(url)
     const params = new URLSearchParams({
       tab_id: String(tabId),
       url_host: parsed.hostname,
       url_path_hash: urlPathHash,
     })
-    const response = await fetch(`${SERVER_BASE_URL}/observations/latest?${params}`)
-    if (!response.ok) return null
+    const response = await serverFetch(`/observations/latest?${params}`)
+    if (!response?.ok) return null
     return response.json() as Promise<LatestObservation>
   } catch {
     return null
   }
 }
 
+export async function urlPathHashFor(url: string): Promise<string> {
+  const parsed = new URL(url)
+  const location = `${parsed.pathname || "/"}${parsed.search}${parsed.hash}`
+  const pathBytes = new TextEncoder().encode(location)
+  const pathDigest = await crypto.subtle.digest("SHA-256", pathBytes)
+  return Array.from(new Uint8Array(pathDigest), (byte) => byte.toString(16).padStart(2, "0")).join("")
+}
+
 export async function postObservationLabel(
   observationId: string,
   label: PageLabel,
 ): Promise<PageLabelResult | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/observations/${observationId}/label`, {
+  const response = await serverFetch(`/observations/${observationId}/label`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ label }),
-  }).catch(() => {
-    return null
   })
   if (!response?.ok) return null
   return response.json() as Promise<PageLabelResult>
@@ -414,12 +461,36 @@ export async function postObservationExcerpt(
   observationId: string,
   excerpt: PageExcerpt,
 ): Promise<PipelineResult | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/observations/${observationId}/excerpt`, {
+  const response = await serverFetch(`/observations/${observationId}/excerpt`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(excerpt),
-  }).catch(() => {
-    return null
+  })
+  if (!response?.ok) return null
+  return response.json() as Promise<PipelineResult>
+}
+
+export async function postObservationContent(
+  observationId: string,
+  excerpt: PageExcerpt,
+): Promise<ContentCaptureResult | null> {
+  const response = await serverFetch(`/observations/${observationId}/content`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(excerpt),
+  })
+  if (!response?.ok) return null
+  return response.json() as Promise<ContentCaptureResult>
+}
+
+export async function postObservationPresence(
+  observationId: string,
+  payload: { event_id: string; kind: PresenceKind; tab_id: number; url_path_hash: string },
+): Promise<PipelineResult | null> {
+  const response = await serverFetch(`/observations/${observationId}/presence`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
   })
   if (!response?.ok) return null
   return response.json() as Promise<PipelineResult>
@@ -458,7 +529,7 @@ export interface HealthStatus {
 }
 
 export async function getHealthStatus(): Promise<HealthStatus | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/health`).catch(() => null)
+  const response = await serverFetch("/health")
   if (!response?.ok) return null
   const body = (await response.json()) as Partial<HealthStatus>
   return {
@@ -517,7 +588,7 @@ export interface SessionReport {
 }
 
 export async function getSessionReport(): Promise<SessionReport | null> {
-  const response = await fetch(`${SERVER_BASE_URL}/sessions/current/report`).catch(() => null)
+  const response = await serverFetch("/sessions/current/report")
   if (!response?.ok) return null
   return response.json() as Promise<SessionReport>
 }

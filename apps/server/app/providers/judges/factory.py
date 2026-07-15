@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +11,17 @@ from ...config import Tier1Config, Tier2Config
 from .base import JudgeProvider
 from .openai_compatible import OpenAICompatibleJudgeProvider
 from .ollama_chat import OllamaChatJudgeProvider
+
+
+class JudgeProviderConfigError(ValueError):
+    """Expected judge configuration failure with no secret-bearing value."""
+
+    def __init__(self, field: str, error_type: str) -> None:
+        self.field = field
+        self.error_type = error_type
+        super().__init__(
+            f"invalid judge provider configuration: field={field}, error_type={error_type}"
+        )
 
 
 @dataclass(frozen=True)
@@ -45,7 +57,7 @@ def create_tier1_judge_provider(config: Tier1Config) -> JudgeProvider | None:
         return _build_judge(settings) if settings else None
 
     if config.provider != "openai_compatible":
-        raise ValueError(f"unsupported Tier 1 provider: {config.provider}")
+        raise JudgeProviderConfigError(field="provider", error_type="ValueError")
 
     api_key = os.environ.get(config.api_key_env)
     base_url = _expand_env(config.base_url)
@@ -63,6 +75,8 @@ def create_tier1_judge_provider(config: Tier1Config) -> JudgeProvider | None:
 def create_tier2_judge_provider(config: Tier2Config) -> JudgeProvider | None:
     if not config.enabled:
         return None
+    if config.provider not in {"experiment", "openai_compatible", "ollama", "ollama_chat"}:
+        raise JudgeProviderConfigError(field="provider", error_type="ValueError")
 
     settings = _resolve_tier2_settings(config)
     if not settings:
@@ -91,7 +105,7 @@ def _build_judge(settings: _ResolvedJudgeSettings) -> JudgeProvider:
             timeout_seconds=settings.timeout_seconds,
             max_output_tokens=settings.max_output_tokens,
         )
-    raise ValueError(f"unsupported judge provider: {settings.provider}")
+    raise JudgeProviderConfigError(field="provider", error_type="ValueError")
 
 
 def _expand_env(value: str) -> str | None:
@@ -157,10 +171,28 @@ def _resolve_experiment_model_settings(
     if not path.exists():
         return None
 
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    try:
+        contents = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise JudgeProviderConfigError(
+            field="models_file",
+            error_type=type(exc).__name__,
+        ) from exc
+    try:
+        data = yaml.safe_load(contents) or {}
+    except yaml.YAMLError as exc:
+        raise JudgeProviderConfigError(
+            field="models_file",
+            error_type=type(exc).__name__,
+        ) from exc
+    if not isinstance(data, dict):
+        raise JudgeProviderConfigError(field="models_file", error_type="TypeError")
+
     model_config = data.get(model_key)
-    if not isinstance(model_config, dict):
+    if model_config is None:
         return None
+    if not isinstance(model_config, dict):
+        raise JudgeProviderConfigError(field="model_entry", error_type="TypeError")
 
     api_url = str(model_config.get("api_url") or "")
     api_style = str(model_config.get("api_style") or "")
@@ -172,17 +204,22 @@ def _resolve_experiment_model_settings(
     fallback_api_key = (
         os.environ.get(fallback_api_key_env) if fallback_api_key_env else None
     ) or model_config.get("fallback_api_key")
-    # Rotation pool: resolve each env name; only meaningful with >= 2 keys.
     pool = tuple(
         key for key in (os.environ.get(env) or "" for env in (api_key_pool_envs or [])) if key
     )
+    if not api_key and len(pool) == 1:
+        api_key = pool[0]
     api_keys = pool if len(pool) > 1 else None
     resolved_timeout = (
-        float(model_config.get("timeout_sec") or timeout_seconds)
+        _positive_float_setting(model_config, "timeout_sec", timeout_seconds)
         if use_model_file_timeout
         else timeout_seconds
     )
-    resolved_max_tokens = int(model_config.get("max_output_tokens") or max_output_tokens)
+    resolved_max_tokens = _positive_int_setting(
+        model_config,
+        "max_output_tokens",
+        max_output_tokens,
+    )
 
     if not api_url or not api_key or not model:
         return None
@@ -207,6 +244,44 @@ def _is_local_url(url: str) -> bool:
 def _provider_from_experiment_style(api_style: str, api_url: str) -> str:
     if api_style == "openai":
         return "openai_compatible"
-    if api_style == "ollama" or "/api/chat" in api_url:
+    if api_style == "ollama" or (not api_style and "/api/chat" in api_url):
         return "ollama_chat"
-    raise ValueError(f"unsupported experiment Tier 2 api_style: {api_style}")
+    raise JudgeProviderConfigError(field="api_style", error_type="ValueError")
+
+
+def _positive_float_setting(
+    model_config: dict[str, object],
+    field: str,
+    default: float,
+) -> float:
+    value = model_config.get(field)
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise JudgeProviderConfigError(field=field, error_type="TypeError")
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise JudgeProviderConfigError(field=field, error_type=type(exc).__name__) from exc
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise JudgeProviderConfigError(field=field, error_type="ValueError")
+    return parsed
+
+
+def _positive_int_setting(
+    model_config: dict[str, object],
+    field: str,
+    default: int,
+) -> int:
+    value = model_config.get(field)
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise JudgeProviderConfigError(field=field, error_type="TypeError")
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise JudgeProviderConfigError(field=field, error_type=type(exc).__name__) from exc
+    if parsed <= 0:
+        raise JudgeProviderConfigError(field=field, error_type="ValueError")
+    return parsed

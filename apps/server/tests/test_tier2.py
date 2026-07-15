@@ -215,10 +215,17 @@ class Tier2ApiTest(unittest.TestCase):
                 f"/observations/{request['observation_id']}/excerpt",
                 json={"title": "API design", "text": "This bread page is actually an API example about breadcrumbs."},
             )
+            replay = client.post(
+                f"/observations/{request['observation_id']}/excerpt",
+                json={"title": "API design", "text": "This bread page is actually an API example about breadcrumbs."},
+            )
         finally:
             client.__exit__(None, None, None)
 
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(replay.json(), response.json())
         self.assertEqual(response.json()["action"], "none")
+        self.assertEqual(len(provider.payloads), 1)
         with closing(sqlite3.connect(self.db_path)) as conn:
             intervention_count = conn.execute("SELECT COUNT(*) FROM interventions").fetchone()[0]
             cancelled = conn.execute("SELECT COUNT(*) FROM event_log WHERE event_type = 'tier2.cancelled'").fetchone()[0]
@@ -251,8 +258,49 @@ class Tier2ApiTest(unittest.TestCase):
             client.__exit__(None, None, None)
 
         self.assertEqual(first.status_code, 200)
-        self.assertEqual(second.status_code, 409)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.json(), first.json())
         self.assertEqual(len(provider.payloads), 1)
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            intervention_count = conn.execute("SELECT COUNT(*) FROM interventions").fetchone()[0]
+            confirmed_count = conn.execute(
+                "SELECT COUNT(*) FROM event_log WHERE event_type = 'tier2.confirmed'"
+            ).fetchone()[0]
+        self.assertEqual(intervention_count, 1)
+        self.assertEqual(confirmed_count, 1)
+
+    def test_excerpt_retry_replays_result_when_delivery_fails_after_commit(self) -> None:
+        provider = FakeTier2Provider(Tier2Result(confirm_drift=True, message="커밋 뒤 응답이 끊겼습니다."))
+        client, store = self._client(provider)
+        try:
+            request = self._start_goal_and_request_excerpt(client)
+            with patch(
+                "apps.server.app.api.observations._handle_delivery_side_effects",
+                side_effect=RuntimeError("synthetic response-loss window"),
+            ):
+                with self.assertRaises(RuntimeError):
+                    client.post(
+                        f"/observations/{request['observation_id']}/excerpt",
+                        json={"title": "Bread", "text": "Unrelated bread recipe."},
+                    )
+            replay = client.post(
+                f"/observations/{request['observation_id']}/excerpt",
+                json={"title": "Bread", "text": "Unrelated bread recipe."},
+            )
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(replay.json()["action"], "notify")
+        self.assertEqual(replay.json()["message"], "커밋 뒤 응답이 끊겼습니다.")
+        self.assertEqual(len(provider.payloads), 1)
+        candidate = store.get_intervention_candidate_for_observation(str(request["observation_id"]))
+        self.assertIsNotNone(candidate)
+        assert candidate is not None
+        self.assertEqual(candidate.status, "confirmed")
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            intervention_count = conn.execute("SELECT COUNT(*) FROM interventions").fetchone()[0]
+        self.assertEqual(intervention_count, 1)
 
     def test_failed_excerpt_processing_releases_candidate_for_retry(self) -> None:
         provider = FakeTier2Provider(Tier2Result(confirm_drift=True, message="retry me"))

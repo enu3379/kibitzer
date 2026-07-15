@@ -52,6 +52,24 @@ class RuntimeResourcesTest(unittest.TestCase):
         self.assertEqual(active_health["mode"], "active")
         self.assertIsNotNone(active_health["active_since"])
 
+    def test_replacing_active_session_releases_runtime_back_to_idle(self) -> None:
+        first_session_id = self.client.post("/sessions").json()["id"]
+        self.client.post(
+            "/sessions/current/goal",
+            json={"raw_text": "Kibitzer observation API"},
+        )
+        active_health = self.client.get("/health").json()
+        self.assertEqual(active_health["mode"], "active")
+        self.assertIsNotNone(active_health["active_since"])
+
+        replacement_response = self.client.post("/sessions")
+
+        self.assertEqual(replacement_response.status_code, 201)
+        self.assertNotEqual(replacement_response.json()["id"], first_session_id)
+        health = self.client.get("/health").json()
+        self.assertEqual(health["mode"], "idle")
+        self.assertIsNone(health["active_since"])
+
     def test_session_end_releases_runtime_back_to_idle(self) -> None:
         self.client.post("/sessions")
         self.client.post("/sessions/current/goal", json={"raw_text": "Kibitzer observation API"})

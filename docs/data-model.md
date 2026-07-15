@@ -42,6 +42,7 @@ raw_text
 keywords
 exemplars
 provenance
+available_time_minutes (optional)
 ```
 
 Stage 0 supports only `provenance = "declared"`.
@@ -53,6 +54,7 @@ goal
 anchor
 controller
 obs_count
+time_budget_clock
 ```
 
 The anchor is the average of the latest effectively-OK observation embeddings.
@@ -67,12 +69,30 @@ goals
 goal_exemplars
 observations
 page_labels
+observation_requests
 controller_states
+drift_clock_states
+drift_page_dwell_states
+observation_excerpts
+dwell_presence_events
 intervention_candidates
 interventions
 feedback
 event_log
 ```
+
+`observation_requests` is the durable browser-navigation idempotency ledger.
+It stores only the opaque key, a hash of the canonical request, and the terminal
+response JSON—never the raw URL or page body. A null response marks the active
+claim. A completed row is replayed verbatim on transport retry; a key whose
+request hash differs is rejected.
+
+`drift_clock_states` stores the active observation and page identity
+(`url_host` + path hash), cumulative/continuous/current-page seconds, the next
+review boundary, and a timestamped review lock. `drift_page_dwell_states`
+retains the per-page dwell totals needed to survive tab flips within the
+current episode. `dwell_presence_events` keeps presence event IDs only for
+duplicate suppression. Both helper tables are pruned when the session ends.
 
 ## Interventions and Feedback
 
@@ -90,12 +110,15 @@ requested_at
 expires_at
 updated_at
 intervention_id
+result_json         terminal PipelineResult for confirmed/cancelled candidates
 ```
 
 The pending lifetime includes the configured remaining Tier 2 dwell plus a
 60-second resume grace period. Tier 2 cancellation leaves controller evidence
 intact. Tier 2 confirmation consumes the evidence and links the candidate to a
-new intervention.
+new intervention. Candidate resolution, the Tier 2 result event, and the
+terminal response are committed together; retrying a resolved candidate does
+not call the judge or create another intervention.
 
 An intervention is created only after Tier 2 confirms drift:
 
@@ -137,6 +160,13 @@ The original detector verdict is retained for audit.
 
 ## Raw Data Retention
 
-Page excerpts are transient. They are used for Tier 2 and then discarded.
+When the D7 time-budget rule is enabled, each non-sensitive browser
+observation may retain one normalized, character-limited page excerpt locally.
+The store keeps only the current excerpt plus the configured recent context
+window; older excerpts are pruned transactionally and excerpts are deleted on
+both explicit and implicit session end. They are never copied into `event_log`,
+reports, or feedback.
+This enables the content half of D7's bounded Tier-2 comparison. With D7
+disabled, excerpts remain transient as in the original pipeline.
 
 Keystrokes are out of scope for Stage 0. If added later, raw keystroke text must never be written to disk.

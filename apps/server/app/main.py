@@ -1,5 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
+from uuid import uuid4
 
 from fastapi import FastAPI
 
@@ -13,6 +14,7 @@ from .config import load_config
 from .core.personas import load_personas, resolve_persona
 from .core.runtime_resources import RuntimeResources
 from .privacy.domain_filter import load_sensitive_domain_rules
+from .ports import identity_payload
 from .providers.embeddings.base import EmbeddingProvider
 from .providers.judges.base import JudgeProvider
 from .storage.sqlite import SQLiteStore
@@ -34,6 +36,7 @@ def create_app(
         tier1_provider=tier1_provider,
         tier2_provider=tier2_provider,
     )
+    instance_id = uuid4().hex
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -47,6 +50,11 @@ def create_app(
         yield
 
     app = FastAPI(title="Kibitzer Local Server", lifespan=lifespan)
+
+    @app.get("/identity")
+    async def identity() -> dict[str, str | int]:
+        return identity_payload(instance_id)
+
     app.include_router(health_router)
     app.include_router(sessions_router)
     app.include_router(observations_router)

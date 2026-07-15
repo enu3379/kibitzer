@@ -15,7 +15,7 @@ New-Item -ItemType Directory -Force data | Out-Null
 $env:PYTHONUNBUFFERED = "1"
 
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
-$Arguments = @("-m", "uvicorn", "apps.server.app.main:app", "--host", "127.0.0.1", "--port", "8765")
+$Arguments = @("-m", "apps.server.app.ports")
 
 $StartInfo = New-Object System.Diagnostics.ProcessStartInfo
 $StartInfo.FileName = $Python

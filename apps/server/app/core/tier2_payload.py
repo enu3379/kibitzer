@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ..config import Tier2Config
 from ..schemas import PageExcerpt
-from ..storage.sqlite import GoalRecord, ObservationRecord, ObservationSummary
+from ..storage.sqlite import GoalRecord, ObservationContentSummary, ObservationRecord, ObservationSummary
 
 
 def build_tier2_payload(
@@ -27,6 +27,49 @@ def build_tier2_payload(
             if item.title or item.verdict
         ],
         "page_excerpt": _clean_excerpt(excerpt.text, config.excerpt_char_limit),
+    }
+
+
+def build_d7_title_payload(
+    goal: GoalRecord,
+    observation: ObservationRecord,
+    recent: list[ObservationSummary],
+    time_context: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "review_kind": "title",
+        "goal": goal.raw_text,
+        "time_budget": time_context,
+        "current": {"title": observation.title, "url_host": observation.url_host},
+        "recent": [
+            {"title": item.title, "verdict": item.verdict}
+            for item in recent
+            if item.title or item.verdict
+        ],
+    }
+
+
+def build_d7_content_payload(
+    goal: GoalRecord,
+    observation: ObservationRecord,
+    current_excerpt: str,
+    recent: list[ObservationContentSummary],
+    time_context: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "review_kind": "content",
+        "goal": goal.raw_text,
+        "time_budget": time_context,
+        "current": {
+            "title": observation.title,
+            "url_host": observation.url_host,
+            "page_excerpt": current_excerpt,
+        },
+        "recent": [
+            {"title": item.title, "verdict": item.verdict, "page_excerpt": item.text}
+            for item in recent
+            if item.text
+        ],
     }
 
 

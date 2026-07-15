@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class ServerConfig(BaseModel):
     host: str = "127.0.0.1"
-    port: int = 8765
     db_path: str = "./data/kibitzer.sqlite3"
 
 
@@ -105,6 +104,26 @@ class DwellConfig(BaseModel):
     tier2_seconds: int = Field(default=10, ge=1, le=300)
 
 
+class TimeBudgetConfig(BaseModel):
+    # Kept opt-in at the model layer so callers constructing AppConfig directly
+    # retain the pre-D7 pipeline. configs/default.yaml enables the feature.
+    enabled: bool = False
+    total_fraction: float = Field(default=1 / 6, gt=0, le=1)
+    min_total_seconds: int = Field(default=300, ge=1)
+    fallback_total_seconds: int = Field(default=900, ge=1)
+    per_page_seconds: int = Field(default=180, ge=1)
+    heartbeat_seconds: int = Field(default=60, ge=30, le=60)
+    max_heartbeat_gap_seconds: int = Field(default=90, ge=30)
+    recent_excerpts: int = Field(default=5, ge=1, le=20)
+    recent_excerpt_char_limit: int = Field(default=600, ge=1, le=3000)
+
+    @model_validator(mode="after")
+    def _validate_heartbeat_gap(self) -> "TimeBudgetConfig":
+        if self.max_heartbeat_gap_seconds < self.heartbeat_seconds:
+            raise ValueError("max_heartbeat_gap_seconds must be at least heartbeat_seconds")
+        return self
+
+
 class PrivacyConfig(BaseModel):
     sensitive_domains_file: str = "configs/sensitive_domains.yaml"
     strip_query: bool = True
@@ -156,6 +175,7 @@ class AppConfig(BaseModel):
     celebration: CelebrationConfig = Field(default_factory=CelebrationConfig)
     intentional_break: BreakConfig = Field(default_factory=BreakConfig, alias="break")
     dwell: DwellConfig = Field(default_factory=DwellConfig)
+    time_budget: TimeBudgetConfig = Field(default_factory=TimeBudgetConfig)
     privacy: PrivacyConfig = Field(default_factory=PrivacyConfig)
     delivery: DeliveryConfig = Field(default_factory=DeliveryConfig)
     raw: dict[str, Any] = Field(default_factory=dict)
@@ -182,6 +202,7 @@ def load_config(path: str | Path = "configs/default.yaml") -> AppConfig:
                 "celebration",
                 "break",
                 "dwell",
+                "time_budget",
                 "privacy",
                 "delivery",
             }

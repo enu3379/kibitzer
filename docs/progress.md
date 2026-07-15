@@ -1,5 +1,29 @@
 # Progress
 
+## 2026-07-15 D7 time-budget drift review fixes
+
+Completed:
+
+- Made verified `active` presence, rather than navigation ingestion, the sole
+  D7 clock activation/recovery path. Focused-window and Chrome idle/lock gates
+  now stop presence assertions; returning to a tab reclaims the server clock.
+- Decoupled elapsed-time review eligibility from streak/alignment trigger bits
+  while preserving coldstart, snooze, and cooldown. Same-page dwell now
+  survives tab flips using host + path-hash identity, while streak-mode OK
+  resets only the continuous review boundary.
+- Added title-only review when content is unavailable, persona fallback when
+  judges are unavailable, dual-payload nagging context, retry-safe review locks
+  with stale-lock expiry, and infra-failure retry without consuming a review
+  boundary.
+- Preserved controller/snooze state on goal re-declaration, preserved clocks
+  for identical goals, aligned replay with the deferred D7 pipeline, and
+  pruned excerpt/presence rows on both session-end paths.
+
+Verified:
+
+- `python -m pytest apps/server/tests -q`: 154 passed, 1 skipped, 8 subtests.
+- `apps/extension` `npm run build`: TypeScript and esbuild green.
+
 ## 2026-07-14 Page labels override the current product verdict
 
 Completed:

@@ -26,6 +26,12 @@ class RawObservation(BaseModel):
     source: Literal[Source.BROWSER_NAV]
     payload: BrowserNavPayload
     ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    idempotency_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+    )
 
 
 class ObservationFeatures(BaseModel):
