@@ -61,8 +61,11 @@ browser event
   -> Tier 0 relevance
   -> optional Tier 1 classifier
   -> controller update
-  -> D7 bounded content capture + server-owned presence heartbeat
-  -> optional time-budget Tier 2 title/content confirmation
+  -> time budget off: optional candidate + request_excerpt (controller evidence retained)
+     -> Tier 2 confirmation/message
+  -> time budget on: D7 bounded content capture + server-owned presence heartbeat
+     -> optional time-budget Tier 2 title/content confirmation
+  -> confirmed drift consumes controller evidence
   -> notification
 ```
 
@@ -82,7 +85,7 @@ Server responses use explicit actions:
 ```
 
 ```json
-{"action":"request_excerpt","observation_id":"obs_..."}
+{"action":"request_excerpt","observation_id":"obs_...","candidate_id":"cand_..."}
 ```
 
 ```json

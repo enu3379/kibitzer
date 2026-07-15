@@ -18,6 +18,7 @@ import {
 } from "./lib/api"
 import { shouldDropUrl } from "./lib/domainFilter"
 import {
+  ExplorationResponseKind,
   ExplorationVerdict,
   prependExplorationHistory,
   updateExplorationHistory,
@@ -191,6 +192,7 @@ async function scheduleDwellCheck(tabId: number, token: number, url: string, sta
     await handlePipelineResult(tabId, result, {
       url,
       startedAt,
+      historyId: pending.historyId,
       tier2DwellMs: pending.tier2DwellMs,
     })
     void refreshBadge()
@@ -270,19 +272,44 @@ async function updateHistoryWithPipelineResult(
   title: string,
 ): Promise<void> {
   if (!historyId) return
-  const patch: { endedAt: number; title?: string; observationId?: string; verdict?: ExplorationVerdict } = {
+  const patch: {
+    endedAt: number
+    title?: string
+    observationId?: string
+    verdict?: ExplorationVerdict
+    responseKind?: ExplorationResponseKind
+  } = {
     endedAt: Date.now(),
   }
   if (title.trim()) patch.title = title
   if (result?.observation_id) patch.observationId = result.observation_id
   if (result?.verdict === "OK" || result?.verdict === "DRIFT") patch.verdict = result.verdict
+  const responseKind = historyResponseKind(result)
+  if (responseKind) patch.responseKind = responseKind
   await updateExplorationHistory(historyId, patch)
+}
+
+async function updateHistoryResponse(
+  historyId: string | undefined,
+  result: PipelineResult | null,
+): Promise<void> {
+  if (!historyId) return
+  const responseKind = historyResponseKind(result)
+  if (!responseKind) return
+  await updateExplorationHistory(historyId, { responseKind })
+}
+
+function historyResponseKind(result: PipelineResult | null): ExplorationResponseKind | undefined {
+  if (result?.action !== "notify") return undefined
+  if (result.kind === "celebration") return "celebration"
+  if (result.kind === "intervention" || result.intervention_id) return "intervention"
+  return undefined
 }
 
 async function handlePipelineResult(
   tabId: number,
   result: PipelineResult | null,
-  observation: { url: string; startedAt: number; tier2DwellMs: number },
+  observation: { url: string; startedAt: number; historyId?: string; tier2DwellMs: number },
 ): Promise<void> {
   if (!result?.observation_id) return
   await captureD7ContentAndActivate(tabId, result.observation_id, observation.url)
@@ -303,6 +330,7 @@ async function handlePipelineResult(
   if (!excerpt) return
   if (!(await tabStillOnObservedPage(tabId, observation.url))) return
   const finalResult = await postObservationExcerpt(result.observation_id, excerpt)
+  await updateHistoryResponse(observation.historyId, finalResult)
   if (finalResult?.action === "notify" && finalResult.message) {
     if (!(await tabStillOnObservedPage(tabId, observation.url))) return
     await showNotification(finalResult, tabId)

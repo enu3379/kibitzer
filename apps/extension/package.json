@@ -4,9 +4,9 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "npm run typecheck && node build.mjs",
+    "build": "npm run test && node build.mjs",
     "watch": "node build.mjs --watch",
-    "test": "tsc --noEmit"
+    "test": "node --experimental-strip-types --test tests/history.test.mjs && npm run typecheck"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.287",

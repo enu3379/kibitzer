@@ -65,6 +65,7 @@ drift_clock_states
 drift_page_dwell_states
 observation_excerpts
 dwell_presence_events
+intervention_candidates
 interventions
 feedback
 event_log
@@ -78,6 +79,27 @@ current episode. `dwell_presence_events` keeps presence event IDs only for
 duplicate suppression. Both helper tables are pruned when the session ends.
 
 ## Interventions and Feedback
+
+An intervention candidate is created when the controller requests a Tier 2
+excerpt review. Creating the candidate does not reset streak/alignment evidence
+or start the intervention cooldown. Only one `pending` or `in_flight` candidate
+may exist per session.
+
+```text
+id
+session_id
+observation_id
+status              pending | in_flight | confirmed | cancelled | expired
+requested_at
+expires_at
+updated_at
+intervention_id
+```
+
+The pending lifetime includes the configured remaining Tier 2 dwell plus a
+60-second resume grace period. Tier 2 cancellation leaves controller evidence
+intact. Tier 2 confirmation consumes the evidence and links the candidate to a
+new intervention.
 
 An intervention is created only after Tier 2 confirms drift:
 

@@ -42,9 +42,13 @@ POST /feedback
 POST /interventions/{id}/delivery
 ```
 
+When the controller returns `request_excerpt`, the response also contains a
+`candidate_id`. Candidate creation preserves streak/alignment state. Tier 2
+confirmation creates the intervention and consumes that state; cancellation or
+candidate expiry does not.
+
 Still planned: `POST /replay` (Work Package 10, gated on the D4 scope decision).
 
 ## Implementation Note
 
 Embedding is CPU-only in Stage 0. Tier 1 and Tier 2 are API providers behind interfaces.
-
