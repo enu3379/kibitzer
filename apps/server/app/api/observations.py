@@ -119,7 +119,11 @@ async def latest_observation_for_tab(
     current = store.get_current_session()
     if not current:
         raise HTTPException(status_code=404, detail="no active session")
-    observation = store.latest_observation_for_tab(current.session.id, tab_id)
+    observation = store.latest_observation_for_tab(
+        current.session.id,
+        tab_id,
+        current.goal.goal_revision if current.goal else None,
+    )
     # A Chrome tab id survives navigation. Require the popup's privacy-safe
     # current-page identity so a pre-dwell navigation cannot expose or label
     # the previous page's observation as the page currently behind the popup.
@@ -273,7 +277,13 @@ async def capture_observation_content(
     store = _store(request)
     current = store.get_current_session()
     observation = store.get_observation(observation_id)
-    if not current or not current.goal or not observation or observation.session_id != current.session.id:
+    if (
+        not current
+        or not current.goal
+        or not observation
+        or observation.session_id != current.session.id
+        or observation.goal_revision != current.goal.goal_revision
+    ):
         raise HTTPException(status_code=404, detail="observation not found")
     config = request.app.state.config.time_budget
     if not config.enabled:
@@ -301,7 +311,13 @@ async def record_observation_presence(
     store = _store(request)
     current = store.get_current_session()
     observation = store.get_observation(observation_id)
-    if not current or not current.goal or not observation or observation.session_id != current.session.id:
+    if (
+        not current
+        or not current.goal
+        or not observation
+        or observation.session_id != current.session.id
+        or observation.goal_revision != current.goal.goal_revision
+    ):
         raise HTTPException(status_code=404, detail="observation not found")
     config = request.app.state.config.time_budget
     verdict = Verdict(observation.verdict) if observation.verdict else None
@@ -535,7 +551,13 @@ async def confirm_observation_excerpt(
     store = _store(request)
     current = store.get_current_session()
     observation = store.get_observation(observation_id)
-    if not current or not current.goal or not observation or observation.session_id != current.session.id:
+    if (
+        not current
+        or not current.goal
+        or not observation
+        or observation.session_id != current.session.id
+        or observation.goal_revision != current.goal.goal_revision
+    ):
         raise HTTPException(status_code=404, detail="observation not found")
 
     effective_value = effective_observation_verdict(
@@ -591,6 +613,16 @@ async def confirm_observation_excerpt(
             system_prompt=system_prompt,
             persona=persona,
         )
+        if not store.goal_revision_is_current(
+            observation.session_id,
+            observation.goal_revision,
+        ):
+            return PipelineResult(
+                action=PipelineAction.NONE,
+                observation_id=observation.id,
+                verdict=verdict,
+                page=observation_page_info(observation),
+            )
         max_sentences = (
             persona.max_sentences
             if persona and persona.max_sentences is not None

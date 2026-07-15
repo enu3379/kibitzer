@@ -55,6 +55,7 @@ class GoalRecord:
     exemplars: list[list[float]]
     provenance: str
     updated_at: datetime
+    goal_revision: int
     available_time_minutes: int | None = None
     derived_exemplars: list[GoalDerivedExemplarRecord] = field(default_factory=list)
 
@@ -87,6 +88,7 @@ class ObservationRecord:
     verdict: str | None
     tier_reached: int | None
     tier1_reason: str | None = None
+    goal_revision: int | None = None
 
 
 @dataclass(frozen=True)
@@ -179,6 +181,7 @@ class InterventionCandidateRecord:
     id: str
     session_id: str
     observation_id: str
+    goal_revision: int
     status: str
     requested_at: datetime
     expires_at: datetime
@@ -337,7 +340,8 @@ class SQLiteStore:
                 return None
             goal_row = conn.execute(
                 """
-                SELECT session_id, raw_text, keywords_json, provenance, updated_at, available_time_minutes
+                SELECT session_id, raw_text, keywords_json, provenance, updated_at,
+                       available_time_minutes, goal_revision
                 FROM goals
                 WHERE session_id = ?
                 """,
@@ -564,7 +568,9 @@ class SQLiteStore:
                        observations.tier1_reason
                 FROM interventions
                 LEFT JOIN observations ON observations.id = interventions.observation_id
+                JOIN goals ON goals.session_id = interventions.session_id
                 WHERE interventions.session_id = ?
+                  AND observations.goal_revision = goals.goal_revision
                   AND interventions.status IN ('pending', 'delivered', 'delivery_failed')
                 ORDER BY interventions.ts DESC, interventions.id DESC
                 LIMIT 1
@@ -622,12 +628,14 @@ class SQLiteStore:
     def minutes_since_last_ok(self, session_id: str) -> int | None:
         with self._connect() as conn:
             self._ensure_schema(conn)
+            goal_revision = self._current_goal_revision_in_conn(conn, session_id)
             row = conn.execute(
                 """
                 SELECT observations.ts
                 FROM observations
                 LEFT JOIN page_labels ON page_labels.observation_id = observations.id
                 WHERE observations.session_id = ?
+                  AND observations.goal_revision IS ?
                   AND CASE page_labels.label
                         WHEN 'related' THEN 'OK'
                         WHEN 'drift' THEN 'DRIFT'
@@ -636,7 +644,7 @@ class SQLiteStore:
                 ORDER BY observations.ts DESC, observations.id DESC
                 LIMIT 1
                 """,
-                (session_id,),
+                (session_id, goal_revision),
             ).fetchone()
         if not row:
             return None
@@ -892,9 +900,9 @@ class SQLiteStore:
         keywords = keywords or []
         now = _utc_now()
         now_text = now.isoformat()
-        reset_clock = True
         with self._connect() as conn:
             self._ensure_schema(conn)
+            conn.execute("BEGIN IMMEDIATE")
             session_row = conn.execute(
                 "SELECT id FROM sessions WHERE active = 1 ORDER BY created_at DESC LIMIT 1"
             ).fetchone()
@@ -904,35 +912,46 @@ class SQLiteStore:
             session_id = session_row["id"]
             previous_goal = conn.execute(
                 """
-                SELECT raw_text, keywords_json, available_time_minutes
+                SELECT raw_text, keywords_json, available_time_minutes, goal_revision
                 FROM goals
                 WHERE session_id = ?
                 """,
                 (session_id,),
             ).fetchone()
-            if previous_goal:
-                reset_clock = (
-                    previous_goal["raw_text"] != normalized_goal
-                    or json.loads(previous_goal["keywords_json"]) != keywords
-                    or previous_goal["available_time_minutes"] != available_time_minutes
-                )
+            goal_changed = (
+                previous_goal is None
+                or previous_goal["raw_text"] != normalized_goal
+                or json.loads(previous_goal["keywords_json"]) != keywords
+                or previous_goal["available_time_minutes"] != available_time_minutes
+            )
+            previous_revision = int(previous_goal["goal_revision"]) if previous_goal else 0
+            goal_revision = previous_revision + 1 if goal_changed else previous_revision
             conn.execute(
                 """
                 INSERT INTO goals (
-                    session_id, raw_text, keywords_json, provenance, updated_at, available_time_minutes
+                    session_id, raw_text, keywords_json, provenance, updated_at,
+                    available_time_minutes, goal_revision
                 )
-                VALUES (?, ?, ?, 'declared', ?, ?)
+                VALUES (?, ?, ?, 'declared', ?, ?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET
                     raw_text = excluded.raw_text,
                     keywords_json = excluded.keywords_json,
                     provenance = excluded.provenance,
                     updated_at = excluded.updated_at,
-                    available_time_minutes = excluded.available_time_minutes
+                    available_time_minutes = excluded.available_time_minutes,
+                    goal_revision = excluded.goal_revision
                 """,
-                (session_id, normalized_goal, json.dumps(keywords), now_text, available_time_minutes),
+                (
+                    session_id,
+                    normalized_goal,
+                    json.dumps(keywords),
+                    now_text,
+                    available_time_minutes,
+                    goal_revision,
+                ),
             )
+            conn.execute("DELETE FROM goal_exemplars WHERE session_id = ?", (session_id,))
             if exemplar is not None:
-                conn.execute("DELETE FROM goal_exemplars WHERE session_id = ?", (session_id,))
                 conn.execute(
                     """
                     INSERT INTO goal_exemplars (id, session_id, position, vector_json, created_at)
@@ -941,6 +960,8 @@ class SQLiteStore:
                     (f"gex_{uuid.uuid4().hex}", session_id, json.dumps(exemplar), now_text),
                 )
             conn.execute("DELETE FROM goal_derived_exemplars WHERE session_id = ?", (session_id,))
+            if goal_changed:
+                self._reset_goal_scoped_state(conn, session_id, goal_revision, now)
             self._append_event(
                 conn,
                 session_id,
@@ -950,12 +971,11 @@ class SQLiteStore:
                     "keywords": keywords,
                     "provenance": "declared",
                     "available_time_minutes": available_time_minutes,
+                    "goal_revision": goal_revision,
                 },
                 now,
             )
 
-        if reset_clock:
-            self.reset_drift_clock_state(session_id, now)
         return GoalRecord(
             session_id=session_id,
             raw_text=normalized_goal,
@@ -963,9 +983,19 @@ class SQLiteStore:
             exemplars=[exemplar] if exemplar is not None else self.get_goal_exemplars(session_id),
             provenance="declared",
             updated_at=now,
+            goal_revision=goal_revision,
             available_time_minutes=available_time_minutes,
             derived_exemplars=[],
         )
+
+    def goal_revision_is_current(self, session_id: str, goal_revision: int) -> bool:
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute(
+                "SELECT goal_revision FROM goals WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+        return bool(row and int(row["goal_revision"]) == goal_revision)
 
     def get_goal_exemplars(self, session_id: str) -> list[list[float]]:
         with self._connect() as conn:
@@ -981,17 +1011,21 @@ class SQLiteStore:
             ).fetchall()
         return [json.loads(row["vector_json"]) for row in rows]
 
-    def get_goal_derived_exemplars(self, session_id: str) -> list[GoalDerivedExemplarRecord]:
+    def get_goal_derived_exemplars(
+        self,
+        session_id: str,
+        goal_revision: int,
+    ) -> list[GoalDerivedExemplarRecord]:
         with self._connect() as conn:
             self._ensure_schema(conn)
             rows = conn.execute(
                 """
                 SELECT phrase, vector_json, position
                 FROM goal_derived_exemplars
-                WHERE session_id = ?
+                WHERE session_id = ? AND goal_revision = ?
                 ORDER BY position ASC
                 """,
-                (session_id,),
+                (session_id, goal_revision),
             ).fetchall()
         return [
             GoalDerivedExemplarRecord(
@@ -1006,25 +1040,34 @@ class SQLiteStore:
         self,
         session_id: str,
         exemplars: list[Any],
+        goal_revision: int,
         provider: str,
         latency_ms: int,
         ts: datetime | None = None,
-    ) -> None:
+    ) -> bool:
         now = ts or _utc_now()
         with self._connect() as conn:
             self._ensure_schema(conn)
+            conn.execute("BEGIN IMMEDIATE")
+            current = conn.execute(
+                "SELECT goal_revision FROM goals WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if not current or int(current["goal_revision"]) != goal_revision:
+                return False
             conn.execute("DELETE FROM goal_derived_exemplars WHERE session_id = ?", (session_id,))
             for position, exemplar in enumerate(exemplars):
                 conn.execute(
                     """
                     INSERT INTO goal_derived_exemplars (
-                        id, session_id, position, phrase, vector_json, created_at
+                        id, session_id, goal_revision, position, phrase, vector_json, created_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         f"gdex_{uuid.uuid4().hex}",
                         session_id,
+                        goal_revision,
                         position,
                         exemplar.phrase,
                         json.dumps(exemplar.vector),
@@ -1039,9 +1082,11 @@ class SQLiteStore:
                     "phrases": [exemplar.phrase for exemplar in exemplars],
                     "provider": provider,
                     "latency_ms": latency_ms,
+                    "goal_revision": goal_revision,
                 },
                 now,
             )
+        return True
 
     def record_goal_enrichment_failed(
         self,
@@ -1146,18 +1191,24 @@ class SQLiteStore:
             )
         return deleted.rowcount == 1
 
-    def record_observation(self, observation: Observation) -> ObservationRecord:
+    def record_observation(
+        self,
+        observation: Observation,
+        goal_revision: int | None = None,
+    ) -> ObservationRecord:
         payload = observation.payload
         features = observation.features.model_dump()
         with self._connect() as conn:
             self._ensure_schema(conn)
+            if goal_revision is None:
+                goal_revision = self._current_goal_revision_in_conn(conn, observation.session_id)
             conn.execute(
                 """
                 INSERT INTO observations (
                     id, session_id, ts, source, url_host, url_path_hash, title, tab_id,
-                    features_json, verdict, tier_reached, tier1_reason
+                    features_json, verdict, tier_reached, tier1_reason, goal_revision
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     observation.id,
@@ -1172,6 +1223,7 @@ class SQLiteStore:
                     observation.verdict.value if observation.verdict else None,
                     observation.features.tier_reached,
                     observation.tier1_reason,
+                    goal_revision,
                 ),
             )
             self._append_event(
@@ -1183,6 +1235,7 @@ class SQLiteStore:
                     "source": observation.source.value,
                     "url_host": payload.get("url_host"),
                     "title": payload.get("title"),
+                    "goal_revision": goal_revision,
                 },
                 observation.ts,
             )
@@ -1199,6 +1252,7 @@ class SQLiteStore:
             verdict=observation.verdict.value if observation.verdict else None,
             tier_reached=observation.features.tier_reached,
             tier1_reason=observation.tier1_reason,
+            goal_revision=goal_revision,
         )
 
     def store_observation_excerpt(
@@ -1280,19 +1334,23 @@ class SQLiteStore:
         session_id: str,
         limit: int,
         excerpt_char_limit: int,
+        goal_revision: int | None = None,
     ) -> list[ObservationContentSummary]:
         with self._connect() as conn:
             self._ensure_schema(conn)
+            if goal_revision is None:
+                goal_revision = self._current_goal_revision_in_conn(conn, session_id)
             rows = conn.execute(
                 """
                 SELECT observations.id, observations.title, observations.verdict, observation_excerpts.text
                 FROM observation_excerpts
                 JOIN observations ON observations.id = observation_excerpts.observation_id
                 WHERE observation_excerpts.session_id = ?
+                  AND observations.goal_revision IS ?
                 ORDER BY observation_excerpts.captured_at DESC, observations.id DESC
                 LIMIT ?
                 """,
-                (session_id, limit),
+                (session_id, goal_revision, limit),
             ).fetchall()
         return [
             ObservationContentSummary(
@@ -1315,37 +1373,91 @@ class SQLiteStore:
         now = ts or _utc_now()
         with self._connect() as conn:
             self._ensure_schema(conn)
-            conn.execute(
-                """
-                INSERT INTO drift_clock_states (
-                    session_id, current_page_drift_seconds, continuous_drift_seconds,
-                    cumulative_drift_seconds, next_review_mode_seconds, review_status, updated_at
-                )
-                VALUES (?, 0, 0, 0, 0, 'none', ?)
-                ON CONFLICT(session_id) DO UPDATE SET
-                    active_observation_id = NULL,
-                    active_tab_id = NULL,
-                    active_url_host = NULL,
-                    active_url_path_hash = NULL,
-                    active_verdict = NULL,
-                    active_since_at = NULL,
-                    last_heartbeat_at = NULL,
-                    current_page_drift_seconds = 0,
-                    continuous_drift_seconds = 0,
-                    cumulative_drift_seconds = 0,
-                    next_review_mode_seconds = 0,
-                    review_observation_id = NULL,
-                    review_started_at = NULL,
-                    review_status = 'none',
-                    last_defer_reason = NULL,
-                    updated_at = excluded.updated_at
-                """,
-                (session_id, now.isoformat()),
-            )
-            self._append_event(conn, session_id, "d7.clock_reset", {}, now)
-            conn.execute("DELETE FROM drift_page_dwell_states WHERE session_id = ?", (session_id,))
+            self._reset_drift_clock_state_in_conn(conn, session_id, now)
             row = self._ensure_drift_clock_state_row(conn, session_id, now)
         return self._drift_clock_state_from_row(row)
+
+    def _reset_goal_scoped_state(
+        self,
+        conn: sqlite3.Connection,
+        session_id: str,
+        goal_revision: int,
+        now: datetime,
+    ) -> None:
+        self._write_controller_state(
+            conn,
+            ControllerStateRecord(
+                session_id=session_id,
+                streak=0,
+                obs_count=0,
+                last_intervention_ts=None,
+                snoozed_until=None,
+                alignment_score=None,
+                drift_latched=False,
+                updated_at=now,
+            ),
+        )
+        conn.execute("DELETE FROM attachment_states WHERE session_id = ?", (session_id,))
+        cancelled = conn.execute(
+            """
+            UPDATE intervention_candidates
+            SET status = 'cancelled', updated_at = ?
+            WHERE session_id = ? AND goal_revision != ?
+              AND status IN ('pending', 'in_flight')
+            RETURNING id, observation_id
+            """,
+            (now.isoformat(), session_id, goal_revision),
+        ).fetchall()
+        for row in cancelled:
+            self._append_event(
+                conn,
+                session_id,
+                "intervention.candidate_cancelled",
+                {
+                    "candidate_id": row["id"],
+                    "observation_id": row["observation_id"],
+                    "intervention_id": None,
+                    "reason": "goal_revised",
+                },
+                now,
+            )
+        self._reset_drift_clock_state_in_conn(conn, session_id, now)
+
+    def _reset_drift_clock_state_in_conn(
+        self,
+        conn: sqlite3.Connection,
+        session_id: str,
+        now: datetime,
+    ) -> None:
+        conn.execute(
+            """
+            INSERT INTO drift_clock_states (
+                session_id, current_page_drift_seconds, continuous_drift_seconds,
+                cumulative_drift_seconds, next_review_mode_seconds, review_status, updated_at
+            )
+            VALUES (?, 0, 0, 0, 0, 'none', ?)
+            ON CONFLICT(session_id) DO UPDATE SET
+                active_observation_id = NULL,
+                active_tab_id = NULL,
+                active_url_host = NULL,
+                active_url_path_hash = NULL,
+                active_verdict = NULL,
+                active_since_at = NULL,
+                last_heartbeat_at = NULL,
+                current_page_drift_seconds = 0,
+                continuous_drift_seconds = 0,
+                cumulative_drift_seconds = 0,
+                next_review_mode_seconds = 0,
+                review_observation_id = NULL,
+                review_started_at = NULL,
+                review_status = 'none',
+                last_defer_reason = NULL,
+                updated_at = excluded.updated_at
+            """,
+            (session_id, now.isoformat()),
+        )
+        self._append_event(conn, session_id, "d7.clock_reset", {}, now)
+        conn.execute("DELETE FROM drift_page_dwell_states WHERE session_id = ?", (session_id,))
 
     def record_drift_presence(
         self,
@@ -1957,19 +2069,39 @@ class SQLiteStore:
         observation_id: str,
         expires_at: datetime,
         ts: datetime | None = None,
+        *,
+        goal_revision: int | None = None,
     ) -> tuple[InterventionCandidateRecord, bool]:
         now = ts or _utc_now()
         candidate_id = f"cand_{uuid.uuid4().hex}"
         with self._connect() as conn:
             self._ensure_schema(conn)
+            conn.execute("BEGIN IMMEDIATE")
+            observation = conn.execute(
+                """
+                SELECT goal_revision
+                FROM observations
+                WHERE id = ? AND session_id = ?
+                """,
+                (observation_id, session_id),
+            ).fetchone()
+            if not observation or observation["goal_revision"] is None:
+                raise ValueError("intervention candidate observation has no goal revision")
+            observation_revision = int(observation["goal_revision"])
+            if goal_revision is None:
+                goal_revision = observation_revision
+            if goal_revision != observation_revision:
+                raise ValueError("intervention candidate goal revision does not match its observation")
+            if self._current_goal_revision_in_conn(conn, session_id) != goal_revision:
+                raise ValueError("intervention candidate goal revision is no longer current")
             self._expire_stale_intervention_candidates(conn, session_id, now)
             inserted = conn.execute(
                 """
                 INSERT INTO intervention_candidates (
-                    id, session_id, observation_id, status,
+                    id, session_id, observation_id, goal_revision, status,
                     requested_at, expires_at, updated_at
                 )
-                VALUES (?, ?, ?, 'pending', ?, ?, ?)
+                VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
                 ON CONFLICT(session_id) WHERE status IN ('pending', 'in_flight')
                 DO NOTHING
                 """,
@@ -1977,6 +2109,7 @@ class SQLiteStore:
                     candidate_id,
                     session_id,
                     observation_id,
+                    goal_revision,
                     now.isoformat(),
                     expires_at.isoformat(),
                     now.isoformat(),
@@ -2005,6 +2138,7 @@ class SQLiteStore:
                     "candidate_id": candidate_id,
                     "observation_id": observation_id,
                     "expires_at": expires_at.isoformat(),
+                    "goal_revision": goal_revision,
                 },
                 now,
             )
@@ -2313,6 +2447,7 @@ class SQLiteStore:
             terminal_result["intervention_id"] = intervention_id
         with self._connect() as conn:
             self._ensure_schema(conn)
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT * FROM intervention_candidates WHERE id = ?",
                 (candidate_id,),
@@ -2322,10 +2457,21 @@ class SQLiteStore:
             candidate = self._intervention_candidate_from_row(row)
             if candidate.session_id != session_id or candidate.observation_id != observation_id:
                 raise ValueError("intervention candidate does not match the confirmed observation")
+            if self._current_goal_revision_in_conn(conn, session_id) != candidate.goal_revision:
+                if candidate.status in {"pending", "in_flight"}:
+                    conn.execute(
+                        """
+                        UPDATE intervention_candidates
+                        SET status = 'cancelled', updated_at = ?
+                        WHERE id = ? AND status IN ('pending', 'in_flight')
+                        """,
+                        (now.isoformat(), candidate_id),
+                    )
+                return None
 
             observation = conn.execute(
                 """
-                SELECT observations.verdict, page_labels.label
+                SELECT observations.verdict, observations.goal_revision, page_labels.label
                 FROM observations
                 LEFT JOIN page_labels ON page_labels.observation_id = observations.id
                 WHERE observations.id = ? AND observations.session_id = ?
@@ -2334,6 +2480,8 @@ class SQLiteStore:
             ).fetchone()
             if not observation:
                 raise ValueError("observation not found")
+            if observation["goal_revision"] != candidate.goal_revision:
+                raise ValueError("intervention candidate goal revision does not match its observation")
             verdict = effective_observation_verdict(observation["verdict"], observation["label"])
             if verdict != "DRIFT":
                 self._cancel_active_intervention_candidates_for_observation_in_conn(
@@ -2486,7 +2634,7 @@ class SQLiteStore:
             row = conn.execute(
                 """
                 SELECT id, session_id, ts, source, url_host, url_path_hash, title, tab_id,
-                       features_json, verdict, tier_reached, tier1_reason
+                       features_json, verdict, tier_reached, tier1_reason, goal_revision
                 FROM observations
                 WHERE id = ?
                 """,
@@ -2494,19 +2642,26 @@ class SQLiteStore:
             ).fetchone()
         return self._observation_from_row(row) if row else None
 
-    def latest_observation_for_tab(self, session_id: str, tab_id: int) -> ObservationRecord | None:
+    def latest_observation_for_tab(
+        self,
+        session_id: str,
+        tab_id: int,
+        goal_revision: int | None = None,
+    ) -> ObservationRecord | None:
         with self._connect() as conn:
             self._ensure_schema(conn)
+            if goal_revision is None:
+                goal_revision = self._current_goal_revision_in_conn(conn, session_id)
             row = conn.execute(
                 """
                 SELECT id, session_id, ts, source, url_host, url_path_hash, title, tab_id,
-                       features_json, verdict, tier_reached, tier1_reason
+                       features_json, verdict, tier_reached, tier1_reason, goal_revision
                 FROM observations
-                WHERE session_id = ? AND tab_id = ?
+                WHERE session_id = ? AND tab_id = ? AND goal_revision IS ?
                 ORDER BY ts DESC, id DESC
                 LIMIT 1
                 """,
-                (session_id, tab_id),
+                (session_id, tab_id, goal_revision),
             ).fetchone()
         return self._observation_from_row(row) if row else None
 
@@ -2521,12 +2676,23 @@ class SQLiteStore:
         now = ts or _utc_now()
         with self._connect() as conn:
             self._ensure_schema(conn)
+            conn.execute("BEGIN IMMEDIATE")
             observation = conn.execute(
-                "SELECT features_json FROM observations WHERE id = ? AND session_id = ?",
+                """
+                SELECT features_json, goal_revision
+                FROM observations
+                WHERE id = ? AND session_id = ?
+                """,
                 (observation_id, session_id),
             ).fetchone()
             if not observation:
                 raise ValueError("observation not found")
+
+            current_revision = self._current_goal_revision_in_conn(conn, session_id)
+            observation_is_current = (
+                observation["goal_revision"] is not None
+                and int(observation["goal_revision"]) == current_revision
+            )
 
             if label == "related":
                 features = json.loads(observation["features_json"])
@@ -2563,7 +2729,7 @@ class SQLiteStore:
                 now,
             )
 
-            if label == "related":
+            if label == "related" and observation_is_current:
                 self._cancel_active_intervention_candidates_for_observation_in_conn(
                     conn,
                     session_id,
@@ -2572,7 +2738,7 @@ class SQLiteStore:
                 )
 
             exemplar_count: int | None = None
-            if label == "related":
+            if label == "related" and observation_is_current:
                 exemplar_count, exemplar_id = self._add_goal_exemplar_from_observation(
                     conn,
                     session_id,
@@ -2591,7 +2757,7 @@ class SQLiteStore:
                         exemplar_cap,
                         now,
                     )
-            else:
+            elif label == "drift":
                 conn.execute(
                     "DELETE FROM goal_exemplars WHERE session_id = ? AND observation_id = ?",
                     (session_id, observation_id),
@@ -2666,6 +2832,7 @@ class SQLiteStore:
     def controller_replay_timeline(self, session_id: str) -> list[ControllerReplayEvent]:
         with self._connect() as conn:
             self._ensure_schema(conn)
+            goal_revision = self._current_goal_revision_in_conn(conn, session_id)
             rows = conn.execute(
                 """
                 SELECT kind, ts, sort_order, sort_id, observation_id, verdict, features_json, label
@@ -2676,17 +2843,20 @@ class SQLiteStore:
                            page_labels.label AS label
                     FROM observations
                     LEFT JOIN page_labels ON page_labels.observation_id = observations.id
-                    WHERE observations.session_id = ?
+                    WHERE observations.session_id = ? AND observations.goal_revision IS ?
                     UNION ALL
                     SELECT 'intervention' AS kind, interventions.ts AS ts, 1 AS sort_order,
                            interventions.id AS sort_id, interventions.observation_id AS observation_id,
                            NULL AS verdict, NULL AS features_json, NULL AS label
                     FROM interventions
+                    JOIN observations AS intervention_observations
+                      ON intervention_observations.id = interventions.observation_id
                     WHERE interventions.session_id = ?
+                      AND intervention_observations.goal_revision IS ?
                 )
                 ORDER BY ts ASC, sort_order ASC, sort_id ASC
                 """,
-                (session_id, session_id),
+                (session_id, goal_revision, session_id, goal_revision),
             ).fetchall()
 
         events: list[ControllerReplayEvent] = []
@@ -2794,7 +2964,7 @@ class SQLiteStore:
             rows = conn.execute(
                 """
                 SELECT id, session_id, ts, source, url_host, url_path_hash, title, tab_id,
-                       features_json, verdict, tier_reached, tier1_reason
+                       features_json, verdict, tier_reached, tier1_reason, goal_revision
                 FROM observations
                 WHERE session_id = ?
                 ORDER BY ts ASC, id ASC
@@ -2803,15 +2973,23 @@ class SQLiteStore:
             ).fetchall()
         return [self._observation_from_row(row) for row in rows]
 
-    def recent_ok_embeddings(self, session_id: str, limit: int) -> list[list[float]]:
+    def recent_ok_embeddings(
+        self,
+        session_id: str,
+        limit: int,
+        goal_revision: int | None = None,
+    ) -> list[list[float]]:
         with self._connect() as conn:
             self._ensure_schema(conn)
+            if goal_revision is None:
+                goal_revision = self._current_goal_revision_in_conn(conn, session_id)
             rows = conn.execute(
                 """
                 SELECT observations.features_json, page_labels.label
                 FROM observations
                 LEFT JOIN page_labels ON page_labels.observation_id = observations.id
                 WHERE observations.session_id = ?
+                  AND observations.goal_revision IS ?
                   AND CASE page_labels.label
                         WHEN 'related' THEN 'OK'
                         WHEN 'drift' THEN 'DRIFT'
@@ -2820,7 +2998,7 @@ class SQLiteStore:
                 ORDER BY observations.ts DESC, observations.id DESC
                 LIMIT ?
                 """,
-                (session_id, limit),
+                (session_id, goal_revision, limit),
             ).fetchall()
 
         embeddings: list[list[float]] = []
@@ -2853,8 +3031,13 @@ class SQLiteStore:
             ).fetchall()
         return [row["title"] for row in rows]
 
-    def anchor_value(self, session_id: str, limit: int) -> list[float] | None:
-        embeddings = self.recent_ok_embeddings(session_id, limit)
+    def anchor_value(
+        self,
+        session_id: str,
+        limit: int,
+        goal_revision: int | None = None,
+    ) -> list[float] | None:
+        embeddings = self.recent_ok_embeddings(session_id, limit, goal_revision)
         if not embeddings:
             return None
         width = len(embeddings[0])
@@ -2864,9 +3047,16 @@ class SQLiteStore:
                 sums[index] += value
         return [value / len(embeddings) for value in sums]
 
-    def recent_observation_summaries(self, session_id: str, limit: int) -> list[ObservationSummary]:
+    def recent_observation_summaries(
+        self,
+        session_id: str,
+        limit: int,
+        goal_revision: int | None = None,
+    ) -> list[ObservationSummary]:
         with self._connect() as conn:
             self._ensure_schema(conn)
+            if goal_revision is None:
+                goal_revision = self._current_goal_revision_in_conn(conn, session_id)
             rows = conn.execute(
                 """
                 SELECT observations.title,
@@ -2878,10 +3068,11 @@ class SQLiteStore:
                 FROM observations
                 LEFT JOIN page_labels ON page_labels.observation_id = observations.id
                 WHERE observations.session_id = ?
+                  AND observations.goal_revision IS ?
                 ORDER BY observations.ts DESC, observations.id DESC
                 LIMIT ?
                 """,
-                (session_id, limit),
+                (session_id, goal_revision, limit),
             ).fetchall()
         return [
             ObservationSummary(title=row["title"], verdict=row["verdict"])
@@ -3082,7 +3273,8 @@ class SQLiteStore:
                 keywords_json TEXT NOT NULL DEFAULT '[]',
                 provenance TEXT NOT NULL CHECK (provenance = 'declared'),
                 updated_at TEXT NOT NULL,
-                available_time_minutes INTEGER
+                available_time_minutes INTEGER,
+                goal_revision INTEGER NOT NULL DEFAULT 1
             );
 
             CREATE TABLE IF NOT EXISTS goal_exemplars (
@@ -3098,6 +3290,7 @@ class SQLiteStore:
             CREATE TABLE IF NOT EXISTS goal_derived_exemplars (
                 id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                goal_revision INTEGER NOT NULL,
                 position INTEGER NOT NULL,
                 phrase TEXT NOT NULL,
                 vector_json TEXT NOT NULL,
@@ -3116,7 +3309,8 @@ class SQLiteStore:
                 tab_id INTEGER,
                 features_json TEXT NOT NULL DEFAULT '{}',
                 verdict TEXT,
-                tier_reached INTEGER
+                tier_reached INTEGER,
+                goal_revision INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS observation_requests (
@@ -3149,6 +3343,7 @@ class SQLiteStore:
                 id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
                 observation_id TEXT NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+                goal_revision INTEGER NOT NULL,
                 status TEXT NOT NULL CHECK (
                     status IN ('pending', 'in_flight', 'confirmed', 'cancelled', 'expired')
                 ),
@@ -3260,10 +3455,11 @@ class SQLiteStore:
             ON intervention_candidates(observation_id, requested_at DESC);
             """
         )
+        self._ensure_goal_columns(conn)
         self._ensure_observation_columns(conn)
         self._ensure_intervention_candidate_columns(conn)
+        self._ensure_goal_derived_exemplar_columns(conn)
         self._ensure_controller_columns(conn)
-        self._ensure_goal_columns(conn)
         self._ensure_goal_exemplar_columns(conn)
         self._ensure_drift_clock_columns(conn)
         conn.execute(
@@ -3272,6 +3468,23 @@ class SQLiteStore:
             ON observations(session_id, tab_id, ts DESC, id DESC)
             """
         )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_observations_session_revision_recent
+            ON observations(session_id, goal_revision, ts DESC, id DESC)
+            """
+        )
+
+    def _current_goal_revision_in_conn(
+        self,
+        conn: sqlite3.Connection,
+        session_id: str,
+    ) -> int | None:
+        row = conn.execute(
+            "SELECT goal_revision FROM goals WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        return int(row["goal_revision"]) if row else None
 
     def _append_event(
         self,
@@ -3331,6 +3544,7 @@ class SQLiteStore:
         return row
 
     def _goal_from_row(self, row: sqlite3.Row) -> GoalRecord:
+        goal_revision = int(row["goal_revision"])
         return GoalRecord(
             session_id=row["session_id"],
             raw_text=row["raw_text"],
@@ -3338,8 +3552,9 @@ class SQLiteStore:
             exemplars=self.get_goal_exemplars(row["session_id"]),
             provenance=row["provenance"],
             updated_at=_parse_dt(row["updated_at"]),
+            goal_revision=goal_revision,
             available_time_minutes=row["available_time_minutes"],
-            derived_exemplars=self.get_goal_derived_exemplars(row["session_id"]),
+            derived_exemplars=self.get_goal_derived_exemplars(row["session_id"], goal_revision),
         )
 
     def _observation_from_row(self, row: sqlite3.Row) -> ObservationRecord:
@@ -3356,6 +3571,7 @@ class SQLiteStore:
             verdict=row["verdict"],
             tier_reached=row["tier_reached"],
             tier1_reason=row["tier1_reason"],
+            goal_revision=int(row["goal_revision"]) if row["goal_revision"] is not None else None,
         )
 
     def _excerpt_from_row(self, row: sqlite3.Row) -> ObservationExcerptRecord:
@@ -3383,6 +3599,7 @@ class SQLiteStore:
             id=row["id"],
             session_id=row["session_id"],
             observation_id=row["observation_id"],
+            goal_revision=int(row["goal_revision"]),
             status=row["status"],
             requested_at=_parse_dt(row["requested_at"]),
             expires_at=_parse_dt(row["expires_at"]),
@@ -3464,6 +3681,19 @@ class SQLiteStore:
             conn.execute("ALTER TABLE observations ADD COLUMN tab_id INTEGER")
         if "tier1_reason" not in columns:
             conn.execute("ALTER TABLE observations ADD COLUMN tier1_reason TEXT")
+        if "goal_revision" not in columns:
+            conn.execute("ALTER TABLE observations ADD COLUMN goal_revision INTEGER")
+            conn.execute(
+                """
+                UPDATE observations
+                SET goal_revision = (
+                    SELECT goals.goal_revision
+                    FROM goals
+                    WHERE goals.session_id = observations.session_id
+                )
+                WHERE goal_revision IS NULL
+                """
+            )
 
     def _ensure_intervention_candidate_columns(self, conn: sqlite3.Connection) -> None:
         columns = {
@@ -3471,6 +3701,23 @@ class SQLiteStore:
         }
         if "result_json" not in columns:
             conn.execute("ALTER TABLE intervention_candidates ADD COLUMN result_json TEXT")
+        if "goal_revision" not in columns:
+            conn.execute(
+                "ALTER TABLE intervention_candidates ADD COLUMN goal_revision INTEGER NOT NULL DEFAULT 1"
+            )
+            conn.execute(
+                """
+                UPDATE intervention_candidates
+                SET goal_revision = COALESCE(
+                    (
+                        SELECT observations.goal_revision
+                        FROM observations
+                        WHERE observations.id = intervention_candidates.observation_id
+                    ),
+                    1
+                )
+                """
+            )
 
     def _ensure_controller_columns(self, conn: sqlite3.Connection) -> None:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(controller_states)").fetchall()}
@@ -3483,6 +3730,30 @@ class SQLiteStore:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(goals)").fetchall()}
         if "available_time_minutes" not in columns:
             conn.execute("ALTER TABLE goals ADD COLUMN available_time_minutes INTEGER")
+        if "goal_revision" not in columns:
+            conn.execute("ALTER TABLE goals ADD COLUMN goal_revision INTEGER NOT NULL DEFAULT 1")
+
+    def _ensure_goal_derived_exemplar_columns(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(goal_derived_exemplars)").fetchall()
+        }
+        if "goal_revision" not in columns:
+            conn.execute(
+                "ALTER TABLE goal_derived_exemplars ADD COLUMN goal_revision INTEGER NOT NULL DEFAULT 1"
+            )
+            conn.execute(
+                """
+                UPDATE goal_derived_exemplars
+                SET goal_revision = COALESCE(
+                    (
+                        SELECT goals.goal_revision
+                        FROM goals
+                        WHERE goals.session_id = goal_derived_exemplars.session_id
+                    ),
+                    1
+                )
+                """
+            )
 
     def _ensure_drift_clock_columns(self, conn: sqlite3.Connection) -> None:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(drift_clock_states)").fetchall()}

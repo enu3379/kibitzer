@@ -45,6 +45,17 @@ class FixedEmbeddingProvider:
         return [vectors.get(text, [0.0, 0.0, 1.0]) for text in texts]
 
 
+class BlockingGoalProvider:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def complete_goal_enrichment(self, prompt: str, timeout_seconds: float) -> str:
+        self.started.set()
+        await self.release.wait()
+        return '{"phrases":["late old goal phrase"]}'
+
+
 class GoalEnrichmentTest(unittest.IsolatedAsyncioTestCase):
     def test_prompt_and_strict_parse(self) -> None:
         prompt = build_goal_enrichment_prompt("마인크래프트 크리에이트모드", 8)
@@ -105,11 +116,12 @@ class GoalEnrichmentTest(unittest.IsolatedAsyncioTestCase):
             store = SQLiteStore(db_path)
             store.initialize()
             session = store.create_session()
-            store.set_current_goal("Kibitzer observation API", exemplar=[1.0, 0.0])
+            goal = store.set_current_goal("Kibitzer observation API", exemplar=[1.0, 0.0])
 
             await enrich_goal_derived_exemplars(
                 session_id=session.id,
                 goal_text="Kibitzer observation API",
+                goal_revision=goal.goal_revision,
                 provider=FakeGoalProvider(["not json", "still not json"]),
                 embedding_provider=HashCpuEmbeddingProvider(dimensions=16),
                 store=store,
@@ -133,11 +145,12 @@ class GoalEnrichmentTest(unittest.IsolatedAsyncioTestCase):
             store = SQLiteStore(db_path)
             store.initialize()
             session = store.create_session()
-            store.set_current_goal("Kibitzer observation API", exemplar=[1.0, 0.0])
+            goal = store.set_current_goal("Kibitzer observation API", exemplar=[1.0, 0.0])
 
             await enrich_goal_derived_exemplars(
                 session_id=session.id,
                 goal_text="Kibitzer observation API",
+                goal_revision=goal.goal_revision,
                 provider=FakeGoalProvider(['{"phrases":["Kibitzer API docs","browser observation API"]}']),
                 embedding_provider=HashCpuEmbeddingProvider(dimensions=16),
                 store=store,
@@ -146,6 +159,41 @@ class GoalEnrichmentTest(unittest.IsolatedAsyncioTestCase):
 
             current = store.get_current_session()
             self.assertEqual(current.goal.derived_phrases, ["Kibitzer API docs", "browser observation API"])
+
+    async def test_late_enrichment_cannot_overwrite_a_new_goal_revision(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "kibitzer.sqlite3"
+            store = SQLiteStore(db_path)
+            store.initialize()
+            session = store.create_session()
+            first_goal = store.set_current_goal("old goal", exemplar=[1.0, 0.0])
+            provider = BlockingGoalProvider()
+            task = asyncio.create_task(
+                enrich_goal_derived_exemplars(
+                    session_id=session.id,
+                    goal_text=first_goal.raw_text,
+                    goal_revision=first_goal.goal_revision,
+                    provider=provider,
+                    embedding_provider=FixedEmbeddingProvider(),
+                    store=store,
+                    config=GoalEnrichmentConfig(enabled=True, max_phrases=8),
+                )
+            )
+            await provider.started.wait()
+            second_goal = store.set_current_goal("new goal", exemplar=[0.0, 1.0])
+            provider.release.set()
+
+            await task
+
+            current = store.get_current_session()
+            self.assertEqual(second_goal.goal_revision, first_goal.goal_revision + 1)
+            self.assertEqual(current.goal.goal_revision, second_goal.goal_revision)
+            self.assertEqual(current.goal.derived_exemplars, [])
+            with closing(sqlite3.connect(db_path)) as conn:
+                enriched_events = conn.execute(
+                    "SELECT COUNT(*) FROM event_log WHERE event_type = 'goal.enriched'"
+                ).fetchone()[0]
+            self.assertEqual(enriched_events, 0)
 
 
 class GoalEnrichmentCorpusRegressionTest(unittest.TestCase):

@@ -432,7 +432,12 @@ async def set_current_goal(request: Request, body: GoalRequest) -> GoalResponse:
             exemplar,
             available_time_minutes=body.available_time_minutes,
         )
-        _schedule_goal_enrichment(request, goal.session_id, goal.raw_text)
+        _schedule_goal_enrichment(
+            request,
+            goal.session_id,
+            goal.raw_text,
+            goal.goal_revision,
+        )
     except NoActiveSessionError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
@@ -447,7 +452,12 @@ async def set_current_goal(request: Request, body: GoalRequest) -> GoalResponse:
     )
 
 
-def _schedule_goal_enrichment(request: Request, session_id: str, goal_text: str) -> None:
+def _schedule_goal_enrichment(
+    request: Request,
+    session_id: str,
+    goal_text: str,
+    goal_revision: int,
+) -> None:
     config = request.app.state.config.goal_enrichment
     if not config.enabled:
         return
@@ -459,12 +469,14 @@ def _schedule_goal_enrichment(request: Request, session_id: str, goal_text: str)
             await enrich_goal_derived_exemplars(
                 session_id=session_id,
                 goal_text=goal_text,
+                goal_revision=goal_revision,
                 provider=runtime.tier1_provider(),
                 embedding_provider=runtime.embedding_provider(),
                 store=store,
                 config=config,
             )
         except Exception as exc:
-            store.record_goal_enrichment_failed(session_id, type(exc).__name__)
+            if store.goal_revision_is_current(session_id, goal_revision):
+                store.record_goal_enrichment_failed(session_id, type(exc).__name__)
 
     asyncio.create_task(_run())
