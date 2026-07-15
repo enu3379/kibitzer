@@ -34,6 +34,7 @@ class _ResolvedJudgeSettings:
     model: str
     timeout_seconds: float
     max_output_tokens: int
+    writer_max_output_tokens: int
 
 
 def create_tier1_judge_provider(config: Tier1Config) -> JudgeProvider | None:
@@ -50,6 +51,7 @@ def create_tier1_judge_provider(config: Tier1Config) -> JudgeProvider | None:
             default_model=config.model,
             timeout_seconds=config.timeout_seconds,
             max_output_tokens=128,
+            writer_max_output_tokens=1024,
             # Tier 1 sits on the observation hot path: the config timeout caps
             # latency instead of the generation-oriented timeout in the models file.
             use_model_file_timeout=False,
@@ -104,6 +106,7 @@ def _build_judge(settings: _ResolvedJudgeSettings) -> JudgeProvider:
             model=settings.model,
             timeout_seconds=settings.timeout_seconds,
             max_output_tokens=settings.max_output_tokens,
+            writer_max_output_tokens=settings.writer_max_output_tokens,
         )
     if settings.provider == "ollama_chat":
         return OllamaChatJudgeProvider(
@@ -114,6 +117,7 @@ def _build_judge(settings: _ResolvedJudgeSettings) -> JudgeProvider:
             model=settings.model,
             timeout_seconds=settings.timeout_seconds,
             max_output_tokens=settings.max_output_tokens,
+            writer_max_output_tokens=settings.writer_max_output_tokens,
         )
     raise JudgeProviderConfigError(field="provider", error_type="ValueError")
 
@@ -173,6 +177,7 @@ def _resolve_direct_tier2_settings(config: Tier2Config) -> _ResolvedJudgeSetting
         model=config.model,
         timeout_seconds=config.timeout_seconds,
         max_output_tokens=config.max_output_tokens,
+        writer_max_output_tokens=config.writer_max_output_tokens,
     )
 
 
@@ -186,6 +191,7 @@ def _resolve_experiment_settings(config: Tier2Config) -> _ResolvedJudgeSettings 
         default_model=config.model,
         timeout_seconds=config.timeout_seconds,
         max_output_tokens=config.max_output_tokens,
+        writer_max_output_tokens=config.writer_max_output_tokens,
         use_model_file_timeout=True,
     )
 
@@ -198,6 +204,7 @@ def _resolve_experiment_model_settings(
     default_model: str,
     timeout_seconds: float,
     max_output_tokens: int,
+    writer_max_output_tokens: int,
     use_model_file_timeout: bool,
     api_key_pool_envs: list[str] | None = None,
 ) -> _ResolvedJudgeSettings | None:
@@ -256,6 +263,11 @@ def _resolve_experiment_model_settings(
         "max_output_tokens",
         max_output_tokens,
     )
+    resolved_writer_max_tokens = _positive_int_setting(
+        model_config,
+        "writer_max_output_tokens",
+        writer_max_output_tokens,
+    )
 
     if not api_url or not api_key or not model:
         return None
@@ -270,6 +282,7 @@ def _resolve_experiment_model_settings(
         model=model,
         timeout_seconds=resolved_timeout,
         max_output_tokens=resolved_max_tokens,
+        writer_max_output_tokens=resolved_writer_max_tokens,
     )
 
 

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from unittest import mock
 
-from apps.server.tests.support import TestClient
+from apps.server.tests.support import AlwaysNotifyTier2Provider, TestClient
 
 from apps.server.app.config import AppConfig, ControllerConfig, GoalEnrichmentConfig, ServerConfig, Tier1Config, Tier2Config
 from apps.server.app.core.goal_enrichment import DerivedPhrase
@@ -85,6 +85,7 @@ class ReplayCliTest(unittest.TestCase):
                 store=store,
                 embedding_provider=embedding_provider,
                 tier1_provider=tier1_provider,
+                tier2_provider=AlwaysNotifyTier2Provider(),
             )
         )
         client.__enter__()

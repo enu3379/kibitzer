@@ -88,6 +88,7 @@ class DataDeletionTest(unittest.TestCase):
             "page_labels",
             "observation_excerpts",
             "drift_clock_states",
+            "d7_prepared_reviews",
             "dwell_presence_events",
             "drift_page_dwell_states",
         )

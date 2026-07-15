@@ -52,9 +52,10 @@ tier2:
   api_key_pool_envs: ["ollama2", "ollama3", "ollama1"]
   model: "minimax-m3"
   timeout_seconds: 180
-  recent_observations: 5
+  recent_observations: 30
   excerpt_char_limit: 3000
-  max_output_tokens: 512
+  max_output_tokens: 4096
+  writer_max_output_tokens: 1024
   experiment_models_file: "configs/models.local.yaml"
   experiment_model_key: "tier2_judge"
 

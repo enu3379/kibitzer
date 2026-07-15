@@ -1,5 +1,45 @@
 # Progress
 
+## 2026-07-16 Tier 2 Context Judge / Message Writer split
+
+Completed:
+
+- Confirmed that the complete D7 time-budget work landed through PR #49 and
+  based the follow-up on current `dev` rather than the deleted feature branch.
+- Replaced D7's parallel title/content judgments with one combined Context
+  Judge and a conditional plain-text persona Writer.
+- Expanded recent title context from five to 30 with consecutive duplicate
+  compression; kept bounded recent excerpts and D7 time clocks in the Judge.
+- Removed persona/nagging context from judgment and kept excerpts out of the
+  Writer, preserving both decision independence and the over-the-shoulder
+  persona privacy boundary.
+- Set the code-default Judge/Writer output budgets to 4096/1024 with
+  backward-compatible experiment-model settings and kept API-key rotation per
+  HTTP call. The local MiniMax M3 profile uses Writer 2048 after the v5 audit.
+- Changed Judge failure to conservative defer, Writer failure to local persona
+  fallback, and provider health to one logical outcome per review so a later
+  successful review clears an older error.
+- Added one canonical prompt-injection trust boundary shared by the Judge,
+  Writer, and legacy provider fallbacks; browser/user payload values cannot
+  change the task or extract the system/persona layers.
+- Treat output-budget saturation as Writer failure (`eval_count` for Ollama,
+  `finish_reason=length` for OpenAI-compatible responses), and fixed sentence
+  clamping for punctuation without following whitespace while preserving
+  domains and decimals.
+- Added threshold-ahead D7 orchestration: the server returns a targeted
+  `threshold - 30 s` scheduling hint, runs Judge/Writer with clock inputs
+  projected to the threshold in a detached server task, persists the result,
+  and commits it only on a threshold presence after revalidating page, goal,
+  verdict, and eligibility. Slow generation is polled without holding the MV3
+  request open.
+- Added restart-safe one-shot extension alarms with short in-memory timers for
+  sub-30-second precision; the existing minute heartbeat remains the fallback.
+
+Verified after rebasing onto latest `dev`:
+
+- `python -m pytest apps/server/tests -q`: 238 passed, 1 skipped, 35 subtests.
+- `apps/extension` `npm run build`: 37 unit tests, typecheck, and bundle passed.
+
 ## 2026-07-15 D7 time-budget drift review fixes
 
 Completed:

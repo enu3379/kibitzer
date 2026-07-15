@@ -7,15 +7,16 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from ..providers.judges.base import (
+    TIER2_JUDGE_SYSTEM_PROMPT,
+    TIER2_LEGACY_SYSTEM_PROMPT,
+    TIER2_WRITER_SYSTEM_PROMPT,
+)
 from ..storage.sqlite import GoalRecord, ObservationRecord
 
 
-TIER2_SYSTEM_PROMPT = (
-    "You are Kibitzer, a quiet browser drift guard. Decide whether the current page is truly "
-    "off-goal after reading the minimized payload and page excerpt. Return strict JSON only: "
-    '{"confirm_drift":true|false,"message":"<=2 short Korean sentences if true, else empty string"}. '
-    "Confirm drift only when the excerpt is not useful for the declared goal."
-)
+# Historical name retained for compatibility with the legacy combined Tier-2 call.
+TIER2_SYSTEM_PROMPT = TIER2_LEGACY_SYSTEM_PROMPT
 
 
 class PersonaVoice(BaseModel):
@@ -54,6 +55,9 @@ def load_personas(
 
     personas: dict[str, Persona] = {}
     personas.update(_validated_personas(base_data.get("personas"), str(Path(path).expanduser()), logger))
+    for fragment_path in _persona_fragment_paths(path):
+        fragment = _read_persona_yaml(fragment_path, missing_ok=True)
+        personas.update(_validated_personas(_fragment_personas(fragment), str(fragment_path), logger))
     if user_path:
         personas.update(_validated_personas(user_data.get("personas"), str(Path(user_path).expanduser()), logger))
 
@@ -70,6 +74,23 @@ def compose_tier2_system_prompt(persona: Persona) -> str:
     if not style_prompt:
         return TIER2_SYSTEM_PROMPT
     return f"{TIER2_SYSTEM_PROMPT}\n\nPersona style layer:\n{style_prompt}"
+
+
+def compose_tier2_judge_system_prompt() -> str:
+    return TIER2_JUDGE_SYSTEM_PROMPT
+
+
+def compose_tier2_writer_system_prompt(persona: Persona | None) -> str:
+    if not persona:
+        return TIER2_WRITER_SYSTEM_PROMPT
+    style_prompt = persona.style_prompt.strip()
+    if not style_prompt:
+        return TIER2_WRITER_SYSTEM_PROMPT
+    return (
+        f"{TIER2_WRITER_SYSTEM_PROMPT}\n\n"
+        "The persona style layer below owns voice, tone, and forbidden expressions.\n"
+        f"Persona style layer:\n{style_prompt}"
+    )
 
 
 def resolve_persona(
@@ -115,6 +136,26 @@ def format_celebration_template(template: str, goal: GoalRecord, return_minutes:
         return template.format(**values)
     except Exception:
         return None
+
+
+def _persona_fragment_paths(base_path: str | Path) -> list[Path]:
+    directory = Path(base_path).expanduser().with_suffix("")
+    if not directory.is_dir():
+        return []
+    return sorted(
+        entry
+        for entry in directory.iterdir()
+        if entry.is_file() and entry.suffix in (".yaml", ".yml")
+    )
+
+
+def _fragment_personas(data: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return {}
+    nested = data.get("personas")
+    if isinstance(nested, dict):
+        return nested
+    return data
 
 
 def _read_persona_yaml(path: str | Path | None, missing_ok: bool) -> dict[str, Any]:

@@ -1,6 +1,8 @@
 # Kibitzer Chrome Extension
 
 The extension is a Chrome MV3 event relay and delivery surface.
+Chrome 120 or newer is required so D7 can use 30-second alarms that match the
+MV3 service-worker lifecycle.
 
 ## Build
 

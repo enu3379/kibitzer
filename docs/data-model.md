@@ -73,6 +73,7 @@ observation_processing_states
 controller_states
 drift_clock_states
 drift_page_dwell_states
+d7_prepared_reviews
 observation_excerpts
 dwell_presence_events
 intervention_candidates
@@ -100,6 +101,12 @@ review boundary, and a timestamped review lock. `drift_page_dwell_states`
 retains the per-page dwell totals needed to survive tab flips within the
 current episode. `dwell_presence_events` keeps presence event IDs only for
 duplicate suppression. Both helper tables are pruned when the session ends.
+`d7_prepared_reviews` stores at most one queued or prepared threshold-gated
+Tier-2 outcome for the session: observation and goal revision, delivery
+boundary, then the typed decision, optional generated message, and projected
+review clocks once generation finishes. It remains protected
+by the `drift_clock_states` review lock and is deleted on delivery, defer,
+invalidation, clock reset, or session end.
 
 ## Interventions and Feedback
 

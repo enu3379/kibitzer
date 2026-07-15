@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ..config import Tier2Config
+from ..providers.judges.base import Tier2Decision
 from ..schemas import PageExcerpt
 from ..storage.sqlite import GoalRecord, ObservationContentSummary, ObservationRecord, ObservationSummary
 
@@ -12,7 +13,29 @@ def build_tier2_payload(
     excerpt: PageExcerpt,
     config: Tier2Config,
 ) -> dict[str, object]:
-    return {
+    return build_tier2_review_payload(
+        goal,
+        observation,
+        recent,
+        excerpt.text,
+        [],
+        None,
+        config,
+    )
+
+
+def build_tier2_review_payload(
+    goal: GoalRecord,
+    observation: ObservationRecord,
+    recent_titles: list[ObservationSummary],
+    current_excerpt: str | None,
+    recent_content: list[ObservationContentSummary],
+    time_context: dict[str, object] | None,
+    config: Tier2Config,
+) -> dict[str, object]:
+    cleaned_excerpt = _clean_excerpt(current_excerpt or "", config.excerpt_char_limit)
+    payload: dict[str, object] = {
+        "review_kind": "combined",
         "goal": goal.raw_text,
         "current": {
             "title": observation.title,
@@ -20,14 +43,76 @@ def build_tier2_payload(
             "verdict": observation.verdict,
             "tier_reached": observation.tier_reached,
             "tier0_score": observation.features.get("r0"),
+            "page_excerpt": cleaned_excerpt or None,
         },
-        "recent": [
-            {"title": item.title, "verdict": item.verdict}
-            for item in recent
-            if item.title or item.verdict
+        "recent_titles": compress_recent_titles(recent_titles),
+        "recent_pages": [
+            {
+                "title": item.title,
+                "verdict": item.verdict,
+                "page_excerpt": item.text,
+            }
+            for item in recent_content
+            if item.text
         ],
-        "page_excerpt": _clean_excerpt(excerpt.text, config.excerpt_char_limit),
+        "repeat_signals": {
+            "current_title_recent_visits": sum(
+                1
+                for item in recent_titles
+                if observation.title and item.title == observation.title
+            ),
+        },
     }
+    if time_context is not None:
+        payload["time_budget"] = time_context
+    return payload
+
+
+def build_tier2_message_payload(
+    goal: GoalRecord,
+    observation: ObservationRecord,
+    decision: Tier2Decision,
+    time_context: dict[str, object] | None,
+    nagging_context: dict[str, object],
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "goal": goal.raw_text,
+        "current": {
+            "title": observation.title,
+            "url_host": observation.url_host,
+        },
+        "judgment": {
+            "decision": decision.decision,
+            "reason_code": decision.reason_code,
+            "basis": decision.basis,
+        },
+        "nagging_context": nagging_context,
+    }
+    if time_context is not None:
+        payload["time_budget"] = time_context
+    return payload
+
+
+def compress_recent_titles(recent: list[ObservationSummary]) -> list[dict[str, object]]:
+    compressed: list[dict[str, object]] = []
+    for item in recent:
+        if not item.title and not item.verdict:
+            continue
+        if (
+            compressed
+            and compressed[-1]["title"] == item.title
+            and compressed[-1]["verdict"] == item.verdict
+        ):
+            compressed[-1]["repeat_count"] = int(compressed[-1]["repeat_count"]) + 1
+            continue
+        compressed.append(
+            {
+                "title": item.title,
+                "verdict": item.verdict,
+                "repeat_count": 1,
+            }
+        )
+    return compressed
 
 
 def build_d7_title_payload(

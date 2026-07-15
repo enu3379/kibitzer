@@ -20,6 +20,7 @@ import {
 } from "./lib/api"
 import { createBadgeRefresher } from "./lib/badgeRefresh"
 import { shouldDropUrl } from "./lib/domainFilter"
+import { D7ReviewScheduler, isD7ReviewAlarmName } from "./lib/d7ReviewScheduler"
 import {
   ExplorationResponseKind,
   ExplorationVerdict,
@@ -103,6 +104,11 @@ const latestObservationTokens = new Map<number, string>()
 const pendingToasts = new Map<string, PendingToast>()
 const activeD7Observations = new Map<number, ActiveD7Observation>()
 let goalObservationTail: Promise<void> = Promise.resolve()
+const d7ReviewScheduler = new D7ReviewScheduler(async (observationId) => {
+  await ensureD7ObservationsRestored()
+  if (![...activeD7Observations.values()].some((item) => item.observationId === observationId)) return
+  await heartbeatD7Observation()
+})
 
 // MV3 tears the service worker down between heartbeat alarms. Without a
 // storage.session copy, every alarm wakes an empty map and takes the
@@ -397,6 +403,16 @@ async function sendD7Presence(
     tab_id: tabId,
     url_path_hash: tracked.urlPathHash,
   })
+  if (
+    kind !== "inactive" &&
+    result?.next_review_check_seconds &&
+    activeD7Observations.get(tabId)?.observationId === tracked.observationId
+  ) {
+    await d7ReviewScheduler.schedule(tracked.observationId, result.next_review_check_seconds)
+    if (activeD7Observations.get(tabId)?.observationId !== tracked.observationId) {
+      await d7ReviewScheduler.clear(tracked.observationId)
+    }
+  }
   if (kind !== "inactive" && result?.action === "notify" && result.message) {
     if (await tabStillActivelyViewed(tabId, tracked.url)) await showNotification(result, tabId)
   }
@@ -407,6 +423,7 @@ async function deactivateD7Observation(tabId: number): Promise<void> {
   const tracked = activeD7Observations.get(tabId)
   if (!tracked) return
   activeD7Observations.delete(tabId)
+  await d7ReviewScheduler.clear(tracked.observationId)
   await persistD7Observations()
   await sendD7Presence(tabId, tracked, "inactive")
 }
@@ -889,6 +906,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     void refreshBadge()
   } else if (alarm.name === D7_HEARTBEAT_ALARM) {
     void heartbeatD7Observation()
+  } else if (isD7ReviewAlarmName(alarm.name)) {
+    void d7ReviewScheduler.handleAlarm(alarm.name)
   } else {
     void dwellScheduler.handleAlarm(alarm.name)
   }

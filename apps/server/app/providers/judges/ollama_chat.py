@@ -7,8 +7,15 @@ from typing import Iterator
 
 import httpx
 
-from .base import Tier1Result, Tier2Result, ordered_api_keys
-from .openai_compatible import parse_tier1_json, parse_tier2_json
+from .base import (
+    TIER2_JUDGE_SYSTEM_PROMPT,
+    TIER2_LEGACY_SYSTEM_PROMPT,
+    Tier1Result,
+    Tier2Decision,
+    Tier2Result,
+    ordered_api_keys,
+)
+from .openai_compatible import parse_tier1_json, parse_tier2_decision_json, parse_tier2_json
 
 
 # Output budgets for the one-shot goal-enrichment call: with thinking disabled
@@ -26,6 +33,7 @@ class OllamaChatJudgeProvider:
     timeout_seconds: float = 120
     fallback_api_key: str | None = None
     max_output_tokens: int = 512
+    writer_max_output_tokens: int = 1024
     # Optional rotation pool: when set (>= 2 keys), each call starts from the
     # next key in the pool and the rest queue up as fallbacks.
     api_keys: tuple[str, ...] | None = None
@@ -74,16 +82,51 @@ class OllamaChatJudgeProvider:
             [
                 {
                     "role": "system",
-                    "content": system_prompt or (
-                        "You are Kibitzer, a quiet browser drift guard. Decide whether the page excerpt is "
-                        "truly off-goal. Return strict JSON only: "
-                        '{"confirm_drift":true|false,"message":"<=2 short Korean sentences if true, else empty string"}.'
-                    ),
+                    "content": system_prompt or TIER2_LEGACY_SYSTEM_PROMPT,
                 },
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ]
         )
         return parse_tier2_json(_message_content(response))
+
+    async def decide_tier2(
+        self,
+        payload: dict[str, object],
+        system_prompt: str | None = None,
+    ) -> Tier2Decision:
+        response = await self._post_chat(
+            [
+                {
+                    "role": "system",
+                    "content": system_prompt or TIER2_JUDGE_SYSTEM_PROMPT,
+                },
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            num_predict=self.max_output_tokens,
+            json_mode=True,
+        )
+        return parse_tier2_decision_json(_message_content(response))
+
+    async def write_tier2_message(
+        self,
+        payload: dict[str, object],
+        system_prompt: str,
+    ) -> str:
+        response = await self._post_chat(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            think=False,
+            num_predict=self.writer_max_output_tokens,
+            json_mode=False,
+        )
+        if _writer_output_budget_exhausted(response, self.writer_max_output_tokens):
+            raise ValueError("tier2 writer response exhausted output budget")
+        content = _message_content(response).strip()
+        if not content:
+            raise ValueError("tier2 writer response was empty")
+        return content[:320]
 
     async def _post_chat(
         self,
@@ -91,14 +134,16 @@ class OllamaChatJudgeProvider:
         timeout_seconds: float | None = None,
         think: bool | None = None,
         num_predict: int | None = None,
+        json_mode: bool = True,
     ) -> dict[str, object]:
         request_body: dict[str, object] = {
             "model": self.model,
             "messages": messages,
             "stream": False,
-            "format": "json",
             "options": {"temperature": 0, "num_predict": num_predict or self.max_output_tokens},
         }
+        if json_mode:
+            request_body["format"] = "json"
         if think is not None:
             request_body["think"] = think
         api_keys = ordered_api_keys(self.api_keys, self.api_key, self.fallback_api_key, self._rotation)
@@ -132,3 +177,13 @@ def _message_content(response: dict[str, object]) -> str:
     if isinstance(response_text, str):
         return response_text
     raise ValueError("Ollama response did not include message content")
+
+
+def _writer_output_budget_exhausted(response: dict[str, object], max_output_tokens: int) -> bool:
+    eval_count = response.get("eval_count")
+    pinned = (
+        isinstance(eval_count, int)
+        and not isinstance(eval_count, bool)
+        and eval_count >= max_output_tokens
+    )
+    return response.get("done_reason") == "length" or pinned

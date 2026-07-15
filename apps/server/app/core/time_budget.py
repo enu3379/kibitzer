@@ -6,6 +6,9 @@ from ..config import TimeBudgetConfig
 from ..storage.sqlite import DriftClockStateRecord
 
 
+TIER2_REVIEW_LEAD_SECONDS = 30
+
+
 @dataclass(frozen=True)
 class TimeBudgetThresholds:
     total_seconds: int
@@ -45,17 +48,37 @@ def review_is_due(
     thresholds: TimeBudgetThresholds,
     event_eligible: bool,
 ) -> bool:
-    if not event_eligible or state.review_observation_id is not None:
-        return False
+    return seconds_until_review_due(state, controller_type, thresholds, event_eligible) == 0
+
+
+def seconds_until_review_due(
+    state: DriftClockStateRecord,
+    controller_type: str,
+    thresholds: TimeBudgetThresholds,
+    event_eligible: bool,
+) -> int | None:
+    """Seconds of continued drift until every review gate can be satisfied.
+
+    The current-page and selected mode clocks advance together while the active
+    page remains DRIFT. ``None`` means no review should be scheduled from this
+    event (for example, coldstart/cooldown or an in-flight review).
+    """
+
+    if (
+        not event_eligible
+        or state.review_observation_id is not None
+        or state.active_verdict != "DRIFT"
+    ):
+        return None
+
+    current_page = state.current_page_drift_seconds
     mode_seconds = mode_clock_seconds(state, controller_type)
-    if state.current_page_drift_seconds < thresholds.per_page_seconds:
-        return False
-    if mode_seconds < state.next_review_mode_seconds:
-        return False
-    return (
-        mode_seconds >= thresholds.total_seconds
-        or state.current_page_drift_seconds >= thresholds.single_page_seconds
-    )
+    per_page_wait = max(0, thresholds.per_page_seconds - current_page)
+    next_boundary_wait = max(0, state.next_review_mode_seconds - mode_seconds)
+    total_wait = max(0, thresholds.total_seconds - mode_seconds)
+    single_page_wait = max(0, thresholds.single_page_seconds - current_page)
+    trigger_wait = min(total_wait, single_page_wait)
+    return max(per_page_wait, next_boundary_wait, trigger_wait)
 
 
 def next_review_boundary(mode_seconds: int, total_seconds: int) -> int:

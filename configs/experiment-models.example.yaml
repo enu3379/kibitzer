@@ -22,12 +22,14 @@ tier1_fast:
   max_output_tokens: 320
 
 tier2_judge:
-  # Tier 2 precise judge + Korean message writer.
+  # Tier 2 context Judge (JSON) + conditional Korean message Writer (plain text).
   api_url: "https://ollama.com/api/chat"
   api_style: "ollama"
   ollama_model: "minimax-m3"
   timeout_sec: 120
-  max_output_tokens: 640
+  # max_output_tokens remains the backward-compatible Judge budget key.
+  max_output_tokens: 4096
+  writer_max_output_tokens: 1024
 
 # Self-hosted Ollama also works (same api_style; local URLs need no API key),
 # as do OpenAI-compatible endpoints:

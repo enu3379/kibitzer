@@ -88,6 +88,9 @@ class PipelineResult(BaseModel):
     intervention_id: str | None = None
     silent: bool = False
     page: PageInfo | None = None
+    # Server-owned scheduling hint for the next D7 pre-review presence check.
+    # It is not a decision deadline and carries no user-facing state.
+    next_review_check_seconds: int | None = Field(default=None, ge=1)
 
 
 class PageExcerpt(BaseModel):

@@ -5,7 +5,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
-from apps.server.tests.support import TestClient
+from apps.server.tests.support import AlwaysNotifyTier2Provider, TestClient
 
 from apps.server.app.config import (
     AppConfig,
@@ -45,7 +45,13 @@ class FeedbackApiTest(unittest.TestCase):
             or ControllerConfig(k=1, coldstart_observations=1, cooldown_seconds=0, snooze_seconds=900),
             intentional_break=BreakConfig(duration_seconds=break_duration_seconds),
         )
-        client = TestClient(create_app(config=config, store=self.store))
+        client = TestClient(
+            create_app(
+                config=config,
+                store=self.store,
+                tier2_provider=AlwaysNotifyTier2Provider(),
+            )
+        )
         client.__enter__()
         return client
 
@@ -267,6 +273,30 @@ class FeedbackApiTest(unittest.TestCase):
     def test_clamp_notification_message_keeps_two_sentences(self) -> None:
         message = "첫 문장입니다. 둘째 문장입니다. 셋째 문장은 잘립니다."
         self.assertEqual(clamp_notification_message(message, 2), "첫 문장입니다. 둘째 문장입니다.")
+
+    def test_clamp_does_not_split_domains_or_decimals(self) -> None:
+        message = "또 youtube.com에 계시네요. 3.6 뢴트겐, 나쁘지 않습니다."
+        self.assertEqual(clamp_notification_message(message, 2), message)
+
+    def test_clamp_treats_stacked_marks_as_one_boundary(self) -> None:
+        self.assertEqual(clamp_notification_message("세이프!! 돌아왔습니다!!", 2), "세이프!! 돌아왔습니다!!")
+        self.assertEqual(clamp_notification_message("하나!! 둘!! 셋!!", 2), "하나!! 둘!!")
+
+    def test_clamp_counts_boundaries_without_following_spaces(self) -> None:
+        self.assertEqual(clamp_notification_message("하나!둘!셋!", 2), "하나! 둘!")
+        self.assertEqual(clamp_notification_message("하나。둘。셋。", 2), "하나。 둘。")
+        self.assertEqual(clamp_notification_message("하나.둘.셋.", 2), "하나. 둘.")
+
+    def test_clamp_keeps_closing_brackets_and_quotes_with_sentence(self) -> None:
+        self.assertEqual(clamp_notification_message("(진짜요?) 다음 문장입니다.", 1), "(진짜요?)")
+        self.assertEqual(
+            clamp_notification_message("\"정말입니다.\" 라고 말했다. 셋째 문장입니다.", 1),
+            "\"정말입니다.\"",
+        )
+
+    def test_clamp_respects_three_sentence_budget(self) -> None:
+        message = "제법이잖아. …차, 착각하지 마, 칭찬 아니야. 원래 했어야 할 일이잖아."
+        self.assertEqual(clamp_notification_message(message, 3), message)
 
 
 if __name__ == "__main__":
