@@ -18,7 +18,7 @@ class RuntimePathsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             try:
                 os.chdir(tmpdir)
-                paths = resolve_runtime_paths(environ={})
+                paths = resolve_runtime_paths(environ={}, platform="darwin")
                 config = load_config(runtime_paths=paths)
             finally:
                 os.chdir(previous_cwd)
