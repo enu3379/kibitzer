@@ -33,6 +33,8 @@ import {
   ExplorationVerdict,
   loadExplorationHistory,
 } from "../lib/history"
+import { completeDashboardSnapshot } from "./dashboardSnapshot"
+import type { DashboardSnapshot } from "./dashboardSnapshot"
 
 const POLL_MS = 2000
 const DEFAULT_OBSERVATION_SECONDS = 5
@@ -73,12 +75,6 @@ const DEV_DIAGNOSTICS_KEY = "kibitzer.devDiagnostics"
 // while the local server is down. Cleared once the server says the session it
 // captured is gone.
 const LAST_SNAPSHOT_KEY = "kibitzer.lastSnapshot"
-
-interface DashboardSnapshot {
-  state: SessionState
-  goalText: string
-  stats: SessionStats | null
-}
 
 let editing = false
 let summary: SessionStats | null = null
@@ -122,6 +118,7 @@ function loadSnapshot(): DashboardSnapshot | null {
     if (!parsed || typeof parsed !== "object") return null
     if (!parsed.state || typeof parsed.state.tracking !== "string") return null
     if (typeof parsed.goalText !== "string") return null
+    if (!parsed.stats || typeof parsed.stats.session_id !== "string") return null
     return parsed
   } catch {
     return null
@@ -241,13 +238,18 @@ async function refresh(): Promise<void> {
     activeTab === null ? Promise.resolve(null) : getLatestObservation(activeTab.id, activeTab.url),
     getSettings(),
   ])
-  const goalText = current?.goal?.raw_text ?? ""
-  currentGoalBudgetMinutes = current?.goal?.available_time_minutes ?? null
-  saveSnapshot({ state: result.state, goalText, stats })
+  const dashboard = completeDashboardSnapshot(result.state, current, stats)
+  if (!dashboard) {
+    handleUnreachable()
+    return
+  }
+  const { snapshot } = dashboard
+  currentGoalBudgetMinutes = dashboard.availableTimeMinutes
+  saveSnapshot(snapshot)
   renderDashboard(
-    result.state,
-    goalText,
-    stats,
+    snapshot.state,
+    snapshot.goalText,
+    snapshot.stats,
     health,
     page,
     false,
