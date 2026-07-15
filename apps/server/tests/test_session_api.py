@@ -31,7 +31,7 @@ class SessionApiTest(unittest.TestCase):
 
         goal_response = self.client.post(
             "/sessions/current/goal",
-            json={"raw_text": "write the Kibitzer observation API", "keywords": ["api"]},
+            json={"raw_text": "write the Kibitzer observation API"},
         )
         self.assertEqual(goal_response.status_code, 200)
         self.assertEqual(goal_response.json()["session_id"], session_id)
@@ -40,7 +40,7 @@ class SessionApiTest(unittest.TestCase):
         current_response = self.client.get("/sessions/current")
         self.assertEqual(current_response.status_code, 200)
         self.assertEqual(current_response.json()["session"]["id"], session_id)
-        self.assertEqual(current_response.json()["goal"]["keywords"], ["api"])
+        self.assertNotIn("keywords", current_response.json()["goal"])
 
         db_path = Path(self.tmpdir.name) / "kibitzer.sqlite3"
         with closing(sqlite3.connect(db_path)) as conn:
@@ -55,6 +55,16 @@ class SessionApiTest(unittest.TestCase):
         response = self.client.post("/sessions/current/goal", json={"raw_text": "no session yet"})
 
         self.assertEqual(response.status_code, 404)
+
+    def test_goal_rejects_removed_keyword_field(self) -> None:
+        self.client.post("/sessions")
+
+        response = self.client.post(
+            "/sessions/current/goal",
+            json={"raw_text": "write the Kibitzer API", "keywords": ["api"]},
+        )
+
+        self.assertEqual(response.status_code, 422)
 
 
 if __name__ == "__main__":

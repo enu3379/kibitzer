@@ -2,7 +2,7 @@ import asyncio
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..core.goal_enrichment import enrich_goal_derived_exemplars
 from ..core.runtime_settings import effective_controller_config
@@ -20,15 +20,15 @@ class SessionResponse(BaseModel):
 
 
 class GoalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     raw_text: str = Field(min_length=1)
-    keywords: list[str] = Field(default_factory=list)
     available_time_minutes: int | None = Field(default=None, ge=1, le=1440)
 
 
 class GoalResponse(BaseModel):
     session_id: str
     raw_text: str
-    keywords: list[str]
     provenance: str
     updated_at: str
     available_time_minutes: int | None = None
@@ -185,7 +185,6 @@ async def get_current_session(request: Request) -> CurrentSessionResponse:
         goal = GoalResponse(
             session_id=current.goal.session_id,
             raw_text=current.goal.raw_text,
-            keywords=current.goal.keywords,
             provenance=current.goal.provenance,
             updated_at=current.goal.updated_at.isoformat(),
             available_time_minutes=current.goal.available_time_minutes,
@@ -428,8 +427,7 @@ async def set_current_goal(request: Request, body: GoalRequest) -> GoalResponse:
         exemplar = await _embed_goal(request, body.raw_text)
         goal = store.set_current_goal(
             body.raw_text,
-            body.keywords,
-            exemplar,
+            exemplar=exemplar,
             available_time_minutes=body.available_time_minutes,
         )
         _schedule_goal_enrichment(
@@ -445,7 +443,6 @@ async def set_current_goal(request: Request, body: GoalRequest) -> GoalResponse:
     return GoalResponse(
         session_id=goal.session_id,
         raw_text=goal.raw_text,
-        keywords=goal.keywords,
         provenance=goal.provenance,
         updated_at=goal.updated_at.isoformat(),
         available_time_minutes=goal.available_time_minutes,

@@ -38,9 +38,9 @@ class SQLiteStoreTest(unittest.TestCase):
 
     def test_set_current_goal_upserts_declared_goal(self) -> None:
         session = self.store.create_session()
-        first = self.store.set_current_goal("  write the paper  ", ["paper"])
-        second = self.store.set_current_goal("revise the talk", ["slides"])
-        unchanged = self.store.set_current_goal("revise the talk", ["slides"])
+        first = self.store.set_current_goal("  write the paper  ")
+        second = self.store.set_current_goal("revise the talk")
+        unchanged = self.store.set_current_goal("revise the talk")
         current = self.store.get_current_session()
 
         self.assertEqual(first.session_id, session.id)
@@ -50,15 +50,16 @@ class SQLiteStoreTest(unittest.TestCase):
         self.assertEqual((first.goal_revision, second.goal_revision), (1, 2))
         self.assertEqual(unchanged.goal_revision, second.goal_revision)
         self.assertEqual(current.goal.raw_text, "revise the talk")
-        self.assertEqual(current.goal.keywords, ["slides"])
 
         with closing(sqlite3.connect(self.db_path)) as conn:
             goals = conn.execute("SELECT COUNT(*) FROM goals WHERE session_id = ?", (session.id,)).fetchone()[0]
+            goal_columns = {row[1] for row in conn.execute("PRAGMA table_info(goals)")}
             goal_events = conn.execute(
                 "SELECT COUNT(*) FROM event_log WHERE session_id = ? AND event_type = 'goal.declared'",
                 (session.id,),
             ).fetchone()[0]
         self.assertEqual(goals, 1)
+        self.assertNotIn("keywords_json", goal_columns)
         self.assertEqual(goal_events, 3)
 
     def test_latest_observation_index_supports_filter_and_order(self) -> None:
@@ -312,7 +313,9 @@ class SQLiteStoreTest(unittest.TestCase):
                 """
             )
 
-        SQLiteStore(legacy_path).initialize()
+        legacy_store = SQLiteStore(legacy_path)
+        legacy_store.initialize()
+        current = legacy_store.get_current_session()
 
         with closing(sqlite3.connect(legacy_path)) as conn:
             revisions = (
@@ -322,6 +325,9 @@ class SQLiteStoreTest(unittest.TestCase):
                 conn.execute("SELECT goal_revision FROM intervention_candidates").fetchone()[0],
             )
         self.assertEqual(revisions, (1, 1, 1, 1))
+        self.assertIsNotNone(current)
+        self.assertIsNotNone(current.goal)
+        self.assertEqual(current.goal.raw_text, "legacy goal")
 
 
 if __name__ == "__main__":

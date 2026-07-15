@@ -51,7 +51,6 @@ class GoalDerivedExemplarRecord:
 class GoalRecord:
     session_id: str
     raw_text: str
-    keywords: list[str]
     exemplars: list[list[float]]
     provenance: str
     updated_at: datetime
@@ -347,7 +346,7 @@ class SQLiteStore:
                 return None
             goal_row = conn.execute(
                 """
-                SELECT session_id, raw_text, keywords_json, provenance, updated_at,
+                SELECT session_id, raw_text, provenance, updated_at,
                        available_time_minutes, goal_revision
                 FROM goals
                 WHERE session_id = ?
@@ -894,7 +893,6 @@ class SQLiteStore:
     def set_current_goal(
         self,
         raw_text: str,
-        keywords: list[str] | None = None,
         exemplar: list[float] | None = None,
         available_time_minutes: int | None = None,
     ) -> GoalRecord:
@@ -904,7 +902,6 @@ class SQLiteStore:
         if available_time_minutes is not None and available_time_minutes < 1:
             raise ValueError("available_time_minutes must be positive")
 
-        keywords = keywords or []
         now = _utc_now()
         now_text = now.isoformat()
         with self._connect() as conn:
@@ -919,7 +916,7 @@ class SQLiteStore:
             session_id = session_row["id"]
             previous_goal = conn.execute(
                 """
-                SELECT raw_text, keywords_json, available_time_minutes, goal_revision
+                SELECT raw_text, available_time_minutes, goal_revision
                 FROM goals
                 WHERE session_id = ?
                 """,
@@ -928,7 +925,6 @@ class SQLiteStore:
             goal_changed = (
                 previous_goal is None
                 or previous_goal["raw_text"] != normalized_goal
-                or json.loads(previous_goal["keywords_json"]) != keywords
                 or previous_goal["available_time_minutes"] != available_time_minutes
             )
             previous_revision = int(previous_goal["goal_revision"]) if previous_goal else 0
@@ -936,13 +932,12 @@ class SQLiteStore:
             conn.execute(
                 """
                 INSERT INTO goals (
-                    session_id, raw_text, keywords_json, provenance, updated_at,
+                    session_id, raw_text, provenance, updated_at,
                     available_time_minutes, goal_revision
                 )
-                VALUES (?, ?, ?, 'declared', ?, ?, ?)
+                VALUES (?, ?, 'declared', ?, ?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET
                     raw_text = excluded.raw_text,
-                    keywords_json = excluded.keywords_json,
                     provenance = excluded.provenance,
                     updated_at = excluded.updated_at,
                     available_time_minutes = excluded.available_time_minutes,
@@ -951,7 +946,6 @@ class SQLiteStore:
                 (
                     session_id,
                     normalized_goal,
-                    json.dumps(keywords),
                     now_text,
                     available_time_minutes,
                     goal_revision,
@@ -975,7 +969,6 @@ class SQLiteStore:
                 "goal.declared",
                 {
                     "raw_text": normalized_goal,
-                    "keywords": keywords,
                     "provenance": "declared",
                     "available_time_minutes": available_time_minutes,
                     "goal_revision": goal_revision,
@@ -986,7 +979,6 @@ class SQLiteStore:
         return GoalRecord(
             session_id=session_id,
             raw_text=normalized_goal,
-            keywords=keywords,
             exemplars=[exemplar] if exemplar is not None else self.get_goal_exemplars(session_id),
             provenance="declared",
             updated_at=now,
@@ -3278,7 +3270,6 @@ class SQLiteStore:
             CREATE TABLE IF NOT EXISTS goals (
                 session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
                 raw_text TEXT NOT NULL,
-                keywords_json TEXT NOT NULL DEFAULT '[]',
                 provenance TEXT NOT NULL CHECK (provenance = 'declared'),
                 updated_at TEXT NOT NULL,
                 available_time_minutes INTEGER,
@@ -3556,7 +3547,6 @@ class SQLiteStore:
         return GoalRecord(
             session_id=row["session_id"],
             raw_text=row["raw_text"],
-            keywords=json.loads(row["keywords_json"]),
             exemplars=self.get_goal_exemplars(row["session_id"]),
             provenance=row["provenance"],
             updated_at=_parse_dt(row["updated_at"]),
