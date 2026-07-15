@@ -33,7 +33,11 @@ The server owns:
 - event log
 - intervention history
 
-The extension owns no durable state. This follows Chrome MV3 service-worker constraints and keeps replay deterministic.
+The extension owns no authoritative session state. It keeps only versioned,
+short-lived dwell checkpoints in `chrome.storage.session`, paired with
+`chrome.alarms`, so an MV3 service-worker restart cannot lose pending work.
+Each navigation keeps the same idempotency key across retries; policy and
+committed results remain server-owned.
 
 ## Runtime Modes
 
