@@ -179,7 +179,8 @@ tier2:
             ) from exc
         else:
             stdout, stderr = stop_process(process)
-            if process.returncode not in (0, -15, 1):
+            allowed_return_codes = {0, 1} if sys.platform == "win32" else {0, -15}
+            if process.returncode not in allowed_return_codes:
                 raise RuntimeError(
                     f"packaged server stopped with {process.returncode}: "
                     f"stdout={stdout!r} stderr={stderr!r}"

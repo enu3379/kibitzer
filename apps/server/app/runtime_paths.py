@@ -11,6 +11,10 @@ from typing import Literal
 RuntimeMode = Literal["development", "packaged"]
 
 
+class RuntimePathsError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class RuntimePaths:
     mode: RuntimeMode
@@ -20,6 +24,7 @@ class RuntimePaths:
     default_config_file: Path
     env_file: Path
     custom_personas_file: Path
+    config_file_explicit: bool = False
 
     @property
     def effective_port_file(self) -> Path:
@@ -111,17 +116,18 @@ def resolve_runtime_paths(
         default_config_file=default_config_file,
         env_file=env_file,
         custom_personas_file=custom_personas_file,
+        config_file_explicit=bool(config_override),
     )
 
 
 def _find_repository_root(module_file: Path) -> Path:
     resolved = module_file.expanduser().resolve()
-    for candidate in (resolved.parent, *resolved.parents):
+    for candidate in resolved.parents:
         if (candidate / "pyproject.toml").is_file() and (
             candidate / "configs" / "default.yaml"
         ).is_file():
             return candidate
-    raise RuntimeError(f"Could not locate Kibitzer repository root from {resolved}")
+    raise RuntimePathsError(f"Could not locate Kibitzer repository resources from {resolved}")
 
 
 def _platform_data_dir(

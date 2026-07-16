@@ -5,12 +5,12 @@ import json
 import tempfile
 import tomllib
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
 from apps.server.app.cli.main import main
-from apps.server.app.runtime_paths import RuntimePaths
+from apps.server.app.runtime_paths import RuntimePaths, RuntimePathsError
 from apps.server.app.version import APP_VERSION, SOURCE_VERSION
 
 
@@ -44,6 +44,19 @@ class CliTest(unittest.TestCase):
         self.assertEqual(raised.exception.code, 0)
         self.assertEqual(output.getvalue().strip(), f"kibitzer {APP_VERSION}")
         self.assertTrue(APP_VERSION)
+
+    def test_non_editable_install_error_is_actionable_without_traceback(self) -> None:
+        error = io.StringIO()
+        with patch(
+            "apps.server.app.cli.main.resolve_runtime_paths",
+            side_effect=RuntimePathsError("Could not locate Kibitzer repository resources"),
+        ), redirect_stderr(error), self.assertRaises(SystemExit) as raised:
+            main(["paths"])
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("editable repository checkout", error.getvalue())
+        self.assertIn("packaged distribution", error.getvalue())
+        self.assertNotIn("Traceback", error.getvalue())
 
     def test_packaged_source_version_matches_project_metadata(self) -> None:
         pyproject = tomllib.loads(

@@ -89,6 +89,43 @@ class RuntimePathsTest(unittest.TestCase):
         self.assertEqual(paths.user_config_dir, profile / "configs")
         self.assertEqual(paths.default_config_file, config_file)
         self.assertEqual(paths.env_file, profile / ".env")
+        self.assertTrue(paths.config_file_explicit)
+
+    def test_missing_explicit_config_override_fails_fast(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir).resolve()
+            missing = root / "typo.yaml"
+            paths = resolve_runtime_paths(
+                environ={
+                    "KIBITZER_HOME": str(root / "profile"),
+                    "KIBITZER_CONFIG": str(missing),
+                },
+                home=root / "home",
+                frozen=True,
+                resource_root=root / "bundle",
+            )
+
+            with self.assertRaisesRegex(
+                FileNotFoundError,
+                "Explicit Kibitzer config file does not exist",
+            ):
+                load_config(runtime_paths=paths)
+
+    def test_yaml_memory_database_is_not_rewritten_as_a_profile_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir).resolve()
+            config_file = root / "memory.yaml"
+            config_file.write_text("server:\n  db_path: ':memory:'\n", encoding="utf-8")
+            paths = resolve_runtime_paths(
+                environ={"KIBITZER_HOME": str(root / "profile")},
+                home=root / "home",
+                frozen=True,
+                resource_root=root / "bundle",
+            )
+
+            config = load_config(config_file, runtime_paths=paths)
+
+        self.assertEqual(config.server.db_path, ":memory:")
 
     def test_packaged_config_separates_writable_and_bundled_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

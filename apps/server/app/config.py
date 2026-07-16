@@ -184,6 +184,9 @@ class DeliveryConfig(BaseModel):
     quiet_hours: QuietHoursConfig = Field(default_factory=QuietHoursConfig)
 
 
+DEFAULT_CUSTOM_PERSONAS_FILE = DeliveryConfig.model_fields["custom_personas_file"].default
+
+
 class AppConfig(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -212,6 +215,10 @@ def load_config(
     paths = runtime_paths or resolve_runtime_paths()
     load_dotenv(paths.env_file, override=False)
     config_path = Path(path).expanduser() if path is not None else paths.default_config_file
+    if (path is not None or paths.config_file_explicit) and not config_path.is_file():
+        raise FileNotFoundError(
+            f"Explicit Kibitzer config file does not exist: {config_path}"
+        )
     data = yaml.safe_load(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
     values = {
         k: v
@@ -312,6 +319,8 @@ def _resolve_config_paths(
 
 
 def _writable_data_path(value: str, paths: RuntimePaths) -> str:
+    if value == ":memory:":
+        return value
     path = Path(value).expanduser()
     if path.is_absolute():
         return str(path)
@@ -325,6 +334,9 @@ def _embedding_path(value: str, paths: RuntimePaths) -> str:
     path = Path(value).expanduser()
     if path.is_absolute() or (path.parts and path.parts[0] == "data"):
         return _writable_data_path(value, paths)
+    # The current providers accept either a local ONNX path or a path-free
+    # built-in model name. A future provider that accepts slash-containing
+    # registry IDs (for example org/model) must make this contract explicit.
     if "/" in value or "\\" in value or value.startswith("."):
         return _writable_data_path(value, paths)
     return value
@@ -356,7 +368,7 @@ def _bundled_resource_path(value: str, paths: RuntimePaths, config_path: Path) -
 
 
 def _custom_personas_path(value: str, paths: RuntimePaths) -> str:
-    if value == "~/.kibitzer/personas.yaml":
+    if value == DEFAULT_CUSTOM_PERSONAS_FILE:
         return str(paths.custom_personas_file)
     path = Path(value).expanduser()
     if path.is_absolute():
