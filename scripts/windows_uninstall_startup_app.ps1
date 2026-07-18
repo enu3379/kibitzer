@@ -1,6 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
+$NotificationAppId = "Kibitzer.Tray"
 $StartupDir = [Environment]::GetFolderPath([Environment+SpecialFolder]::Startup)
 if (-not $StartupDir) {
   $StartupDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup"
@@ -12,6 +13,12 @@ foreach ($Name in @("Kibitzer.lnk", "Kibitzer Server.lnk")) {
     Remove-Item -LiteralPath $ShortcutPath
     Write-Host "Removed Startup shortcut: $ShortcutPath"
   }
+}
+
+$NotificationKey = "HKCU:\Software\Classes\AppUserModelId\$NotificationAppId"
+if (Test-Path $NotificationKey) {
+  Remove-Item -LiteralPath $NotificationKey -Recurse
+  Write-Host "Removed notification app registration: $NotificationAppId"
 }
 
 $DataDirs = @()
@@ -33,6 +40,8 @@ foreach ($DataDir in ($DataDirs | Select-Object -Unique)) {
 foreach ($ControlDir in ($ControlDirs | Select-Object -Unique)) {
   $ControlPath = Join-Path $ControlDir "tray-control.json"
   $RequestPath = Join-Path $ControlDir "tray-exit-request.json"
+  $AttentionPath = Join-Path $ControlDir "tray-attention-request.json"
+  Remove-Item -LiteralPath $AttentionPath -ErrorAction SilentlyContinue
   if (-not (Test-Path $ControlPath)) {
     continue
   }
@@ -63,7 +72,7 @@ foreach ($ControlDir in ($ControlDirs | Select-Object -Unique)) {
     }
   }
   catch {
-    Write-Warning "Could not request tray exit from $ControlPath: $($_.Exception.Message)"
+    Write-Warning "Could not request tray exit from ${ControlPath}: $($_.Exception.Message)"
   }
 }
 

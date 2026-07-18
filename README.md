@@ -65,7 +65,10 @@ directory for writable state. `KIBITZER_HOME` overrides writable paths and
 The current unsigned onedir package and its executable smoke test are documented
 in [packaging/README.md](packaging/README.md). Windows includes the windowed tray
 app and its bundled server; macOS app-bundle/menu-bar integration remains a
-follow-up.
+follow-up. Manual Windows launches show a WinRT status notification, with a
+topmost fallback when Windows is suppressing ordinary banners; login autostart
+stays quiet unless startup fails. Launching the app again signals the existing
+tray instead of creating a duplicate icon or server.
 
 ## Implementation Defaults
 

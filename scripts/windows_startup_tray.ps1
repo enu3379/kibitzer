@@ -10,6 +10,6 @@ if (-not (Test-Path $Pythonw)) {
 }
 Start-Process `
   -FilePath $Pythonw `
-  -ArgumentList "-m apps.server.app.windows_tray" `
+  -ArgumentList "-m apps.server.app.windows_tray --autostart" `
   -WorkingDirectory $Root `
   -WindowStyle Hidden
