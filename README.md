@@ -62,9 +62,10 @@ than the current shell directory. Packaged builds use the OS user-data
 directory for writable state. `KIBITZER_HOME` overrides writable paths and
 `KIBITZER_CONFIG` selects a different main config file.
 
-The current unsigned server-only onedir package and its executable smoke test
-are documented in [packaging/README.md](packaging/README.md). Platform tray and
-menu-bar integration remain separate follow-up work.
+The current unsigned onedir package and its executable smoke test are documented
+in [packaging/README.md](packaging/README.md). Windows includes the windowed tray
+app and its bundled server; macOS app-bundle/menu-bar integration remains a
+follow-up.
 
 ## Implementation Defaults
 
@@ -130,6 +131,7 @@ controls/settings/reports, the P1 attachment loop (return celebration, "5분만"
 break, custom personas, report APIs, judgment transparency), and a session
 lifecycle API (state, stats, snooze, end). The local server starts in idle mode
 and activates judging resources only when a goal-backed session starts; macOS
-runs it at login via LaunchAgent, Windows via the startup tray. The next step is
-the Work Package 10 replay CLI (gated on the D4 scope decision). See
+runs it at login via LaunchAgent, Windows via the startup tray. Replay and the
+packaged server foundation are implemented; macOS app-bundle integration and
+the remaining release/onboarding work stay on the D9 distribution track. See
 [docs/progress.md](docs/progress.md) for the detailed log.

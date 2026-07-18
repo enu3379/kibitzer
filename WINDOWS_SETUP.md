@@ -89,11 +89,13 @@ Remove the Startup shortcut with:
 .\scripts\windows_uninstall_startup_app.ps1
 ```
 
-Startup logs are written under `data\logs\`. **Start server**, **Stop server**,
-and **Restart server** run in background threads, and Exit gracefully stops the
-server before closing the tray. Red means unreachable, gray means idle, green
-means active, and yellow means unknown or transitioning. **Open logs** opens the
-folder containing the tray and server logs.
+Source-checkout startup logs are written under `data\logs\`. The packaged tray
+uses `%LOCALAPPDATA%\Kibitzer\logs\` by default, or
+`%KIBITZER_HOME%\logs\` when that override is set. **Start server**,
+**Stop server**, and **Restart server** run in background threads, and Exit
+gracefully stops the server before closing the tray. Red means unreachable, gray
+means idle, green means active, and yellow means unknown or transitioning.
+**Open logs** opens the active folder containing the tray and server logs.
 
 The tray verifies the server's `/identity` instance ID before requesting a
 shutdown. It does not trust a PID file, so a stale PID cannot terminate an

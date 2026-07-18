@@ -24,8 +24,9 @@ stopping  a background stop/restart operation is in progress
   `Icon.update_menu()` after state changes.
 - The server publishes its selected candidate port and instance-scoped control
   record in the resolved runtime control directory. Windows worktrees share
-  `%LOCALAPPDATA%\Kibitzer\runtime`, while their databases remain local. The `/identity` instance ID
-  must match before the tray writes a graceful stop request.
+  `%LOCALAPPDATA%\Kibitzer\runtime`, while their databases remain local. The
+  `/identity` instance ID must match before the tray writes a graceful stop
+  request.
 - A PID from a file is never force-killed. Only the exact child process object
   created by the current tray may be terminated after graceful shutdown times
   out.

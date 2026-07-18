@@ -1,4 +1,4 @@
-# Work Order — Windows pystray server lifecycle
+# Implementation Record — Windows pystray server lifecycle
 
 ## Context
 
@@ -7,10 +7,10 @@ UI thread, can leave its menu open or ignore clicks, and has no safe server stop
 operation. PR #38 added stop/restart to that wrapper, but its fixed port and
 PowerShell-owned lifecycle no longer match the decided PyInstaller distribution.
 
-This work is deliberately developed on top of the packaging foundation
-before that foundation is merged. If the integration exposes a general D9
-defect, only that defect is backported to PR #100; Windows tray code stays in a
-separate follow-up PR.
+The packaging foundation landed in PR #100. This document records the separate
+Windows lifecycle follow-up implemented in PR #105, which reuses D9's runtime
+paths and PyInstaller collection without folding platform-specific tray code
+back into the foundation PR.
 
 ## Ownership contract
 
