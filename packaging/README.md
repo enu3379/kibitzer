@@ -9,9 +9,11 @@ python -m PyInstaller --clean --noconfirm packaging/kibitzer.spec
 python scripts/smoke_packaged_server.py --dist-dir dist/kibitzer
 ```
 
-The output is `dist/kibitzer/`, with `kibitzer` (`kibitzer.exe` on Windows) at
-its root and dependencies/resources under `_internal/`. Distribute the whole
-directory, not only the executable.
+The output is `dist/kibitzer/`, with dependencies/resources under `_internal/`.
+macOS currently has the `kibitzer` server executable. Windows has the windowed
+user-facing `Kibitzer.exe` tray app plus an internal `kibitzer-server.exe` for
+the child server process and diagnostics. Distribute the whole directory, not
+only an executable.
 
 `kibitzer paths` reports runtime roots and conventional default locations. A
 custom `KIBITZER_CONFIG` may override the effective database, embedding, or
@@ -22,6 +24,6 @@ frozen runtime and bundled Python dependencies, but does not prove that a
 separately provisioned ONNX model/tokenizer can load; model provisioning needs
 its own release-stage smoke before end-user distribution.
 
-This is the server packaging core, not an end-user release. It is unsigned and
-does not yet include platform tray/menu-bar ownership, first-run model
-provisioning, an installer, or update channels.
+This is still an unsigned development distribution, not an end-user release.
+Windows tray/server ownership is included; macOS app-bundle integration,
+first-run model provisioning, an installer, and update channels remain.

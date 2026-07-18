@@ -26,11 +26,33 @@ def parse_args() -> argparse.Namespace:
 
 
 def executable_in(dist_dir: Path) -> Path:
-    name = "kibitzer.exe" if sys.platform == "win32" else "kibitzer"
-    executable = dist_dir.resolve() / name
+    name = "kibitzer-server.exe" if sys.platform == "win32" else "kibitzer"
+    resolved_dist = dist_dir.resolve()
+    executable = resolved_dist / name
     if not executable.is_file():
         raise RuntimeError(f"packaged executable not found: {executable}")
+    if sys.platform == "win32" and not (resolved_dist / "Kibitzer.exe").is_file():
+        raise RuntimeError(f"packaged tray executable not found: {resolved_dist / 'Kibitzer.exe'}")
     return executable
+
+
+def smoke_windows_tray(dist_dir: Path, env: dict[str, str]) -> None:
+    if sys.platform != "win32":
+        return
+    tray = dist_dir.resolve() / "Kibitzer.exe"
+    result = subprocess.run(
+        [str(tray), "--smoke"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"packaged tray smoke failed with {result.returncode}: "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
 
 
 def run_json(executable: Path, args: list[str], env: dict[str, str]) -> dict[str, Any]:
@@ -103,6 +125,31 @@ def stop_process(process: subprocess.Popen[str]) -> tuple[str, str]:
     return process.communicate(timeout=10)
 
 
+def request_graceful_stop(
+    control_file: Path,
+    request_file: Path,
+    instance_id: str,
+) -> None:
+    try:
+        control = json.loads(control_file.read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError) as exc:
+        raise RuntimeError(f"packaged server did not publish {control_file}") from exc
+    if control.get("instance_id") != instance_id:
+        raise RuntimeError(f"control/identity instance mismatch: {control}")
+    pending = request_file.with_suffix(f"{request_file.suffix}.tmp")
+    pending.write_text(
+        json.dumps(
+            {
+                "service": control.get("service"),
+                "protocol_version": control.get("protocol_version"),
+                "instance_id": instance_id,
+            }
+        ),
+        encoding="utf-8",
+    )
+    pending.replace(request_file)
+
+
 def smoke(dist_dir: Path) -> None:
     executable = executable_in(dist_dir)
     with tempfile.TemporaryDirectory(prefix="kibitzer-package-smoke-") as tmpdir:
@@ -129,6 +176,7 @@ tier2:
         env = dict(os.environ)
         env["KIBITZER_HOME"] = str(profile)
         paths = run_json(executable, ["paths"], env)
+        smoke_windows_tray(dist_dir, env)
         if paths.get("mode") != "packaged":
             raise RuntimeError(f"expected packaged runtime mode, got {paths.get('mode')!r}")
         if Path(str(paths["data_dir"])) != profile:
@@ -178,9 +226,19 @@ tier2:
                 f"stdout={stdout!r} stderr={stderr!r}"
             ) from exc
         else:
-            stdout, stderr = stop_process(process)
-            allowed_return_codes = {0, 1} if sys.platform == "win32" else {0, -15}
-            if process.returncode not in allowed_return_codes:
+            request_graceful_stop(
+                Path(str(paths["server_control_file"])),
+                Path(str(paths["server_stop_request_file"])),
+                str(identity["instance_id"]),
+            )
+            try:
+                stdout, stderr = process.communicate(timeout=15)
+            except subprocess.TimeoutExpired as exc:
+                stdout, stderr = stop_process(process)
+                raise RuntimeError(
+                    f"packaged server ignored graceful stop: stdout={stdout!r} stderr={stderr!r}"
+                ) from exc
+            if process.returncode != 0:
                 raise RuntimeError(
                     f"packaged server stopped with {process.returncode}: "
                     f"stdout={stdout!r} stderr={stderr!r}"

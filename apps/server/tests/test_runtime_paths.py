@@ -18,7 +18,7 @@ class RuntimePathsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             try:
                 os.chdir(tmpdir)
-                paths = resolve_runtime_paths(environ={})
+                paths = resolve_runtime_paths(environ={}, platform="darwin")
                 config = load_config(runtime_paths=paths)
             finally:
                 os.chdir(previous_cwd)
@@ -26,6 +26,7 @@ class RuntimePathsTest(unittest.TestCase):
         self.assertEqual(paths.mode, "development")
         self.assertEqual(paths.resource_root, REPOSITORY_ROOT)
         self.assertEqual(paths.data_dir, REPOSITORY_ROOT / "data")
+        self.assertEqual(paths.control_dir, REPOSITORY_ROOT / "data" / "runtime")
         self.assertEqual(paths.default_config_file, REPOSITORY_ROOT / "configs" / "default.yaml")
         self.assertEqual(config.server.db_path, str(REPOSITORY_ROOT / "data" / "kibitzer.sqlite3"))
         self.assertEqual(
@@ -51,6 +52,28 @@ class RuntimePathsTest(unittest.TestCase):
         self.assertEqual(paths.data_dir, local_app_data / "Kibitzer")
         self.assertEqual(paths.user_config_dir, local_app_data / "Kibitzer" / "configs")
         self.assertEqual(paths.effective_port_file, local_app_data / "Kibitzer" / "kibitzer.port")
+        self.assertEqual(paths.control_dir, local_app_data / "Kibitzer" / "runtime")
+        self.assertEqual(
+            paths.server_control_file,
+            local_app_data / "Kibitzer" / "runtime" / "server-control.json",
+        )
+        self.assertEqual(paths.logs_dir, local_app_data / "Kibitzer" / "logs")
+
+    def test_windows_worktrees_share_control_but_not_data(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir).resolve()
+            repository = root / "worktree"
+            local_app_data = root / "LocalAppData"
+            paths = resolve_runtime_paths(
+                environ={"LOCALAPPDATA": str(local_app_data)},
+                platform="win32",
+                home=root / "home",
+                frozen=False,
+                resource_root=repository,
+            )
+
+        self.assertEqual(paths.data_dir, repository / "data")
+        self.assertEqual(paths.control_dir, local_app_data / "Kibitzer" / "runtime")
 
     def test_macos_packaged_paths_use_application_support(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -86,6 +109,7 @@ class RuntimePathsTest(unittest.TestCase):
 
         self.assertEqual(paths.mode, "development")
         self.assertEqual(paths.data_dir, profile)
+        self.assertEqual(paths.control_dir, profile / "runtime")
         self.assertEqual(paths.user_config_dir, profile / "configs")
         self.assertEqual(paths.default_config_file, config_file)
         self.assertEqual(paths.env_file, profile / ".env")

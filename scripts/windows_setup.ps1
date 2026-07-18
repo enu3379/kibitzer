@@ -67,7 +67,7 @@ New-KibitzerVenv
 Add-NodeToProcessPath
 
 Invoke-Native ".\.venv\Scripts\python.exe" @("-m", "pip", "install", "--upgrade", "pip")
-Invoke-Native ".\.venv\Scripts\python.exe" @("-m", "pip", "install", "-e", ".[test]")
+Invoke-Native ".\.venv\Scripts\python.exe" @("-m", "pip", "install", "-e", ".[test,windows]")
 Invoke-Native ".\.venv\Scripts\python.exe" @("scripts\download_embedding_model.py")
 
 Push-Location "apps\extension"

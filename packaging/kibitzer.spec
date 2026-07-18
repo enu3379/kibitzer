@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 ROOT = Path(SPECPATH).resolve().parent
@@ -10,6 +11,17 @@ datas = [
     (
         str(ROOT / "apps" / "server" / "app" / "port-candidates.json"),
         "apps/server/app",
+    ),
+    (
+        str(
+            ROOT
+            / "apps"
+            / "extension"
+            / "icons"
+            / "variants"
+            / "monitor-v1-mono-128.png"
+        ),
+        "icons",
     ),
 ]
 
@@ -30,7 +42,7 @@ hidden_imports = [
     "uvicorn.protocols.websockets.websockets_impl",
 ]
 
-a = Analysis(
+server_analysis = Analysis(
     [str(ROOT / "packaging" / "kibitzer_entry.py")],
     pathex=[str(ROOT)],
     binaries=[],
@@ -43,14 +55,14 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
-pyz = PYZ(a.pure)
+server_pyz = PYZ(server_analysis.pure)
 
-exe = EXE(
-    pyz,
-    a.scripts,
+server_exe = EXE(
+    server_pyz,
+    server_analysis.scripts,
     [],
     exclude_binaries=True,
-    name="kibitzer",
+    name="kibitzer-server" if sys.platform == "win32" else "kibitzer",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -63,11 +75,62 @@ exe = EXE(
     entitlements_file=None,
     contents_directory="_internal",
 )
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=False,
-    name="kibitzer",
-)
+
+if sys.platform == "win32":
+    tray_analysis = Analysis(
+        [str(ROOT / "packaging" / "windows_tray_entry.py")],
+        pathex=[str(ROOT)],
+        binaries=[],
+        datas=datas,
+        hiddenimports=[
+            *hidden_imports,
+            "PIL.Image",
+            "PIL.ImageDraw",
+            "pystray._win32",
+        ],
+        hookspath=[],
+        hooksconfig={},
+        runtime_hooks=[],
+        excludes=["pytest", "pytest_asyncio"],
+        noarchive=False,
+        optimize=0,
+    )
+    tray_pyz = PYZ(tray_analysis.pure)
+    tray_exe = EXE(
+        tray_pyz,
+        tray_analysis.scripts,
+        [],
+        exclude_binaries=True,
+        name="Kibitzer",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        console=False,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        contents_directory="_internal",
+    )
+    coll = COLLECT(
+        tray_exe,
+        server_exe,
+        tray_analysis.binaries,
+        tray_analysis.datas,
+        server_analysis.binaries,
+        server_analysis.datas,
+        strip=False,
+        upx=False,
+        name="kibitzer",
+    )
+else:
+    coll = COLLECT(
+        server_exe,
+        server_analysis.binaries,
+        server_analysis.datas,
+        strip=False,
+        upx=False,
+        name="kibitzer",
+    )
