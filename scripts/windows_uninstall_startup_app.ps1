@@ -40,10 +40,8 @@ foreach ($DataDir in ($DataDirs | Select-Object -Unique)) {
 foreach ($ControlDir in ($ControlDirs | Select-Object -Unique)) {
   $ControlPath = Join-Path $ControlDir "tray-control.json"
   $RequestPath = Join-Path $ControlDir "tray-exit-request.json"
-  $AttentionPath = Join-Path $ControlDir "tray-attention-request.json"
-  $AttentionAckPath = Join-Path $ControlDir "tray-attention-ack.json"
-  Remove-Item -LiteralPath $AttentionPath -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath $AttentionAckPath -ErrorAction SilentlyContinue
+  $AttentionDir = Join-Path $ControlDir "tray-attention"
+  Remove-Item -LiteralPath $AttentionDir -Recurse -ErrorAction SilentlyContinue
   if (-not (Test-Path $ControlPath)) {
     continue
   }

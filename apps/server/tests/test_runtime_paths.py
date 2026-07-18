@@ -58,12 +58,16 @@ class RuntimePathsTest(unittest.TestCase):
             local_app_data / "Kibitzer" / "runtime" / "server-control.json",
         )
         self.assertEqual(
-            paths.tray_attention_request_file,
-            local_app_data / "Kibitzer" / "runtime" / "tray-attention-request.json",
+            paths.tray_attention_dir,
+            local_app_data / "Kibitzer" / "runtime" / "tray-attention",
         )
         self.assertEqual(
-            paths.tray_attention_ack_file,
-            local_app_data / "Kibitzer" / "runtime" / "tray-attention-ack.json",
+            paths.tray_attention_request_file("a" * 32),
+            local_app_data
+            / "Kibitzer"
+            / "runtime"
+            / "tray-attention"
+            / f"{'a' * 32}.request.json",
         )
         self.assertEqual(paths.logs_dir, local_app_data / "Kibitzer" / "logs")
 
@@ -122,12 +126,12 @@ class RuntimePathsTest(unittest.TestCase):
         self.assertEqual(paths.default_config_file, config_file)
         self.assertEqual(paths.env_file, profile / ".env")
         self.assertEqual(
-            paths.tray_attention_request_file,
-            profile / "runtime" / "tray-attention-request.json",
+            paths.tray_attention_dir,
+            profile / "runtime" / "tray-attention",
         )
         self.assertEqual(
-            paths.tray_attention_ack_file,
-            profile / "runtime" / "tray-attention-ack.json",
+            paths.tray_attention_ack_file("b" * 32),
+            profile / "runtime" / "tray-attention" / f"{'b' * 32}.ack.json",
         )
         self.assertTrue(paths.config_file_explicit)
 

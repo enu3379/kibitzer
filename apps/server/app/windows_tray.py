@@ -94,9 +94,11 @@ def request_existing_tray_attention(
                     and instance_id
                 ):
                     request_id = uuid4().hex
+                    request_path = paths.tray_attention_request_file(request_id)
+                    ack_path = paths.tray_attention_ack_file(request_id)
                     try:
                         atomic_write_json(
-                            paths.tray_attention_request_file,
+                            request_path,
                             {
                                 "service": TRAY_SERVICE_NAME,
                                 "protocol_version": TRAY_PROTOCOL_VERSION,
@@ -109,21 +111,105 @@ def request_existing_tray_attention(
                         LOGGER.exception("could not request attention from the running tray")
                         return False
 
-                    while True:
-                        ack = read_json(paths.tray_attention_ack_file)
-                        if ack and (
-                            ack.get("service") == TRAY_SERVICE_NAME
-                            and ack.get("protocol_version") == TRAY_PROTOCOL_VERSION
-                            and ack.get("instance_id") == instance_id
-                            and ack.get("request_id") == request_id
-                        ):
-                            return True
-                        if time.monotonic() >= deadline:
-                            return False
-                        time.sleep(max(poll_seconds, 0.01))
+                    try:
+                        while True:
+                            if _attention_record_matches(
+                                ack_path,
+                                instance_id=instance_id,
+                                request_id=request_id,
+                            ):
+                                return True
+                            if time.monotonic() >= deadline:
+                                # Cancellation races atomically with the tray's
+                                # request -> ack rename. If cancellation wins,
+                                # a late tray poll cannot surface a second
+                                # notification after the local fallback.
+                                if _remove_attention_record_if_matches(
+                                    request_path,
+                                    instance_id=instance_id,
+                                    request_id=request_id,
+                                ):
+                                    return False
+                                return _attention_record_matches(
+                                    ack_path,
+                                    instance_id=instance_id,
+                                    request_id=request_id,
+                                )
+                            time.sleep(max(poll_seconds, 0.01))
+                    finally:
+                        _remove_attention_record_if_matches(
+                            request_path,
+                            instance_id=instance_id,
+                            request_id=request_id,
+                        )
+                        _remove_attention_record_if_matches(
+                            ack_path,
+                            instance_id=instance_id,
+                            request_id=request_id,
+                        )
         if time.monotonic() >= deadline:
             return False
         time.sleep(max(poll_seconds, 0.01))
+
+
+def _attention_record_matches(
+    path: Path,
+    *,
+    instance_id: str,
+    request_id: str,
+) -> bool:
+    value = read_json(path)
+    return bool(
+        value
+        and value.get("service") == TRAY_SERVICE_NAME
+        and value.get("protocol_version") == TRAY_PROTOCOL_VERSION
+        and value.get("instance_id") == instance_id
+        and value.get("request_id") == request_id
+    )
+
+
+def _remove_attention_record_if_matches(
+    path: Path,
+    *,
+    instance_id: str,
+    request_id: str,
+) -> bool:
+    if not _attention_record_matches(
+        path,
+        instance_id=instance_id,
+        request_id=request_id,
+    ):
+        return False
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return False
+    return True
+
+
+def _clear_attention_records(
+    paths: RuntimePaths,
+    *,
+    instance_id: str | None = None,
+) -> None:
+    try:
+        records = tuple(paths.tray_attention_dir.glob("*.json"))
+    except OSError:
+        LOGGER.exception("could not list tray attention records")
+        return
+    for path in records:
+        if instance_id is not None:
+            value = read_json(path)
+            if not value or value.get("instance_id") != instance_id:
+                continue
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            LOGGER.exception("could not remove tray attention record %s", path)
+    try:
+        paths.tray_attention_dir.rmdir()
+    except (FileNotFoundError, OSError):
+        pass
 
 
 def _show_windows_message(title: str, message: str, *, error: bool) -> None:
@@ -575,7 +661,7 @@ class WindowsTrayApp:
             if request and request.get("instance_id") == self.instance_id:
                 self._request_exit()
                 return
-            self._consume_attention_request()
+            self._consume_attention_requests()
             if self._action_lock.locked():
                 continue
             self._set_status(self.manager.status())
@@ -678,8 +764,19 @@ class WindowsTrayApp:
         with self._status_lock:
             return self._status.running and not self._action_lock.locked()
 
-    def _consume_attention_request(self) -> None:
-        request = read_json(self.manager.paths.tray_attention_request_file)
+    def _consume_attention_requests(self) -> None:
+        try:
+            request_paths = sorted(
+                self.manager.paths.tray_attention_dir.glob("*.request.json")
+            )
+        except OSError:
+            LOGGER.exception("could not list tray attention requests")
+            return
+        for request_path in request_paths:
+            self._consume_attention_request(request_path)
+
+    def _consume_attention_request(self, request_path: Path) -> None:
+        request = read_json(request_path)
         request_id = request.get("request_id") if request else None
         if not request or (
             request.get("service") != TRAY_SERVICE_NAME
@@ -687,15 +784,22 @@ class WindowsTrayApp:
             or request.get("instance_id") != self.instance_id
             or not isinstance(request_id, str)
             or not request_id
+            or request_path
+            != self.manager.paths.tray_attention_request_file(request_id)
         ):
             return
-        remove_if_instance_matches(
-            self.manager.paths.tray_attention_request_file,
-            self.instance_id,
-        )
+        ack_path = self.manager.paths.tray_attention_ack_file(request_id)
+        try:
+            request_path.replace(ack_path)
+        except FileNotFoundError:
+            # The requester timed out and canceled this exact request before
+            # the tray could claim it. Do not show a late duplicate toast.
+            return
+        except OSError:
+            LOGGER.exception("could not claim tray attention request %s", request_id)
+            return
         now = time.monotonic()
         if now - self._last_attention_notification < ATTENTION_NOTIFICATION_COOLDOWN_SECONDS:
-            self._acknowledge_attention_request(request_id)
             return
         self._last_attention_notification = now
         with self._status_lock:
@@ -705,22 +809,6 @@ class WindowsTrayApp:
             f"{self._status_summary(status)} Use the existing tray icon to manage Kibitzer.",
             ensure_visible=True,
         )
-        self._acknowledge_attention_request(request_id)
-
-    def _acknowledge_attention_request(self, request_id: str) -> None:
-        try:
-            atomic_write_json(
-                self.manager.paths.tray_attention_ack_file,
-                {
-                    "service": TRAY_SERVICE_NAME,
-                    "protocol_version": TRAY_PROTOCOL_VERSION,
-                    "instance_id": self.instance_id,
-                    "request_id": request_id,
-                    "acknowledged_at": datetime.now(timezone.utc).isoformat(),
-                },
-            )
-        except OSError:
-            LOGGER.exception("could not acknowledge tray attention request %s", request_id)
 
     def _notify_startup(self, status: ServerStatus) -> None:
         if status.running:
@@ -878,8 +966,7 @@ def main() -> int:
     try:
         with WindowsSingleInstance():
             paths.tray_exit_request_file.unlink(missing_ok=True)
-            paths.tray_attention_request_file.unlink(missing_ok=True)
-            paths.tray_attention_ack_file.unlink(missing_ok=True)
+            _clear_attention_records(paths)
             atomic_write_json(
                 paths.tray_control_file,
                 {
@@ -898,8 +985,7 @@ def main() -> int:
                 ).run()
             finally:
                 remove_if_instance_matches(paths.tray_exit_request_file, instance_id)
-                remove_if_instance_matches(paths.tray_attention_request_file, instance_id)
-                remove_if_instance_matches(paths.tray_attention_ack_file, instance_id)
+                _clear_attention_records(paths, instance_id=instance_id)
                 remove_if_instance_matches(paths.tray_control_file, instance_id)
     except TrayAlreadyRunningError as exc:
         LOGGER.info("%s", exc)

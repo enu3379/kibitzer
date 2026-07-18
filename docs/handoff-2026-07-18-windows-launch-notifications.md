@@ -61,12 +61,15 @@ being sampled through a fixed delay. Synchronous failure, suppressed-banner
 mode, and a later WinRT failure can race safely without opening duplicate
 fallback windows.
 
-A duplicate manual launch writes an instance-scoped request with a unique
-`request_id` and waits up to three seconds for the existing tray to write a
-matching acknowledgement. This exceeds the tray's two-second poll interval.
-If the old tray is already shutting down, or otherwise never acknowledges the
-request, the duplicate process shows its own topmost status message instead of
-exiting silently. Login `--autostart` remains silent.
+A duplicate manual launch writes an instance-scoped, request-specific file and
+waits up to three seconds for the existing tray to atomically rename that exact
+file into its acknowledgement. Concurrent launchers therefore cannot overwrite
+one another. At the deadline, canceling the request races atomically with the
+tray claim: cancellation prevents a late toast, while a completed claim avoids
+an unnecessary local fallback. This exceeds the tray's two-second poll
+interval. If the old tray is already shutting down or never claims the request,
+the duplicate process shows its own topmost status message instead of exiting
+silently. Login `--autostart` remains silent.
 
 ## Packaging and installation
 

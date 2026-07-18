@@ -137,14 +137,7 @@ class WindowsServerManagerTest(unittest.TestCase):
             self.assertFalse(
                 request_existing_tray_attention(paths, timeout_seconds=0)
             )
-            request = read_json(paths.tray_attention_request_file)
-
-        self.assertIsNotNone(request)
-        self.assertEqual(request["service"], TRAY_SERVICE_NAME)
-        self.assertEqual(request["protocol_version"], TRAY_PROTOCOL_VERSION)
-        self.assertEqual(request["instance_id"], "current")
-        self.assertTrue(request["request_id"])
-        self.assertTrue(request["requested_at"])
+            self.assertEqual(tuple(paths.tray_attention_dir.glob("*.json")), ())
 
     def test_attention_request_ignores_a_stale_ack(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -157,19 +150,22 @@ class WindowsServerManagerTest(unittest.TestCase):
                     "instance_id": "current",
                 },
             )
+            stale_request_id = "a" * 32
+            stale_ack_path = paths.tray_attention_ack_file(stale_request_id)
             atomic_write_json(
-                paths.tray_attention_ack_file,
+                stale_ack_path,
                 {
                     "service": TRAY_SERVICE_NAME,
                     "protocol_version": TRAY_PROTOCOL_VERSION,
                     "instance_id": "current",
-                    "request_id": "previous-request",
+                    "request_id": stale_request_id,
                 },
             )
 
             self.assertFalse(
                 request_existing_tray_attention(paths, timeout_seconds=0)
             )
+            self.assertTrue(stale_ack_path.exists())
 
     def test_attention_request_waits_for_the_current_tray_ack(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -205,21 +201,103 @@ class WindowsServerManagerTest(unittest.TestCase):
             requester.start()
             deadline = time.monotonic() + 0.25
             while (
-                not paths.tray_attention_request_file.exists()
+                not tuple(paths.tray_attention_dir.glob("*.request.json"))
                 and time.monotonic() < deadline
             ):
                 time.sleep(0.005)
 
-            app._consume_attention_request()
+            app._consume_attention_requests()
             requester.join(timeout=1)
-            ack = read_json(paths.tray_attention_ack_file)
 
         self.assertFalse(requester.is_alive())
         self.assertEqual(result, [True])
-        self.assertIsNotNone(ack)
-        self.assertEqual(ack["instance_id"], "current")
-        self.assertTrue(ack["request_id"])
+        self.assertEqual(tuple(paths.tray_attention_dir.glob("*.json")), ())
         notify.assert_called_once()
+
+    def test_concurrent_attention_requesters_are_isolated(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = runtime_paths(Path(tmpdir))
+            atomic_write_json(
+                paths.tray_control_file,
+                {
+                    "service": TRAY_SERVICE_NAME,
+                    "protocol_version": TRAY_PROTOCOL_VERSION,
+                    "instance_id": "current",
+                },
+            )
+            manager = SimpleNamespace(paths=paths)
+            notify = unittest.mock.Mock(return_value=True)
+            app = WindowsTrayApp(  # type: ignore[arg-type]
+                manager,
+                instance_id="current",
+                notification_sender=notify,
+            )
+            app._status = ServerStatus(ServerState.IDLE, "Kibitzer: idle", 49187)
+            barrier = threading.Barrier(3)
+            results: list[bool] = []
+
+            def request_attention() -> None:
+                barrier.wait()
+                results.append(
+                    request_existing_tray_attention(
+                        paths,
+                        timeout_seconds=1,
+                        poll_seconds=0.005,
+                    )
+                )
+
+            requesters = [
+                threading.Thread(target=request_attention) for _ in range(2)
+            ]
+            for requester in requesters:
+                requester.start()
+            barrier.wait()
+            deadline = time.monotonic() + 0.5
+            while (
+                len(tuple(paths.tray_attention_dir.glob("*.request.json"))) < 2
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.005)
+
+            self.assertEqual(
+                len(tuple(paths.tray_attention_dir.glob("*.request.json"))),
+                2,
+            )
+            app._consume_attention_requests()
+            for requester in requesters:
+                requester.join(timeout=1)
+
+        self.assertTrue(all(not requester.is_alive() for requester in requesters))
+        self.assertEqual(sorted(results), [True, True])
+        self.assertEqual(tuple(paths.tray_attention_dir.glob("*.json")), ())
+        notify.assert_called_once()
+
+    def test_timed_out_attention_request_is_not_consumed_late(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = runtime_paths(Path(tmpdir))
+            atomic_write_json(
+                paths.tray_control_file,
+                {
+                    "service": TRAY_SERVICE_NAME,
+                    "protocol_version": TRAY_PROTOCOL_VERSION,
+                    "instance_id": "current",
+                },
+            )
+            manager = SimpleNamespace(paths=paths)
+            notify = unittest.mock.Mock(return_value=True)
+            app = WindowsTrayApp(  # type: ignore[arg-type]
+                manager,
+                instance_id="current",
+                notification_sender=notify,
+            )
+
+            self.assertFalse(
+                request_existing_tray_attention(paths, timeout_seconds=0)
+            )
+            app._consume_attention_requests()
+
+            notify.assert_not_called()
+            self.assertEqual(tuple(paths.tray_attention_dir.glob("*.json")), ())
 
     def test_attention_request_rejects_an_invalid_control_record(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -236,7 +314,7 @@ class WindowsServerManagerTest(unittest.TestCase):
             self.assertFalse(
                 request_existing_tray_attention(paths, timeout_seconds=0)
             )
-            self.assertFalse(paths.tray_attention_request_file.exists())
+            self.assertFalse(paths.tray_attention_dir.exists())
 
 
 class WindowsTrayAppTest(unittest.TestCase):
@@ -400,27 +478,29 @@ class WindowsTrayAppTest(unittest.TestCase):
                 notification_sender=notify,
             )
             app._status = ServerStatus(ServerState.IDLE, "Kibitzer: idle", 49187)
+            request_id = "1" * 32
+            request_path = paths.tray_attention_request_file(request_id)
             atomic_write_json(
-                paths.tray_attention_request_file,
+                request_path,
                 {
                     "service": TRAY_SERVICE_NAME,
                     "protocol_version": TRAY_PROTOCOL_VERSION,
                     "instance_id": "current",
-                    "request_id": "request-1",
+                    "request_id": request_id,
                 },
             )
 
-            app._consume_attention_request()
+            app._consume_attention_requests()
 
             notify.assert_called_once_with(
                 "Kibitzer is already running",
                 "Server status: idle on port 49187. Use the existing tray icon to manage Kibitzer.",
                 ANY,
             )
-            self.assertFalse(paths.tray_attention_request_file.exists())
-            ack = read_json(paths.tray_attention_ack_file)
+            self.assertFalse(request_path.exists())
+            ack = read_json(paths.tray_attention_ack_file(request_id))
             self.assertIsNotNone(ack)
-            self.assertEqual(ack["request_id"], "request-1")
+            self.assertEqual(ack["request_id"], request_id)
 
     def test_attention_notifications_are_coalesced_during_the_cooldown(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -439,22 +519,26 @@ class WindowsTrayAppTest(unittest.TestCase):
                 side_effect=(10.0, 11.0),
             ):
                 for index in range(2):
+                    request_id = f"{index + 1:032x}"
                     atomic_write_json(
-                        paths.tray_attention_request_file,
+                        paths.tray_attention_request_file(request_id),
                         {
                             "service": TRAY_SERVICE_NAME,
                             "protocol_version": TRAY_PROTOCOL_VERSION,
                             "instance_id": "current",
-                            "request_id": f"request-{index}",
+                            "request_id": request_id,
                         },
                     )
-                    app._consume_attention_request()
+                    app._consume_attention_requests()
 
             notify.assert_called_once()
-            self.assertFalse(paths.tray_attention_request_file.exists())
-            ack = read_json(paths.tray_attention_ack_file)
+            self.assertEqual(
+                tuple(paths.tray_attention_dir.glob("*.request.json")),
+                (),
+            )
+            ack = read_json(paths.tray_attention_ack_file(f"{2:032x}"))
             self.assertIsNotNone(ack)
-            self.assertEqual(ack["request_id"], "request-1")
+            self.assertEqual(ack["request_id"], f"{2:032x}")
 
     def test_attention_request_must_match_the_current_tray_instance(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -466,20 +550,22 @@ class WindowsTrayAppTest(unittest.TestCase):
                 instance_id="current",
                 notification_sender=notify,
             )
+            request_id = "2" * 32
+            request_path = paths.tray_attention_request_file(request_id)
             atomic_write_json(
-                paths.tray_attention_request_file,
+                request_path,
                 {
                     "service": TRAY_SERVICE_NAME,
                     "protocol_version": TRAY_PROTOCOL_VERSION,
                     "instance_id": "stale-or-reused",
-                    "request_id": "request-1",
+                    "request_id": request_id,
                 },
             )
 
-            app._consume_attention_request()
+            app._consume_attention_requests()
 
             notify.assert_not_called()
-            self.assertTrue(paths.tray_attention_request_file.exists())
+            self.assertTrue(request_path.exists())
 
     def test_exit_request_must_match_the_current_tray_instance(self) -> None:
         class TwoIterationStopEvent:
@@ -714,10 +800,8 @@ class WindowsUninstallSafetyTest(unittest.TestCase):
 
     def test_uninstall_cleans_stale_attention_requests(self) -> None:
         script = WINDOWS_UNINSTALL_SCRIPT.read_text(encoding="utf-8")
-        self.assertIn('"tray-attention-request.json"', script)
-        self.assertIn('"tray-attention-ack.json"', script)
-        self.assertIn("Remove-Item -LiteralPath $AttentionPath", script)
-        self.assertIn("Remove-Item -LiteralPath $AttentionAckPath", script)
+        self.assertIn('"tray-attention"', script)
+        self.assertIn("Remove-Item -LiteralPath $AttentionDir -Recurse", script)
 
     def test_legacy_pid_file_is_cleanup_only_and_never_termination_authority(self) -> None:
         script = WINDOWS_UNINSTALL_SCRIPT.read_text(encoding="utf-8")

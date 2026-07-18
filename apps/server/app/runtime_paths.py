@@ -48,12 +48,14 @@ class RuntimePaths:
         return self.control_dir / "tray-exit-request.json"
 
     @property
-    def tray_attention_request_file(self) -> Path:
-        return self.control_dir / "tray-attention-request.json"
+    def tray_attention_dir(self) -> Path:
+        return self.control_dir / "tray-attention"
 
-    @property
-    def tray_attention_ack_file(self) -> Path:
-        return self.control_dir / "tray-attention-ack.json"
+    def tray_attention_request_file(self, request_id: str) -> Path:
+        return self.tray_attention_dir / f"{request_id}.request.json"
+
+    def tray_attention_ack_file(self, request_id: str) -> Path:
+        return self.tray_attention_dir / f"{request_id}.ack.json"
 
     @property
     def logs_dir(self) -> Path:
@@ -89,8 +91,7 @@ class RuntimePaths:
             "server_stop_request_file": str(self.server_stop_request_file),
             "tray_control_file": str(self.tray_control_file),
             "tray_exit_request_file": str(self.tray_exit_request_file),
-            "tray_attention_request_file": str(self.tray_attention_request_file),
-            "tray_attention_ack_file": str(self.tray_attention_ack_file),
+            "tray_attention_dir": str(self.tray_attention_dir),
             "logs_dir": str(self.logs_dir),
         }
 

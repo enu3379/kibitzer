@@ -52,10 +52,12 @@ fully isolated control directory for tests and parallel profiles.
 - A single-instance lock prevents duplicate Windows tray icons.
 - Manual launch and lifecycle actions display modern WinRT notifications under
   the stable current-user `Kibitzer.Tray` AppUserModelID.
-- A duplicate manual launch writes an instance-scoped attention request and
-  waits for the matching acknowledgement. If the tray is already shutting down
-  or does not acknowledge within three seconds, the duplicate process uses its
-  own topmost message instead of exiting silently.
+- A duplicate manual launch writes a request-specific, instance-scoped
+  attention record and waits for the tray to atomically claim that exact file.
+  Concurrent launchers cannot overwrite each other, and timeout cancellation
+  prevents a late duplicate toast. If the tray is already shutting down or
+  does not acknowledge within three seconds, the duplicate process uses its own
+  topmost message instead of exiting silently.
 - When Windows reports Priority-only or Alarms-only mode, manual startup,
   duplicate launches, and failures also use a topmost message fallback because
   ordinary toast banners are suppressed in those modes.
