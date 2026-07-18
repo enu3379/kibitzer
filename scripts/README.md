@@ -20,6 +20,17 @@ Project maintenance scripts live here.
 The application code is shared across operating systems. Keep platform
 differences in these entrypoints unless a native adapter is unavoidable.
 
+## Packaged server smoke
+
+After building `packaging/kibitzer.spec`, `smoke_packaged_server.py` executes
+the frozen CLI, checks its bundled resources and profile paths, starts the
+server with an isolated hash-embedding config, and verifies `/identity`,
+`/health`, the SQLite DB, and the effective-port file.
+
+```bash
+python scripts/smoke_packaged_server.py --dist-dir dist/kibitzer
+```
+
 ## Tier 0 embedding
 
 `download_embedding_model.py` downloads the pinned KoEn E5 Tiny qint8 ONNX

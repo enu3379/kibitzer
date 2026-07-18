@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from apps.server.tests.support import TestClient
 
@@ -12,9 +13,14 @@ from apps.server.app.ports import (
     SERVICE_NAME,
     PortSelectionError,
     acquire_server_socket,
+    clear_effective_port,
     is_kibitzer_identity,
+    main as serve_main,
+    write_effective_port,
 )
+from apps.server.app.runtime_paths import RuntimePaths
 from apps.server.app.storage.sqlite import SQLiteStore
+from apps.server.app.version import APP_VERSION
 
 
 class FakeSocket:
@@ -100,6 +106,63 @@ class PortSelectionTest(unittest.TestCase):
             )
         )
 
+    def test_effective_port_file_is_atomic_and_owner_scoped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "profile" / "kibitzer.port"
+            write_effective_port(49187, path)
+            self.assertEqual(path.read_text(encoding="utf-8"), "49187\n")
+
+            clear_effective_port(51387, path)
+            self.assertTrue(path.exists())
+            clear_effective_port(49187, path)
+            self.assertFalse(path.exists())
+
+    def test_server_entrypoint_writes_port_to_runtime_data_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            paths = RuntimePaths(
+                mode="packaged",
+                resource_root=root / "bundle",
+                data_dir=root / "profile",
+                user_config_dir=root / "profile" / "configs",
+                default_config_file=root / "bundle" / "configs" / "default.yaml",
+                env_file=root / "profile" / ".env",
+                custom_personas_file=root / "profile" / "configs" / "personas.yaml",
+            )
+            with patch(
+                "apps.server.app.ports.acquire_server_socket",
+                return_value=(49187, None),
+            ):
+                self.assertEqual(serve_main(paths), 0)
+
+            self.assertEqual(paths.effective_port_file.read_text(encoding="utf-8"), "49187\n")
+
+    def test_owned_socket_and_port_file_are_cleaned_when_server_init_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            paths = RuntimePaths(
+                mode="packaged",
+                resource_root=root / "bundle",
+                data_dir=root / "profile",
+                user_config_dir=root / "profile" / "configs",
+                default_config_file=root / "bundle" / "configs" / "default.yaml",
+                env_file=root / "profile" / ".env",
+                custom_personas_file=root / "profile" / "configs" / "personas.yaml",
+            )
+            owned_socket = FakeSocket(set())
+            with (
+                patch(
+                    "apps.server.app.ports.acquire_server_socket",
+                    return_value=(49187, owned_socket),
+                ),
+                patch("uvicorn.Config", side_effect=RuntimeError("config failed")),
+                self.assertRaisesRegex(RuntimeError, "config failed"),
+            ):
+                serve_main(paths)
+
+            self.assertTrue(owned_socket.closed)
+            self.assertFalse(paths.effective_port_file.exists())
+
 
 class IdentityEndpointTest(unittest.TestCase):
     def test_identity_is_versioned_and_instance_scoped(self) -> None:
@@ -112,10 +175,12 @@ class IdentityEndpointTest(unittest.TestCase):
             )
             with TestClient(create_app(config=config, store=SQLiteStore(db_path))) as client:
                 identity = client.get("/identity").json()
+                health = client.get("/health").json()
 
         self.assertEqual(identity["service"], SERVICE_NAME)
         self.assertEqual(identity["protocol_version"], PROTOCOL_VERSION)
         self.assertTrue(identity["instance_id"])
+        self.assertEqual(health["version"], APP_VERSION)
 
 
 if __name__ == "__main__":
