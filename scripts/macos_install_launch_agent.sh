@@ -41,7 +41,16 @@ with Path(plist_path).open("wb") as output:
     plistlib.dump(payload, output, fmt=plistlib.FMT_XML, sort_keys=False)
 PYTHON
 
-launchctl bootout "gui/${UID}" "$PLIST" >/dev/null 2>&1 || true
+bootout_status=0
+bootout_output="$(launchctl bootout "gui/${UID}/${LABEL}" 2>&1)" || bootout_status=$?
+if [[ "$bootout_status" -ne 0 && "$bootout_status" -ne 3 ]]; then
+  if [[ -n "$bootout_output" ]]; then
+    printf '%s\n' "$bootout_output" >&2
+  else
+    printf 'Failed to boot out %s (exit %s).\n' "$LABEL" "$bootout_status" >&2
+  fi
+  exit "$bootout_status"
+fi
 launchctl bootstrap "gui/${UID}" "$PLIST"
 launchctl enable "gui/${UID}/${LABEL}"
 launchctl kickstart -k "gui/${UID}/${LABEL}"
