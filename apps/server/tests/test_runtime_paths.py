@@ -61,6 +61,10 @@ class RuntimePathsTest(unittest.TestCase):
             paths.tray_attention_request_file,
             local_app_data / "Kibitzer" / "runtime" / "tray-attention-request.json",
         )
+        self.assertEqual(
+            paths.tray_attention_ack_file,
+            local_app_data / "Kibitzer" / "runtime" / "tray-attention-ack.json",
+        )
         self.assertEqual(paths.logs_dir, local_app_data / "Kibitzer" / "logs")
 
     def test_windows_worktrees_share_control_but_not_data(self) -> None:
@@ -120,6 +124,10 @@ class RuntimePathsTest(unittest.TestCase):
         self.assertEqual(
             paths.tray_attention_request_file,
             profile / "runtime" / "tray-attention-request.json",
+        )
+        self.assertEqual(
+            paths.tray_attention_ack_file,
+            profile / "runtime" / "tray-attention-ack.json",
         )
         self.assertTrue(paths.config_file_explicit)
 

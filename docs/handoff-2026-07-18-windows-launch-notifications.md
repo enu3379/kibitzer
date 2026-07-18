@@ -55,6 +55,19 @@ notification history, while the fallback provides immediate feedback in
 Priority-only/Alarms-only modes. Routine login autostart and automatic
 `idle`/`active` changes never open the fallback.
 
+WinRT can report delivery failure after `show_toast()` has returned. The
+failure event therefore calls the same one-shot fallback directly instead of
+being sampled through a fixed delay. Synchronous failure, suppressed-banner
+mode, and a later WinRT failure can race safely without opening duplicate
+fallback windows.
+
+A duplicate manual launch writes an instance-scoped request with a unique
+`request_id` and waits up to three seconds for the existing tray to write a
+matching acknowledgement. This exceeds the tray's two-second poll interval.
+If the old tray is already shutting down, or otherwise never acknowledges the
+request, the duplicate process shows its own topmost status message instead of
+exiting silently. Login `--autostart` remains silent.
+
 ## Packaging and installation
 
 - The `package` and `windows` extras include `windows-toasts>=1.3.1,<2`.
@@ -63,6 +76,8 @@ Priority-only/Alarms-only modes. Routine login autostart and automatic
 - `windows_install_startup_app.ps1` registers `Kibitzer.Tray`, its display name,
   and the correct packaged or development icon path.
 - `windows_uninstall_startup_app.ps1` removes that current-user registration.
+- Startup and uninstall cleanup remove stale attention request and
+  acknowledgement files.
 - `scripts/__init__.py` makes repository `scripts.*` imports deterministic;
   Windows-Toasts also installs a generic top-level `scripts` package.
 

@@ -36,11 +36,14 @@ STARTUP_TIMEOUT_SECONDS = 30.0
 STOP_TIMEOUT_SECONDS = 10.0
 TRAY_SERVICE_NAME = "kibitzer-tray"
 TRAY_PROTOCOL_VERSION = 1
-ATTENTION_REQUEST_TIMEOUT_SECONDS = 1.0
+ATTENTION_REQUEST_TIMEOUT_SECONDS = POLL_SECONDS + 1.0
 ATTENTION_NOTIFICATION_COOLDOWN_SECONDS = 3.0
 WINDOWS_NOTIFICATION_APP_ID = "Kibitzer.Tray"
 WINDOWS_NOTIFICATION_APP_NAME = "Kibitzer"
-WINDOWS_NOTIFICATION_FAILURE_WAIT_SECONDS = 0.1
+
+
+NotificationFailureHandler = Callable[[], None]
+NotificationSender = Callable[[str, str, NotificationFailureHandler | None], bool]
 
 
 class TrayAlreadyRunningError(RuntimeError):
@@ -73,7 +76,7 @@ def request_existing_tray_attention(
     timeout_seconds: float = ATTENTION_REQUEST_TIMEOUT_SECONDS,
     poll_seconds: float = 0.05,
 ) -> bool:
-    """Ask the current tray instance to surface itself without trusting its PID."""
+    """Ask the current tray to surface itself and wait for its matching ack."""
     deadline = time.monotonic() + max(timeout_seconds, 0.0)
     while True:
         control = read_json(paths.tray_control_file)
@@ -90,17 +93,34 @@ def request_existing_tray_attention(
                     and protocol_version == TRAY_PROTOCOL_VERSION
                     and instance_id
                 ):
-                    atomic_write_json(
-                        paths.tray_attention_request_file,
-                        {
-                            "service": TRAY_SERVICE_NAME,
-                            "protocol_version": TRAY_PROTOCOL_VERSION,
-                            "instance_id": instance_id,
-                            "request_id": uuid4().hex,
-                            "requested_at": datetime.now(timezone.utc).isoformat(),
-                        },
-                    )
-                    return True
+                    request_id = uuid4().hex
+                    try:
+                        atomic_write_json(
+                            paths.tray_attention_request_file,
+                            {
+                                "service": TRAY_SERVICE_NAME,
+                                "protocol_version": TRAY_PROTOCOL_VERSION,
+                                "instance_id": instance_id,
+                                "request_id": request_id,
+                                "requested_at": datetime.now(timezone.utc).isoformat(),
+                            },
+                        )
+                    except OSError:
+                        LOGGER.exception("could not request attention from the running tray")
+                        return False
+
+                    while True:
+                        ack = read_json(paths.tray_attention_ack_file)
+                        if ack and (
+                            ack.get("service") == TRAY_SERVICE_NAME
+                            and ack.get("protocol_version") == TRAY_PROTOCOL_VERSION
+                            and ack.get("instance_id") == instance_id
+                            and ack.get("request_id") == request_id
+                        ):
+                            return True
+                        if time.monotonic() >= deadline:
+                            return False
+                        time.sleep(max(poll_seconds, 0.01))
         if time.monotonic() >= deadline:
             return False
         time.sleep(max(poll_seconds, 0.01))
@@ -154,17 +174,20 @@ class WindowsToastNotifier:
         toaster_factory: Callable[[str], Any] | None = None,
         toast_factory: Callable[..., Any] | None = None,
         notification_mode_getter: Callable[[], Any] | None = None,
-        failure_wait_seconds: float = WINDOWS_NOTIFICATION_FAILURE_WAIT_SECONDS,
     ) -> None:
         self.paths = paths
         self._toaster_factory = toaster_factory
         self._toast_factory = toast_factory
         self._notification_mode_getter = notification_mode_getter
-        self._failure_wait_seconds = failure_wait_seconds
         self._toaster: Any = None
         self._identity_configured = False
 
-    def show(self, title: str, message: str) -> bool:
+    def show(
+        self,
+        title: str,
+        message: str,
+        on_delivery_failure: NotificationFailureHandler | None = None,
+    ) -> bool:
         """Queue a toast and return whether Windows should show its banner."""
         if sys.platform != "win32":
             return False
@@ -202,13 +225,21 @@ class WindowsToastNotifier:
                     getattr(event_args, "error_code", event_args),
                 )
                 failure.set()
+                if on_delivery_failure is not None:
+                    try:
+                        on_delivery_failure()
+                    except Exception:
+                        LOGGER.exception(
+                            "Windows toast failure handler failed for %s",
+                            title,
+                        )
 
             toast = self._toast_factory(
                 text_fields=[title, message],
                 on_failed=on_failed,
             )
             self._toaster.show_toast(toast)
-            if failure.wait(max(self._failure_wait_seconds, 0.0)):
+            if failure.is_set():
                 return False
 
             mode_name = getattr(notification_mode, "name", notification_mode)
@@ -485,7 +516,7 @@ class WindowsTrayApp:
         *,
         instance_id: str | None = None,
         notify_on_startup: bool = True,
-        notification_sender: Callable[[str, str], bool] | None = None,
+        notification_sender: NotificationSender | None = None,
     ) -> None:
         self.manager = manager or WindowsServerManager()
         self.instance_id = instance_id or uuid4().hex
@@ -649,10 +680,13 @@ class WindowsTrayApp:
 
     def _consume_attention_request(self) -> None:
         request = read_json(self.manager.paths.tray_attention_request_file)
+        request_id = request.get("request_id") if request else None
         if not request or (
             request.get("service") != TRAY_SERVICE_NAME
             or request.get("protocol_version") != TRAY_PROTOCOL_VERSION
             or request.get("instance_id") != self.instance_id
+            or not isinstance(request_id, str)
+            or not request_id
         ):
             return
         remove_if_instance_matches(
@@ -661,6 +695,7 @@ class WindowsTrayApp:
         )
         now = time.monotonic()
         if now - self._last_attention_notification < ATTENTION_NOTIFICATION_COOLDOWN_SECONDS:
+            self._acknowledge_attention_request(request_id)
             return
         self._last_attention_notification = now
         with self._status_lock:
@@ -670,6 +705,22 @@ class WindowsTrayApp:
             f"{self._status_summary(status)} Use the existing tray icon to manage Kibitzer.",
             ensure_visible=True,
         )
+        self._acknowledge_attention_request(request_id)
+
+    def _acknowledge_attention_request(self, request_id: str) -> None:
+        try:
+            atomic_write_json(
+                self.manager.paths.tray_attention_ack_file,
+                {
+                    "service": TRAY_SERVICE_NAME,
+                    "protocol_version": TRAY_PROTOCOL_VERSION,
+                    "instance_id": self.instance_id,
+                    "request_id": request_id,
+                    "acknowledged_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+        except OSError:
+            LOGGER.exception("could not acknowledge tray attention request %s", request_id)
 
     def _notify_startup(self, status: ServerStatus) -> None:
         if status.running:
@@ -711,13 +762,30 @@ class WindowsTrayApp:
         ensure_visible: bool = False,
         error: bool = False,
     ) -> None:
+        fallback_lock = threading.Lock()
+        fallback_started = False
+
+        def show_fallback_once() -> None:
+            nonlocal fallback_started
+            if not ensure_visible:
+                return
+            with fallback_lock:
+                if fallback_started:
+                    return
+                fallback_started = True
+            _show_windows_message_async(title, message, error=error)
+
         try:
-            banner_expected = self._notification_sender(title, message)
+            banner_expected = self._notification_sender(
+                title,
+                message,
+                show_fallback_once if ensure_visible else None,
+            )
         except Exception:
             LOGGER.exception("notification sender failed: %s", title)
             banner_expected = False
         if ensure_visible and not banner_expected:
-            _show_windows_message_async(title, message, error=error)
+            show_fallback_once()
 
     @staticmethod
     def _display_status(status: ServerStatus) -> str:
@@ -811,6 +879,7 @@ def main() -> int:
         with WindowsSingleInstance():
             paths.tray_exit_request_file.unlink(missing_ok=True)
             paths.tray_attention_request_file.unlink(missing_ok=True)
+            paths.tray_attention_ack_file.unlink(missing_ok=True)
             atomic_write_json(
                 paths.tray_control_file,
                 {
@@ -830,6 +899,7 @@ def main() -> int:
             finally:
                 remove_if_instance_matches(paths.tray_exit_request_file, instance_id)
                 remove_if_instance_matches(paths.tray_attention_request_file, instance_id)
+                remove_if_instance_matches(paths.tray_attention_ack_file, instance_id)
                 remove_if_instance_matches(paths.tray_control_file, instance_id)
     except TrayAlreadyRunningError as exc:
         LOGGER.info("%s", exc)

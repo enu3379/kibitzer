@@ -6,7 +6,8 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from typing import Callable
+from unittest.mock import ANY, patch
 
 from apps.server.app.ports import PROTOCOL_VERSION, SERVICE_NAME
 from apps.server.app.runtime_paths import RuntimePaths
@@ -17,10 +18,12 @@ from apps.server.app.windows_tray import (
     WINDOWS_NOTIFICATION_APP_ID,
     ServerState,
     ServerStatus,
+    TrayAlreadyRunningError,
     WindowsServerManager,
     WindowsToastNotifier,
     WindowsTrayApp,
     _tray_icon_path,
+    main as windows_tray_main,
     request_existing_tray_attention,
 )
 
@@ -117,7 +120,7 @@ class WindowsServerManagerTest(unittest.TestCase):
                 self.assertFalse(manager.stop())
             child.terminate.assert_not_called()
 
-    def test_attention_request_targets_the_current_tray_instance(self) -> None:
+    def test_attention_request_times_out_without_a_matching_ack(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             paths = runtime_paths(Path(tmpdir))
             atomic_write_json(
@@ -131,7 +134,7 @@ class WindowsServerManagerTest(unittest.TestCase):
                 },
             )
 
-            self.assertTrue(
+            self.assertFalse(
                 request_existing_tray_attention(paths, timeout_seconds=0)
             )
             request = read_json(paths.tray_attention_request_file)
@@ -142,6 +145,81 @@ class WindowsServerManagerTest(unittest.TestCase):
         self.assertEqual(request["instance_id"], "current")
         self.assertTrue(request["request_id"])
         self.assertTrue(request["requested_at"])
+
+    def test_attention_request_ignores_a_stale_ack(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = runtime_paths(Path(tmpdir))
+            atomic_write_json(
+                paths.tray_control_file,
+                {
+                    "service": TRAY_SERVICE_NAME,
+                    "protocol_version": TRAY_PROTOCOL_VERSION,
+                    "instance_id": "current",
+                },
+            )
+            atomic_write_json(
+                paths.tray_attention_ack_file,
+                {
+                    "service": TRAY_SERVICE_NAME,
+                    "protocol_version": TRAY_PROTOCOL_VERSION,
+                    "instance_id": "current",
+                    "request_id": "previous-request",
+                },
+            )
+
+            self.assertFalse(
+                request_existing_tray_attention(paths, timeout_seconds=0)
+            )
+
+    def test_attention_request_waits_for_the_current_tray_ack(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = runtime_paths(Path(tmpdir))
+            atomic_write_json(
+                paths.tray_control_file,
+                {
+                    "service": TRAY_SERVICE_NAME,
+                    "protocol_version": TRAY_PROTOCOL_VERSION,
+                    "instance_id": "current",
+                    "pid": 123,
+                    "executable": "Kibitzer.exe",
+                },
+            )
+            manager = SimpleNamespace(paths=paths)
+            notify = unittest.mock.Mock(return_value=True)
+            app = WindowsTrayApp(  # type: ignore[arg-type]
+                manager,
+                instance_id="current",
+                notification_sender=notify,
+            )
+            app._status = ServerStatus(ServerState.IDLE, "Kibitzer: idle", 49187)
+            result: list[bool] = []
+            requester = threading.Thread(
+                target=lambda: result.append(
+                    request_existing_tray_attention(
+                        paths,
+                        timeout_seconds=0.5,
+                        poll_seconds=0.005,
+                    )
+                )
+            )
+            requester.start()
+            deadline = time.monotonic() + 0.25
+            while (
+                not paths.tray_attention_request_file.exists()
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.005)
+
+            app._consume_attention_request()
+            requester.join(timeout=1)
+            ack = read_json(paths.tray_attention_ack_file)
+
+        self.assertFalse(requester.is_alive())
+        self.assertEqual(result, [True])
+        self.assertIsNotNone(ack)
+        self.assertEqual(ack["instance_id"], "current")
+        self.assertTrue(ack["request_id"])
+        notify.assert_called_once()
 
     def test_attention_request_rejects_an_invalid_control_record(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -182,10 +260,12 @@ class WindowsTrayAppTest(unittest.TestCase):
                     value=0,
                     name="UNRESTRICTED",
                 ),
-                failure_wait_seconds=0,
             )
 
-            with patch.object(notifier, "_configure_identity") as configure:
+            with (
+                patch("apps.server.app.windows_tray.sys.platform", "win32"),
+                patch.object(notifier, "_configure_identity") as configure,
+            ):
                 self.assertTrue(notifier.show("Kibitzer title", "Kibitzer message"))
 
             configure.assert_called_once_with()
@@ -211,13 +291,50 @@ class WindowsTrayAppTest(unittest.TestCase):
                     value=1,
                     name="PRIORITY_ONLY",
                 ),
-                failure_wait_seconds=0,
             )
 
-            with patch.object(notifier, "_configure_identity"):
+            with (
+                patch("apps.server.app.windows_tray.sys.platform", "win32"),
+                patch.object(notifier, "_configure_identity"),
+            ):
                 self.assertFalse(notifier.show("Kibitzer title", "Kibitzer message"))
 
             toaster.show_toast.assert_called_once()
+
+    def test_winrt_notifier_reports_failure_after_show_returns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            toaster = SimpleNamespace(
+                toastNotifier=SimpleNamespace(
+                    setting=SimpleNamespace(value=0, name="ENABLED")
+                ),
+                show_toast=unittest.mock.Mock(),
+            )
+            notifier = WindowsToastNotifier(
+                runtime_paths(Path(tmpdir)),
+                toaster_factory=lambda _app_id: toaster,
+                toast_factory=lambda **kwargs: SimpleNamespace(**kwargs),
+                notification_mode_getter=lambda: SimpleNamespace(
+                    value=0,
+                    name="UNRESTRICTED",
+                ),
+            )
+            fallback = unittest.mock.Mock()
+
+            with (
+                patch("apps.server.app.windows_tray.sys.platform", "win32"),
+                patch.object(notifier, "_configure_identity"),
+            ):
+                self.assertTrue(
+                    notifier.show(
+                        "Kibitzer title",
+                        "Kibitzer message",
+                        fallback,
+                    )
+                )
+
+            toast = toaster.show_toast.call_args.args[0]
+            toast.on_failed(SimpleNamespace(error_code=-1))
+            fallback.assert_called_once_with()
 
     def test_manual_startup_notifies_the_current_server_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -244,6 +361,7 @@ class WindowsTrayAppTest(unittest.TestCase):
             notify.assert_called_once_with(
                 "Kibitzer is running",
                 "Server status: idle on port 49187.",
+                ANY,
             )
             self.assertEqual(icon.title, "Kibitzer: idle (port 49187)")
 
@@ -288,6 +406,7 @@ class WindowsTrayAppTest(unittest.TestCase):
                     "service": TRAY_SERVICE_NAME,
                     "protocol_version": TRAY_PROTOCOL_VERSION,
                     "instance_id": "current",
+                    "request_id": "request-1",
                 },
             )
 
@@ -296,8 +415,12 @@ class WindowsTrayAppTest(unittest.TestCase):
             notify.assert_called_once_with(
                 "Kibitzer is already running",
                 "Server status: idle on port 49187. Use the existing tray icon to manage Kibitzer.",
+                ANY,
             )
             self.assertFalse(paths.tray_attention_request_file.exists())
+            ack = read_json(paths.tray_attention_ack_file)
+            self.assertIsNotNone(ack)
+            self.assertEqual(ack["request_id"], "request-1")
 
     def test_attention_notifications_are_coalesced_during_the_cooldown(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -315,19 +438,23 @@ class WindowsTrayAppTest(unittest.TestCase):
                 "apps.server.app.windows_tray.time.monotonic",
                 side_effect=(10.0, 11.0),
             ):
-                for _ in range(2):
+                for index in range(2):
                     atomic_write_json(
                         paths.tray_attention_request_file,
                         {
                             "service": TRAY_SERVICE_NAME,
                             "protocol_version": TRAY_PROTOCOL_VERSION,
                             "instance_id": "current",
+                            "request_id": f"request-{index}",
                         },
                     )
                     app._consume_attention_request()
 
             notify.assert_called_once()
             self.assertFalse(paths.tray_attention_request_file.exists())
+            ack = read_json(paths.tray_attention_ack_file)
+            self.assertIsNotNone(ack)
+            self.assertEqual(ack["request_id"], "request-1")
 
     def test_attention_request_must_match_the_current_tray_instance(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -345,6 +472,7 @@ class WindowsTrayAppTest(unittest.TestCase):
                     "service": TRAY_SERVICE_NAME,
                     "protocol_version": TRAY_PROTOCOL_VERSION,
                     "instance_id": "stale-or-reused",
+                    "request_id": "request-1",
                 },
             )
 
@@ -400,7 +528,7 @@ class WindowsTrayAppTest(unittest.TestCase):
             notifications: list[tuple[str, str]] = []
             app = WindowsTrayApp(  # type: ignore[arg-type]
                 manager,
-                notification_sender=lambda title, message: (
+                notification_sender=lambda title, message, _on_failure: (
                     notifications.append((title, message)) or True
                 ),
             )
@@ -473,6 +601,7 @@ class WindowsTrayAppTest(unittest.TestCase):
             notify.assert_called_once_with(
                 "Kibitzer could not restart the server",
                 "Choose Open logs from the tray menu for details.",
+                ANY,
             )
 
     def test_priority_mode_uses_visible_fallback_for_manual_startup(self) -> None:
@@ -480,7 +609,7 @@ class WindowsTrayAppTest(unittest.TestCase):
             manager = SimpleNamespace(paths=runtime_paths(Path(tmpdir)))
             app = WindowsTrayApp(  # type: ignore[arg-type]
                 manager,
-                notification_sender=lambda _title, _message: False,
+                notification_sender=lambda _title, _message, _on_failure: False,
             )
             with patch(
                 "apps.server.app.windows_tray._show_windows_message_async"
@@ -492,6 +621,72 @@ class WindowsTrayAppTest(unittest.TestCase):
             fallback.assert_called_once_with(
                 "Kibitzer is running",
                 "Server status: idle on port 49187.",
+                error=False,
+            )
+
+    def test_synchronous_toast_failure_starts_only_one_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = SimpleNamespace(paths=runtime_paths(Path(tmpdir)))
+
+            def fail_delivery(
+                _title: str,
+                _message: str,
+                on_failure: Callable[[], None] | None,
+            ) -> bool:
+                self.assertIsNotNone(on_failure)
+                on_failure()
+                return False
+
+            app = WindowsTrayApp(  # type: ignore[arg-type]
+                manager,
+                notification_sender=fail_delivery,
+            )
+            with patch(
+                "apps.server.app.windows_tray._show_windows_message_async"
+            ) as fallback:
+                app._notify(
+                    "Kibitzer title",
+                    "Kibitzer message",
+                    ensure_visible=True,
+                )
+
+            fallback.assert_called_once_with(
+                "Kibitzer title",
+                "Kibitzer message",
+                error=False,
+            )
+
+
+class WindowsTrayMainTest(unittest.TestCase):
+    def test_duplicate_manual_launch_falls_back_when_tray_does_not_ack(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = runtime_paths(Path(tmpdir))
+            with (
+                patch("apps.server.app.windows_tray.sys.platform", "win32"),
+                patch("apps.server.app.windows_tray.sys.argv", ["Kibitzer.exe"]),
+                patch(
+                    "apps.server.app.windows_tray.resolve_runtime_paths",
+                    return_value=paths,
+                ),
+                patch("apps.server.app.windows_tray._configure_logging"),
+                patch(
+                    "apps.server.app.windows_tray.WindowsSingleInstance.__enter__",
+                    side_effect=TrayAlreadyRunningError("already running"),
+                ),
+                patch(
+                    "apps.server.app.windows_tray.request_existing_tray_attention",
+                    return_value=False,
+                ) as request_attention,
+                patch(
+                    "apps.server.app.windows_tray._show_windows_message"
+                ) as fallback,
+            ):
+                self.assertEqual(windows_tray_main(), 0)
+
+            request_attention.assert_called_once_with(paths)
+            fallback.assert_called_once_with(
+                "Kibitzer is already running",
+                "Use the existing icon in the Windows notification area to manage Kibitzer.",
                 error=False,
             )
 
@@ -520,7 +715,9 @@ class WindowsUninstallSafetyTest(unittest.TestCase):
     def test_uninstall_cleans_stale_attention_requests(self) -> None:
         script = WINDOWS_UNINSTALL_SCRIPT.read_text(encoding="utf-8")
         self.assertIn('"tray-attention-request.json"', script)
+        self.assertIn('"tray-attention-ack.json"', script)
         self.assertIn("Remove-Item -LiteralPath $AttentionPath", script)
+        self.assertIn("Remove-Item -LiteralPath $AttentionAckPath", script)
 
     def test_legacy_pid_file_is_cleanup_only_and_never_termination_authority(self) -> None:
         script = WINDOWS_UNINSTALL_SCRIPT.read_text(encoding="utf-8")
