@@ -19,6 +19,10 @@ from apps.server.app.windows_tray import (
 )
 
 
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+WINDOWS_UNINSTALL_SCRIPT = REPOSITORY_ROOT / "scripts" / "windows_uninstall_startup_app.ps1"
+
+
 def runtime_paths(root: Path, *, mode: str = "development") -> RuntimePaths:
     return RuntimePaths(
         mode=mode,  # type: ignore[arg-type]
@@ -107,6 +111,47 @@ class WindowsServerManagerTest(unittest.TestCase):
 
 
 class WindowsTrayAppTest(unittest.TestCase):
+    def test_exit_request_must_match_the_current_tray_instance(self) -> None:
+        class TwoIterationStopEvent:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def wait(self, _timeout: float) -> bool:
+                self.calls += 1
+                return self.calls > 1
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = SimpleNamespace(paths=runtime_paths(Path(tmpdir)))
+            manager.status = lambda: ServerStatus(ServerState.IDLE, "idle", 49187)
+            app = WindowsTrayApp(manager, instance_id="current")  # type: ignore[arg-type]
+            app._stop_event = TwoIterationStopEvent()  # type: ignore[assignment]
+            with (
+                patch(
+                    "apps.server.app.windows_tray.read_json",
+                    return_value={"instance_id": "stale-or-reused"},
+                ),
+                patch.object(app, "_request_exit") as request_exit,
+            ):
+                app._poll_loop()
+
+            request_exit.assert_not_called()
+
+    def test_matching_exit_request_stops_the_current_tray_instance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = SimpleNamespace(paths=runtime_paths(Path(tmpdir)))
+            app = WindowsTrayApp(manager, instance_id="current")  # type: ignore[arg-type]
+            with (
+                patch(
+                    "apps.server.app.windows_tray.read_json",
+                    return_value={"instance_id": "current"},
+                ),
+                patch("apps.server.app.windows_tray.POLL_SECONDS", 0),
+                patch.object(app, "_request_exit") as request_exit,
+            ):
+                app._poll_loop()
+
+            request_exit.assert_called_once_with()
+
     def test_lifecycle_callback_returns_without_waiting_for_action(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = SimpleNamespace(paths=runtime_paths(Path(tmpdir)))
@@ -139,6 +184,17 @@ class WindowsTrayAppTest(unittest.TestCase):
                 time.sleep(0.01)
             self.assertFalse(app._action_lock.locked())
             self.assertFalse(menu_lock_states[-1])
+
+
+class WindowsUninstallSafetyTest(unittest.TestCase):
+    def test_legacy_pid_file_is_cleanup_only_and_never_termination_authority(self) -> None:
+        script = WINDOWS_UNINSTALL_SCRIPT.read_text(encoding="utf-8")
+
+        for termination_command in ("Stop-Process", "taskkill", "TerminateProcess"):
+            with self.subTest(termination_command=termination_command):
+                self.assertNotIn(termination_command, script)
+        self.assertIn("$LegacyPidFile", script)
+        self.assertIn("Remove-Item -LiteralPath $LegacyPidFile", script)
 
 
 if __name__ == "__main__":
