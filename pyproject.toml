@@ -25,10 +25,12 @@ package = [
   "pyinstaller>=6.21,<7",
   "pillow>=11.0,<13; sys_platform == 'win32'",
   "pystray>=0.19.5,<0.20; sys_platform == 'win32'",
+  "windows-toasts>=1.3.1,<2; sys_platform == 'win32'",
 ]
 windows = [
   "pillow>=11.0,<13",
   "pystray>=0.19.5,<0.20",
+  "windows-toasts>=1.3.1,<2",
 ]
 
 [project.scripts]

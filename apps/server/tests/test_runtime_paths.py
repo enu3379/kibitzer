@@ -57,6 +57,18 @@ class RuntimePathsTest(unittest.TestCase):
             paths.server_control_file,
             local_app_data / "Kibitzer" / "runtime" / "server-control.json",
         )
+        self.assertEqual(
+            paths.tray_attention_dir,
+            local_app_data / "Kibitzer" / "runtime" / "tray-attention",
+        )
+        self.assertEqual(
+            paths.tray_attention_request_file("a" * 32),
+            local_app_data
+            / "Kibitzer"
+            / "runtime"
+            / "tray-attention"
+            / f"{'a' * 32}.request.json",
+        )
         self.assertEqual(paths.logs_dir, local_app_data / "Kibitzer" / "logs")
 
     def test_windows_worktrees_share_control_but_not_data(self) -> None:
@@ -113,6 +125,14 @@ class RuntimePathsTest(unittest.TestCase):
         self.assertEqual(paths.user_config_dir, profile / "configs")
         self.assertEqual(paths.default_config_file, config_file)
         self.assertEqual(paths.env_file, profile / ".env")
+        self.assertEqual(
+            paths.tray_attention_dir,
+            profile / "runtime" / "tray-attention",
+        )
+        self.assertEqual(
+            paths.tray_attention_ack_file("b" * 32),
+            profile / "runtime" / "tray-attention" / f"{'b' * 32}.ack.json",
+        )
         self.assertTrue(paths.config_file_explicit)
 
     def test_missing_explicit_config_override_fails_fast(self) -> None:

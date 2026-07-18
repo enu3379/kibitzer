@@ -12,6 +12,10 @@ Windows lifecycle follow-up implemented in PR #105, which reuses D9's runtime
 paths and PyInstaller collection without folding platform-specific tray code
 back into the foundation PR.
 
+The modern toast transport, Priority-only fallback, and Windows QA completed on
+2026-07-18 are recorded separately in
+`docs/handoff-2026-07-18-windows-launch-notifications.md`.
+
 ## Ownership contract
 
 The FastAPI server remains the single source of truth. A server that owns a
@@ -46,6 +50,23 @@ fully isolated control directory for tests and parallel profiles.
 - Starting the tray starts the server when no valid Kibitzer identity exists.
 - Exiting the tray requests server shutdown; the app owns the server lifecycle.
 - A single-instance lock prevents duplicate Windows tray icons.
+- Manual launch and lifecycle actions display modern WinRT notifications under
+  the stable current-user `Kibitzer.Tray` AppUserModelID.
+- A duplicate manual launch writes a request-specific, instance-scoped
+  attention record and waits for the tray to atomically claim that exact file.
+  Concurrent launchers cannot overwrite each other, and timeout cancellation
+  prevents a late duplicate toast. If the tray is already shutting down or
+  does not acknowledge within three seconds, the duplicate process uses its own
+  topmost message instead of exiting silently.
+- When Windows reports Priority-only or Alarms-only mode, manual startup,
+  duplicate launches, and failures also use a topmost message fallback because
+  ordinary toast banners are suppressed in those modes.
+- A delayed WinRT delivery-failure event invokes the same one-shot fallback;
+  no fixed timing window is used to guess whether delivery succeeded.
+- Login autostart is quiet on success; startup and lifecycle failures remain
+  visible. Automatic `idle`/`active` changes do not produce notification spam.
+- Installing autostart removes the retired `Kibitzer Server.lnk` shortcut so
+  development and packaged launchers cannot race at the next login.
 
 ## Distribution and development
 
@@ -65,7 +86,10 @@ longer the active lifecycle implementation.
 - Stop and Restart complete without Task Manager and without a fixed port.
 - A stale/mismatched control file cannot stop an unrelated or newer process.
 - Polling cannot block native tray menu interaction.
-- Duplicate tray launches exit without creating a second icon.
+- Duplicate tray launches notify through the existing instance and exit without
+  creating a second icon or server; rapid repeated launches are coalesced.
+- Manual launch reports startup/status, while `--autostart` suppresses routine
+  success notifications and `--smoke` remains non-interactive.
 - Packaged smoke starts and gracefully stops the server through the control
   protocol on macOS and Windows.
 - Server pytest and extension tests/build pass; Windows CI builds both bundled

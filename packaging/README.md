@@ -15,6 +15,15 @@ user-facing `Kibitzer.exe` tray app plus an internal `kibitzer-server.exe` for
 the child server process and diagnostics. Distribute the whole directory, not
 only an executable.
 
+On Windows, a manual `Kibitzer.exe` launch shows the current startup/server
+status through a WinRT toast. Repeated manual launches notify through the
+existing tray and exit without creating duplicate icons or servers. If Windows
+is suppressing ordinary banners in Priority-only/Alarms-only mode, Kibitzer uses
+a topmost status message as the visible fallback. Login shortcuts use
+`--autostart` to suppress routine success notifications while preserving
+failure feedback. The packaged directory includes the `windows-toasts`/PyWinRT
+runtime required by this path.
+
 `kibitzer paths` reports runtime roots and conventional default locations. A
 custom `KIBITZER_CONFIG` may override the effective database, embedding, or
 provider-config paths; inspect that YAML when an override is active.

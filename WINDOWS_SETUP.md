@@ -20,7 +20,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\windows_setup.ps1
 ```
 
-The script creates `.venv`, installs Python and pystray dependencies, downloads and verifies
+The script creates `.venv`, installs Python, pystray, and WinRT toast dependencies, downloads and verifies
 the local Tier 0 ONNX model plus tokenizer (about 41 MB total), installs
 extension npm dependencies, and rebuilds `apps\extension\dist`.
 
@@ -73,6 +73,22 @@ logon, owns the local server lifecycle, and shows a taskbar tray icon:
 .\scripts\windows_install_startup_app.ps1
 ```
 
+The shortcut passes `--autostart`, so a successful login launch does not show a
+notification every time Windows starts. Starting `Kibitzer.exe` manually shows
+the current server status through a modern Windows toast. Starting it again does
+not create another tray or server; the existing tray displays an **already
+running** notification instead. The installer registers the stable
+`Kibitzer.Tray` notification identity for the current user.
+
+When Windows is in **Priority only** or **Alarms only** mode, ordinary app toast
+banners are intentionally suppressed even though the notification is stored in
+notification history. Kibitzer detects that mode and also opens a topmost status
+message for manual startup, duplicate launches, and action failures so those
+acknowledgements cannot disappear silently. Login autostart remains quiet.
+Re-run the install command after upgrading an older shortcut so it receives the
+new autostart argument. The installer removes the retired `Kibitzer Server.lnk`
+PowerShell shortcut before writing the single current `Kibitzer.lnk` entry.
+
 The server responds to health checks while idle, but judging providers are
 initialized only after a goal-backed session starts. Check the identity and
 mode on the selected port with:
@@ -96,6 +112,9 @@ uses `%LOCALAPPDATA%\Kibitzer\logs\` by default, or
 gracefully stops the server before closing the tray. Red means unreachable, gray
 means idle, green means active, and yellow means unknown or transitioning.
 **Open logs** opens the active folder containing the tray and server logs.
+Manual lifecycle actions report success or failure through modern Windows
+notifications. Automatic `idle`/`active` changes update only the icon and menu,
+so normal browser activity does not produce notification spam.
 
 The tray verifies the server's `/identity` instance ID before requesting a
 shutdown. It does not trust a PID file, so a stale PID cannot terminate an

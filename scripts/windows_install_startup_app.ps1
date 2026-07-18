@@ -1,6 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $ShortcutName = "Kibitzer.lnk"
+$NotificationAppId = "Kibitzer.Tray"
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $PackagedTray = Join-Path $Root "dist\kibitzer\Kibitzer.exe"
 $Pythonw = Join-Path $Root ".venv\Scripts\pythonw.exe"
@@ -10,20 +11,28 @@ if (-not $StartupDir) {
   $StartupDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup"
 }
 
+$LegacyShortcutPath = Join-Path $StartupDir "Kibitzer Server.lnk"
+if (Test-Path $LegacyShortcutPath) {
+  Remove-Item -LiteralPath $LegacyShortcutPath
+  Write-Host "Removed legacy Startup shortcut: $LegacyShortcutPath"
+}
+
 if (Test-Path $PackagedTray) {
   $Target = $PackagedTray
-  $Arguments = ""
+  $Arguments = "--autostart"
   $WorkingDirectory = Split-Path -Parent $PackagedTray
   $DataDir = if ($env:KIBITZER_HOME) { $env:KIBITZER_HOME } else { Join-Path $env:LOCALAPPDATA "Kibitzer" }
+  $NotificationIcon = Join-Path (Split-Path -Parent $PackagedTray) "_internal\icons\monitor-v1-mono-128.png"
 }
 else {
   if (-not (Test-Path $Pythonw)) {
     throw "Missing .venv. Run .\scripts\windows_setup.ps1 first."
   }
   $Target = $Pythonw
-  $Arguments = "-m apps.server.app.windows_tray"
+  $Arguments = "-m apps.server.app.windows_tray --autostart"
   $WorkingDirectory = $Root.ToString()
   $DataDir = if ($env:KIBITZER_HOME) { $env:KIBITZER_HOME } else { Join-Path $Root "data" }
+  $NotificationIcon = Join-Path $Root "apps\extension\icons\variants\monitor-v1-mono-128.png"
 }
 
 $ShortcutPath = Join-Path $StartupDir $ShortcutName
@@ -39,12 +48,22 @@ $Shortcut.WindowStyle = 7
 $Shortcut.Description = "Starts Kibitzer and its local server at Windows logon."
 $Shortcut.Save()
 
+# Register a stable current-user identity for modern Windows toast
+# notifications. The tray also refreshes these values at runtime so a copied
+# development build remains usable before this installer is run.
+$NotificationKey = "HKCU:\Software\Classes\AppUserModelId\$NotificationAppId"
+New-Item -Path $NotificationKey -Force | Out-Null
+New-ItemProperty -Path $NotificationKey -Name "DisplayName" -Value "Kibitzer" -PropertyType String -Force | Out-Null
+New-ItemProperty -Path $NotificationKey -Name "IconUri" -Value $NotificationIcon -PropertyType String -Force | Out-Null
+New-ItemProperty -Path $NotificationKey -Name "IconBackgroundColor" -Value "FF111827" -PropertyType String -Force | Out-Null
+
 Write-Host "Installed Startup shortcut: $ShortcutPath"
+Write-Host "Registered notification app: $NotificationAppId"
 Write-Host "Runtime data: $DataDir"
 Write-Host "Logs: $(Join-Path $DataDir 'logs')"
 
 # Starting an already-running tray is safe: its named mutex makes the duplicate
-# process exit without creating a second icon.
+# autostart process exit quietly without creating a second icon.
 if ($Arguments) {
   Start-Process -FilePath $Target -ArgumentList $Arguments -WorkingDirectory $WorkingDirectory -WindowStyle Hidden
 }
