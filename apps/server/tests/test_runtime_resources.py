@@ -7,6 +7,7 @@ from apps.server.tests.support import TestClient
 
 from apps.server.app.config import AppConfig, ServerConfig, Tier1Config, Tier2Config
 from apps.server.app.main import create_app
+from apps.server.app.providers.judges.base import ProviderResponseError
 from apps.server.app.storage.sqlite import SQLiteStore
 
 
@@ -33,8 +34,20 @@ class RuntimeResourcesTest(unittest.TestCase):
         self.assertEqual(
             initial_health["provider_calls"],
             {
-                "tier1": {"last_result": "none", "reason": None, "checked_at": None},
-                "tier2": {"last_result": "none", "reason": None, "checked_at": None},
+                "tier1": {
+                    "last_result": "none",
+                    "reason": None,
+                    "phase": None,
+                    "stage": None,
+                    "checked_at": None,
+                },
+                "tier2": {
+                    "last_result": "none",
+                    "reason": None,
+                    "phase": None,
+                    "stage": None,
+                    "checked_at": None,
+                },
             },
         )
 
@@ -97,22 +110,29 @@ class RuntimeResourcesTest(unittest.TestCase):
             (_http_status_error(request, 403), "forbidden"),
             (_http_status_error(request, 429), "rate_limited"),
             (_http_status_error(request, 503), "server_error"),
-            (ValueError("bad response"), "invalid_response"),
+            (ProviderResponseError("content_json", "bad response"), "invalid_response"),
             (RuntimeError("unexpected"), "other"),
         ]
 
         for exc, expected_reason in cases:
             with self.subTest(reason=expected_reason):
-                runtime.record_provider_call_failure(1, exc)
+                runtime.record_provider_call_failure(1, exc, phase="judge")
                 status = self.client.get("/health").json()["provider_calls"]["tier1"]
                 self.assertEqual(status["last_result"], "error")
                 self.assertEqual(status["reason"], expected_reason)
+                self.assertEqual(status["phase"], "judge")
+                self.assertEqual(
+                    status["stage"],
+                    "content_json" if isinstance(exc, ProviderResponseError) else None,
+                )
                 self.assertIsNotNone(status["checked_at"])
 
         runtime.record_provider_call_success(1)
         recovered = self.client.get("/health").json()["provider_calls"]["tier1"]
         self.assertEqual(recovered["last_result"], "success")
         self.assertIsNone(recovered["reason"])
+        self.assertIsNone(recovered["phase"])
+        self.assertIsNone(recovered["stage"])
         self.assertIsNotNone(recovered["checked_at"])
 
 

@@ -2304,6 +2304,8 @@ class SQLiteStore:
         session_id: str,
         observation_id: str,
         error_type: str,
+        phase: str,
+        stage: str | None,
         ts: datetime | None = None,
     ) -> None:
         now = ts or _utc_now()
@@ -2316,6 +2318,8 @@ class SQLiteStore:
                 {
                     "observation_id": observation_id,
                     "error_type": error_type,
+                    "phase": phase,
+                    "stage": stage,
                 },
                 now,
             )
@@ -2785,6 +2789,8 @@ class SQLiteStore:
         session_id: str,
         observation_id: str,
         error_type: str,
+        phase: str,
+        stage: str | None,
         ts: datetime | None = None,
     ) -> None:
         now = ts or _utc_now()
@@ -2797,6 +2803,8 @@ class SQLiteStore:
                 {
                     "observation_id": observation_id,
                     "error_type": error_type,
+                    "phase": phase,
+                    "stage": stage,
                 },
                 now,
             )

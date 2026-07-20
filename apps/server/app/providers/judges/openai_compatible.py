@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from itertools import count
-from typing import Iterator
+from typing import Callable, Iterator, TypeVar
 
 import httpx
 
@@ -11,11 +11,15 @@ from ...schemas import Verdict
 from .base import (
     TIER2_JUDGE_SYSTEM_PROMPT,
     TIER2_LEGACY_SYSTEM_PROMPT,
+    ProviderResponseError,
     Tier1Result,
     Tier2Decision,
     Tier2Result,
     ordered_api_keys,
 )
+
+
+_JudgeResult = TypeVar("_JudgeResult")
 
 
 @dataclass(frozen=True)
@@ -49,11 +53,11 @@ class OpenAICompatibleJudgeProvider:
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ],
             "temperature": 0,
+            "max_tokens": self.max_output_tokens,
             "response_format": {"type": "json_object"},
         }
         response = await self._post_chat_completions(request_body)
-        content = response.json()["choices"][0]["message"]["content"]
-        return parse_tier1_json(content)
+        return _parse_openai_judge_response(response, parse_tier1_json)
 
     async def complete_goal_enrichment(self, prompt: str, timeout_seconds: float) -> str:
         request_body = {
@@ -63,7 +67,7 @@ class OpenAICompatibleJudgeProvider:
             "response_format": {"type": "json_object"},
         }
         response = await self._post_chat_completions(request_body, timeout_seconds=timeout_seconds)
-        return response.json()["choices"][0]["message"]["content"]
+        return _openai_message_content(_response_json(response))
 
     async def confirm_tier2(
         self,
@@ -78,8 +82,7 @@ class OpenAICompatibleJudgeProvider:
             "response_format": {"type": "json_object"},
         }
         response = await self._post_chat_completions(request_body)
-        content = response.json()["choices"][0]["message"]["content"]
-        return parse_tier2_json(content)
+        return _parse_openai_judge_response(response, parse_tier2_json)
 
     async def decide_tier2(
         self,
@@ -94,7 +97,7 @@ class OpenAICompatibleJudgeProvider:
             "response_format": {"type": "json_object"},
         }
         response = await self._post_chat_completions(request_body)
-        return parse_tier2_decision_json(_openai_message_content(response.json()))
+        return _parse_openai_judge_response(response, parse_tier2_decision_json)
 
     async def write_tier2_message(
         self,
@@ -108,12 +111,15 @@ class OpenAICompatibleJudgeProvider:
             "max_tokens": self.writer_max_output_tokens,
         }
         response = await self._post_chat_completions(request_body)
-        response_data = response.json()
-        if _openai_finish_reason(response_data) == "length":
-            raise ValueError("tier2 writer response exhausted output budget")
+        response_data = _response_json(response)
         content = _openai_message_content(response_data).strip()
+        if _openai_finish_reason(response_data) == "length":
+            raise ProviderResponseError(
+                "output_exhausted",
+                "tier2 writer response exhausted output budget",
+            )
         if not content:
-            raise ValueError("tier2 writer response was empty")
+            raise ProviderResponseError("writer_empty", "tier2 writer response was empty")
         return content[:320]
 
     async def _post_chat_completions(
@@ -148,14 +154,14 @@ def parse_tier1_json(content: str) -> Tier1Result:
         return Tier1Result(verdict=Verdict.OK, reason=reason)
     if verdict == "drift":
         return Tier1Result(verdict=Verdict.DRIFT, reason=reason)
-    raise ValueError(f"invalid tier1 verdict: {verdict}")
+    raise ProviderResponseError("schema", f"invalid tier1 verdict: {verdict}")
 
 
 def parse_tier2_json(content: str) -> Tier2Result:
     data = _load_json_object(content)
     confirm = data.get("confirm_drift")
     if not isinstance(confirm, bool):
-        raise ValueError("tier2 confirm_drift must be boolean")
+        raise ProviderResponseError("schema", "tier2 confirm_drift must be boolean")
     message_value = data.get("message")
     message = str(message_value).strip()[:320] if message_value is not None else None
     if confirm and not message:
@@ -169,11 +175,11 @@ def parse_tier2_decision_json(content: str) -> Tier2Decision:
     reason_code = data.get("reason_code")
     basis = data.get("basis")
     if decision not in {"notify", "defer"}:
-        raise ValueError("tier2 decision must be notify or defer")
+        raise ProviderResponseError("schema", "tier2 decision must be notify or defer")
     if reason_code not in {"off_goal", "useful_side_branch", "insufficient_evidence"}:
-        raise ValueError("tier2 reason_code is invalid")
+        raise ProviderResponseError("schema", "tier2 reason_code is invalid")
     if basis not in {"title", "content", "both"}:
-        raise ValueError("tier2 basis is invalid")
+        raise ProviderResponseError("schema", "tier2 basis is invalid")
     return Tier2Decision(decision=decision, reason_code=reason_code, basis=basis)
 
 
@@ -216,10 +222,10 @@ def _tier2_writer_messages(
 def _openai_message_content(response: dict[str, object]) -> str:
     choices = response.get("choices")
     if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
-        raise ValueError("OpenAI response did not include choices")
+        raise ProviderResponseError("envelope", "OpenAI response did not include choices")
     message = choices[0].get("message")
     if not isinstance(message, dict) or not isinstance(message.get("content"), str):
-        raise ValueError("OpenAI response did not include message content")
+        raise ProviderResponseError("envelope", "OpenAI response did not include message content")
     return message["content"]
 
 
@@ -238,15 +244,46 @@ def _chat_completions_url(base_url: str) -> str:
     return f"{base}/chat/completions"
 
 
+def _response_json(response: httpx.Response) -> dict[str, object]:
+    try:
+        data = response.json()
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ProviderResponseError("http_json", "provider HTTP body was not JSON") from exc
+    if not isinstance(data, dict):
+        raise ProviderResponseError("envelope", "provider response was not a JSON object")
+    return data
+
+
+def _parse_openai_judge_response(
+    response: httpx.Response,
+    parser: Callable[[str], _JudgeResult],
+) -> _JudgeResult:
+    response_data = _response_json(response)
+    content = _openai_message_content(response_data)
+    exhausted = _openai_finish_reason(response_data) == "length"
+    try:
+        return parser(content)
+    except ProviderResponseError as exc:
+        if exhausted and exc.stage in {"content_json", "schema"}:
+            raise ProviderResponseError(
+                "output_exhausted",
+                "judge response exhausted output budget",
+            ) from exc
+        raise
+
+
 def _load_json_object(content: str) -> dict[str, object]:
     try:
         data = json.loads(content)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as first_exc:
         start = content.find("{")
         end = content.rfind("}")
         if start == -1 or end <= start:
-            raise
-        data = json.loads(content[start : end + 1])
+            raise ProviderResponseError("content_json", "judge content was not JSON") from first_exc
+        try:
+            data = json.loads(content[start : end + 1])
+        except json.JSONDecodeError as exc:
+            raise ProviderResponseError("content_json", "judge content was not JSON") from exc
     if not isinstance(data, dict):
-        raise ValueError("judge response must be a JSON object")
+        raise ProviderResponseError("content_json", "judge response must be a JSON object")
     return data

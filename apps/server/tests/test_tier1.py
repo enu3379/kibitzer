@@ -177,11 +177,16 @@ class Tier1ResilienceAndFactoryTest(unittest.TestCase):
             provider_status = client.get("/health").json()["provider_calls"]["tier1"]
             self.assertEqual(provider_status["last_result"], "error")
             self.assertEqual(provider_status["reason"], "other")
+            self.assertEqual(provider_status["phase"], "judge")
+            self.assertIsNone(provider_status["stage"])
             with closing(sqlite3.connect(self.db_path)) as conn:
-                count = conn.execute(
-                    "SELECT COUNT(*) FROM event_log WHERE event_type = 'tier1.provider_error'"
-                ).fetchone()[0]
-            self.assertEqual(count, 1)
+                row = conn.execute(
+                    "SELECT payload_json FROM event_log WHERE event_type = 'tier1.provider_error'"
+                ).fetchone()
+            self.assertIsNotNone(row)
+            event = json.loads(row[0])
+            self.assertEqual(event["phase"], "judge")
+            self.assertIsNone(event["stage"])
         finally:
             client.__exit__(None, None, None)
 
@@ -208,6 +213,8 @@ class Tier1ResilienceAndFactoryTest(unittest.TestCase):
             provider_status = client.get("/health").json()["provider_calls"]["tier1"]
             self.assertEqual(provider_status["last_result"], "success")
             self.assertIsNone(provider_status["reason"])
+            self.assertIsNone(provider_status["phase"])
+            self.assertIsNone(provider_status["stage"])
         finally:
             client.__exit__(None, None, None)
 

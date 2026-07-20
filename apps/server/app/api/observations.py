@@ -45,7 +45,7 @@ from ..core.time_budget import (
     thresholds_for_budget,
 )
 from ..core.voice import speak
-from ..providers.judges.base import Tier2Decision
+from ..providers.judges.base import ProviderResponseError, Tier2Decision
 from ..schemas import PageExcerpt, PipelineAction, PipelineResult, RawObservation, Verdict
 from ..storage.sqlite import (
     CurrentSessionRecord,
@@ -1191,11 +1191,13 @@ async def _review_tier2(
         if not request.app.state.config.tier2.enabled:
             return Tier2ReviewOutcome(decision=None)
         exc = RuntimeError("tier2 provider unavailable")
-        runtime.record_provider_call_failure(2, exc)
+        runtime.record_provider_call_failure(2, exc, phase="judge")
         store.record_tier2_provider_error(
             observation.session_id,
             observation.id,
             "ProviderUnavailable",
+            phase="judge",
+            stage=None,
         )
         return Tier2ReviewOutcome(decision=None)
 
@@ -1205,11 +1207,13 @@ async def _review_tier2(
             system_prompt=compose_tier2_judge_system_prompt(),
         )
     except Exception as exc:
-        runtime.record_provider_call_failure(2, exc)
+        runtime.record_provider_call_failure(2, exc, phase="judge")
         store.record_tier2_provider_error(
             observation.session_id,
             observation.id,
             type(exc).__name__,
+            phase="judge",
+            stage=exc.stage if isinstance(exc, ProviderResponseError) else None,
         )
         return Tier2ReviewOutcome(decision=None)
 
@@ -1237,13 +1241,15 @@ async def _review_tier2(
         )
         message = message.strip()
         if not message:
-            raise ValueError("tier2 writer response was empty")
+            raise ProviderResponseError("writer_empty", "tier2 writer response was empty")
     except Exception as exc:
-        runtime.record_provider_call_failure(2, exc)
+        runtime.record_provider_call_failure(2, exc, phase="writer")
         store.record_tier2_provider_error(
             observation.session_id,
             observation.id,
             type(exc).__name__,
+            phase="writer",
+            stage=exc.stage if isinstance(exc, ProviderResponseError) else None,
         )
         nag_count = store.nag_count_today(observation.session_id) + 1
         fallback = format_persona_fallback(persona, current.goal, observation, nag_count)

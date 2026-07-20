@@ -682,6 +682,8 @@ class Tier2ApiTest(unittest.TestCase):
         self.assertEqual(response.json()["action"], "none")
         self.assertEqual(provider_status["last_result"], "error")
         self.assertEqual(provider_status["reason"], "connection")
+        self.assertEqual(provider_status["phase"], "judge")
+        self.assertIsNone(provider_status["stage"])
 
     def test_writer_failure_uses_fallback_and_next_success_clears_health_error(self) -> None:
         provider = FakeTier2Provider(Tier2Result(confirm_drift=True, message=""))
@@ -717,10 +719,23 @@ class Tier2ApiTest(unittest.TestCase):
         self.assertTrue(first["message"])
         self.assertEqual(failed_status["last_result"], "error")
         self.assertEqual(failed_status["reason"], "invalid_response")
+        self.assertEqual(failed_status["phase"], "writer")
+        self.assertEqual(failed_status["stage"], "writer_empty")
         self.assertEqual(second["action"], "notify")
         self.assertEqual(second["message"], "정상 Writer 메시지입니다.")
         self.assertEqual(recovered_status["last_result"], "success")
         self.assertIsNone(recovered_status["reason"])
+        self.assertIsNone(recovered_status["phase"])
+        self.assertIsNone(recovered_status["stage"])
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM event_log "
+                "WHERE event_type = 'tier2.provider_error' ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        self.assertIsNotNone(row)
+        event = json.loads(row[0])
+        self.assertEqual(event["phase"], "writer")
+        self.assertEqual(event["stage"], "writer_empty")
 
     def test_tier2_provider_receives_persona_prompt_and_escalation_context(self) -> None:
         provider = FakeTier2Provider(Tier2Result(confirm_drift=True, message="목표와 다른 페이지입니다."))
