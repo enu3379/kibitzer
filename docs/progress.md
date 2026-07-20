@@ -41,6 +41,31 @@ Completed:
   draft), `docs/persona-voice-revamp.md`, and the
   `docs/benchmarks/persona-voice-v4/` evidence (the v5 benchmark already on
   `dev` references v4 as its baseline).
+## 2026-07-18 Tier 2 red-team artifact preservation
+
+Completed:
+
+- Preserved PR #74's prompt-extraction and behavioral-injection threat model,
+  historical MiniMax M3 results, residual-risk analysis, and reproduction guide.
+- Forward-ported the live harness from the old combined Tier-2 call to the
+  production Context Judge / Message Writer split.
+- Kept all 27 historical Judge attacks and routed only reachable goal/title
+  attacks to the Writer; excerpts and recent history remain excluded from the
+  persona-bearing call.
+- Made the harness distinguish raw-only disclosure from delivered disclosure,
+  simulate Writer fallback/clamping, and treat targeted Judge parse/provider
+  failures as effective suppression under the current defer-on-failure policy.
+- Added dry-run routing validation and optional external `.env` /
+  `models.local.yaml` paths for safe use from an isolated worktree.
+
+Verified:
+
+- harness dry run: 27 Judge jobs, 4 Writer jobs for one persona, and 40 Writer
+  jobs across all 10 personas;
+- `python -m pytest apps/server/tests -q`: 275 passed, 1 skipped, 39 subtests;
+- `apps/extension` `npm run build`: 45 tests, typecheck, and bundle passed.
+- The live cloud-model baseline was deliberately left pending separate
+  authorization; retained result tables are labeled as historical.
 
 ## 2026-07-16 Tier 2 Context Judge / Message Writer split
 
