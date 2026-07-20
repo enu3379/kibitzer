@@ -43,6 +43,9 @@ class ObservationFeatures(BaseModel):
     exemplar_score: float | None = None
     derived_score: float | None = None
     anchor_eligible: bool | None = None
+    title_quality: str | None = None
+    audit_trigger: str | None = None
+    audit_cached: bool | None = None
 
 
 class Observation(BaseModel):
@@ -120,4 +123,5 @@ class FeedbackResult(BaseModel):
     intervention_status: str
     verdict: Verdict | None = None
     exemplar_count: int | None = None
+    exemplar_added: bool = False
     snoozed_until: datetime | None = None
