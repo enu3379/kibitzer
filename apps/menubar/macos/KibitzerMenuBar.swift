@@ -2,6 +2,17 @@ import AppKit
 import Darwin
 import Foundation
 
+// scripts/macos_build_menu_bar.sh generates the real values into
+// build/BuildInfo.swift and compiles with -D KIBITZER_GENERATED_BUILD_INFO;
+// these fallbacks keep the single-file build (and SourceKit) working.
+#if !KIBITZER_GENERATED_BUILD_INFO
+enum MenuBarBuildInfo {
+    static let version = "dev"
+    static let commit: String? = nil
+    static let builtAt = "unknown"
+}
+#endif
+
 enum KibitzerMode: String {
     case dead
     case idle
@@ -53,6 +64,8 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private let statusMenuItem = NSMenuItem(title: "Kibitzer: starting", action: nil, keyEquivalent: "")
+    private let serverInfoMenuItem = NSMenuItem(title: "Server: checking…", action: nil, keyEquivalent: "")
+    private let buildInfoMenuItem = NSMenuItem(title: KibitzerMenuBarApp.menuBarBuildSummary(), action: nil, keyEquivalent: "")
     private let startServerMenuItem = NSMenuItem(title: "Start server", action: #selector(startServerClicked), keyEquivalent: "s")
     private let refreshMenuItem = NSMenuItem(title: "Refresh status", action: #selector(refreshClicked), keyEquivalent: "r")
     private let openLogsMenuItem = NSMenuItem(title: "Open logs", action: #selector(openLogsClicked), keyEquivalent: "l")
@@ -74,6 +87,10 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
     private func configureMenu() {
         statusMenuItem.isEnabled = false
         menu.addItem(statusMenuItem)
+        serverInfoMenuItem.isEnabled = false
+        menu.addItem(serverInfoMenuItem)
+        buildInfoMenuItem.isEnabled = false
+        menu.addItem(buildInfoMenuItem)
         menu.addItem(NSMenuItem.separator())
         for item in [refreshMenuItem, startServerMenuItem, openLogsMenuItem] {
             item.target = self
@@ -87,13 +104,13 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
         statusItem.button?.imageScaling = .scaleProportionallyDown
         statusItem.button?.setAccessibilityLabel("Kibitzer")
         statusItem.menu = menu
-        render(mode: .unknown)
+        render(mode: .unknown, serverSummary: nil)
     }
 
     private func updateStatus(autostartIfDead: Bool) {
-        fetchMode { [weak self] mode in
+        fetchMode { [weak self] mode, serverSummary in
             guard let self else { return }
-            self.render(mode: mode)
+            self.render(mode: mode, serverSummary: serverSummary)
             if autostartIfDead && mode == .dead && !self.attemptedAutostart {
                 self.attemptedAutostart = true
                 self.startServer()
@@ -101,14 +118,14 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func fetchMode(completion: @escaping (KibitzerMode) -> Void) {
-        let finish: (KibitzerMode) -> Void = { mode in
+    private func fetchMode(completion: @escaping (KibitzerMode, String?) -> Void) {
+        let finish: (KibitzerMode, String?) -> Void = { mode, serverSummary in
             DispatchQueue.main.async {
-                completion(mode)
+                completion(mode, serverSummary)
             }
         }
         guard let baseURL = effectiveBaseURL() else {
-            finish(.dead)
+            finish(.dead, nil)
             return
         }
 
@@ -116,7 +133,7 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
         identityRequest.timeoutInterval = 2
         URLSession.shared.dataTask(with: identityRequest) { data, _, error in
             guard error == nil, let data else {
-                finish(.dead)
+                finish(.dead, nil)
                 return
             }
             let identity = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -124,7 +141,7 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
                   identity?["protocol_version"] as? Int == 1,
                   let instanceID = identity?["instance_id"] as? String,
                   !instanceID.isEmpty else {
-                finish(.dead)
+                finish(.dead, nil)
                 return
             }
 
@@ -132,14 +149,48 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
             healthRequest.timeoutInterval = 2
             URLSession.shared.dataTask(with: healthRequest) { healthData, _, healthError in
                 guard healthError == nil, let healthData else {
-                    finish(.dead)
+                    finish(.dead, nil)
                     return
                 }
                 let health = try? JSONSerialization.jsonObject(with: healthData) as? [String: Any]
                 let rawMode = health?["mode"] as? String
-                finish(KibitzerMode(rawValue: rawMode ?? "") ?? .unknown)
+                finish(
+                    KibitzerMode(rawValue: rawMode ?? "") ?? .unknown,
+                    KibitzerMenuBarApp.serverSummary(from: health)
+                )
             }.resume()
         }.resume()
+    }
+
+    private static func menuBarBuildSummary() -> String {
+        var summary = "Menu bar v\(MenuBarBuildInfo.version)"
+        if let commit = MenuBarBuildInfo.commit {
+            summary += " (\(commit))"
+        }
+        summary += " · built \(MenuBarBuildInfo.builtAt)"
+        return summary
+    }
+
+    private static func serverSummary(from health: [String: Any]?) -> String? {
+        guard let version = health?["version"] as? String else { return nil }
+        var summary = "Server v\(version)"
+        if let commit = health?["git_commit"] as? String, !commit.isEmpty {
+            summary += " (\(commit))"
+        }
+        if let startedAt = health?["started_at"] as? String,
+           let formatted = formatTimestamp(startedAt) {
+            summary += " · started \(formatted)"
+        }
+        return summary
+    }
+
+    private static func formatTimestamp(_ iso: String) -> String? {
+        guard let date = ISO8601DateFormatter().date(from: iso) else {
+            return nil
+        }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd HH:mm"
+        return formatter.string(from: date)
     }
 
     private func effectiveBaseURL() -> URL? {
@@ -152,10 +203,11 @@ final class KibitzerMenuBarApp: NSObject, NSApplicationDelegate {
         return URL(string: "http://127.0.0.1:\(port)")
     }
 
-    private func render(mode: KibitzerMode) {
+    private func render(mode: KibitzerMode, serverSummary: String?) {
         statusMenuItem.title = mode.message
+        serverInfoMenuItem.title = serverSummary ?? "Server: unreachable"
         startServerMenuItem.isEnabled = mode == .dead
-        statusItem.button?.toolTip = "Kibitzer: \(mode.label)"
+        statusItem.button?.toolTip = "Kibitzer: \(mode.label) · \(KibitzerMenuBarApp.menuBarBuildSummary())"
         statusItem.button?.setAccessibilityLabel("Kibitzer: \(mode.label)")
         statusItem.length = NSStatusItem.variableLength
         if let image = loadBaseIcon() {

@@ -1,4 +1,5 @@
 import { build, context } from "esbuild"
+import { execSync } from "node:child_process"
 import { cpSync, mkdirSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -7,7 +8,24 @@ const watch = process.argv.includes("--watch")
 const extensionRoot = dirname(fileURLToPath(import.meta.url))
 const distDir = join(extensionRoot, "dist")
 
+function gitCommit() {
+  try {
+    const commit = execSync("git rev-parse --short HEAD", { cwd: extensionRoot }).toString().trim()
+    if (!commit) return null
+    const dirty = execSync("git status --porcelain --untracked-files=no", { cwd: extensionRoot })
+      .toString().trim()
+    return dirty ? `${commit}+dirty` : commit
+  } catch {
+    return null
+  }
+}
+
+// Injected as a compile-time constant; tsc and node --test run the raw source
+// where the identifier is absent (see src/lib/buildInfo.ts).
+const buildInfo = { builtAt: new Date().toISOString(), commit: gitCommit() }
+
 const options = {
+  define: { __KIBITZER_BUILD__: JSON.stringify(buildInfo) },
   entryPoints: [
     join(extensionRoot, "src/background.ts"),
     join(extensionRoot, "src/popup/popup.ts"),

@@ -582,6 +582,9 @@ export interface ProviderCalls {
 }
 
 export interface HealthStatus {
+  version: string | null
+  git_commit: string | null
+  started_at: string | null
   tiers: HealthTiers
   provider_calls: ProviderCalls
 }
@@ -591,6 +594,9 @@ export async function getHealthStatus(): Promise<HealthStatus | null> {
   if (!response?.ok) return null
   const body = (await response.json()) as Partial<HealthStatus>
   return {
+    version: typeof body.version === "string" ? body.version : null,
+    git_commit: typeof body.git_commit === "string" ? body.git_commit : null,
+    started_at: typeof body.started_at === "string" ? body.started_at : null,
     tiers: body.tiers ?? {},
     provider_calls: body.provider_calls ?? {},
   }

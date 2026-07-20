@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request
 
-from ..version import APP_VERSION
+from ..build_info import build_info
 
 router = APIRouter()
 
@@ -14,7 +14,7 @@ async def health(request: Request) -> dict[str, object]:
     return {
         "ok": True,
         "service": "kibitzer-server",
-        "version": APP_VERSION,
+        **build_info(),
         **status,
         "tiers": tiers,
         "provider_calls": provider_calls,
