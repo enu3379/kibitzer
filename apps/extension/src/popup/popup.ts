@@ -33,6 +33,7 @@ import {
   ExplorationVerdict,
   loadExplorationHistory,
 } from "../lib/history"
+import { providerFailureDiagnostics } from "../lib/providerFailureDiagnostics"
 import { completeDashboardSnapshot } from "./dashboardSnapshot"
 import type { DashboardSnapshot } from "./dashboardSnapshot"
 
@@ -589,17 +590,18 @@ function renderDashboard(
     </div>`
     : ""
 
-  const failedProviderCalls = Object.values(health?.provider_calls ?? {}).filter(
-    (call) => call?.last_result === "error",
-  )
-  const failureReasons = new Set(failedProviderCalls.map((call) => call?.reason).filter((reason) => reason != null))
-  const providerFailureHint =
-    failureReasons.size === 1 ? providerFailureReasonText([...failureReasons][0]) : "Provider 상태를 확인하세요."
-  const providerFailureNote = failedProviderCalls.length
-    ? `
-    <div style="background: var(--red-bg); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px;">
-      <p style="margin: 0; font-size: 12px; color: var(--red-tx);">LLM 호출 오류 — 마지막 판정 요청이 실패했어요. ${providerFailureHint}</p>
-    </div>`
+  const providerFailures = providerFailureDiagnostics(offline ? null : health?.provider_calls)
+  const providerFailureNote = providerFailures.length
+    ? `<div class="provider-failures">${providerFailures
+        .map(
+          (failure) => `
+      <section class="provider-failure-card ${failure.severity}">
+        <p class="provider-failure-title">${esc(failure.title)}</p>
+        <p class="provider-failure-summary">${esc(failure.summary)}</p>
+        ${failure.guidance ? `<p class="provider-failure-guidance">${esc(failure.guidance)}</p>` : ""}
+      </section>`,
+        )
+        .join("")}</div>`
     : ""
 
   // Offline renders come from the snapshot: the nag may have expired and its
@@ -703,27 +705,6 @@ function renderDashboard(
   document.getElementById("session-end")?.addEventListener("click", () => {
     void endSession()
   })
-}
-
-function providerFailureReasonText(reason: string | undefined): string {
-  switch (reason) {
-    case "timeout":
-      return "Provider 응답 시간이 초과됐어요."
-    case "connection":
-      return "Provider 서버에 연결하지 못했어요."
-    case "auth":
-      return "API 키가 유효하지 않아요."
-    case "forbidden":
-      return "Provider가 요청을 거부했어요. 모델 접근 권한 또는 요금제를 확인하세요."
-    case "rate_limited":
-      return "Provider 요청 한도에 도달했어요."
-    case "server_error":
-      return "Provider 서버에서 오류가 발생했어요."
-    case "invalid_response":
-      return "Provider 응답을 판정 결과로 읽지 못했어요."
-    default:
-      return "Provider 상태를 확인하세요."
-  }
 }
 
 async function submitInterventionFeedback(
