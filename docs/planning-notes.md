@@ -605,9 +605,14 @@ scheduling:
 
 Status: PR #81 implemented exact loopback Host and extension-Origin boundaries,
 closing the DNS-rebinding/CSRF baseline. Per-install request authentication is
-not in `dev`; the broad PR #71 (closed unmerged 2026-07-18) contains one
-HMAC/pairing design but overlapped the extracted security PRs — treat it as
-design reference only. F2 input caps also remain. F3/F4 stay informational.
+not in `dev`; the broad PR #71 (closed unmerged 2026-07-18) overlapped the
+extracted security PRs, but its branch (`fix/security-audit-hardening`, kept
+locally and on `origin`) preserves the only **complete per-install auth
+implementation** — `auth.py` pairing/LoopbackAuthenticator, request-body-size
+middleware, extension `auth.ts`, pairing-reset scripts (audited 2026-07-20:
+exists nowhere else in repo history). When the per-install auth decision is
+made, evaluate/rebase that branch rather than rewriting from scratch. F2
+input caps also remain. F3/F4 stay informational.
 
 ## Backlog (consolidated 2026-07-08, post-P1)
 
@@ -1025,7 +1030,13 @@ the extension badge.
   split (`331a0ba`) + persona v5 fragments. The old local worktree (guard-
   prompt hardening + persona v4) is archived on
   `archive/security-hardening-20260720`; three local 07-10 Windows tray
-  commits were superseded by #105 (pystray lifecycle) and dropped. This file
+  commits were already squash-merged as #24 (tray later reworked by #105). A
+  six-agent branch audit then deleted 42 verified-merged local branches +
+  clean worktrees; genuinely unmerged work kept: #71's complete per-install
+  auth implementation (`fix/security-audit-hardening`), Tier-0 OK audit
+  routing + judgment-review dashboard (`feature/judgment-review`), the
+  tier0-benchmark-v2 HTML report, and remote
+  `origin/codex/d7-structure-review`'s 495-line D7 review. This file
   merged its three divergent copies — the local one carried D9–D13 and the
   persona rounds, `dev`'s carried D3/D7/D8 design detail, and the never-PRed
   `chore/predist-audit-docs` branch carried the audit reconciliation, the
