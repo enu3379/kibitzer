@@ -18,6 +18,7 @@ import argparse
 import json
 import sqlite3
 import sys
+from contextlib import closing
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -41,7 +42,7 @@ def connect_ro(db_path: str) -> sqlite3.Connection:
 
 
 def list_sessions(db_path: str) -> list[dict]:
-    with connect_ro(db_path) as conn:
+    with closing(connect_ro(db_path)) as conn:
         rows = conn.execute(
             """
             SELECT s.id, s.created_at, s.active, g.raw_text AS goal,
@@ -56,7 +57,7 @@ def list_sessions(db_path: str) -> list[dict]:
 
 
 def session_detail(db_path: str, session_id: str) -> dict:
-    with connect_ro(db_path) as conn:
+    with closing(connect_ro(db_path)) as conn:
         goal = conn.execute("SELECT raw_text FROM goals WHERE session_id = ?", (session_id,)).fetchone()
         phrases = [
             r["phrase"]
@@ -137,7 +138,7 @@ def session_detail(db_path: str, session_id: str) -> dict:
 def save_label(db_path: str, app_server: str, observation_id: str, label: str) -> dict:
     if label not in {"related", "drift"}:
         return {"ok": False, "error": "invalid label"}
-    with connect_ro(db_path) as conn:
+    with closing(connect_ro(db_path)) as conn:
         row = conn.execute("SELECT session_id FROM observations WHERE id = ?", (observation_id,)).fetchone()
         if not row:
             return {"ok": False, "error": "observation not found"}
