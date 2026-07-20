@@ -402,6 +402,31 @@ class PageLabelApiTest(unittest.TestCase):
         self.assertEqual(rows, [(observation_id, "related")])
         self.assertEqual(learned_exemplars, [(observation_id,)])
 
+    def test_page_label_related_on_generic_title_skips_exemplar(self) -> None:
+        client = self._client()
+        base = datetime(2026, 7, 8, 0, 0, tzinfo=timezone.utc)
+        try:
+            session_id = self._start_goal(client)
+            generic = self._post_nav(client, "YouTube", 77, base)
+            observation_id = str(generic["observation_id"])
+
+            related = client.post(
+                f"/observations/{observation_id}/label",
+                json={"label": "related"},
+            )
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertEqual(related.status_code, 200)
+        body = related.json()
+        self.assertEqual(body["label"], "related")
+        self.assertFalse(body["exemplar_added"])
+        self.assertEqual(self.store.goal_exemplar_count(session_id), 1)
+
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            rows = conn.execute("SELECT observation_id, label FROM page_labels").fetchall()
+        self.assertEqual(rows, [(observation_id, "related")])
+
     def test_page_label_and_exemplar_update_roll_back_together(self) -> None:
         client = self._client()
         base = datetime(2026, 7, 8, 0, 0, tzinfo=timezone.utc)

@@ -1,5 +1,49 @@
 # Progress
 
+## 2026-07-20 Tier-0 OK audit routing + title-quality gate (audit plan Steps 2–5)
+
+Completed:
+
+- Re-implemented the 2026-07-10 audit-routing work (reference commit
+  `30076c2`) on the current Judge/Writer-era `dev`, per
+  `docs/handoff-audit-routing.md`:
+  - `core/title_quality.py` classifier (content_specific / generic /
+    url_like / empty) computed on the furniture-stripped embedding text and
+    persisted in observation features;
+  - `core/audit_routing.py` triggers over Tier-0 OKs — `low_margin`
+    (r0 < `judgment_audit.audit_ok_below`), `low_quality_title`,
+    `mixed_host` (10-minute host-family window, D8-effective verdicts), and
+    `risk_host` — routed through the existing Tier-1 path in `core/ingest.py`
+    with `{"audit": {trigger, tier0_score}}` payload metadata and audit-mode
+    prompt sentences in both judge providers;
+  - audited-OK semantics: Tier-1 DRIFT flips the verdict before the
+    controller, Tier-1 OK vets it (`tier_reached=1`), provider errors keep
+    the Tier-0 OK; per-page (host family + title) audit reuse skips repeat
+    Tier-1 calls (`audit_cached`, `tier1.audit_reused` event);
+  - guardrails: low-quality titles are never anchor-eligible and never enter
+    the exemplar set — related feedback/page labels record the page fact and
+    D8 propagation but skip the exemplar (`exemplar_added: false` surfaced
+    on feedback and label APIs, `allow_exemplar` in `record_page_label`);
+  - replay parity: routing, window, reuse, and the low-quality anchor
+    override are mirrored in `_replay_observation`; `title_quality` /
+    `audit_trigger` / `audit_cached` fill the waiting CSV/JSON columns, an
+    `audit` block joins the summary, and pre-routing sessions surface
+    `tier1:no_recording` honestly.
+- Calibration: `audit_ok_below` defaults provisionally to 0.7 on the ONNX
+  scale — benchmark-v2 sweep puts all 10 benchmark false-OKs in [0.61, 0.76]
+  with 8/10 caught via low_margin at 32% pre-reuse benchmark volume; the
+  private-corpus regression (`KIBITZER_AUDIT_CORPUS`/`KIBITZER_AUDIT_DB`,
+  ONNX-era acceptance: full false-OK coverage at ≤30% fresh audits) remains
+  the final calibration gate.
+
+Verified:
+
+- New tests: audit-trigger units, host-family normalization, audited-OK
+  stay/flip/error/reuse API flows, replay-parity mirror, title-quality
+  units, exemplar-skip guardrails on feedback and page labels.
+- `python -m pytest apps/server/tests -q` green; `apps/extension`
+  `npm run build` green (API types extended for the new feature fields).
+
 ## 2026-07-18 Tier 2 red-team artifact preservation
 
 Completed:

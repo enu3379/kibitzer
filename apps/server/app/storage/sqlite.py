@@ -3110,8 +3110,9 @@ class SQLiteStore:
         label: str,
         exemplar_cap: int,
         sync_exemplar: bool = True,
+        allow_exemplar: bool = True,
         ts: datetime | None = None,
-    ) -> tuple[PageLabelRecord, int | None]:
+    ) -> tuple[PageLabelRecord, int | None, bool]:
         now = ts or _utc_now()
         with self._connect() as conn:
             self._ensure_schema(conn)
@@ -3133,7 +3134,7 @@ class SQLiteStore:
                 and int(observation["goal_revision"]) == current_revision
             )
 
-            if label == "related" and sync_exemplar:
+            if label == "related" and sync_exemplar and allow_exemplar:
                 features = json.loads(observation["features_json"])
                 emb = features.get("emb")
                 if not isinstance(emb, list) or not emb:
@@ -3165,6 +3166,7 @@ class SQLiteStore:
                     "label": label,
                     "previous_label": previous_label,
                     "exemplar_sync": sync_exemplar,
+                    "exemplar_allowed": allow_exemplar if label == "related" else None,
                 },
                 now,
             )
@@ -3178,32 +3180,47 @@ class SQLiteStore:
                 )
 
             exemplar_count: int | None = None
+            exemplar_added = False
             if label == "related" and observation_is_current and sync_exemplar:
-                exemplar_count, exemplar_id = self._add_goal_exemplar_from_observation(
-                    conn,
-                    session_id,
-                    observation_id,
-                    exemplar_cap,
-                    now,
-                    features=features,
-                )
-                if exemplar_id:
-                    self._append_goal_exemplar_added_event(
+                if allow_exemplar:
+                    exemplar_count, exemplar_id = self._add_goal_exemplar_from_observation(
                         conn,
                         session_id,
                         observation_id,
-                        exemplar_id,
-                        exemplar_count,
                         exemplar_cap,
                         now,
+                        features=features,
                     )
+                    exemplar_added = exemplar_id is not None
+                    if exemplar_id:
+                        self._append_goal_exemplar_added_event(
+                            conn,
+                            session_id,
+                            observation_id,
+                            exemplar_id,
+                            exemplar_count,
+                            exemplar_cap,
+                            now,
+                        )
+                else:
+                    # Low-quality-title guardrail: record the page fact but keep
+                    # generic/url_like/empty-titled pages out of the exemplar set.
+                    conn.execute(
+                        "DELETE FROM goal_exemplars WHERE session_id = ? AND observation_id = ?",
+                        (session_id, observation_id),
+                    )
+                    exemplar_count = self._goal_exemplar_count(conn, session_id)
             elif label == "drift" and sync_exemplar:
                 conn.execute(
                     "DELETE FROM goal_exemplars WHERE session_id = ? AND observation_id = ?",
                     (session_id, observation_id),
                 )
 
-        return PageLabelRecord(id=label_id, observation_id=observation_id, label=label, ts=now), exemplar_count
+        return (
+            PageLabelRecord(id=label_id, observation_id=observation_id, label=label, ts=now),
+            exemplar_count,
+            exemplar_added,
+        )
 
     def cancel_active_intervention_candidates_for_observation(
         self,

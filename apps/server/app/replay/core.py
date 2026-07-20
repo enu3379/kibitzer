@@ -7,13 +7,14 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from ..config import AppConfig
+from ..core.audit_routing import choose_audit_trigger, host_family
 from ..core.controller_flow import apply_controller, confirm_controller_intervention
 from ..core.normalization import strip_repeated_title_suffix
 from ..core.relevance import (
@@ -21,6 +22,7 @@ from ..core.relevance import (
     tier0_score_parts,
     tier1_final_relevance,
 )
+from ..core.title_quality import classify_title, is_low_quality_title
 from ..providers.embeddings.factory import create_embedding_provider
 from ..schemas import Observation, ObservationFeatures, PipelineAction, Source, Verdict
 from ..storage.sqlite import ControllerStateRecord
@@ -96,6 +98,8 @@ class ReplayRow:
     page_label: str | None = None
     hand_label: str = ""
     title_quality: str = ""
+    audit_trigger: str = ""
+    audit_cached: bool = False
     flags: list[str] = field(default_factory=list)
     tier1_would_call: bool = False
     tier1_no_recording: bool = False
@@ -206,7 +210,47 @@ class ReplayState:
         self.ok_embeddings: list[list[float]] = []
         self.rows: list[ReplayRow] = []
         self.rows_by_observation_id: dict[str, ReplayRow] = {}
+        self.page_labels: dict[str, str] = {}
         self.controller_store = InMemoryControllerStore(session.id, session.created_at)
+
+    def host_family_verdicts(self, family: str, observed_at: datetime) -> set[Verdict]:
+        """Mirror of the live mixed-host window query over replayed state."""
+        if not family:
+            return set()
+        window = self.config.judgment_audit.mixed_host_window_minutes
+        cutoff = observed_at - timedelta(minutes=window)
+        verdicts: set[Verdict] = set()
+        for row in self.rows:
+            if row.skipped_no_goal or row.ts < cutoff or row.ts > observed_at:
+                continue
+            if host_family(row.url_host) != family:
+                continue
+            label = self.page_labels.get(row.observation_id)
+            effective = (
+                "OK" if label == "related" else "DRIFT" if label == "drift" else row.verdict_replay
+            )
+            if effective in {Verdict.OK.value, Verdict.DRIFT.value}:
+                verdicts.add(Verdict(effective))
+        return verdicts
+
+    def cached_audit_row(self, family: str, title: str) -> ReplayRow | None:
+        """Mirror of the live per-page audit reuse lookup over replayed state."""
+        if not family or not title:
+            return None
+        for row in reversed(self.rows):
+            if row.skipped_no_goal:
+                continue
+            if (row.title or "").strip() != title:
+                continue
+            if host_family(row.url_host) != family:
+                continue
+            if not row.audit_trigger:
+                continue
+            if (row.tier_replay or 0) < 1:
+                continue
+            if row.verdict_replay in {Verdict.OK.value, Verdict.DRIFT.value}:
+                return row
+        return None
 
     def reset_goal(self, raw_text: str, exemplar: list[float]) -> None:
         self.goal_text = raw_text
@@ -320,11 +364,18 @@ async def replay_session(
                 continue
             if event.event_type == "page_label.recorded":
                 observation_id = event.payload.get("observation_id")
-                if (
-                    isinstance(observation_id, str)
-                    and event.payload.get("label") == "drift"
-                    and event.payload.get("exemplar_sync") is not False
-                ):
+                label = event.payload.get("label")
+                if isinstance(observation_id, str) and label in ("related", "drift"):
+                    state.page_labels[observation_id] = label
+                sync_exemplar = event.payload.get("exemplar_sync") is not False
+                removes_exemplar = sync_exemplar and (
+                    label == "drift"
+                    or (
+                        label == "related"
+                        and event.payload.get("exemplar_allowed") is False
+                    )
+                )
+                if isinstance(observation_id, str) and removes_exemplar:
                     state.remove_exemplar(observation_id)
                 continue
             if event.event_type == "session.snoozed":
@@ -464,6 +515,8 @@ def write_csv(path: str | Path, result: ReplayResult) -> None:
         "page_label",
         "hand_label",
         "title_quality",
+        "audit_trigger",
+        "audit_cached",
     ]
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -610,6 +663,9 @@ async def _replay_observation(
     verdict_replay = tier0_verdict
     tier_replay = 0
 
+    title_quality = classify_title(embedding_text)
+    row.title_quality = title_quality
+
     if tier0_verdict == Verdict.DRIFT and state.config.tier1.enabled:
         row.tier1_would_call = True
         if tier_orig is not None and tier_orig >= 1 and stored.verdict in {Verdict.OK.value, Verdict.DRIFT.value}:
@@ -618,16 +674,52 @@ async def _replay_observation(
         else:
             row.tier1_no_recording = True
             row.flags.append("tier1:no_recording")
+    elif tier0_verdict == Verdict.OK and state.config.tier1.enabled:
+        family = host_family(stored.url_host)
+        audit_decision = choose_audit_trigger(
+            verdict=tier0_verdict,
+            tier0_score=score.score,
+            title_quality=title_quality,
+            host_family=family,
+            host_family_verdicts=state.host_family_verdicts(family, stored.ts),
+            config=state.config.judgment_audit,
+        )
+        if audit_decision.trigger:
+            row.audit_trigger = audit_decision.trigger
+            row.flags.append(f"audit:{audit_decision.trigger}")
+            cached = state.cached_audit_row(family, (stored.title or "").strip())
+            if cached is not None:
+                verdict_replay = Verdict(cached.verdict_replay)
+                tier_replay = 1
+                row.audit_cached = True
+            else:
+                row.tier1_would_call = True
+                if (
+                    tier_orig is not None
+                    and tier_orig >= 1
+                    and stored.verdict in {Verdict.OK.value, Verdict.DRIFT.value}
+                ):
+                    verdict_replay = Verdict(stored.verdict)
+                    tier_replay = 1
+                else:
+                    # Common on pre-routing sessions: the replayed routing audits
+                    # where the original run never called Tier 1. Honest accounting.
+                    row.tier1_no_recording = True
+                    row.flags.append("tier1:no_recording")
 
     final_relevance = tier1_final_relevance(verdict_replay) if tier_replay >= 1 else score.score
 
-    anchor_eligible = anchor_admission_eligible(
-        score,
-        has_derived_exemplars=bool(state.derived_vectors),
-        anchor_epsilon=state.config.relevance.anchor_epsilon,
-        derived_tau=state.config.goal_enrichment.derived_tau,
-        verdict=verdict_replay,
-        tier_reached=tier_replay,
+    anchor_eligible = (
+        False
+        if is_low_quality_title(title_quality)
+        else anchor_admission_eligible(
+            score,
+            has_derived_exemplars=bool(state.derived_vectors),
+            anchor_epsilon=state.config.relevance.anchor_epsilon,
+            derived_tau=state.config.goal_enrichment.derived_tau,
+            verdict=verdict_replay,
+            tier_reached=tier_replay,
+        )
     )
 
     row.r0_replay = score.score
@@ -910,6 +1002,11 @@ def _build_summary(rows: list[ReplayRow], original_request_excerpt: int) -> dict
             "replay_would_call": sum(1 for row in rows if row.tier1_would_call),
             "no_recording": sum(1 for row in rows if row.tier1_no_recording),
         },
+        "audit": {
+            "triggered": sum(1 for row in rows if row.audit_trigger),
+            "fresh": sum(1 for row in rows if row.audit_trigger and not row.audit_cached),
+            "cached": sum(1 for row in rows if row.audit_cached),
+        },
         "request_excerpt": {
             "original": original_request_excerpt,
             "replay": sum(1 for row in rows if row.request_excerpt_replay),
@@ -978,6 +1075,8 @@ def _csv_row(row: ReplayRow) -> dict[str, Any]:
         "page_label": row.page_label or "",
         "hand_label": row.hand_label,
         "title_quality": row.title_quality,
+        "audit_trigger": row.audit_trigger,
+        "audit_cached": str(row.audit_cached).lower() if row.audit_trigger else "",
     }
 
 

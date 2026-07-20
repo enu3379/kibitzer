@@ -11,6 +11,15 @@ from ..storage.sqlite import (
     effective_observation_verdict,
 )
 from .controller_flow import rebuild_controller_state
+from .title_quality import classify_title, is_low_quality_title
+
+
+def observation_allows_exemplar(observation: ObservationRecord) -> bool:
+    """Generic/url_like/empty-titled pages must not enter the exemplar set."""
+    quality = observation.features.get("title_quality")
+    if not isinstance(quality, str):
+        quality = classify_title(observation.title or "")
+    return not is_low_quality_title(quality)
 
 
 def apply_page_label_override(
@@ -20,16 +29,17 @@ def apply_page_label_override(
     label: str,
     exemplar_cap: int,
     now: datetime | None = None,
-) -> tuple[PageLabelRecord, int | None, str | None]:
+) -> tuple[PageLabelRecord, int | None, str | None, bool]:
     """Persist a user page fact and rebuild every derived state it affects."""
 
     applied_at = now or datetime.now(timezone.utc)
     previous_label = store.page_label_for_observation(observation.id)
-    page_label, exemplar_count = store.record_page_label(
+    page_label, exemplar_count, exemplar_added = store.record_page_label(
         session_id=observation.session_id,
         observation_id=observation.id,
         label=label,
         exemplar_cap=exemplar_cap,
+        allow_exemplar=observation_allows_exemplar(observation),
         ts=applied_at,
     )
     verdict = effective_observation_verdict(observation.verdict, label)
@@ -60,4 +70,4 @@ def apply_page_label_override(
             ts=applied_at,
         )
 
-    return page_label, exemplar_count, verdict
+    return page_label, exemplar_count, verdict, exemplar_added

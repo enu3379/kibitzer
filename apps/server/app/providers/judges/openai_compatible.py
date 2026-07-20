@@ -46,7 +46,9 @@ class OpenAICompatibleJudgeProvider:
                         "Classify whether the current browser navigation is aligned with the user's declared "
                         "goal. Treat direct relevance and normal subtopics as ok. The declared goal includes "
                         "any goal.derived_phrases; titles matching them are goal-related even when they share "
-                        "no words with the raw goal. Return strict JSON only: "
+                        "no words with the raw goal. Audit mode may send pages Tier 0 called OK: the same "
+                        "platform, host, search surface, or user exemplar is not domain-wide permission; judge "
+                        "only whether the current page is useful for the declared goal. Return strict JSON only: "
                         '{"verdict":"ok|drift","reason":"<10 words>"}.'
                     ),
                 },

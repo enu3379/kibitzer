@@ -16,6 +16,7 @@ from apps.server.app.config import (
     AppConfig,
     ControllerConfig,
     GoalEnrichmentConfig,
+    JudgmentAuditConfig,
     ServerConfig,
     Tier1Config,
     Tier2Config,
@@ -425,6 +426,7 @@ class Tier1ApiTest(unittest.TestCase):
             tier1=Tier1Config(enabled=True),
             controller=ControllerConfig(k=2, coldstart_observations=1),
             goal_enrichment=GoalEnrichmentConfig(enabled=False),
+            judgment_audit=JudgmentAuditConfig(enabled=False),
         )
         client = TestClient(
             create_app(
