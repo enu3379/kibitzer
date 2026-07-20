@@ -41,6 +41,7 @@ Completed:
   draft), `docs/persona-voice-revamp.md`, and the
   `docs/benchmarks/persona-voice-v4/` evidence (the v5 benchmark already on
   `dev` references v4 as its baseline).
+
 ## 2026-07-18 Tier 2 red-team artifact preservation
 
 Completed:
