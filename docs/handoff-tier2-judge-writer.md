@@ -4,6 +4,15 @@ Date: 2026-07-16
 Base: `origin/dev` at `4d62765`
 Working branch: `codex/tier2-judge-writer`
 
+Status (2026-07-18): completed on `dev` in `331a0ba`. The prompt-injection
+guard and persona work named below were reconciled into the shared trust
+boundary, split Judge/Writer prompts, v5 persona fragments, and current tests.
+PRs #69 and #74 are superseded as product-code branches. The #74 threat model,
+historical results, and a split-aware live harness are preserved in
+`docs/security-redteam-prompt-extraction.md` and
+`scripts/redteam/extract_prompt.py`. The dependency and integration-order text
+below is retained as the historical work order, not as current merge guidance.
+
 ## Objective
 
 Replace the current Tier-2 contract, where every call both judges drift and
