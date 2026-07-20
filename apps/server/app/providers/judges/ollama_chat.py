@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from itertools import count
-from typing import Iterator
+from typing import Callable, Iterator, TypeVar
 
 import httpx
 
 from .base import (
     TIER2_JUDGE_SYSTEM_PROMPT,
     TIER2_LEGACY_SYSTEM_PROMPT,
+    ProviderResponseError,
     Tier1Result,
     Tier2Decision,
     Tier2Result,
@@ -23,6 +24,7 @@ from .openai_compatible import parse_tier1_json, parse_tier2_decision_json, pars
 # before the JSON content.
 _GOAL_ENRICHMENT_NUM_PREDICT = 512
 _GOAL_ENRICHMENT_THINKING_NUM_PREDICT = 2048
+_JudgeResult = TypeVar("_JudgeResult")
 
 
 @dataclass(frozen=True)
@@ -54,7 +56,11 @@ class OllamaChatJudgeProvider:
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ]
         )
-        return parse_tier1_json(_message_content(response))
+        return _parse_ollama_judge_response(
+            response,
+            self.max_output_tokens,
+            parse_tier1_json,
+        )
 
     async def complete_goal_enrichment(self, prompt: str, timeout_seconds: float) -> str:
         messages = [{"role": "user", "content": prompt}]
@@ -87,7 +93,11 @@ class OllamaChatJudgeProvider:
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ]
         )
-        return parse_tier2_json(_message_content(response))
+        return _parse_ollama_judge_response(
+            response,
+            self.max_output_tokens,
+            parse_tier2_json,
+        )
 
     async def decide_tier2(
         self,
@@ -105,7 +115,11 @@ class OllamaChatJudgeProvider:
             num_predict=self.max_output_tokens,
             json_mode=True,
         )
-        return parse_tier2_decision_json(_message_content(response))
+        return _parse_ollama_judge_response(
+            response,
+            self.max_output_tokens,
+            parse_tier2_decision_json,
+        )
 
     async def write_tier2_message(
         self,
@@ -121,11 +135,14 @@ class OllamaChatJudgeProvider:
             num_predict=self.writer_max_output_tokens,
             json_mode=False,
         )
-        if _writer_output_budget_exhausted(response, self.writer_max_output_tokens):
-            raise ValueError("tier2 writer response exhausted output budget")
         content = _message_content(response).strip()
+        if _output_budget_exhausted(response, self.writer_max_output_tokens):
+            raise ProviderResponseError(
+                "output_exhausted",
+                "tier2 writer response exhausted output budget",
+            )
         if not content:
-            raise ValueError("tier2 writer response was empty")
+            raise ProviderResponseError("writer_empty", "tier2 writer response was empty")
         return content[:320]
 
     async def _post_chat(
@@ -160,11 +177,11 @@ class OllamaChatJudgeProvider:
                 if response.status_code in {401, 403, 429} and index + 1 < len(api_keys):
                     continue
                 response.raise_for_status()
-                return response.json()
+                return _response_json(response)
 
         assert last_response is not None
         last_response.raise_for_status()
-        return last_response.json()
+        return _response_json(last_response)
 
 
 def _message_content(response: dict[str, object]) -> str:
@@ -176,10 +193,38 @@ def _message_content(response: dict[str, object]) -> str:
     response_text = response.get("response")
     if isinstance(response_text, str):
         return response_text
-    raise ValueError("Ollama response did not include message content")
+    raise ProviderResponseError("envelope", "Ollama response did not include message content")
 
 
-def _writer_output_budget_exhausted(response: dict[str, object], max_output_tokens: int) -> bool:
+def _response_json(response: httpx.Response) -> dict[str, object]:
+    try:
+        data = response.json()
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ProviderResponseError("http_json", "provider HTTP body was not JSON") from exc
+    if not isinstance(data, dict):
+        raise ProviderResponseError("envelope", "provider response was not a JSON object")
+    return data
+
+
+def _parse_ollama_judge_response(
+    response: dict[str, object],
+    max_output_tokens: int,
+    parser: Callable[[str], _JudgeResult],
+) -> _JudgeResult:
+    content = _message_content(response)
+    exhausted = _output_budget_exhausted(response, max_output_tokens)
+    try:
+        return parser(content)
+    except ProviderResponseError as exc:
+        if exhausted and exc.stage in {"content_json", "schema"}:
+            raise ProviderResponseError(
+                "output_exhausted",
+                "judge response exhausted output budget",
+            ) from exc
+        raise
+
+
+def _output_budget_exhausted(response: dict[str, object], max_output_tokens: int) -> bool:
     eval_count = response.get("eval_count")
     pinned = (
         isinstance(eval_count, int)

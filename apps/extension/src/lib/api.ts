@@ -550,6 +550,14 @@ export interface HealthTiers {
 }
 
 export type ProviderCallResult = "none" | "success" | "error"
+export type ProviderCallPhase = "judge" | "writer"
+export type ProviderResponseStage =
+  | "http_json"
+  | "envelope"
+  | "content_json"
+  | "schema"
+  | "writer_empty"
+  | "output_exhausted"
 export type ProviderFailureReason =
   | "timeout"
   | "connection"
@@ -563,6 +571,8 @@ export type ProviderFailureReason =
 export interface ProviderCallStatus {
   last_result: ProviderCallResult
   reason?: ProviderFailureReason | null
+  phase?: ProviderCallPhase | null
+  stage?: ProviderResponseStage | null
   checked_at?: string | null
 }
 

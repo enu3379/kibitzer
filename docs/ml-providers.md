@@ -64,6 +64,14 @@ successful call for that tier. The popup shows a distinct "LLM 호출 오류"
 warning only while a tier's last call is an error. Health polling never probes
 the provider or creates extra API usage.
 
+Each call status also includes `phase` (`judge` or `writer`) and a response
+`stage`. The stage is one of `http_json`, `envelope`, `content_json`, `schema`,
+`writer_empty`, or `output_exhausted`; it is `null` for request failures that
+occur before response decoding. These fields are diagnostic metadata only. Raw
+provider responses are never exposed or persisted. See
+[`handoff-provider-response-failures.md`](handoff-provider-response-failures.md)
+for the decision tree and examples.
+
 Failure reasons deliberately stay coarse and never expose raw provider errors,
 URLs, or API keys to the extension:
 

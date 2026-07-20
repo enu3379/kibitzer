@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from ..config import AppConfig, ControllerConfig
 from ..privacy.domain_filter import SensitiveDomainRules, drop_decision_for_url
+from ..providers.judges.base import ProviderResponseError
 from ..schemas import Observation, PageInfo, PipelineAction, PipelineResult, PipelineResultKind, RawObservation, Verdict
 from ..storage.sqlite import (
     ControllerStateRecord,
@@ -105,11 +106,13 @@ async def ingest_browser_nav(
                 result = await tier1_provider.classify_tier1(payload)
             except Exception as exc:
                 # Tier 1 is best-effort: on provider failure keep the Tier 0 verdict.
-                runtime.record_provider_call_failure(1, exc)
+                runtime.record_provider_call_failure(1, exc, phase="judge")
                 store.record_tier1_provider_error(
                     session_id=current.session.id,
                     observation_id=observation.id,
                     error_type=type(exc).__name__,
+                    phase="judge",
+                    stage=exc.stage if isinstance(exc, ProviderResponseError) else None,
                     ts=observation.ts,
                 )
             else:

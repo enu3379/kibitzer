@@ -11,7 +11,7 @@ import httpx
 from ..config import AppConfig
 from ..providers.embeddings.base import EmbeddingProvider
 from ..providers.embeddings.factory import create_embedding_provider
-from ..providers.judges.base import JudgeProvider
+from ..providers.judges.base import JudgeProvider, ProviderResponseError, ProviderResponseStage
 from ..providers.judges.factory import (
     JudgeProviderConfigError,
     create_tier1_judge_provider,
@@ -21,6 +21,7 @@ from ..storage.sqlite import SQLiteStore
 
 RuntimeMode = Literal["idle", "active"]
 ProviderCallResult = Literal["none", "success", "error"]
+ProviderCallPhase = Literal["judge", "writer"]
 ProviderFailureReason = Literal[
     "timeout",
     "connection",
@@ -37,12 +38,16 @@ ProviderFailureReason = Literal[
 class ProviderCallStatus:
     last_result: ProviderCallResult = "none"
     reason: ProviderFailureReason | None = None
+    phase: ProviderCallPhase | None = None
+    stage: ProviderResponseStage | None = None
     checked_at: datetime | None = None
 
     def as_dict(self) -> dict[str, str | None]:
         return {
             "last_result": self.last_result,
             "reason": self.reason,
+            "phase": self.phase,
+            "stage": self.stage,
             "checked_at": self.checked_at.isoformat() if self.checked_at else None,
         }
 
@@ -118,10 +123,18 @@ class RuntimeResources:
             checked_at=datetime.now(timezone.utc),
         )
 
-    def record_provider_call_failure(self, tier: int, exc: Exception) -> None:
+    def record_provider_call_failure(
+        self,
+        tier: int,
+        exc: Exception,
+        *,
+        phase: ProviderCallPhase,
+    ) -> None:
         self._provider_calls[tier] = ProviderCallStatus(
             last_result="error",
             reason=_classify_provider_failure(exc),
+            phase=phase,
+            stage=exc.stage if isinstance(exc, ProviderResponseError) else None,
             checked_at=datetime.now(timezone.utc),
         )
 
