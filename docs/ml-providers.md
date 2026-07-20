@@ -57,11 +57,13 @@ If a tier cannot resolve, it degrades to the tier below, `/health` reports
 `tiers: {tierN: degraded}`, and the extension popup shows a
 "판정 축소 모드" warning — degradation is loud, not silent.
 
-Configured tiers separately expose the last real judge call under
+Configured tiers separately expose the last real provider call under
 `/health.provider_calls`. The result starts as `none`, changes to `error` with a
 coarse failure reason when a call fails, and returns to `success` after the next
-successful call for that tier. The popup shows a distinct "LLM 호출 오류"
-warning only while a tier's last call is an error. Health polling never probes
+successful call for that tier. While a tier's last call is an error, the popup
+shows one diagnostic card per failed tier in Tier 1 → Tier 2 order. The card
+identifies the Judge/Writer phase, response stage, severity, and applicable
+fallback without making another provider request. Health polling never probes
 the provider or creates extra API usage.
 
 Each call status also includes `phase` (`judge` or `writer`) and a response
@@ -75,7 +77,7 @@ for the decision tree and examples.
 Failure reasons deliberately stay coarse and never expose raw provider errors,
 URLs, or API keys to the extension:
 
-| Reason | Detected from | Popup hint |
+| Reason | Detected from | Popup summary |
 |---|---|---|
 | `timeout` | provider request timeout | `Provider 응답 시간이 초과됐어요.` |
 | `connection` | DNS, connection refused, or another network error | `Provider 서버에 연결하지 못했어요.` |
@@ -86,10 +88,14 @@ URLs, or API keys to the extension:
 | `invalid_response` | invalid JSON or judge response shape | `Provider 응답을 판정 결과로 읽지 못했어요.` |
 | `other` | any unclassified failure | `Provider 상태를 확인하세요.` |
 
-The popup prefixes each hint with
-`LLM 호출 오류 — 마지막 판정 요청이 실패했어요.` When both tiers have
-different last-failure reasons, it uses the generic provider-status hint rather
-than presenting one tier's reason as if it covered both.
+For `invalid_response`, the popup uses `stage` to distinguish transport JSON,
+response envelope, content JSON, schema, empty Writer output, and exhausted
+output limits. A missing stage retains the legacy invalid-response summary; a
+missing phase uses the generic LLM-call title and red severity. Unknown runtime
+values safely fall back to `Provider 상태를 확인하세요.` Offline snapshots do
+not synthesize provider failures. See
+[`handoff-popup-provider-failure-details.md`](handoff-popup-provider-failure-details.md)
+for the complete copy, severity, fallback, and privacy rules.
 
 ## Tier 0
 
