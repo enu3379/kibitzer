@@ -1,17 +1,62 @@
 # Handoff: Pre-Distribution Refactor & Bug Fixes
 
 Date: 2026-07-15
-Source: multi-agent audit (31 agents — 2 mappers + 6 Opus bug-hunters +
-adversarial verification + 2 maintainability agents). 20 candidate findings →
-**17 confirmed** (2 high / 6 medium / 9 low), 3 refuted, all confirmed at
-verifier confidence *high*.
+Source: multi-agent audit on `feature/tray-status-menu` @ `c48b134` (31 agents —
+2 mappers + 6 Opus bug-hunters + adversarial verification + 2 maintainability
+agents). The historical report recorded 20 candidates → **17 confirmed**
+(2 high / 6 medium / 9 low), 3 refuted. Reconciliation against
+`origin/dev` @ `6ba1b36` leaves **14 actionable original findings**
+(2 high / 5 medium / 7 low): C1, T4, and C4 were resolved by #36, #34, and #32.
 Decision context: [planning-notes.md](planning-notes.md) D7 (packaging), D8
 (app/extension split + same-repo refactor), D9 (this audit).
+**Numbering note (2026-07-20):** planning-notes has since renumbered these
+decisions — packaging is now **D9**, the app/extension split **D10**, and this
+audit **D11**. This document keeps its original 2026-07-15 numbering.
 Full original report (Korean, verbatim): **Appendix A** at the bottom.
 
 > **Scope of this doc.** A work order that turns the audit into ordered,
 > file-anchored tasks. It does **not** include the CWD-relative config/data path
 > issue — that is D7 packaging phase-0, tracked separately.
+
+> **Current reconciliation — this body supersedes Appendix A's implementation
+> advice.** The audit snapshot was behind `dev`; code moved and three
+> findings were resolved before this work order was written. Confirmed on
+> 2026-07-15:
+> - **C1 (r_final)** — fixed on `dev` by **#36** (`observations.py:215` sets
+>   `r_final = tier1_final_relevance(...)`). Removed from the queue.
+> - **C3 (hash_cpu non-ASCII)** — `dev` default embedding is now `onnx_cpu`
+>   (384-dim transformer, **#29**); `hash_cpu` can still produce an invalid zero
+>   vector, but the selected fix is a typed unsupported-input guard rather than
+>   broadening fallback language support.
+> - **M8 (CLI stub)** — still valid: `dev` `cli/main.py` is still
+>   `SystemExit("not implemented")` even though the replay CLI (#14) shipped
+>   elsewhere.
+> - **T4 (provider failures invisible)** — resolved as originally framed by
+>   **#34**: `/health.provider_calls` reports last failure/recovery and the popup
+>   displays it. A consecutive-failure circuit breaker may be considered later,
+>   but is not a confirmed release bug.
+> - **C4 (history lost-update)** — fixed on `dev` by **#32**: history mutations
+>   use a single promise queue, and `tests/history.test.mjs` covers concurrent
+>   prepends/updates and queue recovery. Removed from the queue.
+> - **M7 correction** — `embedding.model` and `embedding.batch_size` are live:
+>   the ONNX factory passes both and `OnnxCpuEmbeddingProvider` consumes them.
+>   They must not be removed.
+> - **Counting correction** — Appendix A has 13 numbered maintainability
+>   recommendations, not 15. This body additionally names the extension test
+>   harness M13.
+> - **Test-gap correction** — `test_tier1.py` already pins the
+>   credentials-missing → one `provider.degraded` event path; Appendix A's claim
+>   that this test is absent is stale.
+> Re-confirm file anchors against the PR's `dev` base before implementation.
+
+> **Product decisions confirmed by the user on 2026-07-15:** P1 uses the strict
+> Host/exact-Origin boundary below; P2 disables incognito and also drops it
+> defensively; C1 needs no further work; C2 rejects equal quiet-hours endpoints;
+> C3 safely records but does not score unsupported embedding input; C6 keeps a
+> compact title-centered history after debug detail expires; M6 deletes the dead
+> feedback hooks without wiring new semantics; M10 uses the fixed candidate-port
+> pool and discovery contract below. These are implementation requirements, not
+> open product calls.
 
 ## How to read this
 
@@ -22,18 +67,24 @@ product-semantics decision → **Claude/user** (discuss first). Each item is siz
 to be one squash-merged PR into `dev` unless noted.
 
 **Global gate:** `python -m pytest apps/server/tests -q` green + `apps/extension`
-`npm run build` green before every PR (AGENTS.md rule 4).
+`npm run build` green before every PR (AGENTS.md rule 4). On current `dev`, the
+build runs the real `node:test` extension suite plus `tsc`; expand that suite
+with each extension change.
 
 ---
 
 ## Track 0 — Release gate (must land before ANY distribution)
 
-These two are the only findings that make a shipped build unusable. Do them
-first, as independent small PRs.
+These two can silently disable core behavior or make the app unusable. Both
+must land before a distribution build. Keep R1 independent; R2 may be two
+ordered PRs (server idempotency, then extension persistence), but the release
+gate stays open until the end-to-end acceptance tests pass.
 
 ### R1 — Malformed provider config must degrade, not crash `[high]`
-- **files:** `apps/server/app/providers/judges/factory.py:212` (+ `:181`,
-  `:185`); `apps/server/app/core/runtime_resources.py:138,148`
+- **files:** `apps/server/app/providers/judges/factory.py`
+  (`_resolve_experiment_model_settings`, `_provider_from_experiment_style`);
+  `apps/server/app/core/runtime_resources.py`
+  (`_ensure_tier1_provider`, `_ensure_tier2_provider`)
 - **do:** Missing-credentials already returns `None` → Tier-0 degrade, but a
   malformed `models.local.yaml` **raises** — `ValueError` at `factory.py:212`
   (`api_style` not `openai`/`ollama` and URL lacks `/api/chat`), or
@@ -41,60 +92,91 @@ first, as independent small PRs.
   `max_output_tokens`). The `_ensure_tier{1,2}_provider` calls run this
   **unguarded**, so a single typo in the hand-edited config makes the first
   goal-set return HTTP 400 and every subsequent browser-nav POST 500 → whole app
-  unusable (reproduced end-to-end). Wrap the factory call in
-  `try/except Exception` → set provider `None` +
-  `record_provider_degraded(reason="config_invalid")`. The sibling
-  `_describe_tier` (`runtime_resources.py:87-90`) already catches this exact
-  raise — mirror that pattern into the hot path. Additionally, inside the factory
-  make the numeric casts fall back to defaults + warn rather than raise.
+  unusable (reproduced end-to-end). Catch config/parsing exceptions inside each
+  `_ensure_tier{1,2}_provider`, mark that tier initialized with provider `None`,
+  and record exactly one `provider.degraded` event with
+  `reason="config_invalid"`. Log the invalid field/type without logging keys or
+  values that may contain secrets. Keep the other tier healthy if only one tier's
+  config is invalid. **Strict policy:** do not silently coerce malformed numeric
+  values to defaults; invalid `timeout_sec` / `max_output_tokens` degrades that
+  tier just like an invalid `api_style`.
 - **effort:** small · **deps:** none · **owner:** Codex
-- **tests:** new — malformed config (bad `api_style`, non-numeric numerics) →
-  provider `None`, `/health` shows the tier `degraded`, goal-set succeeds,
-  browser-nav returns Tier-0 verdict (not 500). Closes the "no degrade-path test"
-  gap in §Tests.
+- **tests:** new — bad `api_style`, non-numeric `timeout_sec`, and non-numeric
+  `max_output_tokens` each make only the affected tier `degraded`; goal-set and
+  browser-nav still succeed through Tier 0; the healthy tier remains active; one
+  `config_invalid` event is recorded per degraded tier even after repeated calls.
 
 ### R2 — MV3 dwell timers survive service-worker suspension `[high]`
-- **files:** `apps/extension/src/background.ts:126` (observation dwell),
-  `:240`, `:253-257` (Tier-2 dwell)
-- **do:** Both dwells are bare `setTimeout`; the MV3 worker is evicted after
-  ~30s idle and silently drops the timer (no `chrome.alarms`, no persistence).
-  Settings allow dwell up to 300s (`popup.ts:856-863`, `api.ts:286-287`, server
-  matches), so any value >30s — ~90% of the allowed range — deterministically
-  loses the observation: `observation_seconds>30` drops `postBrowserNav`
-  entirely; a pending Tier-2 excerpt request never fires. User believes tracking
-  is live.
-  - **Full fix:** persist pending dwell (`tab_id`, `url`, expiry) to
-    `chrome.storage.session`; schedule dwells >~25s via `chrome.alarms`
-    (30s granularity floor) and restore on worker restart.
-  - **Stopgap** (acceptable interim, smaller PR): clamp dwell ≤25s on both
-    client and server so timers never outlive the worker.
-- **effort:** medium (full) / small (stopgap) · **deps:** none · **owner:** Codex
-- **tests:** hard to unit-test without a chrome mock; at minimum add a pure-fn
-  test for the clamp/threshold logic once `background.ts` is split (M11).
+- **files:** `apps/extension/src/background.ts` (observation + Tier-2 dwell);
+  `apps/extension/src/lib/history.ts`; `apps/extension/src/lib/api.ts`;
+  `apps/server/app/schemas.py`, `api/observations.py`, and `storage/sqlite.py`
+  for idempotent retries; extension tests expanded by M13. The manifest already
+  grants `alarms` and `storage`.
+- **do:** Both dwells are bare `setTimeout`; a timer does not keep an MV3 worker
+  alive, so suspension can discard it. Values above the usual ~30s idle window
+  expose the bug systematically, although eviction timing is not deterministic.
+  Make persistent state, not the in-memory timer, the source of truth:
+  - store a versioned pending record in `chrome.storage.session` for each stage;
+    observation records include a stable event/idempotency key, tab/token/url,
+    start/history ID, due time, and Tier-2 dwell; Tier-2 records include a stable
+    stage key, tab/url/candidate/observation ID, and due time;
+  - schedule unique `chrome.alarms` names, restore/re-arm records on worker start,
+    and validate the active tab, URL, token, and stage before continuing;
+  - close the response-loss crash window: the browser-nav endpoint must accept
+    the stable key and atomically store/replay its result, and excerpt retry must
+    return the candidate's terminal result instead of creating/committing twice;
+    do not rely on an in-memory “in flight” flag for exactly-once effects;
+  - clear pending state only after the corresponding result is durably reflected
+    in server/history state or the stage is deliberately cancelled;
+  - short `setTimeout`s may remain as an optimization, but correctness must not
+    depend on worker residency.
+  A ≤25s client/server clamp is acceptable only as a dogfooding mitigation; it
+  is **not** the distribution fix.
+- **effort:** large · **deps:** M13 test-harness expansion · **owner:** Codex
+- **tests:** with fake timers + a Chrome API mock — worker restart restores each
+  stage; navigation/token change cancels stale work; duplicate alarm delivery is
+  one committed observation/intervention; a server-success/client-response-loss
+  retry replays the same result; successful completion clears alarm + state; 60s
+  observation and Tier-2 dwells survive simulated suspension.
 
 ---
 
 ## Track 1 — Trust & privacy bundle (recommended before first public release)
 
-Medium findings that damage judgment trust or the "data stays local" promise.
-The privacy sub-bundle (P-*) should be raised together — it also delivers the
-D8/D7-item-13 localhost hardening.
+Medium findings that damage judgment trust or the documented local-first,
+data-minimizing boundary. The privacy sub-bundle (P-*) should be raised together
+and must land before D8 exposes credentials/history through onboarding or a
+dashboard. Cloud judge payloads are disclosed separately; “nothing leaves the
+machine” is not the product promise.
 
-### T1 — Reset session state when the goal is edited `[medium]`
-- **files:** `apps/server/app/storage/sqlite.py:764` (`set_current_goal`)
+### T1 — Version goals and reset all goal-scoped state on edit `[medium]`
+- **files:** `apps/server/app/storage/sqlite.py` (`set_current_goal`, goals /
+  observations schema, `recent_ok_embeddings`, intervention candidates,
+  derived exemplars); `apps/server/app/api/sessions.py` (enrichment task);
+  `apps/server/app/api/observations.py` (ingest + excerpt confirmation)
 - **do:** `set_current_goal` rewrites the goal row and resets `goal_exemplars`
   to position-0, but leaves `controller_states` (streak/obs_count),
   `attachment_states`, and the anchor window intact. Result under a mid-session
   goal edit: old-goal pages stay OK-whitelisted via the anchor, coldstart is
-  skipped (early nags), and a fake "return" celebration can fire. Reset
-  controller + attachment state on goal change and filter `recent_ok_embeddings`
-  by goal version (goal_id).
-- **effort:** medium · **deps:** cheaper after M2 (ingest extraction) · **owner:** Codex
-- **tests:** new — edit goal mid-session → anchor/controller cleared, old-goal
-  page no longer auto-OKs. (Closes a §Tests gap.)
+  skipped (early nags), and a fake "return" celebration can fire. There is no
+  current `goal_id`: `goals.session_id` is updated in place and observations only
+  carry `session_id`. Add an integer `goal_revision` (or an equivalent immutable
+  goal ID) and tag every observation/candidate/derived-enrichment write with the
+  revision captured at ingest. On edit, atomically increment the revision, reset
+  controller + attachment state, cancel old-revision intervention candidates,
+  clear derived exemplars, and make late enrichment writes compare-and-swap on
+  the expected revision. Anchor/recent queries must filter the current revision.
+  After any embedding/provider await, re-check the captured revision before
+  controller/candidate side effects; an old-revision observation may remain as
+  historical data, but it must not mutate the new revision's live state.
+- **effort:** large · **deps:** cheaper after M2 (ingest extraction) · **owner:** Codex
+- **tests:** edit goal mid-session → anchor/controller/attachment reset and old
+  pages no longer auto-OK; a late old-goal enrichment result is ignored; an old
+  pending excerpt cannot create an intervention under the new goal; concurrent
+  ingest retains the revision captured before its await. (Closes a §Tests gap.)
 
 ### T2 — Serialize the browser-nav read-modify-write around the Tier-1 await `[medium]`
-- **files:** `apps/server/app/api/observations.py:220` (await at `:191`)
+- **files:** `apps/server/app/api/observations.py::ingest_browser_nav`
 - **do:** `ingest_browser_nav` yields the loop at
   `await tier1_provider.classify_tier1(...)`; concurrent nav requests (rapid tab
   switches) reorder, so controller streak / `drift_started_at` latch update in
@@ -115,60 +197,82 @@ D8/D7-item-13 localhost hardening.
 - **effort:** small · **deps:** none · **owner:** Codex
 - **tests:** new — 1-key `.env` in each slot → corresponding tier active.
 
-### T4 — Surface a provider that is built but 100% failing `[medium]`
-- **files:** `apps/server/app/core/runtime_resources.py:153`
-- **do:** A provider built with an expired key / unreachable endpoint never
-  emits `provider.degraded`, so `/health` keeps reporting the tier `active`
-  while the whole LLM stack is down. Add a consecutive-`provider_error` counter
-  (simple circuit-breaker); past a threshold, flip health to degraded + emit the
-  event.
-- **effort:** medium · **deps:** none (pairs naturally with R1) · **owner:** Codex
-- **tests:** new — N consecutive tier errors → `/health` degraded + one event.
+### T5 — Distinguish HTTP validation errors from an offline server `[medium]`
+- **files:** `apps/extension/src/lib/api.ts`; `apps/extension/src/popup/popup.ts`
+- **do:** API wrappers collapse every non-2xx response to `null`, so a 422 from
+  invalid settings is rendered as “server unreachable” and the rejected value
+  appears to fail silently. Return a typed result that distinguishes network
+  failure from HTTP status/error detail; render a validation message for 4xx;
+  add matching client bounds (`cooldown <= 86400`, `k <= 20`) without treating
+  client validation as a substitute for the server.
+- **effort:** small · **deps:** none · **owner:** Codex (plumbing) + Claude (copy)
+- **tests:** network failure → offline state; 422 → validation message with the
+  server still online; successful update re-renders canonical server settings.
 
-### P1 — Host-header allowlist + Origin check on state-changing POSTs `[medium read / low write]`
-- **files:** `apps/server/app/main.py:49`;
-  `apps/server/app/api/sessions.py:151,273,303`
+### P1 — Host-header allowlist + exact Origin boundary `[medium read / low write]`
+- **files:** `apps/server/app/main.py`; a dedicated security middleware/config;
+  all state-changing API routes (POST/PUT/PATCH/DELETE), including sessions,
+  settings, feedback, labels, and future onboarding credentials
 - **do:** `create_app()` mounts no `TrustedHostMiddleware` and no CORS. Two
   exploits confirmed cross-origin: (a) **DNS rebinding** reads goal + browsing
   report via read endpoints (external `Host` header → 200); (b) bodyless POSTs
   (`/sessions`, `/sessions/current/snooze`, `/end`) are CORS-simple requests, so
   any visited web page can **CSRF** snooze/end/reset the session (cross-origin
-  200/201). Add `TrustedHostMiddleware` allowlisting `127.0.0.1:8765` /
-  `localhost:8765`, and an Origin check on state-changing POSTs (allow only
-  `chrome-extension://…` and absent-Origin). This is the concrete mechanism
-  behind D8's "localhost hardening" note.
-- **effort:** small · **deps:** none · **owner:** Codex (allowlist值/extension
-  origin needs a 1-line confirm from user)
-- **tests:** new — foreign Host → rejected; cross-origin POST → rejected;
-  extension origin + localhost → allowed.
+  200/201). Add `TrustedHostMiddleware` with hostname-only values
+  `127.0.0.1` / `localhost` and `www_redirect=False` — Starlette strips the port
+  before comparison, so entries containing `:8765` reject valid requests
+  ([docs](https://www.starlette.io/middleware/)). For mutating requests, allow
+  only exact configured origins: the production Web Store extension ID, an
+  explicit dev-extension allowlist, and the same-origin dashboard/onboarding
+  URLs constructed from the effective local port. Reject every other present
+  Origin. Document absent-Origin as limited to loopback native/CLI clients; add
+  a per-install token before credential/history APIs are exposed outside the
+  same-origin UI. CORS headers alone are not the control.
+- **effort:** small for Host/Origin boundary; token is a separate D8 prerequisite
+  · **deps:** effective port implementation (M10) · **owner:** Codex
+- **tests:** foreign Host rejected; `Host: 127.0.0.1:<port>` accepted; foreign
+  webpage and unrelated extension origins rejected; exact production/dev
+  extension origins and both supported same-origin UI hosts accepted; absent
+  Origin behavior pinned; non-default effective port covered.
 
 ### P2 — Do not relay/persist incognito navigations `[low]`
-- **files:** `apps/extension/src/background.ts:638`; `apps/extension/manifest.json`
+- **files:** `apps/extension/src/background.ts` web-navigation/tab listeners;
+  `apps/extension/manifest.json`
 - **do:** Listeners relay incognito tab events undifferentiated; title + url_host
-  are persisted to sqlite, violating the no-trace expectation. Skip events where
-  `tab.incognito`, or set manifest `"incognito": "not_allowed"`. (Product call:
-  silently skip vs. refuse to run in incognito — **Claude/user to confirm**.)
-- **effort:** small · **deps:** none · **owner:** Claude/user decision → Codex
+  are persisted to sqlite, violating the no-trace expectation. Set manifest
+  `"incognito": "not_allowed"` **and** keep a defense-in-depth guard in every
+  navigation/tab entry point: resolve the tab before history mutation or network
+  relay and return immediately when `tab.incognito` is true. Unknown/missing tabs
+  must fail closed for that event rather than relaying data that might be
+  incognito. Do not add a memory-only incognito mode in this release.
+- **effort:** small · **deps:** none · **owner:** Codex
+- **tests:** incognito events never update extension history and never call the
+  server; normal tabs still flow; tab lookup failure does not relay the event;
+  manifest validation pins `incognito: not_allowed`.
 
 ### P3 — De-duplicate the privacy blocklist `[high payoff refactor, privacy-critical]`
 - **files:** `apps/extension/src/lib/domainFilter.ts`;
   `apps/server/app/privacy/domain_filter.py`; `configs/sensitive_domains.yaml`
 - **do:** The sensitive-host/keyword list **and its matching algorithm** are
   hand-duplicated on both sides. The extension is the first privacy gate, so a
-  one-sided edit silently leaks sensitive URLs. Generate the TS array from the
-  YAML at build time, or have the server expose the rules and the extension
-  fetch-and-cache. At minimum add a CI parity test so drift fails the build.
-- **effort:** small · **deps:** best paired with M13 (extension test runner) for
+  one-sided edit silently leaks sensitive URLs. Use the checked-in YAML as the
+  source and generate the TS rules **at build time**; the extension privacy gate
+  must work before the server is reachable, so runtime fetch-and-cache is not the
+  primary design. Fail build/CI when generated output is stale and run shared
+  fixtures through both matchers (exact/subdomain/path/keyword cases).
+- **effort:** small · **deps:** best paired with M13 (test-harness expansion) for
   the parity test · **owner:** Codex
 
-### P4 — Remove or wire the dead privacy flags `[small, privacy-critical]`
-- **files:** `configs/default.yaml`; provider send-config models
-- **do:** `privacy.strip_query` and `privacy.hash_url_path` are documented
-  `true` in `default.yaml` but control nothing — config over-claims privacy
-  before a public release. Either wire them to real behavior or delete them (and
-  update docs). **Whether we actually want query-stripping / path-hashing is a
-  product decision — Claude/user first**, then Codex. (Bundle with M7.)
-- **effort:** small · **deps:** none · **owner:** Claude/user decision → Codex
+### P4 — Remove dead privacy toggles; keep minimization mandatory `[small, privacy-critical]`
+- **files:** `apps/server/app/config.py`; `configs/default.yaml`;
+  `apps/server/app/core/normalization.py`; `docs/privacy.md`
+- **do:** `privacy.strip_query` and `privacy.hash_url_path` are parsed but never
+  read. The implementation already avoids storing raw query/fragment and stores
+  a SHA-256 of the path+query+fragment location. Make that an invariant: remove
+  the ineffective toggles, retain the always-on normalization, and document
+  exactly what is hashed. A future debug mode that weakens minimization requires
+  a separate explicit design and must not arrive as a default config switch.
+- **effort:** small · **deps:** none · **owner:** Codex
 
 ---
 
@@ -178,43 +282,114 @@ Not release-blocking. Group into 1–2 PRs.
 
 | ID | files | do | effort | owner |
 |---|---|---|---|---|
-| C1 | `api/observations.py:201` | On Tier-1 DRIFT→OK override, also correct `r_final` (e.g. `max(r0, tau_ok)`) so the alignment EWMA/latch isn't polluted by a rescued OK counted as drift | small | Codex |
-| C2 | `core/runtime_settings.py:120` | quiet-hours `start==end` currently always-true → 24/7 silent. Reject `start==end` on PUT (or treat as zero-width) **and** show quiet-hours-active state in the popup | small | Codex + Claude (copy) |
-| C3 | `providers/embeddings/hash_cpu.py:9` | `TOKEN_RE` matches only ASCII/Korean → CJK/Cyrillic/Arabic/emoji titles embed to zero vector → forced DRIFT. Add char n-gram fallback when zero tokens, or widen the regex | small | Codex |
-| C4 | `lib/history.ts:26` | Serialize the `chrome.storage.session` get→mutate→set via a single promise queue (display-only lost-update; minor) | small | Codex |
-| C5 | `background.ts:471` | Memoize the `offscreen.createDocument` creation promise (single in-flight mutex) so concurrent notifications don't drop a chime | small | Codex |
+| C2 | `core/runtime_settings.py::quiet_hours_active`; settings schema/API; popup settings | quiet-hours `start==end` currently becomes 24/7 silent. Reject equality as invalid; do not interpret it as zero-width or all-day quiet | small | Codex + Claude (validation copy) |
+| C3 | `providers/embeddings/hash_cpu.py`; embedding/ingest boundary | Keep current language scope. Replace an empty/zero/non-finite fallback vector with an explicit unsupported-input result; preserve the normalized observation with no verdict, but do not score or feed live state | small | Codex |
+| C5 | `background.ts::playNotificationSound` | Memoize the `offscreen.createDocument` creation promise (single in-flight mutex) so concurrent notifications don't drop a chime | small | Codex |
+| C6 | `storage/sqlite.py` (observations/events/report queries); settings + history API | Split full debug retention from compact long-term behavior history; paginate report judgments. Implement as C6a pagination then C6b compaction | medium each | Codex |
 
-*(C3 also closes the "no non-ASCII embedding test" §Tests gap.)*
+**C2 acceptance:** reject equal endpoints in both server validation and client
+pre-validation with a clear message; preserve normal same-day and cross-midnight
+ranges; show when quiet hours are currently active and the next end time.
 
-### The 422-misread (user-facing, needs copy) `[medium]`
-- **files:** `apps/extension/src/popup/popup.ts:973`, `lib/api.ts:322`
-- **do:** Every popup API wrapper collapses non-2xx to `null`, rendered as
-  "server unreachable". So a 422 (cooldown >86400, k >20) silently drops the
-  setting *and* shows an offline banner. In `api.ts`, distinguish network
-  failure from HTTP error (return the status); show a validation message on 422;
-  add `max` to `#cooldown-seconds` and a k upper-bound check.
-- **effort:** small · **owner:** Codex (plumbing) + **Claude** (error copy)
+**C3 acceptance:** do not add script-specific regex ranges or Unicode n-grams.
+No supported tokens / a deterministic zero vector is a typed
+`embedding_input_unsupported` outcome. Wrong dimensions or non-finite output is
+instead `embedding_provider_invalid_output` and must also update provider-health
+diagnostics; do not mislabel a provider fault as unsupported user text. Neither
+path is caught with a broad `except Exception`. Store the title/host/timestamp
+observation with `verdict=None` and no embedding; return `action=none`. Do not
+call Tier 1, update controller/attachment state, admit an anchor, create a
+candidate, or turn the invalid vector into DRIFT. Valid mixed-script input that
+still yields supported tokens continues normally. Tests pin both failure classes
+and prove controller/attachment state is unchanged.
+
+**C6 retention contract:**
+
+- **C6a — report pagination:** summary aggregates still cover the requested
+  session/range, while the judgment list is cursor-paginated by stable `(ts,id)`
+  order (`limit` default 100, maximum 500, `next_cursor` when more remain).
+- **C6b — two-tier storage:** active sessions and ended sessions within a
+  configurable debug window retain full replay detail; initial default is 7
+  days after session end. A once-per-day/startup idempotent compactor converts
+  older ended sessions to compact history.
+- Compact history retains observation ID, session/goal relationship, timestamp,
+  source, **title**, host, final verdict, and user-feedback relationship. It
+  clears path hash, tab ID, embedding, intermediate scores, tier/reason detail,
+  debug-only event payloads, and expired controller/candidate/vector state. Audit
+  every duplicate event/table so deleted detail is not left elsewhere.
+- Compact rows remain until explicit user deletion so later usage-habit analysis
+  has longitudinal titles and outcomes. Privacy/onboarding docs must disclose
+  title retention; P2 means incognito titles never enter either tier.
+- Exact Replay CLI support is guaranteed only while full detail remains. It must
+  reject a compacted session with a clear `debug detail expired` diagnostic,
+  rather than silently presenting recomputed output as exact replay.
+- Add a storage/API operation to delete all retained history (UI follows D8),
+  protected by P1 and the per-install token once that token boundary lands.
+- Tests cover compaction cutoff/active-session exclusion/idempotency, absence of
+  vectors and debug reasons across all tables after compaction, compact report
+  correctness, cursor stability, and complete history deletion.
 
 ---
 
-## Track 3 — Maintainability (start right after packaging phase-0)
+## Track 3 — Maintainability and packaging feeders
 
-Ordered so that dependency-unlocking refactors come first. Not release-blocking,
-but the two starred items are the biggest post-launch maintenance sinks.
+Ordered so that dependency-unlocking refactors come first. Most are not
+release-blocking, but M8/M10 feed packaging and M2/M13 are pulled forward by the
+dependency graph. The two starred items are the biggest maintenance unlockers.
 
 | ID | item | files | effort | notes / deps |
 |---|---|---|---|---|
-| **M2** ★ | Extract ingest pipeline | `api/observations.py:139-239` → new `core/ingest.py`; delete dead `core/pipeline.py` | medium | **Do early** — unlocks cheaper T1, T2, and controller tests |
-| M3 | De-dup controller math | `observations.py:355-382` (`_drift_confirmed_after_observation`, `_next_alignment_score`) reuse `Alignment`/`StreakController` instead of reimplementing EMA/streak | medium | after M2 |
-| M4 | Wire-type codegen | `lib/api.ts` (~25 hand-written interfaces) ← `/openapi.json` via `openapi-typescript` in build/CI; consolidate server inline response models into `schemas.py` | medium | catches server field renames at `tsc` |
-| M5 | Split `storage/sqlite.py` (1,829 lines) | pull the 4 pure report aggregates (`_report_from_rows` etc., `:1478-1608`) → `storage/reporting.py`; gate schema bootstrap once (fixes the per-op reconnect, `sqlite.py:1625`); decide `:memory:` support explicitly | large | absorbs a low bug |
-| M6 | Delete dead code | `core/anchor.py`, `logging/event_log.py`, `relevance.tier0_verdict`, `domain_filter.host_from_url`, controllers' unused `on_feedback` | small | **⚠ `on_feedback` hides a latent bug**: `'relevant'` vs the real enum `'related'`. If 'related' feedback *should* reset the streak, wire it correctly in `feedback.py` — **Claude/user to confirm intent** |
-| M7 | Remove unread config | `embedding.model`/`batch_size`, `delivery.channel`, `Tier1SendConfig.url_path`/`page_excerpt` (+ P4's privacy flags) | small | bundle with P4 |
+| **M2** ★ | Extract ingest pipeline | `api/observations.py::ingest_browser_nav` → new `core/ingest.py`; delete dead `core/pipeline.py` | medium | **Do early** — unlocks cheaper T1, T2, and controller tests |
+| M3 | De-dup controller math | `observations.py::_drift_confirmed_after_observation` / `_next_alignment_score` reuse `AlignmentController`/`StreakController` instead of reimplementing EMA/streak | medium | after M2 |
+| M4 | Wire-type codegen | `lib/api.ts` hand-written response interfaces ← `/openapi.json` via `openapi-typescript` in build/CI; consolidate server inline response models into `schemas.py` | medium | catches server field renames at `tsc` |
+| M5 | Split `storage/sqlite.py` (~2,550 lines at this baseline) | pull the 4 report aggregation helpers (`_report_from_rows`, `_hourly_related_ratio`, `_top_drift_hosts`, `_longest_ok_stretch`) → `storage/reporting.py`; pass the report clock explicitly where needed; gate `_ensure_schema` once instead of per operation; decide `:memory:` support explicitly | large | absorbs the sync-connect/schema-bootstrap low bug |
+| M6 | Delete dead code | `core/anchor.py`, `logging/event_log.py`, `relevance.tier0_verdict`, `domain_filter.host_from_url`, controllers' unused `on_feedback` | small | Remove `on_feedback` from the controller protocol/implementations; do **not** wire `related` feedback into controller state. Keep the existing exemplar feedback flow unchanged |
+| M7 | Remove genuinely unread config | `delivery.channel`, `Tier1SendConfig.url_path`/`page_excerpt` | small | **Do not remove** `embedding.model` or `batch_size`: both feed the ONNX provider. P4 owns the privacy flags separately |
 | M8 | Fix the CLI entry point | `pyproject.toml` `kibitzer` → `SystemExit('not implemented')` stub; implement a minimal "start server" launcher (needed for the single-binary anyway) or remove the entry | small | feeds D7 packaging |
 | M9 | Hoist duplicated prompts | Tier-2 system prompt ×3 (already diverged), Tier-1 ×2, Korean fallback drift copy ×2 → shared prompts module | small | copy-touching → Claude reviews |
-| M10 | Finish `KIBITZER_PORT` wiring | recognized only by macOS scripts/menubar; Windows scripts + extension (`SERVER_BASE_URL` hardcoded) ignore it → silent break. Wire end-to-end or drop the override for a single 8765 constant; align setup docs; `macos_setup` `npm install`→`npm ci`, reconcile Python 3.12-vs-3.11 preference | small | feeds D7; docs → Claude |
-| M11 | Split `background.ts` (663 lines) | badge renderer (~100 lines) → `lib/badge.ts`; toast state machine (~180 lines) → `lib/notifications.ts` (unit-testable). Defer `popup.ts` (979 lines) split to post-packaging | medium | enables R2's clamp test |
-| M12 | Misc | unify settings validation via `ControllerConfig.model_validate`; collapse the 3 `'window'`→`'alignment'` aliases to 1; fix `build_tier1_payload` `Goal` annotation → `GoalRecord` | small | — |
+| M10 | Candidate-port discovery | replace half-wired `KIBITZER_PORT`/hardcoded 8765 with the confirmed five-port runtime contract below; align launchers, extension, live setup docs, and packaging | medium | feeds D7 and P1; docs → Claude |
+| M11 | Split `background.ts` | badge renderer → `lib/badge.ts`; toast state machine → `lib/notifications.ts` (unit-testable). Defer the large `popup.ts` split to post-packaging | medium | post-R2 cleanup; not a prerequisite for the persistent fix |
+| M12 | Misc | unify settings validation via `ControllerConfig.model_validate`; centralize the legacy `'window'`→`'alignment'` compatibility boundary and define its removal; fix `build_tier1_payload` `Goal` annotation → `GoalRecord` | small | — |
+| **M13** ★ | Expand the extension unit-test harness | existing `node:test` suite under `tests/`; reusable Chrome tabs/alarms/storage doubles + fake timers | small | #32 already covers the history queue; test `shouldDropUrl`, and extract/export `normalizeSettings` as a pure helper before testing it; then add P3 parity + R2 restart/idempotence tests. Do not introduce Vitest unless `node:test` proves insufficient |
+
+**M6 acceptance:** verify each symbol has no live/import-by-string call site, then
+delete it. Specifically remove `on_feedback` from the base protocol and both
+controllers, including the dead `'relevant'` comparison. Do not add a replacement
+call in `feedback.py`; `related` continues to teach future judgments through the
+existing exemplar path, and intervention confirmation remains the controller
+reset boundary.
+
+**M10 effective-port contract:**
+
+- Use the ordered pool `49187, 51387, 53587, 55787, 57987`. These are local
+  Dynamic/Private candidates, not collision-free reservations. Remove the
+  arbitrary runtime `KIBITZER_PORT` override from the supported product path;
+  one half-wired override is worse than a discoverable contract.
+- Keep the list in one checked-in machine-readable source (for example
+  `configs/port-candidates.json`). Package it with the server and generate the
+  extension constant at build time; CI fails if generated output is stale.
+- At launcher startup, first detect an already-running Kibitzer by a versioned
+  read-only identity response (`service=kibitzer`, protocol version, instance
+  ID). Otherwise atomically bind the first available candidate — the successful
+  bind itself selects the port; do not check-then-close-then-bind. If all five
+  are unavailable, fail visibly with the attempted ports and owning-process
+  diagnostics where the OS permits. Do not silently choose an undiscoverable
+  random port.
+- The extension caches the last successful port in `chrome.storage.local`, probes
+  it first, then probes the ordered pool with short timeouts and validates the
+  identity response before any mutation. Discovery requests are GET-only. An
+  identity marker is service discovery, not authentication.
+- Change extension host permission to `http://127.0.0.1/*`; use
+  `127.0.0.1` consistently for product traffic. P1 builds same-origin UI origins
+  from the selected effective port; the extension Origin remains
+  `chrome-extension://<id>` and is independent of the server port.
+- Align macOS/Windows launchers, health/status checks, onboarding/dashboard
+  links, and current setup docs. Preserve historical logs as history. Also make
+  both setup scripts use `npm ci` and document one supported Python-version
+  policy while retaining intentional platform-specific interpreter discovery.
+- Tests cover first/second candidate collision, all candidates occupied, existing
+  Kibitzer detection, unrelated-service rejection, cached-port recovery,
+  non-default same-origin P1 acceptance, and server/extension list parity.
 
 ★ = highest post-launch payoff.
 
@@ -226,44 +401,50 @@ but the two starred items are the biggest post-launch maintenance sinks.
 - `StreakController` direct unit tests (coldstart gate, k threshold, cooldown,
   snooze) — currently only covered indirectly via the HTTP handshake.
 - `apply_controller` (streak/alignment dispatch + state persistence).
-- `RuntimeResources` credentials-missing → provider `None` → single
-  `provider.degraded` event path (also covered by R1's test).
 - alignment branch of celebration detection (`_next_alignment_score`);
   attachment tests only exercise streak mode today.
 - Gaps that confirmed bugs exposed: concurrency (T2), goal-change reset (T1),
-  non-ASCII embedding (C3).
+  and invalid/unsupported embedding output (C3).
 
-**Extension** (`apps/extension`): **no test runner exists** — `npm test` is
-`tsc --noEmit`, CI only builds. `shouldDropUrl` (privacy gate),
-`normalizeSettings` (hand-copied server Pydantic ranges + theta order), history
-dedup/cap are all pure functions — this is pure omission, not a harness problem.
-Add **vitest** and start with those three modules; that seam also carries the
-P3 blocklist-parity test and M4 wire-type validation.
+**Extension — M13** (`apps/extension`): #32 added a real `node:test` suite,
+wired it into `npm test` and `npm run build`, and covered history validation,
+serialization, and storage failures. `shouldDropUrl` (privacy gate) and
+`normalizeSettings` (hand-copied server Pydantic ranges + theta order) remain
+pure but untested. Extend the existing runner with reusable Chrome API doubles
+and fake timers; that seam also carries P3 blocklist parity, R2 restart/
+idempotence, and M4 wire-type validation.
 
 ---
 
 ## Suggested sequencing (dependency graph)
 
 ```
-Release gate:      R1 ──┐         R2 (stopgap or full)
-                        │
-Trust bundle:      T3, T4, P1, P3, P4  (parallel, small)
+Release gate:      R1              M13 expansion ──▶ R2a idempotency ──▶ R2b persistence
+
+Trust bundle:      T3, T5, P2, P3, P4  (parallel where independent)
+                   M10 port implementation ──▶ P1
                    T1, T2  ── depend on ──▶ M2 (do M2 first if bundling)
                                              │
 Maintainability:   M2 ★ ──▶ M3 ──▶ Track-4 controller tests
-                   M13 (vitest) ──▶ P3 parity test, M4 validation
-                   M5, M6, M7/P4, M8, M9, M10, M11, M12  (independent)
-Packaging (D7-0):  runs in parallel; M8 + M10 feed it
+                   M13 (node:test doubles) ──▶ P3 parity test, M4 validation
+                   M5 ──▶ C6a pagination ──▶ C6b compaction
+                   M6, M7/P4, M8, M9, M10, M11, M12  (independent)
+Packaging (D7-0):  code prep runs in parallel; M8 + M10 feed it; no release build before R1/R2
 ```
 
 Practical first PRs, in order:
 1. **R1** (factory degrade) — smallest, safest, closes a test gap.
-2. **R2 stopgap** (dwell clamp) — unblocks the release gate cheaply; full
-   `chrome.alarms` fix can follow after M11.
-3. **T3 + P1** — tiny, and both protect the D7 onboarding path.
+2. **M13** (expand `node:test` with Chrome test doubles), then **R2a** server
+   idempotency and
+   **R2b** persistent/alarm state. The gate closes only after the combined tests.
+3. **T3** and **T5** as separate small fixes; implement **M10**'s confirmed
+   effective-port contract, then land **P1** against that contract.
 4. **M2** (ingest extraction) — the keystone; makes T1/T2 and controller tests
    cheap. Then T1, T2.
-5. **M13** (vitest) + **P3** parity test.
+5. **P3** generated blocklist + parity fixtures; P2/P4 can land alongside the
+   privacy bundle in separate reviewable PRs.
+6. **M5**, then **C6a/C6b**, so report extraction lands before pagination and
+   storage compaction touch the same SQLite/report seams.
 
 Everything lands as small `fix/*` / `chore/*` / `refactor/*` PRs into `dev`
 (AGENTS.md workflow). Branch from `dev`, not from any feature branch.
@@ -273,10 +454,23 @@ Everything lands as small `fix/*` / `chore/*` / `refactor/*` PRs into `dev`
 ## Appendix A — Original audit report (verbatim, Korean)
 
 > Generated 2026-07-15 by the pre-distribution audit workflow (task
-> `wrr2kimts`). Preserved verbatim as the source of record for every item above.
-> Stats: 17 confirmed (2 high / 6 medium / 9 low), 3 refuted, 15 maintainability
-> items. Refuted (for the record): voice task GC, `renderReport` unguarded,
-> OS-notification feedback loss — all had an impossible failure mechanism.
+> `wrr2kimts`). Preserved verbatim as the historical record of the audit snapshot,
+> **not** as current implementation guidance. Use the corrected work-order body
+> above. Errata/reconciliation:
+> - the audit ran on `c48b134`, behind the `dev` base used for this document;
+> - C1, T4, and C4 were subsequently resolved by #36, #34, and #32, leaving 14
+>   actionable original findings (2 high / 5 medium / 7 low) on `origin/dev` @
+>   `6ba1b36`;
+> - the report contains 13 numbered maintainability recommendations, not 15;
+> - recommendation 7 incorrectly labels live `embedding.model` / `batch_size`
+>   fields as unread; M7 above corrects it;
+> - current `dev` has a real extension `node:test` runner from #32, and already
+>   has the credentials-missing degradation test; the old test-gap section is
+>   preserved only as snapshot evidence;
+> - R1 numeric fallback, T1 nonexistent `goal_id`, and P1 host-with-port / local
+>   UI Origin instructions are corrected in the body above.
+> Original refutations: voice task GC, `renderReport` unguarded, and
+> OS-notification feedback loss.
 
 # Kibitzer 배포 전 감사 최종 보고서
 

@@ -10,14 +10,21 @@ Completed:
   persona v5 lineup, and archived on `archive/security-hardening-20260720`
   instead of rebased. Three local 07-10 Windows tray commits were found
   superseded by the pystray lifecycle (#105) and dropped.
-- Merged the two divergent copies of `docs/planning-notes.md`: the local copy
-  carried D9–D13 (packaging, app/extension role split, pre-distribution
+- Merged the three divergent copies of `docs/planning-notes.md`: the local
+  copy carried D9–D13 (packaging, app/extension role split, pre-distribution
   audit, red-team, security review) and the persona-revamp working rounds;
   the `dev` copy carried D3/D7/D8 design detail including the 2026-07-16
-  Tier-2 rework design. Statuses refreshed for the #69/#71/#74 closures,
-  `331a0ba`, and draft #106.
+  Tier-2 rework design; the never-PRed `chore/predist-audit-docs` branch
+  (2026-07-15) carried the audit reconciliation (14 actionable findings +
+  errata), the user-confirmed post-audit product calls (port candidate pool,
+  per-install token, C6 retention window, M6 deletion), and the
+  channel-staging decisions (ad-hoc signing requirement, Homebrew cask
+  deferred per the 2026-09-01 Gatekeeper policy). Statuses refreshed for the
+  #69/#71/#74 closures, `331a0ba`, and draft #106.
 - Landed previously local-only records: `docs/security-review-2026-07-15.md`,
-  `docs/handoff-refactor-predist.md`, `docs/persona-voice-revamp.md`, and the
+  `docs/handoff-refactor-predist.md` (the corrected 2026-07-15 reconciled
+  work order from `chore/predist-audit-docs`, superseding the unreconciled
+  draft), `docs/persona-voice-revamp.md`, and the
   `docs/benchmarks/persona-voice-v4/` evidence (the v5 benchmark already on
   `dev` references v4 as its baseline).
 

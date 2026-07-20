@@ -25,6 +25,15 @@ Two tracks ran in parallel since the P0 persona engine landed:
 
 Baseline: 90 server tests green; server runs in idle daemon mode.
 
+**Shipped since this snapshot (recorded 2026-07-15, on `dev`):** D3
+goal-enrichment (#26), D4 replay CLI (#14), D5 dev diagnostics / page card
+(#13), onnx_cpu Tier-0 embeddings replacing hash embeddings (#29),
+configurable tau (#31), Tier-0 `r_final` ↔ Tier-1 verdict alignment (#36),
+controller-consumption deferral (#37), provider-failure surfacing in the
+popup (#34), web history (#20), Tier-0 benchmark v2 (#40), serialized history
+writes (#32). The table above is a 2026-07-08 snapshot kept for narrative;
+treat `dev` git history as the source of truth for what has shipped.
+
 **Re-verified 2026-07-20** (`origin/dev` through PR #109): Tier 2 has since
 been split into a Context Judge / persona Message Writer with threshold-timed
 precomputation (`331a0ba`, supersedes the single guarded call), the persona v5
@@ -49,6 +58,11 @@ nagging cannot be saved by humor; trust features outrank personality features.
 Critical-path insight: the whole audit plan is gated on the **Replay CLI**
 (long-deferred WP10). Its Step 0 is "label the log and build histograms," which
 needs a replay harness. So the Replay CLI is the true unlock.
+
+**Update: the Replay CLI shipped (#14)** — the gate is cleared; the audit-plan
+chain (title-quality gate → Tier-0 OK audit routing → threshold tuning) can
+proceed, and several pieces already landed (#31 configurable tau, #40
+benchmark v2, #36 r_final alignment).
 
 ### Evidence: 2026-07-08 "LG그램 수리" session (sess_f249ac14…)
 
@@ -316,6 +330,29 @@ removed. Sources: [Apple](https://support.apple.com/guide/mac-help/mh40616/mac),
 [Homebrew](https://docs.brew.sh/Manpage),
 [Microsoft MotW](https://learn.microsoft.com/en-us/deployedge/per-site-configuration-by-policy).
 
+**Channel staging (recorded 2026-07-15 on `chore/predist-audit-docs`; folded
+in 2026-07-20 — where it conflicts with the channel list above, this staging
+is the operative decision):** unsigned is a channel decision, not a
+frictionless claim. macOS 15 removed the old control-click bypass, so the
+macOS alpha build must still be **ad-hoc signed** in CI and pass
+`codesign --verify --deep --strict` on a clean machine. Channel order:
+(1) developer-alpha checksum-verifying install scripts in the main repo
+(download the versioned artifact, verify the published SHA-256, print any
+remaining OS security step; never marketed as bypassing platform security);
+(2) a Scoop bucket may wrap the same release immediately (clean-machine tests
+decide the real SmartScreen/Defender experience); (3) an unsigned **Homebrew
+cask is deferred until the app passes Gatekeeper** — Homebrew ends support
+for casks that fail Gatekeeper checks on 2026-09-01
+([Homebrew/brew#20755](https://github.com/Homebrew/brew/issues/20755)), so a
+personal tap is not a reliable unsigned channel; Homebrew auto-bump comes
+only after the signed/notarized macOS phase. Privacy disclosure must describe
+the real boundary — extension↔app traffic and storage stay local, Tier 0 is
+local; once a cloud judge is enabled, Tier 1 may send the goal (incl. derived
+phrases) and current/recent title/host, Tier 2 additionally a bounded excerpt
+— with explicit consent before the first cloud call, keyless Tier 0 always
+usable, and Chrome Web Store disclosures matching the behavior
+([policy](https://developer.chrome.com/docs/webstore/cws-dashboard-privacy)).
+
 ### D10 — App/extension role split + refactor venue → DECIDED, IMPLEMENTATION PENDING (2026-07-15)
 
 **Role split — "in-flow → extension, occasional admin/review → app":**
@@ -435,6 +472,47 @@ single-binary launcher anyway); hoist duplicated prompts; finish half-wired
 `apply_controller` unit tests, no concurrency test, no goal-change reset test,
 no non-ASCII embedding test; extension has **no test runner at all** — add
 vitest starting with pure fns (`shouldDropUrl`, `normalizeSettings`, history).
+
+**Reconciliation (2026-07-15, recorded on `chore/predist-audit-docs`):** the
+audit ran against `feature/tray-status-menu` @ `c48b134`, not `dev` HEAD.
+Against `origin/dev` @ `6ba1b36`, **14 original findings remain actionable
+(2 high / 5 medium / 7 low)**: C1 (`r_final`) was already fixed by #36, T4's
+"provider failures invisible" was resolved by #34 (`/health.provider_calls` +
+popup), and C4's history lost-update was fixed by #32. C3 (`hash_cpu` zero
+vector) remains real but no longer affects the shipped `onnx_cpu` default.
+Errata: the report has **13** numbered maintainability recommendations (not
+15), M13 means expanding the existing extension test harness, and M7 wrongly
+called `embedding.model`/`batch_size` unread (both feed the ONNX provider).
+The corrected source of execution is
+[handoff-refactor-predist.md](handoff-refactor-predist.md) (Appendix A keeps
+the old report verbatim behind errata). Release gates: R1 strict
+malformed-config degradation and the **full** R2 — persistent alarm-backed
+MV3 dwell state plus idempotent server retries; a ≤25 s clamp is dogfooding
+mitigation, not the release fix.
+
+**Post-audit product calls confirmed by the user (2026-07-15):**
+
+- **M10 port contract:** replace fixed 8765 with the ordered candidate pool
+  `49187, 51387, 53587, 55787, 57987`; atomically bind the first free port,
+  discover it via a versioned Kibitzer identity response, cache it in the
+  extension, and fail visibly if all candidates are occupied.
+- **P1/P2:** hostname-only TrustedHost + exact Origin checks; a per-install
+  token is required before credential/history administration is exposed (CORS
+  response headers alone are not authentication). Incognito disabled in the
+  manifest, and incognito/unknown-tab events dropped defensively.
+- **C1/C2/C3:** C1 closed (no new work); reject equal quiet-hours endpoints;
+  do not expand `hash_cpu` language support — record an unsupported-embedding
+  observation without a verdict and skip scoring, controllers, attachment,
+  Tier 1, and intervention so a zero vector never becomes DRIFT.
+- **C6 retention:** full replay/debug detail keeps a configurable window
+  (initial default: seven days after session end), then compacts to
+  title/host/time/session/final-outcome/feedback history; vectors, scores,
+  reasons, path/tab identifiers, and debug-only state are removed; reports
+  paginate; exact replay refuses compact sessions; users can delete all
+  history.
+- **M6:** delete the unused controller `on_feedback` protocol and its wrong
+  `'relevant'` comparison; the existing `related` exemplar-learning flow
+  remains the only feedback path.
 
 **Implementation status audit (2026-07-16, `origin/dev` through PR #95):**
 
@@ -909,7 +987,12 @@ the extension badge.
   release blockers: factory `ValueError` crashes the app on a config typo, and
   MV3 dwell timers silently drop >30s observations. Release-gate backlog (0a–0c)
   added at the top; medium privacy cluster folded into D10/D9 localhost
-  hardening. Full report in task output `wrr2kimts.output`.
+  hardening. Full report in task output `wrr2kimts.output`. Later the same day
+  the audit was reconciled against `origin/dev` @ `6ba1b36` — 14 originals
+  actionable (2/5/7), 13 maintainability items, M13 = extension-harness
+  expansion — and the user confirmed the post-audit product calls (port pool,
+  per-install token, C6 retention window, M6 deletion); see the reconciliation
+  block under D11.
 - 2026-07-15 (red-team): Tier-2 prompt-injection exercise (D12). Prompt
   extraction not reproducible on `minimax-m3` (0/24); the real hole was
   drift-suppression — an off-goal page arguing its own relevance flipped
@@ -943,8 +1026,10 @@ the extension badge.
   prompt hardening + persona v4) is archived on
   `archive/security-hardening-20260720`; three local 07-10 Windows tray
   commits were superseded by #105 (pystray lifecycle) and dropped. This file
-  merged its two divergent copies — the local one carried D9–D13 and the
-  persona rounds, `dev`'s carried D3/D7/D8 design detail — and D11/D12/D13
-  statuses were refreshed. Red-team harness preservation pending as draft
+  merged its three divergent copies — the local one carried D9–D13 and the
+  persona rounds, `dev`'s carried D3/D7/D8 design detail, and the never-PRed
+  `chore/predist-audit-docs` branch carried the audit reconciliation, the
+  user-confirmed post-audit product calls, and the channel-staging decisions
+  (all folded in above) — and D11/D12/D13 statuses were refreshed. Red-team harness preservation pending as draft
   #106. Untracked WIP kept local: `apps/extension/src/assets/characters/`
   (tsundere toast art exploration).
