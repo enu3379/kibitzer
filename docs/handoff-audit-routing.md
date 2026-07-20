@@ -1,7 +1,12 @@
 # Handoff: Tier-0 OK Audit Routing + Title Quality (audit plan Steps 2–5)
 
 Date: 2026-07-09 (original spec) / 2026-07-20 (re-implementation notes)
-Implementation status: **RE-IMPLEMENTATION REQUIRED.** The feature was
+Implementation status: **RE-IMPLEMENTED as PR #115 (2026-07-20)** — the notes
+below were the work order for that PR and stay as its rationale. Outstanding
+after #115: the private-corpus recalibration of `audit_ok_below` (provisional
+0.7 from the public benchmark-v2 sweep) via the env-gated regression in
+`test_audit_routing.py`.
+Original status: The feature was
 completed and regression-verified 2026-07-10 on the local branch
 `feature/judgment-review` (commit `30076c2`, superset of
 `feature/tier0-audit-routing`) but was never PRed; `dev` has since moved
