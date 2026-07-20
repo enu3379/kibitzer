@@ -44,7 +44,7 @@ from apps.server.app.providers.judges.factory import create_tier2_judge_provider
 from apps.server.app.providers.judges.ollama_chat import (  # noqa: E402
     OllamaChatJudgeProvider,
     _message_content,
-    _writer_output_budget_exhausted,
+    _output_budget_exhausted,
 )
 from apps.server.app.providers.judges.openai_compatible import (  # noqa: E402
     parse_tier2_decision_json,
@@ -575,7 +575,7 @@ async def evaluate_job(
         )
         delivered_score = Score()
     else:
-        if provider_error is None and _writer_output_budget_exhausted(
+        if provider_error is None and _output_budget_exhausted(
             response, provider.writer_max_output_tokens
         ):
             provider_error = "ValueError: tier2 writer response exhausted output budget"
