@@ -29,7 +29,9 @@ sys.path.insert(0, str(REPO_ROOT))
 from apps.server.app.config import load_config  # noqa: E402
 from apps.server.app.storage.sqlite import SQLiteStore  # noqa: E402
 
-CONFIG = load_config(str(REPO_ROOT / "configs" / "default.yaml"))
+# Resolves the same runtime paths as the app server (dev repo, KIBITZER_HOME,
+# or packaged data dir), so --db defaults to the DB the server actually uses.
+CONFIG = load_config()
 
 
 def connect_ro(db_path: str) -> sqlite3.Connection:
@@ -255,7 +257,10 @@ function agreement(o) {
 function chipTrail(o) {
   const bits = [];
   if (o.r0 === null || o.r0 === undefined) return '<span class="chip">판정 전</span>';
-  const t0ok = o.r0 >= (o.tau_ok ?? DATA.tau_ok);
+  // Old rows predate the per-observation tau_ok feature; for those, trust the
+  // stored verdict at tier 0 instead of recomputing against today's config tau.
+  const t0ok = o.tau_ok !== null && o.tau_ok !== undefined ? o.r0 >= o.tau_ok
+    : (o.tier_reached === 0 && o.verdict ? o.verdict === "OK" : o.r0 >= DATA.tau_ok);
   const exemplar = o.exemplar_score === null || o.exemplar_score === undefined ? "" : ` · e ${fmt(o.exemplar_score)}`;
   const derived = o.derived_score === null || o.derived_score === undefined ? "" : ` · d ${fmt(o.derived_score)}`;
   bits.push(`<span class="chip ${t0ok ? "ok" : "drift"}">T0 ${t0ok ? "OK" : "DRIFT"} · r0 ${fmt(o.r0)}${exemplar}${derived}</span>`);
@@ -390,7 +395,7 @@ def make_handler(db_path: str, app_server: str):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Kibitzer judgment review UI")
-    parser.add_argument("--db", default=str(REPO_ROOT / "data" / "kibitzer.sqlite3"))
+    parser.add_argument("--db", default=CONFIG.server.db_path)
     parser.add_argument("--port", type=int, default=8799)
     parser.add_argument("--app-server", default="http://127.0.0.1:8765")
     args = parser.parse_args()
