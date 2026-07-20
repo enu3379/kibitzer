@@ -1,5 +1,26 @@
 # Progress
 
+## 2026-07-20 Worktree reconciliation and docs backfill
+
+Completed:
+
+- Audited the local pre-split working tree against `dev`: the uncommitted
+  Tier-2 guard-prompt hardening and persona v4 fragments were confirmed
+  superseded by the Context Judge / Message Writer split (`331a0ba`) and the
+  persona v5 lineup, and archived on `archive/security-hardening-20260720`
+  instead of rebased. Three local 07-10 Windows tray commits were found
+  superseded by the pystray lifecycle (#105) and dropped.
+- Merged the two divergent copies of `docs/planning-notes.md`: the local copy
+  carried D9–D13 (packaging, app/extension role split, pre-distribution
+  audit, red-team, security review) and the persona-revamp working rounds;
+  the `dev` copy carried D3/D7/D8 design detail including the 2026-07-16
+  Tier-2 rework design. Statuses refreshed for the #69/#71/#74 closures,
+  `331a0ba`, and draft #106.
+- Landed previously local-only records: `docs/security-review-2026-07-15.md`,
+  `docs/handoff-refactor-predist.md`, `docs/persona-voice-revamp.md`, and the
+  `docs/benchmarks/persona-voice-v4/` evidence (the v5 benchmark already on
+  `dev` references v4 as its baseline).
+
 ## 2026-07-16 Tier 2 Context Judge / Message Writer split
 
 Completed:
