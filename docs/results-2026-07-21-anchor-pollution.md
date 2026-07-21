@@ -1,8 +1,8 @@
 # Results — OK-anchor 오염 루프 검증과 존폐 결정 (2026-07-21)
 
 원인 문서: [handoff-2026-07-21-anchor-pollution.md](handoff-2026-07-21-anchor-pollution.md).
-산출: 실험 결과(본 문서) + **PR #118**(오염 차단 가드) + **anchor 기본
-비활성화 PR**(`fix/disable-anchor-default`, 본 문서를 포함한 PR).
+산출: 실험 결과(본 문서) + **PR #118**(오염 차단 가드) + **PR #120**(anchor
+기본 비활성화, 본 문서를 포함한 PR).
 
 모든 실험은 실제 ONNX KoEn-E5-Tiny 임베딩 + 리포 실함수(`tier0_score_parts`,
 `anchor_admission_eligible`)를 사용한 합성 세션 시뮬레이션이다. 확률 조건은
