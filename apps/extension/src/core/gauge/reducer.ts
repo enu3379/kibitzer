@@ -151,8 +151,9 @@ function applyTier2(state: GaugeState, ts: number, flow: "drift" | "ok", pageKey
     if (reason === "s_zero") {
       st = { ...st, s: config.rDismiss, m: Math.min(st.m, 0), accelTier: 0 };
     } else {
-      const downIdx = Math.max(0, st.accelTier - 1);
-      const floor = config.tDown.length > 0 ? config.tDown[downIdx] : 0;
+      // Contract §6: promotion reject clamps by the current tier, m <- min(m, T_down[tier]).
+      const floorIdx = Math.min(st.accelTier, config.tDown.length - 1);
+      const floor = config.tDown.length > 0 ? config.tDown[floorIdx] : 0;
       st = { ...st, s: Math.min(100, st.s + config.bRefund), m: Math.min(st.m, floor) };
     }
     if (isActive) st = { ...st, activeVerdict: "OK" }; // override until page change
