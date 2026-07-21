@@ -52,6 +52,14 @@ class RelevanceConfig(BaseModel):
     # (goal-exemplar similarity below this) keeps its verdict but must not
     # join the anchor, or the reference frame drifts with the user.
     anchor_epsilon: float = 0.05
+    # Anchor tiebreaker: the anchor term only enters the Tier 0 max() when the
+    # page's direct goal affinity (exemplar or derived) reaches this floor.
+    # 0.0 keeps the legacy behavior where the anchor can solo-OK a page.
+    anchor_tiebreak_floor: float = Field(default=0.0, ge=0.0, le=1.0)
+    # Tier 1 anchor admission: a Tier 1 OK joins the anchor only when direct
+    # goal affinity reaches this floor. 0.0 keeps the legacy unconditional
+    # admission that lets one false OK seed a self-reinforcing anchor.
+    tier1_anchor_floor: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class GoalEnrichmentConfig(BaseModel):

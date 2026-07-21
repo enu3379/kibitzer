@@ -9,9 +9,16 @@ from pathlib import Path
 from apps.server.tests.support import TestClient
 
 from apps.server.app.config import AppConfig, ServerConfig
-from apps.server.app.core.relevance import cosine, tier0_score, tier0_score_parts
+from apps.server.app.core.relevance import (
+    Tier0Score,
+    anchor_admission_eligible,
+    cosine,
+    tier0_score,
+    tier0_score_parts,
+)
 from apps.server.app.main import create_app
 from apps.server.app.providers.embeddings.hash_cpu import HashCpuEmbeddingProvider
+from apps.server.app.schemas import Verdict
 from apps.server.app.storage.sqlite import SQLiteStore
 
 
@@ -81,6 +88,125 @@ class EmbeddingTier0Test(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(below_score.score, 0.0)
         self.assertAlmostEqual(above_score.derived_score, 0.3)
         self.assertAlmostEqual(above_score.score, 0.3)
+
+
+class AnchorTiebreakFloorTest(unittest.TestCase):
+    """The anchor may only lift pages with direct goal affinity (pollution-loop fix)."""
+
+    def _exemplar_at(self, target_cosine: float) -> list[float]:
+        return [target_cosine, math.sqrt(1 - target_cosine**2), 0.0]
+
+    def test_anchor_cannot_solo_ok_below_floor(self) -> None:
+        emb = [1.0, 0.0, 0.0]
+        anchor = [1.0, 0.0, 0.0]  # polluted anchor, perfectly aligned with the page
+
+        score = tier0_score_parts(
+            emb,
+            exemplars=[self._exemplar_at(0.2)],
+            anchor=anchor,
+            beta=0.85,
+            anchor_tiebreak_floor=0.30,
+        )
+
+        self.assertAlmostEqual(score.anchor_score, 0.85)  # raw diagnostic preserved
+        self.assertAlmostEqual(score.score, 0.2)  # anchor excluded from the verdict score
+
+    def test_anchor_lifts_page_at_or_above_floor(self) -> None:
+        emb = [1.0, 0.0, 0.0]
+        anchor = [1.0, 0.0, 0.0]
+
+        score = tier0_score_parts(
+            emb,
+            exemplars=[self._exemplar_at(0.35)],
+            anchor=anchor,
+            beta=0.85,
+            anchor_tiebreak_floor=0.30,
+        )
+
+        self.assertAlmostEqual(score.score, 0.85)
+
+    def test_derived_affinity_also_unlocks_anchor(self) -> None:
+        emb = [1.0, 0.0, 0.0]
+        anchor = [1.0, 0.0, 0.0]
+
+        score = tier0_score_parts(
+            emb,
+            exemplars=[],
+            anchor=anchor,
+            beta=0.85,
+            derived_exemplars=[self._exemplar_at(0.4)],
+            derived_tau=0.25,
+            anchor_tiebreak_floor=0.30,
+        )
+
+        self.assertAlmostEqual(score.score, 0.85)
+
+    def test_zero_floor_keeps_legacy_solo_anchor_ok(self) -> None:
+        emb = [1.0, 0.0, 0.0]
+        anchor = [1.0, 0.0, 0.0]
+
+        score = tier0_score_parts(
+            emb,
+            exemplars=[self._exemplar_at(0.2)],
+            anchor=anchor,
+            beta=0.85,
+            anchor_tiebreak_floor=0.0,
+        )
+
+        self.assertAlmostEqual(score.score, 0.85)
+
+    def test_tier1_ok_needs_affinity_to_join_anchor(self) -> None:
+        low_affinity = Tier0Score(score=0.0, exemplar_score=0.02, anchor_score=0.9)
+
+        legacy = anchor_admission_eligible(
+            low_affinity,
+            has_derived_exemplars=False,
+            anchor_epsilon=0.05,
+            derived_tau=0.25,
+            verdict=Verdict.OK,
+            tier_reached=1,
+            tier1_anchor_floor=0.0,
+        )
+        guarded = anchor_admission_eligible(
+            low_affinity,
+            has_derived_exemplars=False,
+            anchor_epsilon=0.05,
+            derived_tau=0.25,
+            verdict=Verdict.OK,
+            tier_reached=1,
+            tier1_anchor_floor=0.30,
+        )
+
+        self.assertTrue(legacy)  # the old unconditional Tier 1 bypass
+        self.assertFalse(guarded)  # a lone Tier 1 OK can no longer seed the anchor
+
+    def test_tier1_floor_is_not_voided_by_epsilon_branch(self) -> None:
+        # Affinity above epsilon (0.05) but below the Tier 1 floor (0.30) — the
+        # exact profile of the webtoon-binge seed. The epsilon branch must not
+        # admit what the Tier 1 gate rejects.
+        binge_seed = Tier0Score(score=0.0, exemplar_score=0.235, anchor_score=0.7)
+
+        guarded = anchor_admission_eligible(
+            binge_seed,
+            has_derived_exemplars=False,
+            anchor_epsilon=0.05,
+            derived_tau=0.25,
+            verdict=Verdict.OK,
+            tier_reached=1,
+            tier1_anchor_floor=0.30,
+        )
+        tier0_same_affinity = anchor_admission_eligible(
+            binge_seed,
+            has_derived_exemplars=False,
+            anchor_epsilon=0.05,
+            derived_tau=0.25,
+            verdict=Verdict.OK,
+            tier_reached=0,
+            tier1_anchor_floor=0.30,
+        )
+
+        self.assertFalse(guarded)  # Tier 1 OK: floor applies despite epsilon
+        self.assertTrue(tier0_same_affinity)  # Tier 0 OK: epsilon branch unchanged
 
 
 class Tier0ApiTest(unittest.TestCase):
