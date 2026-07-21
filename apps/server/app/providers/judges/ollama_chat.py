@@ -8,6 +8,7 @@ from typing import Callable, Iterator, TypeVar
 import httpx
 
 from .base import (
+    TIER1_SYSTEM_PROMPT,
     TIER2_JUDGE_SYSTEM_PROMPT,
     TIER2_LEGACY_SYSTEM_PROMPT,
     ProviderResponseError,
@@ -44,15 +45,7 @@ class OllamaChatJudgeProvider:
     async def classify_tier1(self, payload: dict[str, object]) -> Tier1Result:
         response = await self._post_chat(
             [
-                {
-                    "role": "system",
-                    "content": (
-                        "Classify whether the current browser navigation is aligned with the user's declared "
-                        "goal. The declared goal includes any goal.derived_phrases; titles matching them are "
-                        "goal-related even when they share no words with the raw goal. Return strict JSON only: "
-                        '{"verdict":"ok|drift","reason":"<10 words>"}.'
-                    ),
-                },
+                {"role": "system", "content": TIER1_SYSTEM_PROMPT},
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ]
         )
