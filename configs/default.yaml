@@ -65,7 +65,15 @@ relevance:
   # treating this as a production estimate.
   tau_ok: 0.6
   beta: 0.85
-  anchor_window: 10
+  # Anchor disabled by default (2026-07-21 anchor-contribution experiments,
+  # docs/results-2026-07-21-anchor-pollution.md): under the ONNX stack the
+  # rescue threshold is cos(page, anchor) >= tau_ok/beta = 0.706, and across
+  # every synthetic scenario — including the normal-deepening chain the anchor
+  # was designed for — it rescued zero related pages while remaining the one
+  # self-reinforcing pollution path (webtoon-binge loop). Measured cost of
+  # removal: one Tier 1 call per session. Restore a positive window only if
+  # replay on real session logs shows a non-zero rescue rate.
+  anchor_window: 0
   exemplar_cap: 20
   # Anchor admission guard (2026-07-08, from the LG그램 session audit): pages
   # whose OK came only from anchor similarity (exemplar score < epsilon) keep
