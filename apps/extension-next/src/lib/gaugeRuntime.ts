@@ -73,6 +73,18 @@ export function dispatch(event: GaugeEvent, goal: SessionGoal | null): Promise<v
   const task = async (): Promise<void> => {
     const state = await loadState()
     const transition = reduceGauge(state, event, configFor(goal))
+    // Diagnostic trace (service-worker console): watch S drain/recover and why an
+    // effect fired. Remove once the pipeline is trusted.
+    const s0 = state.s.toFixed(1)
+    const s1 = transition.state.s.toFixed(1)
+    if (s0 !== s1 || transition.effects.length > 0) {
+      const eff = transition.effects.map((e) => e.type).join(",")
+      console.log(
+        `[kbz] ${event.type} S ${s0}->${s1} m=${transition.state.m.toFixed(2)}` +
+          ` armed=${transition.state.celebrateArmed} v=${transition.state.activeVerdict}` +
+          (eff ? ` !! ${eff}` : ""),
+      )
+    }
     await saveState(transition.state)
     for (const effect of transition.effects) {
       await deliver(effect, goal)
