@@ -89,7 +89,8 @@ export async function tier1Rescue(goalText: string, title: string, urlHost: stri
   try {
     const result = await p.tier1.classifyTier1(buildTier1Payload({ rawText: goalText }, { title, urlHost }, []))
     return result.verdict
-  } catch {
+  } catch (error) {
+    console.warn("[kbz] tier1 error (keeping DRIFT):", error)
     return "DRIFT"
   }
 }
@@ -117,7 +118,8 @@ export async function tier2Confirm(
     )
     const result = await p.tier2.confirmTier2(payload)
     return { flow: result.confirmDrift ? "drift" : "ok", message: result.message }
-  } catch {
+  } catch (error) {
+    console.warn("[kbz] tier2 error (fail-open to ok, no nag):", error)
     return { flow: "ok", message: null }
   }
 }

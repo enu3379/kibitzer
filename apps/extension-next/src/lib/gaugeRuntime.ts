@@ -127,6 +127,7 @@ async function serviceTier2(
   const page = await getActivePage()
   if (!page || page.pageKey !== effect.pageKey) return
   const outcome = await tier2Confirm(goal?.text ?? "", page)
+  console.log(`[kbz] tier2 gate (${effect.reason}) on ${effect.pageKey} -> ${outcome.flow}`)
   // The Writer's message rides along to the nag toast (if drift is confirmed).
   if (outcome.flow === "drift" && outcome.message) pendingNagMessage = outcome.message
   await dispatch(

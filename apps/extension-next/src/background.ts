@@ -31,13 +31,18 @@ function hostOf(url: string): string {
   }
 }
 
+let lastObservedKey: string | null = null
+
 /** Embed the page title vs the goal (Tier 0), optionally rescue via Tier 1 (Ollama),
- *  and feed the verdict into the gauge. Normal mode when Ollama is on; else degraded. */
+ *  and feed the verdict into the gauge. Normal mode when Ollama is on; else degraded.
+ *  Debounced per page so SPA update storms (e.g. YouTube) don't re-judge the same page
+ *  and keep clearing the Tier 2 verdict override — that was the S 0↔30 yo-yo. */
 async function observe(url: string | undefined, title: string | undefined): Promise<void> {
   const goal = await getGoal()
   if (!goal || !url || !title) return
   const pageKey = pageKeyOf(url)
-  if (!pageKey) return
+  if (!pageKey || pageKey === lastObservedKey) return
+  lastObservedKey = pageKey
   const urlHost = hostOf(url)
   const { score, verdict: tier0Verdict } = await judgeTier0(goal.text, title, TAU_OK)
   const enabled = await ollamaEnabled()
@@ -45,6 +50,7 @@ async function observe(url: string | undefined, title: string | undefined): Prom
   if (verdict === "DRIFT" && enabled) {
     verdict = await tier1Rescue(goal.text, title, urlHost) // Tier 1 may rescue to OK
   }
+  console.log(`[kbz] observe ${pageKey} tier0=${tier0Verdict}(${score.toFixed(2)}) final=${verdict}`)
   await setActivePage({ pageKey, title, urlHost, score })
   await dispatch(
     { type: "nav", pageKey, verdict, r0: score, tauOk: TAU_OK, degraded: !enabled, ts: Date.now() },
@@ -138,6 +144,7 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     if (!goal || previous?.text !== goal.text) await resetState()
     ensureHeartbeat()
     if (goal) {
+      lastObservedKey = null // re-judge the active page under the new goal
       // Test shortcut: goal "알림보기" fires a nag notification right away.
       if (goal.text === "알림보기") await testNag(goal)
       void observeActiveTab()
