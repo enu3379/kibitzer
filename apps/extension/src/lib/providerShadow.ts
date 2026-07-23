@@ -249,7 +249,10 @@ export function parseProviderShadowConfig(value: unknown): ProviderShadowConfig 
     version: 1,
     tier0: {
       enabled: tier0.enabled !== false,
-      tauOk: clampFloat(tier0.tauOk, 0.6, 0, 1),
+      // Recalibrated for the O4 ONNX export (2026-07-23): its FPR<=10% operating
+      // point on the 200-pair v2 benchmark is 0.587 (qint8 was 0.597 -> 0.6). See
+      // docs/benchmarks/tier0-embedding-o4/. Rounded to 0.59.
+      tauOk: clampFloat(tier0.tauOk, 0.59, 0, 1),
     },
     tier1: parseOllamaConfig(object.tier1),
     tier2: parseOllamaConfig(object.tier2),
