@@ -31,12 +31,12 @@ Legend — Effort: S(mall)/M(edium)/L(arge). "Blocked on SSOT" = needs the durab
 | P1-5 | **Goal-revision guard for in-flight async work** | ✅ DONE | `SessionGoal.revision` bumps on text OR minutes; reset on either; `serviceTier2` drops the Tier-2 result if the revision moved on. |
 | P1-6 | **Time-budget context not sent to the LLMs** | ✅ DONE | `serviceTier2` builds `{available_time_minutes, elapsed_minutes, current_page_drift_minutes}` and threads it into both Tier-2 payloads. |
 
-## P2 — Foundational infrastructure
+## P2 — Foundational infrastructure ✅ DONE
 
-| # | Gap | Status | Effort | Notes |
-|---|-----|--------|--------|-------|
-| P2-1 | **Durable IndexedDB SSOT (state + effect outbox)** | MISSING | M | **Unblocks most of P3.** Gauge state (S/M/accelTier/drift-since/active page/recent obs) lives in `chrome.storage.session` → **wiped on browser restart**; no effect outbox → a nag computed across an SW teardown is lost. Original old ext had `apps/extension/src/lib/gaugeIndexedDb.ts` (checkpoint+outbox, versioning, `importLegacy`) — adapt near-verbatim; it's unit-tested. |
-| P2-2 | **Structured, durable observation + event log** | MISSING | M | Next persists only a 400-line _text_ debug ring (`klog`) + 20/40-entry context caps. No structured record of verdicts/scores/tiers/interventions/feedback. Prerequisite for analytics (P3-3) and replay (P3-6). |
+| # | Gap | Status | Resolution |
+|---|-----|--------|------------|
+| P2-1 | **Durable IndexedDB SSOT** | ✅ DONE | Added `lib/db.ts` (IndexedDB: `kv` + `observations` + `events` stores). Moved all live gauge state (S/M/accelTier, drift-since, active page) and the recent-visit / nag logs off `chrome.storage.session` onto it, so they survive **browser restart**, not just SW teardown; reads fail-safe to a fresh gauge. _Effect-outbox deferred_ — effects deliver synchronously in `deliver()`, so a cross-teardown loss is rare; revisit if it bites. |
+| P2-2 | **Structured, durable observation + event log** | ✅ DONE | `lib/events.ts` — typed append-only records in the IndexedDB `events` store, logged at every decision point (observe/tier2/nag/celebrate/feedback/goal). Exportable as JSONL from the popup. The queryable substrate for P3 analytics + replay. |
 
 ## P3 — Larger features (mostly blocked on P2)
 
