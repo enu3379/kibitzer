@@ -5,16 +5,32 @@ import {
   GAUGE_SHADOW_MAX_EFFECTS,
   GaugeShadowController,
 } from "./gaugeShadow.ts"
-import type { GaugeShadowSnapshot, GaugeShadowStorage } from "./gaugeShadow.ts"
+import type {
+  GaugeShadowEffectRecord,
+  GaugeShadowSnapshot,
+  GaugeShadowStore,
+} from "./gaugeShadow.ts"
 
-class MemoryStorage implements GaugeShadowStorage {
+class MemoryStorage implements GaugeShadowStore {
   value: GaugeShadowSnapshot | null = null
+  failNextCommit = false
 
   async load(): Promise<unknown> {
     return structuredClone(this.value)
   }
 
-  async save(snapshot: GaugeShadowSnapshot): Promise<void> {
+  async reset(snapshot: GaugeShadowSnapshot): Promise<void> {
+    this.value = structuredClone(snapshot)
+  }
+
+  async commit(
+    snapshot: GaugeShadowSnapshot,
+    _effects: GaugeShadowEffectRecord[],
+  ): Promise<void> {
+    if (this.failNextCommit) {
+      this.failNextCommit = false
+      throw new Error("commit failed")
+    }
     this.value = structuredClone(snapshot)
   }
 
@@ -38,6 +54,7 @@ test("gauge shadow persists a session across controller restarts", async () => {
   assert.ok(afterHeartbeat)
   assert.equal(afterHeartbeat.sessionId, "session-1")
   assert.equal(afterHeartbeat.eventCount, 2)
+  assert.equal(afterHeartbeat.outboxCount, 0)
   assert.ok(afterHeartbeat.state.s < 100)
 
   const restarted = new GaugeShadowController(storage)
@@ -66,6 +83,7 @@ test("goal replacement resets state even within the same server session", async 
   assert.equal(reset.state.s, 100)
   assert.equal(reset.state.updatedAt, 100_000)
   assert.equal(reset.eventCount, 0)
+  assert.equal(reset.outboxCount, 0)
   assert.deepEqual(reset.effectLog, [])
 })
 
@@ -110,6 +128,7 @@ test("reducer effects are recorded and bounded but never delivered", async () =>
   const promoted = await shadow.snapshot()
   assert.ok(promoted)
   assert.ok(promoted.effectLog.some((item) => item.effect.type === "request_tier2"))
+  assert.equal(promoted.outboxCount, promoted.effectLog.length)
 
   storage.value = {
     ...promoted,
@@ -118,8 +137,32 @@ test("reducer effects are recorded and bounded but never delivered", async () =>
       sourceEvent: "heartbeat" as const,
       effect: { type: "celebrate" as const },
     })),
+    outboxCount: GAUGE_SHADOW_MAX_EFFECTS,
   }
   const reloaded = new GaugeShadowController(storage)
   await reloaded.dispatch({ type: "heartbeat", ts: 450_000 })
   assert.equal(storage.value?.effectLog.length, GAUGE_SHADOW_MAX_EFFECTS)
+})
+
+test("a failed store transaction cannot advance the in-memory cache", async () => {
+  const storage = new MemoryStorage()
+  const shadow = new GaugeShadowController(storage)
+  await shadow.ensureSession("session-1", null, 0)
+  await shadow.dispatch({
+    type: "nav",
+    pageKey: "example.test:path",
+    verdict: "DRIFT",
+    ts: 0,
+  })
+  const before = await shadow.snapshot()
+  assert.ok(before)
+
+  storage.failNextCommit = true
+  await assert.rejects(
+    shadow.dispatch({ type: "heartbeat", ts: 90_000 }),
+    /commit failed/,
+  )
+
+  assert.deepEqual(await shadow.snapshot(), before)
+  assert.deepEqual(storage.value, before)
 })

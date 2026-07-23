@@ -1,5 +1,31 @@
 # Progress
 
+## 2026-07-23 IndexedDB gauge SSOT and effect outbox
+
+Completed:
+
+- Replaced the Phase 2 `chrome.storage.session` snapshot with an IndexedDB
+  checkpoint store and pending-effect outbox.
+- Commit each reducer checkpoint and all effects emitted by that transition in
+  one read-write transaction. The controller updates its memory cache only
+  after the transaction succeeds.
+- Added one-time, idempotent migration of the Phase 2 session snapshot and its
+  bounded effect history into IndexedDB.
+- Retained the full current-session outbox while exposing only its latest 50
+  entries as popup diagnostics; effect delivery remains disconnected.
+- Reset state and outbox on goal replacement, and clear both on session end or
+  explicit activity deletion.
+- Added IndexedDB tests for worker-restart restoration, atomic rollback,
+  idempotent legacy migration, reset/clear lifecycle, and controller cache
+  rollback after a failed commit.
+
+Verified:
+
+- `apps/extension` `npm run build`: 68 tests, source/test typechecks, port
+  contract check, and bundle passed.
+- `python -m pytest apps/server/tests -q`: 319 passed, 1 skipped, 56
+  subtests (run with the project virtual environment).
+
 ## 2026-07-23 TypeScript gauge shadow mode
 
 Completed:

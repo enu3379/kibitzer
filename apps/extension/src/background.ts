@@ -22,6 +22,7 @@ import {
 import { createBadgeRefresher } from "./lib/badgeRefresh"
 import { shouldDropUrl } from "./lib/domainFilter"
 import { D7ReviewScheduler, isD7ReviewAlarmName } from "./lib/d7ReviewScheduler"
+import { GaugeIndexedDbStore } from "./lib/gaugeIndexedDb"
 import {
   GAUGE_SHADOW_STORAGE_KEY,
   GaugeShadowController,
@@ -131,22 +132,32 @@ interface GaugeShadowContext {
   goalMinutes: number | null
 }
 
-const gaugeShadow = new GaugeShadowController({
-  async load() {
-    const data = await chrome.storage.session.get(GAUGE_SHADOW_STORAGE_KEY)
-    return data[GAUGE_SHADOW_STORAGE_KEY]
-  },
-  async save(snapshot) {
-    await chrome.storage.session.set({ [GAUGE_SHADOW_STORAGE_KEY]: snapshot })
-  },
-  async clear() {
-    await chrome.storage.session.remove(GAUGE_SHADOW_STORAGE_KEY)
-  },
-})
+const gaugeShadowStore = new GaugeIndexedDbStore()
+const gaugeShadow = new GaugeShadowController(gaugeShadowStore)
 let gaugeShadowContext: GaugeShadowContext | null = null
+let gaugeShadowMigrationPromise: Promise<void> | null = null
+
+function ensureGaugeShadowMigrated(): Promise<void> {
+  if (!gaugeShadowMigrationPromise) {
+    gaugeShadowMigrationPromise = (async () => {
+      const data = await chrome.storage.session.get(GAUGE_SHADOW_STORAGE_KEY)
+      if (!(GAUGE_SHADOW_STORAGE_KEY in data)) return
+      await gaugeShadowStore.importLegacy(data[GAUGE_SHADOW_STORAGE_KEY])
+      await chrome.storage.session.remove(GAUGE_SHADOW_STORAGE_KEY)
+    })().catch((error) => {
+      gaugeShadowMigrationPromise = null
+      throw error
+    })
+  }
+  return gaugeShadowMigrationPromise
+}
 
 function runGaugeShadowWork<T>(task: () => Promise<T>): Promise<T> {
-  const result = gaugeShadowWorkTail.then(task, task)
+  const guardedTask = async () => {
+    await ensureGaugeShadowMigrated()
+    return task()
+  }
+  const result = gaugeShadowWorkTail.then(guardedTask, guardedTask)
   gaugeShadowWorkTail = result.then(
     () => undefined,
     () => undefined,
