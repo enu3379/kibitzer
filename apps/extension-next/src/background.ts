@@ -86,6 +86,7 @@ interface PopupMessage {
   type?: string
   goal?: string
   minutes?: number | null
+  kind?: string
 }
 
 async function handleMessage(message: PopupMessage): Promise<unknown> {
@@ -108,6 +109,16 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
       void observeActiveTab()
     }
     return { goal }
+  }
+  if (message?.type === "kibitzer:toast-feedback") {
+    const goal = await getGoal()
+    if (goal) {
+      const now = Date.now()
+      // "5분만" / "30분 조용히" quiet the gauge; other feedback just dismisses the toast.
+      if (message.kind === "break") await dispatch({ type: "snooze", until: now + 5 * 60_000, ts: now }, goal)
+      else if (message.kind === "snooze") await dispatch({ type: "snooze", until: now + 30 * 60_000, ts: now }, goal)
+    }
+    return { ok: true }
   }
   return { error: "unknown message" }
 }

@@ -29,7 +29,6 @@
   "permissions": [
     "tabs",
     "webNavigation",
-    "notifications",
     "scripting",
     "alarms",
     "storage",
@@ -42,8 +41,12 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["assets/*"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "assets/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }

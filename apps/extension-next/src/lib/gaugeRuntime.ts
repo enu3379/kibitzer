@@ -9,6 +9,7 @@ import { reduceGauge } from "../core/gauge/reducer.ts"
 import { defaultGaugeConfig } from "../core/gauge/config.ts"
 import { initGaugeState } from "../core/gauge/types.ts"
 import type { GaugeConfig, GaugeEffect, GaugeEvent, GaugeState } from "../core/gauge/types.ts"
+import { showKibitzerToast, type ToastPayload } from "../content/toastOverlay.ts"
 import type { SessionGoal } from "./session.ts"
 
 const STATE_KEY = "kibitzer:gauge-state:v1"
@@ -70,24 +71,43 @@ export async function testNag(goal: SessionGoal | null): Promise<void> {
 async function deliver(effect: GaugeEffect, goal: SessionGoal | null): Promise<void> {
   const goalText = goal?.text ?? "목표"
   if (effect.type === "nag") {
-    await notify("nag", `'${goalText}'에서 벗어난 것 같아요`, "잠깐 — 지금 하려던 걸 확인해볼까요?")
+    await showToast(
+      `'${goalText}' 흐름에서 벗어난 것 같아요. 계속 필요한 곁가지인지 확인해볼까요?`,
+      effect.pageKey ?? null,
+      "intervention",
+    )
   } else if (effect.type === "celebrate") {
-    await notify("celebrate", "돌아왔네요 👍", `'${goalText}'에 다시 집중하고 있어요.`)
+    await showToast(`'${goalText}'에 다시 집중하고 있네요 👍`, null, "celebration")
   }
   // "request_tier2" effects need the Ollama layer (next PR); ignored in this slice.
 }
 
-async function notify(kind: string, title: string, message: string): Promise<void> {
+let toastToken = 0
+
+/** Render the in-page toast overlay in the active tab (matches apps/extension —
+ *  a quiet on-page bubble, not an OS notification). Injected via executeScript. */
+async function showToast(
+  message: string,
+  contextLabel: string | null,
+  kind: "intervention" | "celebration",
+): Promise<void> {
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+  if (!tab?.id) return
+  const payload: ToastPayload = {
+    notificationId: `kbz-${Date.now()}`,
+    displayToken: (toastToken += 1),
+    message,
+    contextLabel,
+    autoDismissMs: 12_000,
+    kind,
+  }
   try {
-    await chrome.notifications.create(`kibitzer-${kind}-${Date.now()}`, {
-      type: "basic",
-      iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
-      title,
-      message,
-      priority: 1,
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: showKibitzerToast,
+      args: [payload],
     })
   } catch {
-    // Notifications may be unavailable (permissions, headless); the gauge state is
-    // already persisted, so this only drops the surfacing, not the accounting.
+    // Some pages (chrome://, the web store) block injection — skip silently.
   }
 }
