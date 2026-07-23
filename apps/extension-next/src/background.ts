@@ -20,10 +20,23 @@ const HEARTBEAT_ALARM = "kibitzer-next-heartbeat"
 
 let lastObservedKey: string | null = null
 
-/** Embed the page title vs the goal (Tier 0), optionally rescue via Tier 1 (Ollama),
- *  and feed the verdict into the gauge. Normal mode when Ollama is on; else degraded.
- *  Debounced per page so SPA update storms (e.g. YouTube) don't re-judge the same page
- *  and keep clearing the Tier 2 verdict override — that was the S 0↔30 yo-yo. */
+// A page is judged only after it has been dwelt on for OBSERVE_DWELL_MS of sustained
+// attention — a quick glance / bounce never counts, embeds, or pollutes recent-titles.
+// (Sensitive pages are handled immediately, without waiting.)
+const OBSERVE_DWELL_MS = 5000
+let dwellTimer: ReturnType<typeof setTimeout> | null = null
+let pendingObsKey: string | null = null
+
+function cancelDwell(): void {
+  if (dwellTimer) {
+    clearTimeout(dwellTimer)
+    dwellTimer = null
+  }
+}
+
+/** Entry for every observation trigger (nav / activate / SPA). Debounces per page, pauses
+ *  immediately on sensitive pages, and otherwise schedules the judgement after a dwell so
+ *  transient pages don't count. */
 async function observe(url: string | undefined, title: string | undefined): Promise<void> {
   const goal = await getGoal()
   if (!goal || !url || !title) return
@@ -34,14 +47,31 @@ async function observe(url: string | undefined, title: string | undefined): Prom
   // storm on the identical page is collapsed (the old S 0↔30 yo-yo guard).
   const obsKey = `${pageKey}\n${title}`
   if (obsKey === lastObservedKey) return
-  lastObservedKey = obsKey
-  // Privacy gate: never observe/embed/judge/send/nag on a sensitive page. Pause the
-  // gauge (inactive) so nothing drains or fires while it's the active page.
+  // A new candidate page cancels the previous page's pending dwell (it never counted).
+  cancelDwell()
+  pendingObsKey = obsKey
+  // Privacy gate: sensitive pages pause the gauge immediately — no dwell, no judging.
   if (shouldDropUrl(url)) {
+    lastObservedKey = obsKey
     klog(`drop (sensitive) ${pageKey}`)
     await dispatch({ type: "inactive", ts: Date.now() }, goal)
     return
   }
+  dwellTimer = setTimeout(() => {
+    dwellTimer = null
+    void judgeAndDispatch(url, title, obsKey)
+  }, OBSERVE_DWELL_MS)
+}
+
+/** Embed title vs goal (Tier 0), optionally rescue via Tier 1 (Ollama), and feed the
+ *  verdict into the gauge — after the dwell, and only if the page is still the candidate. */
+async function judgeAndDispatch(url: string, title: string, obsKey: string): Promise<void> {
+  if (pendingObsKey !== obsKey) return // navigated away during the dwell
+  const goal = await getGoal()
+  if (!goal) return
+  const pageKey = pageKeyOf(url)
+  if (!pageKey) return
+  lastObservedKey = obsKey
   const urlHost = hostOf(url)
   const { score, verdict: tier0Verdict } = await judgeTier0(goal.text, title, TAU_OK)
   const enabled = await ollamaEnabled()
