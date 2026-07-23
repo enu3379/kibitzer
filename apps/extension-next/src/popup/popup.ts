@@ -1,15 +1,17 @@
-// Popup: setup (goal + time + Ollama) when no goal; active (S + goal + mode) once set.
+// Popup: setup (goal + time + Ollama Cloud) when no goal; active (S + goal + mode) once set.
 
 interface OllamaConfig {
   apiUrl: string
-  model: string
+  apiKey: string
+  tier1Model: string
+  tier2Model: string
 }
 
 interface StateResponse {
   goal: { text: string; availableMinutes: number | null } | null
   s: number
   accelTier: number
-  ollama: OllamaConfig | null
+  ollama: OllamaConfig
 }
 
 const activeView = document.getElementById("active") as HTMLDivElement
@@ -21,8 +23,9 @@ const goalInput = document.getElementById("goal") as HTMLInputElement
 const minutesInput = document.getElementById("minutes") as HTMLInputElement
 const startButton = document.getElementById("set") as HTMLButtonElement
 const editButton = document.getElementById("edit") as HTMLButtonElement
-const ollamaModelInput = document.getElementById("ollama-model") as HTMLInputElement
-const ollamaUrlInput = document.getElementById("ollama-url") as HTMLInputElement
+const keyInput = document.getElementById("ollama-key") as HTMLInputElement
+const tier1Input = document.getElementById("ollama-tier1") as HTMLInputElement
+const tier2Input = document.getElementById("ollama-tier2") as HTMLInputElement
 const saveOllamaButton = document.getElementById("save-ollama") as HTMLButtonElement
 
 let current: StateResponse | null = null
@@ -35,14 +38,19 @@ async function getState(): Promise<StateResponse | null> {
   }
 }
 
+function modeText(state: StateResponse): string {
+  return state.ollama.apiKey ? `LLM 판정: ${state.ollama.tier2Model}` : "제목 유사도만 (LLM 꺼짐)"
+}
+
 function fillSettings(state: StateResponse | null): void {
   if (state?.goal) {
     goalInput.value = state.goal.text
     minutesInput.value = state.goal.availableMinutes != null ? String(state.goal.availableMinutes) : ""
   }
   if (state?.ollama) {
-    ollamaModelInput.value = state.ollama.model
-    ollamaUrlInput.value = state.ollama.apiUrl
+    keyInput.value = state.ollama.apiKey
+    tier1Input.value = state.ollama.tier1Model
+    tier2Input.value = state.ollama.tier2Model
   }
 }
 
@@ -58,7 +66,7 @@ function showActive(state: StateResponse): void {
   setupView.hidden = true
   goalTextEl.textContent = state.goal?.text ?? ""
   gaugeEl.innerHTML = `${state.s}<small> / 100 몰입</small>`
-  modeEl.textContent = state.ollama ? `LLM 판정: ${state.ollama.model}` : "제목 유사도만 (LLM 꺼짐)"
+  modeEl.textContent = modeText(state)
 }
 
 function render(state: StateResponse | null): void {
@@ -81,13 +89,13 @@ startButton.addEventListener("click", async () => {
 saveOllamaButton.addEventListener("click", async () => {
   await chrome.runtime.sendMessage({
     type: "set-ollama",
-    apiUrl: ollamaUrlInput.value,
-    model: ollamaModelInput.value,
+    apiKey: keyInput.value,
+    tier1Model: tier1Input.value,
+    tier2Model: tier2Input.value,
   })
-  const state = await getState()
-  current = state
+  current = await getState()
   saveOllamaButton.textContent = "저장됨 ✓"
-  setTimeout(() => { saveOllamaButton.textContent = "Ollama 저장" }, 1200)
+  setTimeout(() => { saveOllamaButton.textContent = "저장" }, 1200)
 })
 
 editButton.addEventListener("click", () => {
@@ -104,5 +112,5 @@ setInterval(async () => {
   current = state
   gaugeEl.innerHTML = `${state.s}<small> / 100 몰입</small>`
   goalTextEl.textContent = state.goal.text
-  modeEl.textContent = state.ollama ? `LLM 판정: ${state.ollama.model}` : "제목 유사도만 (LLM 꺼짐)"
+  modeEl.textContent = modeText(state)
 }, 1500)

@@ -105,7 +105,9 @@ interface PopupMessage {
   minutes?: number | null
   kind?: string
   apiUrl?: string
-  model?: string
+  apiKey?: string
+  tier1Model?: string
+  tier2Model?: string
 }
 
 async function handleMessage(message: PopupMessage): Promise<unknown> {
@@ -118,7 +120,12 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     return { goal, s: Math.round(state.s), accelTier: state.accelTier, ollama }
   }
   if (message?.type === "set-ollama") {
-    const ollama = await setOllamaConfig(message.apiUrl ?? "", message.model ?? "")
+    const ollama = await setOllamaConfig({
+      apiUrl: message.apiUrl,
+      apiKey: message.apiKey,
+      tier1Model: message.tier1Model,
+      tier2Model: message.tier2Model,
+    })
     return { ollama }
   }
   if (message?.type === "set-goal") {

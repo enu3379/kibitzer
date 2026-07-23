@@ -1,75 +1,89 @@
-// Tier 1 / Tier 2 via a local Ollama chat model. The provider, prompts, payloads
-// and response parsing were ported in Phase 4 — this is the wiring: config storage,
-// a cached provider, a Tier 1 rescue call, and a Tier 2 confirm mapped onto the
-// gauge's flow(drift|ok) schema.
+// Tier 1 / Tier 2 via **Ollama Cloud** (https://ollama.com) — the project default
+// (configs/experiment-models.example.yaml, docs/ml-providers.md, planning-notes D3).
+// The provider/prompts/payloads/parsing were ported in Phase 4; this is the wiring:
+// a Cloud API key + models, a cached provider per tier, Tier 1 rescue, Tier 2 confirm.
 
 import { OllamaChatJudgeProvider } from "../providers/ollamaChat.ts"
 import { buildTier1Payload, buildTier2ReviewPayload } from "../providers/payloads.ts"
 import type { JudgeVerdict } from "../providers/types.ts"
 
-const OLLAMA_KEY = "kibitzer:ollama:v1"
-const DEFAULT_URL = "http://127.0.0.1:11434/api/chat"
+const OLLAMA_KEY = "kibitzer:ollama:v2"
+
+const DEFAULTS = {
+  apiUrl: "https://ollama.com/api/chat",
+  apiKey: "",
+  tier1Model: "nemotron-3-super", // Ollama Cloud fast classifier (Tier 1)
+  tier2Model: "minimax-m3", // Ollama Cloud judge + Korean writer (Tier 2)
+} as const
 
 export interface OllamaConfig {
   apiUrl: string
-  model: string
+  apiKey: string
+  tier1Model: string
+  tier2Model: string
 }
 
-export async function getOllamaConfig(): Promise<OllamaConfig | null> {
+function str(value: unknown): string {
+  return typeof value === "string" ? value.trim() : ""
+}
+
+/** Full config, defaults merged in. `apiKey === ""` means Cloud is off (Tier-0 only). */
+export async function getOllamaConfig(): Promise<OllamaConfig> {
   const stored = await chrome.storage.local.get(OLLAMA_KEY)
-  const value = stored[OLLAMA_KEY] as Partial<OllamaConfig> | undefined
-  if (!value || typeof value.model !== "string" || !value.model.trim()) return null
-  const apiUrl = typeof value.apiUrl === "string" && value.apiUrl.trim() ? value.apiUrl.trim() : DEFAULT_URL
-  return { apiUrl, model: value.model.trim() }
+  const value = (stored[OLLAMA_KEY] ?? {}) as Partial<OllamaConfig>
+  return {
+    apiUrl: str(value.apiUrl) || DEFAULTS.apiUrl,
+    apiKey: str(value.apiKey),
+    tier1Model: str(value.tier1Model) || DEFAULTS.tier1Model,
+    tier2Model: str(value.tier2Model) || DEFAULTS.tier2Model,
+  }
 }
 
-export async function setOllamaConfig(apiUrl: string, model: string): Promise<OllamaConfig | null> {
-  const trimmedModel = model.trim()
-  if (!trimmedModel) {
-    await chrome.storage.local.remove(OLLAMA_KEY)
-    provider = null
-    fingerprint = null
-    return null
+export async function setOllamaConfig(input: Partial<OllamaConfig>): Promise<OllamaConfig> {
+  const merged: OllamaConfig = {
+    apiUrl: str(input.apiUrl) || DEFAULTS.apiUrl,
+    apiKey: str(input.apiKey),
+    tier1Model: str(input.tier1Model) || DEFAULTS.tier1Model,
+    tier2Model: str(input.tier2Model) || DEFAULTS.tier2Model,
   }
-  const config: OllamaConfig = { apiUrl: apiUrl.trim() || DEFAULT_URL, model: trimmedModel }
-  await chrome.storage.local.set({ [OLLAMA_KEY]: config })
-  return config
+  await chrome.storage.local.set({ [OLLAMA_KEY]: merged })
+  tier1Provider = null
+  tier2Provider = null
+  fingerprint = null
+  return merged
 }
 
 export async function ollamaEnabled(): Promise<boolean> {
-  return (await getOllamaConfig()) !== null
+  return (await getOllamaConfig()).apiKey !== ""
 }
 
-let provider: OllamaChatJudgeProvider | null = null
+let tier1Provider: OllamaChatJudgeProvider | null = null
+let tier2Provider: OllamaChatJudgeProvider | null = null
 let fingerprint: string | null = null
 
-async function getProvider(): Promise<OllamaChatJudgeProvider | null> {
+async function providers(): Promise<{ tier1: OllamaChatJudgeProvider; tier2: OllamaChatJudgeProvider } | null> {
   const config = await getOllamaConfig()
-  if (!config) {
-    provider = null
+  if (!config.apiKey) {
+    tier1Provider = tier2Provider = null
     fingerprint = null
     return null
   }
   const fp = JSON.stringify(config)
-  if (!provider || fingerprint !== fp) {
-    provider = new OllamaChatJudgeProvider({
-      apiUrl: config.apiUrl,
-      model: config.model,
-      timeoutMs: 30_000,
-      maxOutputTokens: 512,
-      writerMaxOutputTokens: 1024,
-    })
+  if (!tier1Provider || !tier2Provider || fingerprint !== fp) {
+    const base = { apiUrl: config.apiUrl, apiKey: config.apiKey, timeoutMs: 30_000, maxOutputTokens: 512, writerMaxOutputTokens: 1024 }
+    tier1Provider = new OllamaChatJudgeProvider({ ...base, model: config.tier1Model })
+    tier2Provider = new OllamaChatJudgeProvider({ ...base, model: config.tier2Model })
     fingerprint = fp
   }
-  return provider
+  return { tier1: tier1Provider, tier2: tier2Provider }
 }
 
 /** Let Tier 1 rescue a Tier-0 DRIFT (may return OK) or confirm it. Failure keeps DRIFT. */
 export async function tier1Rescue(goalText: string, title: string, urlHost: string): Promise<JudgeVerdict> {
-  const p = await getProvider()
+  const p = await providers()
   if (!p) return "DRIFT"
   try {
-    const result = await p.classifyTier1(buildTier1Payload({ rawText: goalText }, { title, urlHost }, []))
+    const result = await p.tier1.classifyTier1(buildTier1Payload({ rawText: goalText }, { title, urlHost }, []))
     return result.verdict
   } catch {
     return "DRIFT"
@@ -81,12 +95,12 @@ export interface Tier2Outcome {
   message: string | null
 }
 
-/** Confirm a drift via Tier 2. No provider / failure → "ok" (false-positive-first). */
+/** Confirm a drift via Tier 2. No key / failure → "ok" (false-positive-first). */
 export async function tier2Confirm(
   goalText: string,
   page: { title: string; urlHost: string; score: number },
 ): Promise<Tier2Outcome> {
-  const p = await getProvider()
+  const p = await providers()
   if (!p) return { flow: "ok", message: null }
   try {
     const payload = buildTier2ReviewPayload(
@@ -97,7 +111,7 @@ export async function tier2Confirm(
       [],
       null,
     )
-    const result = await p.confirmTier2(payload)
+    const result = await p.tier2.confirmTier2(payload)
     return { flow: result.confirmDrift ? "drift" : "ok", message: result.message }
   } catch {
     return { flow: "ok", message: null }

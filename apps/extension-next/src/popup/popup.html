@@ -49,10 +49,11 @@
       <div class="hint">목표에 "알림보기"를 넣으면 토스트가 바로 떠요 (지금 보는 웹페이지에서 · 테스트용).</div>
 
       <hr />
-      <div class="section-label">LLM 판정 (선택)</div>
-      <label>Ollama 모델 <input id="ollama-model" placeholder="비우면 제목 유사도만 사용 · 예: qwen2.5" /></label>
-      <label>Ollama 주소 <input id="ollama-url" placeholder="http://127.0.0.1:11434/api/chat" /></label>
-      <button id="save-ollama" class="ghost">Ollama 저장</button>
+      <div class="section-label">Ollama Cloud · LLM 판정 (선택)</div>
+      <label>API 키 <input id="ollama-key" type="password" placeholder="ollama.com API 키 · 비우면 제목 유사도만" /></label>
+      <label>Tier 1 모델 <input id="ollama-tier1" placeholder="nemotron-3-super" /></label>
+      <label>Tier 2 모델 <input id="ollama-tier2" placeholder="minimax-m3" /></label>
+      <button id="save-ollama" class="ghost">저장</button>
     </div>
 
     <script type="module" src="popup.js"></script>
