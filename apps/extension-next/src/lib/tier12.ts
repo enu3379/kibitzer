@@ -74,7 +74,9 @@ async function providers(): Promise<{ tier1: OllamaChatJudgeProvider; tier2: Oll
   }
   const fp = JSON.stringify(config)
   if (!tier1Provider || !tier2Provider || fingerprint !== fp) {
-    const base = { apiUrl: config.apiUrl, apiKeys: config.apiKeys, timeoutMs: 30_000, maxOutputTokens: 512, writerMaxOutputTokens: 1024 }
+    // These Cloud models reason before answering; a small budget exhausts before the
+    // JSON verdict (output_exhausted). Match the server's Judge budget.
+    const base = { apiUrl: config.apiUrl, apiKeys: config.apiKeys, timeoutMs: 60_000, maxOutputTokens: 4096, writerMaxOutputTokens: 2048 }
     tier1Provider = new OllamaChatJudgeProvider({ ...base, model: config.tier1Model })
     tier2Provider = new OllamaChatJudgeProvider({ ...base, model: config.tier2Model })
     fingerprint = fp
@@ -124,7 +126,7 @@ export async function testOllama(input: Partial<OllamaConfig>): Promise<OllamaTe
   const tier1Model = str(input.tier1Model) || DEFAULTS.tier1Model
   const tier2Model = str(input.tier2Model) || DEFAULTS.tier2Model
   if (apiKeys.length === 0) return { ok: false, error: "API 키를 먼저 입력하세요" }
-  const base = { apiUrl, apiKeys, timeoutMs: 30_000, maxOutputTokens: 256, writerMaxOutputTokens: 256 }
+  const base = { apiUrl, apiKeys, timeoutMs: 60_000, maxOutputTokens: 4096, writerMaxOutputTokens: 2048 }
   try {
     const t1 = new OllamaChatJudgeProvider({ ...base, model: tier1Model })
     const r1 = await t1.classifyTier1(
