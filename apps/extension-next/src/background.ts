@@ -105,7 +105,7 @@ interface PopupMessage {
   minutes?: number | null
   kind?: string
   apiUrl?: string
-  apiKey?: string
+  apiKeys?: string[]
   tier1Model?: string
   tier2Model?: string
 }
@@ -122,7 +122,7 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
   if (message?.type === "set-ollama") {
     const ollama = await setOllamaConfig({
       apiUrl: message.apiUrl,
-      apiKey: message.apiKey,
+      apiKeys: message.apiKeys,
       tier1Model: message.tier1Model,
       tier2Model: message.tier2Model,
     })

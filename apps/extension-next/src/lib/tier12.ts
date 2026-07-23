@@ -1,7 +1,8 @@
 // Tier 1 / Tier 2 via **Ollama Cloud** (https://ollama.com) — the project default
 // (configs/experiment-models.example.yaml, docs/ml-providers.md, planning-notes D3).
-// The provider/prompts/payloads/parsing were ported in Phase 4; this is the wiring:
-// a Cloud API key + models, a cached provider per tier, Tier 1 rescue, Tier 2 confirm.
+// Provider/prompts/payloads/parsing were ported in Phase 4; this is the wiring. The
+// provider already rotates a key **pool** on 401/403/429, so a whole set of keys is
+// passed through (matching the server's api_key_pool_envs).
 
 import { OllamaChatJudgeProvider } from "../providers/ollamaChat.ts"
 import { buildTier1Payload, buildTier2ReviewPayload } from "../providers/payloads.ts"
@@ -11,14 +12,13 @@ const OLLAMA_KEY = "kibitzer:ollama:v2"
 
 const DEFAULTS = {
   apiUrl: "https://ollama.com/api/chat",
-  apiKey: "",
   tier1Model: "nemotron-3-super", // Ollama Cloud fast classifier (Tier 1)
   tier2Model: "minimax-m3", // Ollama Cloud judge + Korean writer (Tier 2)
 } as const
 
 export interface OllamaConfig {
   apiUrl: string
-  apiKey: string
+  apiKeys: string[] // rotated automatically by the provider on 401/403/429
   tier1Model: string
   tier2Model: string
 }
@@ -27,13 +27,18 @@ function str(value: unknown): string {
   return typeof value === "string" ? value.trim() : ""
 }
 
-/** Full config, defaults merged in. `apiKey === ""` means Cloud is off (Tier-0 only). */
+function keyList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.map((v) => (typeof v === "string" ? v.trim() : "")).filter(Boolean)
+}
+
+/** Full config, defaults merged. Empty `apiKeys` means Cloud is off (Tier-0 only). */
 export async function getOllamaConfig(): Promise<OllamaConfig> {
   const stored = await chrome.storage.local.get(OLLAMA_KEY)
   const value = (stored[OLLAMA_KEY] ?? {}) as Partial<OllamaConfig>
   return {
     apiUrl: str(value.apiUrl) || DEFAULTS.apiUrl,
-    apiKey: str(value.apiKey),
+    apiKeys: keyList(value.apiKeys),
     tier1Model: str(value.tier1Model) || DEFAULTS.tier1Model,
     tier2Model: str(value.tier2Model) || DEFAULTS.tier2Model,
   }
@@ -42,19 +47,18 @@ export async function getOllamaConfig(): Promise<OllamaConfig> {
 export async function setOllamaConfig(input: Partial<OllamaConfig>): Promise<OllamaConfig> {
   const merged: OllamaConfig = {
     apiUrl: str(input.apiUrl) || DEFAULTS.apiUrl,
-    apiKey: str(input.apiKey),
+    apiKeys: keyList(input.apiKeys),
     tier1Model: str(input.tier1Model) || DEFAULTS.tier1Model,
     tier2Model: str(input.tier2Model) || DEFAULTS.tier2Model,
   }
   await chrome.storage.local.set({ [OLLAMA_KEY]: merged })
-  tier1Provider = null
-  tier2Provider = null
+  tier1Provider = tier2Provider = null
   fingerprint = null
   return merged
 }
 
 export async function ollamaEnabled(): Promise<boolean> {
-  return (await getOllamaConfig()).apiKey !== ""
+  return (await getOllamaConfig()).apiKeys.length > 0
 }
 
 let tier1Provider: OllamaChatJudgeProvider | null = null
@@ -63,14 +67,14 @@ let fingerprint: string | null = null
 
 async function providers(): Promise<{ tier1: OllamaChatJudgeProvider; tier2: OllamaChatJudgeProvider } | null> {
   const config = await getOllamaConfig()
-  if (!config.apiKey) {
+  if (config.apiKeys.length === 0) {
     tier1Provider = tier2Provider = null
     fingerprint = null
     return null
   }
   const fp = JSON.stringify(config)
   if (!tier1Provider || !tier2Provider || fingerprint !== fp) {
-    const base = { apiUrl: config.apiUrl, apiKey: config.apiKey, timeoutMs: 30_000, maxOutputTokens: 512, writerMaxOutputTokens: 1024 }
+    const base = { apiUrl: config.apiUrl, apiKeys: config.apiKeys, timeoutMs: 30_000, maxOutputTokens: 512, writerMaxOutputTokens: 1024 }
     tier1Provider = new OllamaChatJudgeProvider({ ...base, model: config.tier1Model })
     tier2Provider = new OllamaChatJudgeProvider({ ...base, model: config.tier2Model })
     fingerprint = fp
@@ -95,7 +99,7 @@ export interface Tier2Outcome {
   message: string | null
 }
 
-/** Confirm a drift via Tier 2. No key / failure → "ok" (false-positive-first). */
+/** Confirm a drift via Tier 2. No keys / failure → "ok" (false-positive-first). */
 export async function tier2Confirm(
   goalText: string,
   page: { title: string; urlHost: string; score: number },

@@ -17,8 +17,9 @@
       .goalline b { color: inherit; font-weight: 650; }
       .mode { font-size: 11px; color: #999; margin: 0 0 14px; }
       label { display: block; font-size: 12px; color: #888; margin-bottom: 10px; }
-      input { width: 100%; box-sizing: border-box; padding: 8px 9px; margin-top: 4px;
+      input, textarea { width: 100%; box-sizing: border-box; padding: 8px 9px; margin-top: 4px;
         border: 1px solid #8884; border-radius: 8px; background: transparent; color: inherit; font: inherit; }
+      textarea { resize: vertical; min-height: 44px; }
       .row { display: flex; gap: 8px; }
       .row label { flex: 1; }
       .row label.mins { flex: 0 0 82px; }
@@ -50,7 +51,9 @@
 
       <hr />
       <div class="section-label">Ollama Cloud · LLM 판정 (선택)</div>
-      <label>API 키 <input id="ollama-key" type="password" placeholder="ollama.com API 키 · 비우면 제목 유사도만" /></label>
+      <label>API 키 <span style="color:#aaa">· 한 줄에 하나, 여러 개면 자동 로테이션</span>
+        <textarea id="ollama-keys" rows="3" placeholder="ollama.com API 키 (여러 개면 줄바꿈)&#10;비우면 제목 유사도만"></textarea>
+      </label>
       <label>Tier 1 모델 <input id="ollama-tier1" placeholder="nemotron-3-super" /></label>
       <label>Tier 2 모델 <input id="ollama-tier2" placeholder="minimax-m3" /></label>
       <button id="save-ollama" class="ghost">저장</button>

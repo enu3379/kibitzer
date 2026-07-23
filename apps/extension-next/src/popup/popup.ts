@@ -2,7 +2,7 @@
 
 interface OllamaConfig {
   apiUrl: string
-  apiKey: string
+  apiKeys: string[]
   tier1Model: string
   tier2Model: string
 }
@@ -23,7 +23,7 @@ const goalInput = document.getElementById("goal") as HTMLInputElement
 const minutesInput = document.getElementById("minutes") as HTMLInputElement
 const startButton = document.getElementById("set") as HTMLButtonElement
 const editButton = document.getElementById("edit") as HTMLButtonElement
-const keyInput = document.getElementById("ollama-key") as HTMLInputElement
+const keysInput = document.getElementById("ollama-keys") as HTMLTextAreaElement
 const tier1Input = document.getElementById("ollama-tier1") as HTMLInputElement
 const tier2Input = document.getElementById("ollama-tier2") as HTMLInputElement
 const saveOllamaButton = document.getElementById("save-ollama") as HTMLButtonElement
@@ -39,7 +39,8 @@ async function getState(): Promise<StateResponse | null> {
 }
 
 function modeText(state: StateResponse): string {
-  return state.ollama.apiKey ? `LLM 판정: ${state.ollama.tier2Model}` : "제목 유사도만 (LLM 꺼짐)"
+  const keys = state.ollama.apiKeys.length
+  return keys > 0 ? `LLM 판정: ${state.ollama.tier2Model} · 키 ${keys}개` : "제목 유사도만 (LLM 꺼짐)"
 }
 
 function fillSettings(state: StateResponse | null): void {
@@ -48,7 +49,7 @@ function fillSettings(state: StateResponse | null): void {
     minutesInput.value = state.goal.availableMinutes != null ? String(state.goal.availableMinutes) : ""
   }
   if (state?.ollama) {
-    keyInput.value = state.ollama.apiKey
+    keysInput.value = state.ollama.apiKeys.join("\n")
     tier1Input.value = state.ollama.tier1Model
     tier2Input.value = state.ollama.tier2Model
   }
@@ -89,7 +90,7 @@ startButton.addEventListener("click", async () => {
 saveOllamaButton.addEventListener("click", async () => {
   await chrome.runtime.sendMessage({
     type: "set-ollama",
-    apiKey: keyInput.value,
+    apiKeys: keysInput.value.split("\n").map((k) => k.trim()).filter(Boolean),
     tier1Model: tier1Input.value,
     tier2Model: tier2Input.value,
   })
