@@ -8,7 +8,8 @@
 
 import { getGoal, setGoal, type SessionGoal } from "./lib/session.ts"
 import { judgeTier0, TAU_OK } from "./lib/tier0.ts"
-import { currentState, dispatch, resetState, testNag } from "./lib/gaugeRuntime.ts"
+import { currentState, dispatch, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
+import { getOllamaConfig, ollamaEnabled, setOllamaConfig, tier1Rescue } from "./lib/tier12.ts"
 
 const HEARTBEAT_ALARM = "kibitzer-next-heartbeat"
 
@@ -22,15 +23,31 @@ function pageKeyOf(url: string): string | null {
   }
 }
 
-/** Embed the page title vs the goal and feed the verdict into the gauge as a nav event. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return ""
+  }
+}
+
+/** Embed the page title vs the goal (Tier 0), optionally rescue via Tier 1 (Ollama),
+ *  and feed the verdict into the gauge. Normal mode when Ollama is on; else degraded. */
 async function observe(url: string | undefined, title: string | undefined): Promise<void> {
   const goal = await getGoal()
   if (!goal || !url || !title) return
   const pageKey = pageKeyOf(url)
   if (!pageKey) return
-  const { score, verdict } = await judgeTier0(goal.text, title, TAU_OK)
+  const urlHost = hostOf(url)
+  const { score, verdict: tier0Verdict } = await judgeTier0(goal.text, title, TAU_OK)
+  const enabled = await ollamaEnabled()
+  let verdict = tier0Verdict
+  if (verdict === "DRIFT" && enabled) {
+    verdict = await tier1Rescue(goal.text, title, urlHost) // Tier 1 may rescue to OK
+  }
+  await setActivePage({ pageKey, title, urlHost, score })
   await dispatch(
-    { type: "nav", pageKey, verdict, r0: score, tauOk: TAU_OK, degraded: true, ts: Date.now() },
+    { type: "nav", pageKey, verdict, r0: score, tauOk: TAU_OK, degraded: !enabled, ts: Date.now() },
     goal,
   )
 }
@@ -87,6 +104,8 @@ interface PopupMessage {
   goal?: string
   minutes?: number | null
   kind?: string
+  apiUrl?: string
+  model?: string
 }
 
 async function handleMessage(message: PopupMessage): Promise<unknown> {
@@ -95,8 +114,12 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     // Advance the gauge to "now" so the popup shows a live value between the
     // 1-min heartbeat alarms (a nag can still fire here if S reaches 0).
     if (goal) await dispatch({ type: "heartbeat", ts: Date.now() }, goal)
-    const state = await currentState()
-    return { goal, s: Math.round(state.s), accelTier: state.accelTier }
+    const [state, ollama] = await Promise.all([currentState(), getOllamaConfig()])
+    return { goal, s: Math.round(state.s), accelTier: state.accelTier, ollama }
+  }
+  if (message?.type === "set-ollama") {
+    const ollama = await setOllamaConfig(message.apiUrl ?? "", message.model ?? "")
+    return { ollama }
   }
   if (message?.type === "set-goal") {
     const previous = await getGoal()

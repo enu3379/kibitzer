@@ -10,9 +10,29 @@ import { defaultGaugeConfig } from "../core/gauge/config.ts"
 import { initGaugeState } from "../core/gauge/types.ts"
 import type { GaugeConfig, GaugeEffect, GaugeEvent, GaugeState } from "../core/gauge/types.ts"
 import { showKibitzerToast, type ToastPayload } from "../content/toastOverlay.ts"
+import { tier2Confirm } from "./tier12.ts"
 import type { SessionGoal } from "./session.ts"
 
 const STATE_KEY = "kibitzer:gauge-state:v1"
+const ACTIVE_PAGE_KEY = "kibitzer:active-page:v1"
+
+export interface ActivePage {
+  pageKey: string
+  title: string
+  urlHost: string
+  score: number
+}
+
+/** Remember the active page's details so the async Tier 2 gate can judge it. */
+export async function setActivePage(page: ActivePage): Promise<void> {
+  await chrome.storage.session.set({ [ACTIVE_PAGE_KEY]: page })
+}
+
+async function getActivePage(): Promise<ActivePage | null> {
+  const stored = await chrome.storage.session.get(ACTIVE_PAGE_KEY)
+  const value = stored[ACTIVE_PAGE_KEY] as ActivePage | undefined
+  return value && typeof value.pageKey === "string" ? value : null
+}
 
 function isGaugeState(value: unknown): value is GaugeState {
   return (
@@ -68,18 +88,39 @@ export async function testNag(goal: SessionGoal | null): Promise<void> {
   await deliver({ type: "nag", pageKey: "test" }, goal)
 }
 
+let pendingNagMessage: string | null = null
+
 async function deliver(effect: GaugeEffect, goal: SessionGoal | null): Promise<void> {
   const goalText = goal?.text ?? "목표"
+  if (effect.type === "request_tier2") {
+    // Service the Tier 2 gate off the dispatch queue (Ollama is slow); it dispatches
+    // a tier2_result back into the gauge when it resolves.
+    void serviceTier2(effect, goal)
+    return
+  }
   if (effect.type === "nag") {
-    await showToast(
-      `'${goalText}' 흐름에서 벗어난 것 같아요. 계속 필요한 곁가지인지 확인해볼까요?`,
-      effect.pageKey ?? null,
-      "intervention",
-    )
+    const message = pendingNagMessage
+      ?? `'${goalText}' 흐름에서 벗어난 것 같아요. 계속 필요한 곁가지인지 확인해볼까요?`
+    pendingNagMessage = null
+    await showToast(message, effect.pageKey, "intervention")
   } else if (effect.type === "celebrate") {
     await showToast(`'${goalText}'에 다시 집중하고 있네요 👍`, null, "celebration")
   }
-  // "request_tier2" effects need the Ollama layer (next PR); ignored in this slice.
+}
+
+async function serviceTier2(
+  effect: Extract<GaugeEffect, { type: "request_tier2" }>,
+  goal: SessionGoal | null,
+): Promise<void> {
+  const page = await getActivePage()
+  if (!page || page.pageKey !== effect.pageKey) return
+  const outcome = await tier2Confirm(goal?.text ?? "", page)
+  // The Writer's message rides along to the nag toast (if drift is confirmed).
+  if (outcome.flow === "drift" && outcome.message) pendingNagMessage = outcome.message
+  await dispatch(
+    { type: "tier2_result", flow: outcome.flow, pageKey: effect.pageKey, ts: Date.now() },
+    goal,
+  )
 }
 
 let toastToken = 0
