@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Kibitzer (next)",
+  "version": "0.0.1",
+  "description": "Serverless attention guard — TypeScript-only, no local server.",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "tabs",
+    "webNavigation",
+    "notifications",
+    "scripting",
+    "alarms",
+    "storage",
+    "idle"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://*/*",
+    "https://*/*"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["assets/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
