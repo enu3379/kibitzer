@@ -6,7 +6,7 @@
     <style>
       :root { color-scheme: light dark; }
       body {
-        font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+        font: 14px/1.4 system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
         margin: 0; padding: 14px; width: 268px;
       }
       h1 { font-size: 12px; margin: 0 0 12px; color: #888; font-weight: 600; letter-spacing: .06em; }
@@ -15,32 +15,22 @@
       .gauge small { font-size: 14px; color: #888; font-weight: 500; }
       .goalline { margin: 8px 0 4px; color: #888; font-size: 13px; }
       .goalline b { color: inherit; font-weight: 650; }
-      .mode { font-size: 11px; color: #999; margin: 0 0 14px; }
+      .mode { font-size: 11px; color: #999; margin: 0 0 4px; }
+      .hint { font-size: 11px; color: #999; margin: 6px 0 0; word-break: break-word; }
+      .hint.err { color: #d1495b; }
       label { display: block; font-size: 12px; color: #888; margin-bottom: 10px; }
-      input, textarea, select { width: 100%; box-sizing: border-box; padding: 8px 9px; margin-top: 4px;
+      input { width: 100%; box-sizing: border-box; padding: 8px 9px; margin-top: 4px;
         border: 1px solid #8884; border-radius: 8px; background: transparent; color: inherit; font: inherit; }
-      textarea { resize: vertical; min-height: 44px; }
       .row { display: flex; gap: 8px; }
       .row label { flex: 1; }
       .row label.mins { flex: 0 0 82px; }
       button { width: 100%; padding: 9px; border: 0; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer; }
-      #set, #save-ollama { background: #4a5bd4; color: #fff; }
-      .ghost { background: transparent; color: #888; border: 1px solid #8884; padding: 6px; font-weight: 500; }
-      hr { border: 0; border-top: 1px solid #8883; margin: 16px 0 12px; }
-      .hint { font-size: 11px; color: #999; margin: 8px 0 0; word-break: break-word; }
-      .hint.ok { color: #1f9d6b; } .hint.err { color: #d1495b; }
-      .btn-row { display: flex; gap: 8px; }
-      .btn-row button { flex: 1; }
-      .section-label { font-size: 11px; color: #999; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .05em; }
-      #logbox { margin-top: 14px; }
-      #logbox summary { font-size: 11px; color: #999; cursor: pointer; letter-spacing: .05em; text-transform: uppercase; }
-      #logview { font: 10.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-all;
-        max-height: 200px; overflow-y: auto; margin: 8px 0; padding: 8px; border: 1px solid #8884; border-radius: 8px; color: #999; }
-      #logbox .btn-row button { font-size: 11px; padding: 5px; }
+      #set { background: #1e7a4c; color: #fff; }
+      .ghost { background: transparent; color: #888; border: 1px solid #8884; padding: 7px; font-weight: 500; margin-top: 8px; }
     </style>
   </head>
   <body>
-    <h1>KIBITZER (next)</h1>
+    <h1>KIBITZER</h1>
 
     <div id="active" hidden>
       <div class="gauge" id="gauge">–</div>
@@ -48,7 +38,8 @@
       <div class="mode" id="mode"></div>
       <div class="mode" id="personaActive"></div>
       <div class="hint err" id="providerWarn" hidden></div>
-      <button id="edit" class="ghost">목표 · 설정 변경</button>
+      <button id="edit" class="ghost">목표 변경</button>
+      <button id="openSettings" class="ghost">설정 · 말투 · AI 판정</button>
     </div>
 
     <div id="setup" hidden>
@@ -57,34 +48,10 @@
         <label class="mins">시간(분)<input id="minutes" type="number" min="1" placeholder="60" /></label>
       </div>
       <button id="set">시작</button>
-      <div class="hint">목표에 "알림보기"를 넣으면 토스트가 바로 떠요 (지금 보는 웹페이지에서 · 테스트용).</div>
-
-      <label style="margin-top:12px">훈수 말투 <select id="persona"></select></label>
-
-      <hr />
-      <div class="section-label">Ollama Cloud · LLM 판정 (선택)</div>
-      <label>API 키 <span style="color:#aaa">· 한 줄에 하나, 여러 개면 자동 로테이션</span>
-        <textarea id="ollama-keys" rows="3" placeholder="ollama.com API 키 (여러 개면 줄바꿈)&#10;비우면 제목 유사도만"></textarea>
-      </label>
-      <label>Tier 1 모델 <input id="ollama-tier1" placeholder="nemotron-3-super" /></label>
-      <label>Tier 2 모델 <input id="ollama-tier2" placeholder="minimax-m3" /></label>
-      <div class="btn-row">
-        <button id="test-ollama" class="ghost">연결 테스트</button>
-        <button id="save-ollama" class="ghost">저장</button>
-      </div>
-      <div id="ollama-result" class="hint"></div>
+      <div class="hint">목표를 선언하면 흐름이 어긋날 때만 조용히 알려드려요.</div>
+      <div class="hint">목표에 "알림보기"를 넣으면 토스트가 바로 떠요 (테스트용).</div>
+      <button id="openSettings2" class="ghost">설정 · 말투 · AI 판정 열기</button>
     </div>
-
-    <details id="logbox">
-      <summary>디버그 로그</summary>
-      <pre id="logview"></pre>
-      <div class="btn-row">
-        <button id="log-refresh" class="ghost">새로고침</button>
-        <button id="log-export" class="ghost">로그 파일</button>
-        <button id="events-export" class="ghost">이벤트 JSON</button>
-        <button id="log-clear" class="ghost">지우기</button>
-      </div>
-    </details>
 
     <script type="module" src="popup.js"></script>
   </body>

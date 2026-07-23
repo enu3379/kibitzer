@@ -7,7 +7,7 @@
 // A 1-min alarm feeds heartbeats so dwell time (not click count) drives the gauge.
 
 import { getGoal, setGoal, type SessionGoal } from "./lib/session.ts"
-import { embedText, embedTexts, judgeTier0, TAU_OK } from "./lib/tier0.ts"
+import { embedText, embedTexts, judgeTier0 } from "./lib/tier0.ts"
 import { addExemplar, admissionEligible, admitAnchor, loadRefs, setDerived } from "./lib/relevance.ts"
 import { filterDerivedPhrases, MAX_PHRASES } from "./lib/goalEnrichment.ts"
 import { currentState, dispatch, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
@@ -16,6 +16,8 @@ import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
 import { getProviderHealth } from "./lib/providerHealth.ts"
 import { clearBadge } from "./lib/badge.ts"
 import { clearEvents, exportEvents, logEvent } from "./lib/events.ts"
+import { getSettings, setSettings, type Settings } from "./lib/settings.ts"
+import { clearStore, OBS_STORE } from "./lib/db.ts"
 import { markNagActed, recordObservation } from "./lib/history.ts"
 import { clearLog, exportLog, klog, logText } from "./lib/klog.ts"
 import { shouldDropUrl } from "./lib/domainFilter.ts"
@@ -78,8 +80,9 @@ async function judgeAndDispatch(url: string, title: string, obsKey: string): Pro
   if (!pageKey) return
   lastObservedKey = obsKey
   const urlHost = hostOf(url)
+  const tauOk = (await getSettings()).tauOk
   const refs = await loadRefs()
-  const { score, verdict: tier0Verdict, vector: titleVec, parts } = await judgeTier0(goal.text, title, TAU_OK, refs)
+  const { score, verdict: tier0Verdict, vector: titleVec, parts } = await judgeTier0(goal.text, title, tauOk, refs)
   const enabled = await ollamaEnabled()
   let verdict = tier0Verdict
   let tierReached = 0
@@ -97,7 +100,7 @@ async function judgeAndDispatch(url: string, title: string, obsKey: string): Pro
   await setActivePage({ pageKey, title, urlHost, score })
   await recordObservation({ title, urlHost, verdict, ts: now }) // recent_titles / repeat context
   await dispatch(
-    { type: "nav", pageKey, verdict, r0: score, tauOk: TAU_OK, degraded: !enabled, ts: now },
+    { type: "nav", pageKey, verdict, r0: score, tauOk, degraded: !enabled, ts: now },
     goal,
   )
 }
@@ -231,6 +234,7 @@ interface PopupMessage {
   tier2Model?: string
   persona?: string
   displayToken?: number
+  settings?: Partial<Settings>
 }
 
 async function handleMessage(message: PopupMessage): Promise<unknown> {
@@ -273,6 +277,21 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
   }
   if (message?.type === "clear-events") {
     await clearEvents()
+    return { ok: true }
+  }
+  if (message?.type === "get-settings") {
+    return await getSettings()
+  }
+  if (message?.type === "set-settings") {
+    return await setSettings(message.settings ?? {})
+  }
+  if (message?.type === "delete-all-data") {
+    // Wipe activity data (gauge, history, learned vectors, events, observations, log);
+    // keep the goal, Ollama config, persona, and settings.
+    await resetState()
+    await clearEvents()
+    await clearStore(OBS_STORE)
+    await clearLog()
     return { ok: true }
   }
   if (message?.type === "test-ollama") {

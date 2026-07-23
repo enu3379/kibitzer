@@ -11,8 +11,9 @@ import { tier2Confirm } from "./tier12.ts"
 import { getGoal } from "./session.ts"
 import { activePersona, clampSentences, DEFAULT_MAX_SENTENCES, pickCelebrate, pickFallback } from "./personas.ts"
 import { klog } from "./klog.ts"
-import { playChime } from "./chime.ts"
+import { playChime, speak } from "./chime.ts"
 import { shouldDropUrl } from "./domainFilter.ts"
+import { getSettings, inQuietHours } from "./settings.ts"
 import { pageKeyOf } from "./url.ts"
 import { extractPageExcerpt } from "../content/pageExcerpt.ts"
 import { updateBadge } from "./badge.ts"
@@ -163,6 +164,14 @@ async function deliver(effect: GaugeEffect, goal: SessionGoal | null, ts: number
     return
   }
   if (effect.type === "nag") {
+    const settings = await getSettings()
+    // Do-not-disturb: within quiet hours, drop the nudge (the drift is still logged).
+    if (inQuietHours(settings.quietHours, ts)) {
+      pendingNagMessage = null
+      klog(`nag suppressed (quiet hours)`)
+      logEvent("nag", { pageKey: effect.pageKey, suppressed: "quiet_hours" })
+      return
+    }
     const page = await getActivePage()
     // Persona voice for EVERY nag: the Tier-2 Writer message when we have one (fresh
     // gate), otherwise the persona's fallback template. This covers degraded mode,
@@ -186,7 +195,10 @@ async function deliver(effect: GaugeEffect, goal: SessionGoal | null, ts: number
     klog(`nag (${fromWriter ? "writer" : "fallback"}): "${message.slice(0, 48)}"`)
     logEvent("nag", { pageKey: effect.pageKey, source: fromWriter ? "writer" : "fallback", message })
     const token = await showToast(message, effect.pageKey, "intervention")
-    if (token != null) await recordNag({ ts, host: page?.urlHost ?? "", token })
+    if (token != null) {
+      await recordNag({ ts, host: page?.urlHost ?? "", token })
+      if (settings.ttsEnabled) void speak(message) // read the nudge aloud
+    }
   } else if (effect.type === "celebrate") {
     // Celebrate in the selected persona's voice; fall back to the plain line.
     const persona = await activePersona()

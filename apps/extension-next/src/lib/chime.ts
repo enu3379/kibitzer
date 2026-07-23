@@ -25,3 +25,16 @@ export async function playChime(kind: "intervention" | "celebration"): Promise<v
     klog(`chime error: ${String(error)}`)
   }
 }
+
+/** Read the nudge aloud via Web Speech, hosted in the offscreen document. */
+export async function speak(text: string): Promise<void> {
+  try {
+    ensuring ??= ensureOffscreen().finally(() => {
+      ensuring = null
+    })
+    await ensuring
+    await chrome.runtime.sendMessage({ type: "kbz-speak", text })
+  } catch (error) {
+    klog(`speak error: ${String(error)}`)
+  }
+}

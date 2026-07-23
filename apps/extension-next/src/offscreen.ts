@@ -5,6 +5,7 @@
 interface ChimeMessage {
   type?: string
   kind?: "intervention" | "celebration"
+  text?: string
 }
 
 let ctx: AudioContext | null = null
@@ -38,6 +39,15 @@ chrome.runtime.onMessage.addListener((message: ChimeMessage) => {
       playChime(message.kind === "celebration" ? "celebration" : "intervention")
     } catch {
       // No audio device / context failure — nothing to do.
+    }
+  } else if (message?.type === "kbz-speak" && typeof message.text === "string") {
+    try {
+      const utterance = new SpeechSynthesisUtterance(message.text)
+      utterance.lang = "ko-KR"
+      speechSynthesis.cancel()
+      speechSynthesis.speak(utterance)
+    } catch {
+      // Web Speech unavailable — the visual/audible toast still delivered the nudge.
     }
   }
 })
