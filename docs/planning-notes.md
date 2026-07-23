@@ -278,6 +278,12 @@ Semantics-affecting open questions (§10) decided (2026-07-21):
   only as the current shipping default until the Python server is removed; it is not
   a design constraint (no shared-component compromise).
 - **Q7 page-switch impulse → disabled (`J_page = 0`)**; not in v0.
+- **Q5 recovery denominator → resolved by issue #122 "F"** (2026-07-22): the OK-branch
+  recovery multiplier becomes `((1-m)/K) · min(exp(γ·max(-m,0)), F_max)` (K=2.45, γ=3.0,
+  F_max=6.0, placeholders). Slow just after a return, accelerating with sustained
+  return-inertia depth — no new state variable (reuses m), robust to a single false-DRIFT.
+  Fixes the drain(2.5×)/recovery(1×) asymmetry; full refill drops ~20 min → ~10 min and
+  celebration arrives sooner. Adopted in both reducers; benchmark stays byte-identical.
 
 Rollout revised to **TypeScript-first**, superseding the Python stage roadmap in
 gauge-design §9. Because the endgame is a full TS/serverless refactor (Tier 0 WASM
@@ -300,10 +306,11 @@ from its own heartbeat clock. Degraded-mode margin (§3.2) needs `r0`/`tau_ok`, 
 `PipelineResult` does not currently expose to the extension; defer degraded mode or
 add those fields when it is first exercised.
 
-**OPEN — ship timing:** whether the gauge may stay shadow until the TS migration
-completes (no interim Python trigger), or must go live on the current Python server
-first (§9 stage 3, re-ported to TS later). Determines whether any Python trigger is
-ever written.
+**Ship timing → RESOLVED (2026-07-22):** the gauge stays shadow until the TS cutover —
+**no interim Python trigger.** The Python reducer (`gauge.py`) was validation-only:
+its sole job was to confirm the design runs correctly (byte-identical to TS over the
+benchmark), which is done. Work proceeds **TypeScript-only**; the Python reducer is a
+frozen reference deleted with the server. Canonical roadmap: `docs/ts-migration-plan.md`.
 
 ## Backlog (consolidated 2026-07-08, post-P1)
 

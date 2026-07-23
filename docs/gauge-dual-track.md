@@ -1,7 +1,10 @@
 # Gauge dual-track workflow (A = TypeScript, B = Python)
 
-Status: active from 2026-07-21 (planning-notes **D9**). Defines how the two gauge
-implementations are built in parallel and kept in lockstep.
+Status: **completed 2026-07-22.** Historical record of how the two pure reducers
+were built in parallel and kept in lockstep. The Python track stopped after
+cross-validation; its real-data shadow/trigger plan below was superseded by
+`docs/ts-migration-plan.md` and planning-notes **D9**. The branch & merge model
+remains the landing procedure for the frozen artifacts.
 
 ## Why two tracks
 

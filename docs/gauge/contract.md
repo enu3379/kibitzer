@@ -94,7 +94,10 @@ m' = m + (d - m) * (1 - exp(-Δ / tauM)) * w
 # 가속 전이(히스테리시스): m'≥T_up[tier] → 승격 후보(정상:request_tier2 emit·대기 / 축퇴:즉시 승격)
 #                          m'≤T_down[tier] → 즉시 강등.  대기 중엔 현재 tier 배율로 계속 적분.
 if activeVerdict == "DRIFT": s' = max(0,   s - Rdrain   * A[accelTier] * w * Δ)
-else:                        s' = min(100, s + Rrecover * ((1 - m') / kRecover) * w * Δ)
+else:                        s' = min(100, s + Rrecover * ((1 - m') / kRecover)
+                                              * min(exp(recoverGamma * max(-m', 0)), recoverFMax) * w * Δ)
+# 회복 가속(issue #122 "F"): 복귀 직후(m'≥0)엔 boost=1로 느리게, m'이 음수로 깊어질수록
+# exp로 가속(상한 recoverFMax). 새 상태변수 없이 m'만 사용 → 단발 오판·Tier2 오버라이드에 견고.
 ```
 
 성질(테스트로 고정): 연속 이탈이 흩어진 이탈보다 먼저 S=0 도달 / 한 번의 OK로 m 부호가
