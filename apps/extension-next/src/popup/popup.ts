@@ -40,8 +40,10 @@ async function getState(): Promise<StateResponse | null> {
 
 function modeText(state: StateResponse): string {
   const ollama = state.ollama
-  const keys = ollama?.apiKeys?.length ?? 0
-  return keys > 0 ? `LLM 판정: ${ollama.tier2Model} · 키 ${keys}개` : "제목 유사도만 (LLM 꺼짐)"
+  if (ollama && ollama.apiKeys?.length) {
+    return `LLM 판정: ${ollama.tier2Model} · 키 ${ollama.apiKeys.length}개`
+  }
+  return "제목 유사도만 (LLM 꺼짐)"
 }
 
 function fillSettings(state: StateResponse | null): void {
