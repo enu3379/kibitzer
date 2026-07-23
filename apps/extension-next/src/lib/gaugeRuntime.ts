@@ -15,6 +15,10 @@ import { activePersona, clampSentences, DEFAULT_MAX_SENTENCES, pickCelebrate, pi
 import { klog } from "./klog.ts"
 import { playChime } from "./chime.ts"
 import { shouldDropUrl } from "./domainFilter.ts"
+import { pageKeyOf } from "./url.ts"
+import { extractPageExcerpt } from "../content/pageExcerpt.ts"
+
+const EXCERPT_LIMIT = 3500 // extraction cap; the Tier-2 payload re-cleans to 3000
 import {
   clearHistory,
   lastNagIgnored,
@@ -191,6 +195,25 @@ async function deliver(effect: GaugeEffect, goal: SessionGoal | null, ts: number
   }
 }
 
+/** Grab the active tab's body text for the Tier-2 judge — but only if the active tab is
+ *  still the page being judged and it isn't sensitive. Null on any mismatch/failure
+ *  (the judge then falls back to title-only, as before). */
+async function extractActiveExcerpt(pageKey: string): Promise<string | null> {
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+  if (!tab?.id || !tab.url || shouldDropUrl(tab.url) || pageKeyOf(tab.url) !== pageKey) return null
+  try {
+    const [injected] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: extractPageExcerpt,
+      args: [EXCERPT_LIMIT],
+    })
+    const result = injected?.result as { text?: string } | undefined
+    return result?.text ?? null
+  } catch {
+    return null // chrome://, PDF, web store — no injection possible
+  }
+}
+
 async function serviceTier2(
   effect: Extract<GaugeEffect, { type: "request_tier2" }>,
   goal: SessionGoal | null,
@@ -200,12 +223,13 @@ async function serviceTier2(
   // Build the persona's message context from the nag / visit history (mirrors the
   // server's _nagging_context). nag_count_today is the count BEFORE this nag.
   const now = Date.now()
-  const [count, ignored, repeat, drift, titles] = await Promise.all([
+  const [count, ignored, repeat, drift, titles, excerpt] = await Promise.all([
     nagCountToday(now),
     lastNagIgnored(),
     repeatHost(page.urlHost),
     driftMinutes(now),
     recentTitles(),
+    extractActiveExcerpt(effect.pageKey),
   ])
   const outcome = await tier2Confirm(goal?.text ?? "", page, {
     nagCount: count + 1,
@@ -216,8 +240,9 @@ async function serviceTier2(
       repeat_host: repeat,
     },
     recentTitles: titles,
+    excerpt,
   })
-  klog(`tier2 gate (${effect.reason}) on ${effect.pageKey} -> ${outcome.flow}`)
+  klog(`tier2 gate (${effect.reason}) on ${effect.pageKey} excerpt=${excerpt?.length ?? 0}c -> ${outcome.flow}`)
   // The Writer's message rides along to the nag toast (if drift is confirmed).
   if (outcome.flow === "drift" && outcome.message) pendingNagMessage = outcome.message
   await dispatch(

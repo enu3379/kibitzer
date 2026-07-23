@@ -22,11 +22,13 @@ import {
 import { klog } from "./klog.ts"
 
 /** History-derived context for the Tier-2 writer (built by gaugeRuntime from the nag /
- *  visit logs). `nagCount` is the 1-based ordinal of the nag about to be produced. */
+ *  visit logs). `nagCount` is the 1-based ordinal of the nag about to be produced.
+ *  `excerpt` is the current page's body text (null when it couldn't be extracted). */
 export interface Tier2Context {
   nagCount: number
   naggingContext: Record<string, unknown>
   recentTitles: readonly RecentTitle[]
+  excerpt: string | null
 }
 
 const OLLAMA_KEY = "kibitzer:ollama:v2"
@@ -179,7 +181,7 @@ export async function testOllama(input: Partial<OllamaConfig>): Promise<OllamaTe
 export async function tier2Confirm(
   goalText: string,
   page: { title: string; urlHost: string; score: number },
-  ctx: Tier2Context = { nagCount: 1, naggingContext: {}, recentTitles: [] },
+  ctx: Tier2Context = { nagCount: 1, naggingContext: {}, recentTitles: [], excerpt: null },
 ): Promise<Tier2Outcome> {
   const p = await providers()
   if (!p) return { flow: "ok", message: null }
@@ -196,7 +198,7 @@ export async function tier2Confirm(
       { rawText: goalText },
       observation,
       ctx.recentTitles,
-      null,
+      ctx.excerpt, // page body text → page_excerpt (content evidence for the judge)
       [],
       null,
     )

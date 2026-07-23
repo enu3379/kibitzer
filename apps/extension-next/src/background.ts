@@ -14,26 +14,9 @@ import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
 import { markNagActed, recordObservation } from "./lib/history.ts"
 import { clearLog, exportLog, klog, logText } from "./lib/klog.ts"
 import { shouldDropUrl } from "./lib/domainFilter.ts"
+import { hostOf, pageKeyOf } from "./lib/url.ts"
 
 const HEARTBEAT_ALARM = "kibitzer-next-heartbeat"
-
-function pageKeyOf(url: string): string | null {
-  try {
-    const parsed = new URL(url)
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null
-    return `${parsed.host}${parsed.pathname}`
-  } catch {
-    return null
-  }
-}
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).hostname
-  } catch {
-    return ""
-  }
-}
 
 let lastObservedKey: string | null = null
 
