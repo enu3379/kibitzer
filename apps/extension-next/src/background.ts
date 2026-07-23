@@ -8,7 +8,7 @@
 
 import { getGoal, setGoal, type SessionGoal } from "./lib/session.ts"
 import { judgeTier0, TAU_OK } from "./lib/tier0.ts"
-import { currentState, dispatch, resetState } from "./lib/gaugeRuntime.ts"
+import { currentState, dispatch, resetState, testNag } from "./lib/gaugeRuntime.ts"
 
 const HEARTBEAT_ALARM = "kibitzer-next-heartbeat"
 
@@ -94,13 +94,19 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     return { goal, s: Math.round(state.s), accelTier: state.accelTier }
   }
   if (message?.type === "set-goal") {
+    const previous = await getGoal()
     const goal: SessionGoal | null = await setGoal(
       message.goal ?? "",
       typeof message.minutes === "number" ? message.minutes : null,
     )
-    await resetState()
+    // Only restart the gauge when the goal actually changes (or is cleared).
+    if (!goal || previous?.text !== goal.text) await resetState()
     ensureHeartbeat()
-    if (goal) void observeActiveTab()
+    if (goal) {
+      // Test shortcut: goal "알림보기" fires a nag notification right away.
+      if (goal.text === "알림보기") await testNag(goal)
+      void observeActiveTab()
+    }
     return { goal }
   }
   return { error: "unknown message" }

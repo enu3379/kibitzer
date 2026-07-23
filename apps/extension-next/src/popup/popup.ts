@@ -1,4 +1,4 @@
-// Minimal popup: set the goal, show the current immersion gauge S.
+// Popup: two states. No goal → setup (input + 시작). Goal set → active (S + goal + 변경).
 
 interface StateResponse {
   goal: { text: string; availableMinutes: number | null } | null
@@ -6,10 +6,16 @@ interface StateResponse {
   accelTier: number
 }
 
+const activeView = document.getElementById("active") as HTMLDivElement
+const setupView = document.getElementById("setup") as HTMLDivElement
 const gaugeEl = document.getElementById("gauge") as HTMLDivElement
-const goalEl = document.getElementById("goal") as HTMLInputElement
-const minutesEl = document.getElementById("minutes") as HTMLInputElement
-const setButton = document.getElementById("set") as HTMLButtonElement
+const goalTextEl = document.getElementById("goalText") as HTMLElement
+const goalInput = document.getElementById("goal") as HTMLInputElement
+const minutesInput = document.getElementById("minutes") as HTMLInputElement
+const startButton = document.getElementById("set") as HTMLButtonElement
+const editButton = document.getElementById("edit") as HTMLButtonElement
+
+let current: StateResponse | null = null
 
 async function getState(): Promise<StateResponse | null> {
   try {
@@ -19,25 +25,42 @@ async function getState(): Promise<StateResponse | null> {
   }
 }
 
-function render(state: StateResponse | null): void {
-  if (!state?.goal) {
-    gaugeEl.innerHTML = `<small>목표를 정하면 시작해요</small>`
-    return
+function showSetup(): void {
+  setupView.hidden = false
+  activeView.hidden = true
+  if (current?.goal) {
+    goalInput.value = current.goal.text
+    minutesInput.value = current.goal.availableMinutes != null ? String(current.goal.availableMinutes) : ""
   }
-  goalEl.value = state.goal.text
-  if (state.goal.availableMinutes != null) minutesEl.value = String(state.goal.availableMinutes)
+  goalInput.focus()
+}
+
+function showActive(state: StateResponse): void {
+  activeView.hidden = false
+  setupView.hidden = true
+  goalTextEl.textContent = state.goal?.text ?? ""
   gaugeEl.innerHTML = `${state.s}<small> / 100 몰입</small>`
 }
 
-setButton.addEventListener("click", async () => {
-  const rawMinutes = minutesEl.value.trim()
+function render(state: StateResponse | null): void {
+  current = state
+  if (state?.goal) showActive(state)
+  else showSetup()
+}
+
+startButton.addEventListener("click", async () => {
+  const rawMinutes = minutesInput.value.trim()
   const minutes = rawMinutes ? Number.parseInt(rawMinutes, 10) : null
   await chrome.runtime.sendMessage({
     type: "set-goal",
-    goal: goalEl.value,
+    goal: goalInput.value,
     minutes: Number.isFinite(minutes) ? minutes : null,
   })
   render(await getState())
+})
+
+editButton.addEventListener("click", () => {
+  showSetup()
 })
 
 void getState().then(render)

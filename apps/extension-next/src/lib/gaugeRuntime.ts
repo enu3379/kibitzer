@@ -62,6 +62,11 @@ export function dispatch(event: GaugeEvent, goal: SessionGoal | null): Promise<v
   return run
 }
 
+/** Fire a nag notification immediately, for manual testing (goal = "알림보기"). */
+export async function testNag(goal: SessionGoal | null): Promise<void> {
+  await deliver({ type: "nag", pageKey: "test" }, goal)
+}
+
 async function deliver(effect: GaugeEffect, goal: SessionGoal | null): Promise<void> {
   const goalText = goal?.text ?? "목표"
   if (effect.type === "nag") {
