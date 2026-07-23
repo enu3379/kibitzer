@@ -48,6 +48,57 @@ export function composeWriterPrompt(persona: PersonaData | null): string {
   )
 }
 
+/** Default nag length cap when a persona sets no override (server delivery.max_sentences). */
+export const DEFAULT_MAX_SENTENCES = 2
+
+const SENTENCE_BOUNDARIES = ".!?。！？"
+const SENTENCE_CLOSERS = "\"'”’»」』)]"
+
+function isIdentifierChar(ch: string): boolean {
+  // ASCII alphanumeric, "_", or "-" — matches the server's _identifier_char.
+  return /[A-Za-z0-9_-]/.test(ch)
+}
+
+function periodEndsSentence(chars: string[], index: number, nextChar: string): boolean {
+  if (!nextChar || /\s/.test(nextChar) || SENTENCE_CLOSERS.includes(nextChar)) return true
+  const prev = index > 0 ? chars[index - 1] : ""
+  // A dot between identifier chars is a domain/decimal/version (youtube.com, 3.6), not an end.
+  return !(isIdentifierChar(prev) && isIdentifierChar(nextChar))
+}
+
+/** Clamp a message to at most `maxSentences` sentences. Faithful port of the server's
+ *  clamp_notification_message (domain/decimal-aware, stacked marks count once). */
+export function clampSentences(message: string, maxSentences: number): string {
+  const text = message.split(/\s+/u).filter(Boolean).join(" ")
+  if (maxSentences <= 0) return text
+  const chars = Array.from(text)
+  const length = chars.length
+  const sentences: string[] = []
+  let start = 0
+  let index = 0
+  while (index < length) {
+    if (SENTENCE_BOUNDARIES.includes(chars[index])) {
+      let end = index
+      while (end + 1 < length && SENTENCE_BOUNDARIES.includes(chars[end + 1])) end += 1
+      let sentenceEnd = end
+      while (sentenceEnd + 1 < length && SENTENCE_CLOSERS.includes(chars[sentenceEnd + 1])) sentenceEnd += 1
+      const nextChar = sentenceEnd + 1 < length ? chars[sentenceEnd + 1] : ""
+      if (chars[index] !== "." || periodEndsSentence(chars, index, nextChar)) {
+        const sentence = chars.slice(start, sentenceEnd + 1).join("").trim()
+        if (sentence) sentences.push(sentence)
+        start = sentenceEnd + 1
+        if (sentences.length >= maxSentences) return sentences.join(" ")
+      }
+      index = sentenceEnd + 1
+      continue
+    }
+    index += 1
+  }
+  const tail = chars.slice(start).join("").trim()
+  if (tail && sentences.length < maxSentences) sentences.push(tail)
+  return sentences.join(" ")
+}
+
 function fill(template: string, values: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (whole, name) =>
     Object.prototype.hasOwnProperty.call(values, name) ? values[name] : whole,

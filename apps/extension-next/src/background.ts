@@ -163,6 +163,17 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
   })
 })
 
+// Feedback from the OS-notification fallback (buttons: 0=related, 1=break), routed
+// through the same handler as the in-page toast.
+chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) => {
+  if (!notificationId.startsWith("kbz-")) return
+  void handleMessage({ type: "kibitzer:toast-feedback", kind: buttonIndex === 0 ? "related" : "break" })
+  void chrome.notifications.clear(notificationId)
+})
+chrome.notifications.onClicked.addListener((notificationId) => {
+  if (notificationId.startsWith("kbz-")) void chrome.notifications.clear(notificationId)
+})
+
 // --- popup messaging -------------------------------------------------------------
 
 interface PopupMessage {
@@ -257,6 +268,17 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
       // "5분만" / "30분 조용히" quiet the gauge; other feedback just dismisses the toast.
       if (message.kind === "break") await dispatch({ type: "snooze", until: now + 5 * 60_000, ts: now }, goal)
       else if (message.kind === "snooze") await dispatch({ type: "snooze", until: now + 30 * 60_000, ts: now }, goal)
+      else if (message.kind === "related") {
+        // "목표와 관련 있어요": the user says this page IS on-goal (the nag was wrong) →
+        // flip the active page to OK so S recovers. ("accepted"/"잘 잡았어요" agrees with
+        // the nag, so it must NOT recover.)
+        const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+        const pageKey = tab?.url ? pageKeyOf(tab.url) : null
+        if (pageKey) {
+          klog(`related → OK recover ${pageKey}`)
+          await dispatch({ type: "nav", pageKey, verdict: "OK", ts: now }, goal)
+        }
+      }
     }
     return { ok: true }
   }

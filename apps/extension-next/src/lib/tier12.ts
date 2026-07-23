@@ -12,7 +12,13 @@ import {
   type RecentTitle,
 } from "../providers/payloads.ts"
 import type { JudgeVerdict } from "../providers/types.ts"
-import { activePersona, composeWriterPrompt, pickFallback } from "./personas.ts"
+import {
+  activePersona,
+  clampSentences,
+  composeWriterPrompt,
+  DEFAULT_MAX_SENTENCES,
+  pickFallback,
+} from "./personas.ts"
 import { klog } from "./klog.ts"
 
 /** History-derived context for the Tier-2 writer (built by gaugeRuntime from the nag /
@@ -203,6 +209,7 @@ export async function tier2Confirm(
   if (decision.decision !== "notify") return { flow: "ok", message: null }
   // Notify confirmed → write the nag in the selected persona's voice.
   const persona = await activePersona()
+  const maxSentences = persona.maxSentences ?? DEFAULT_MAX_SENTENCES
   const messagePayload = buildTier2MessagePayload(
     { rawText: goalText },
     observation,
@@ -212,7 +219,7 @@ export async function tier2Confirm(
   )
   try {
     const message = await p.tier2.writeTier2Message(messagePayload, composeWriterPrompt(persona))
-    return { flow: "drift", message }
+    return { flow: "drift", message: clampSentences(message, maxSentences) }
   } catch (error) {
     klog(`tier2 writer error (persona fallback template): ${String(error)}`)
     const message = pickFallback(persona, ctx.nagCount, {
@@ -220,6 +227,6 @@ export async function tier2Confirm(
       title: page.title || page.urlHost || "현재 페이지",
       host: page.urlHost || "현재 페이지",
     })
-    return { flow: "drift", message }
+    return { flow: "drift", message: message ? clampSentences(message, maxSentences) : message }
   }
 }

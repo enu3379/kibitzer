@@ -34,7 +34,8 @@
     "storage",
     "idle",
     "downloads",
-    "offscreen"
+    "offscreen",
+    "notifications"
   ],
   "host_permissions": [
     "http://127.0.0.1/*",

@@ -11,7 +11,7 @@ import { initGaugeState } from "../core/gauge/types.ts"
 import type { GaugeConfig, GaugeEffect, GaugeEvent, GaugeState } from "../core/gauge/types.ts"
 import { showKibitzerToast, type ToastPayload } from "../content/toastOverlay.ts"
 import { tier2Confirm } from "./tier12.ts"
-import { activePersona, pickCelebrate, pickFallback } from "./personas.ts"
+import { activePersona, clampSentences, DEFAULT_MAX_SENTENCES, pickCelebrate, pickFallback } from "./personas.ts"
 import { klog } from "./klog.ts"
 import { playChime } from "./chime.ts"
 import { shouldDropUrl } from "./domainFilter.ts"
@@ -167,12 +167,14 @@ async function deliver(effect: GaugeEffect, goal: SessionGoal | null, ts: number
     if (!message) {
       const persona = await activePersona()
       const nagCount = (await nagCountToday(ts)) + 1
-      message =
-        pickFallback(persona, nagCount, {
-          goal: goalText,
-          title: page?.title || page?.urlHost || "현재 페이지",
-          host: page?.urlHost || "현재 페이지",
-        }) ?? `'${goalText}' 흐름에서 벗어난 것 같아요. 계속 필요한 곁가지인지 확인해볼까요?`
+      const fallback = pickFallback(persona, nagCount, {
+        goal: goalText,
+        title: page?.title || page?.urlHost || "현재 페이지",
+        host: page?.urlHost || "현재 페이지",
+      })
+      message = fallback
+        ? clampSentences(fallback, persona.maxSentences ?? DEFAULT_MAX_SENTENCES)
+        : `'${goalText}' 흐름에서 벗어난 것 같아요. 계속 필요한 곁가지인지 확인해볼까요?`
     }
     klog(`nag (${fromWriter ? "writer" : "fallback"}): "${message.slice(0, 48)}"`)
     const token = await showToast(message, effect.pageKey, "intervention")
@@ -226,38 +228,62 @@ async function serviceTier2(
 
 let toastToken = 0
 
-/** Render the in-page toast overlay in the active tab (matches apps/extension —
- *  a quiet on-page bubble, not an OS notification). Injected via executeScript.
- *  Returns the toast's displayToken (to log the nag), or null if it couldn't show. */
+/** Render the in-page toast overlay in the active tab (matches apps/extension — a quiet
+ *  on-page bubble). Injected via executeScript; falls back to an OS notification when the
+ *  page can't be injected (chrome://, the web store, PDF viewer, no active tab) so the
+ *  nudge is never silently dropped. Returns the displayToken (to log the nag), or null. */
 async function showToast(
   message: string,
   contextLabel: string | null,
   kind: "intervention" | "celebration",
 ): Promise<number | null> {
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
-  if (!tab?.id) return null
   // Privacy: never surface a nudge on a sensitive page, even if one was queued before
   // the user navigated there.
-  if (tab.url && shouldDropUrl(tab.url)) return null
+  if (tab?.url && shouldDropUrl(tab.url)) return null
   void playChime(kind) // audible cue via the offscreen document (works off-screen)
   const token = (toastToken += 1)
-  const payload: ToastPayload = {
-    notificationId: `kbz-${Date.now()}`,
-    displayToken: token,
-    message,
-    contextLabel,
-    autoDismissMs: 12_000,
-    kind,
+  if (tab?.id) {
+    const payload: ToastPayload = {
+      notificationId: `kbz-${token}`,
+      displayToken: token,
+      message,
+      contextLabel,
+      autoDismissMs: 12_000,
+      kind,
+    }
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: showKibitzerToast,
+        args: [payload],
+      })
+      return token
+    } catch {
+      // Injection blocked (chrome://, web store, PDF) — fall through to a notification.
+    }
   }
+  showSystemNotification(token, message, kind)
+  return token
+}
+
+/** OS-notification fallback for pages that can't host the in-page toast. Buttons feed the
+ *  same feedback path as the toast (see background's notifications.onButtonClicked). */
+function showSystemNotification(
+  token: number,
+  message: string,
+  kind: "intervention" | "celebration",
+): void {
   try {
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: showKibitzerToast,
-      args: [payload],
+    chrome.notifications.create(`kbz-${token}`, {
+      type: "basic",
+      iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+      title: "Kibitzer",
+      message,
+      buttons:
+        kind === "intervention" ? [{ title: "목표와 관련 있어요" }, { title: "5분만" }] : [],
     })
-    return token
   } catch {
-    // Some pages (chrome://, the web store) block injection — skip silently.
-    return null
+    // No notifications permission / platform limit — nothing more we can do.
   }
 }
