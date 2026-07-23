@@ -1,6 +1,6 @@
 # Kibitzer TS / serverless migration plan
 
-Status: **v0.2, 2026-07-23.** Canonical execution plan for the whole refactor. Supersedes
+Status: **v0.3, 2026-07-23.** Canonical execution plan for the whole refactor. Supersedes
 the Python stage roadmap in `docs/analysis-plan-a-gauge-design.md` §9. Decision record:
 `docs/planning-notes.md` **D9**. Single forward track: **TypeScript only**.
 
@@ -11,8 +11,10 @@ TypeScript reducer, independently cross-checked against a throwaway Python reduc
 over the shared fixtures and a lifecycle benchmark). The extension feeds server verdicts and its
 local presence clock into that reducer. IndexedDB is now the gauge SSOT: each checkpoint and its
 new effects commit in one transaction, with effects retained in a pending outbox. The developer
-popup can inspect S and outbox state, but no effect can be delivered. This document is the map from
-that durable shadow to "one TypeScript runtime in the extension, Python server removed."
+popup can inspect S and outbox state, but no effect can be delivered. Tier 0 now also runs locally
+through packaged WASM in a non-authoritative provider shadow, and the Ollama Tier 1/2 client,
+prompts, parsers, and minimized payload builders live in the extension bundle. This document is the
+map from that durable shadow to "one TypeScript runtime in the extension, Python server removed."
 
 ## 1. Goal — end-state architecture
 
@@ -51,11 +53,15 @@ gauge is the real attention trigger. No local server process, no HTTP round-trip
 | Extension shadow runner | ✅ server verdicts + local heartbeat |
 | IndexedDB gauge SSOT | ✅ checkpoint + pending effects in one transaction |
 | Phase 2 state migration | ✅ one-time `chrome.storage.session` → IndexedDB import |
-| Popup diagnostics | ✅ S/m/accel/outbox state behind the existing developer toggle |
+| TS Tier 0 | ✅ packaged O4 ONNX + pure-JS tokenizer + CPU WASM; Python/WASM parity test |
+| TS Ollama Tier 1/2 | ✅ client, prompts, parsers, payloads, timeout/key/error contracts |
+| Provider shadow | ✅ Tier 0 live diagnostics; Ollama explicit opt-in; no gauge input |
+| Popup diagnostics | ✅ gauge S/m/accel/outbox + last provider-shadow result |
 | Effect delivery | ⬜ intentionally disabled; existing Python controller remains authoritative |
-| Pushed / PR'd | ✅ Phase 1 merged; Phase 2 is #125; Phase 3 is the stacked migration PR |
+| Pushed / PR'd | ✅ Phase 1–3 merged into `dev-migrate`; Phase 4 is the current migration PR |
 
-The pure core, shadow wiring, and durable persistence boundary are complete. TS providers are next.
+The pure core, durable persistence boundary, and TS provider implementations are complete.
+Cutover orchestration is next.
 
 ## 4. Phased roadmap (TypeScript, independent PRs → `dev-migrate`)
 
@@ -70,10 +76,19 @@ The pure core, shadow wiring, and durable persistence boundary are complete. TS 
   the commit succeeds. It survives MV3 worker/browser restarts, migrates the Phase 2 session
   snapshot once, clears on goal replacement/session end/activity deletion, and keeps only a
   bounded diagnostic view while retaining the full pending outbox. Delivery remains disabled.
-- **Phase 4 — Providers to TS (next).** Port Tier 0 (WASM embeddings) and the Ollama Tier 1/2 calls into
-  the extension runtime.
-- **Phase 5 — Cutover.** Switch the gauge to the real trigger, remove the Python server and
-  `StreakController`. `dev-migrate` merges to `main`.
+- **Phase 4 — Providers to TS (✅ done).** Tier 0 uses a packaged KoEn E5 Tiny O4 ONNX
+  export with `onnxruntime-web/wasm` and a pure-JS tokenizer. The same O4 export is checked
+  against Python `CPUExecutionProvider`; vector components and cosine agree within `2e-4`.
+  Ollama Tier 1/2 request contracts, canonical prompts, strict parsers, payload minimization,
+  key rotation, output-budget handling, and safe failures are ported and tested. Tier 0 runs
+  in a best-effort diagnostics shadow after the server verdict. Tier 1 is explicit opt-in;
+  Tier 2 is bundled but does not consume the gauge outbox yet. No TS provider result can
+  change the gauge or deliver an effect in this phase.
+- **Phase 5 — Cutover (next).** Make extension storage own the goal/exemplars/provider
+  configuration and recent context, route TS Tier 0/1 verdicts into the gauge, consume and
+  acknowledge `request_tier2` outbox entries with stale-page cancellation, enable
+  nag/celebration delivery, then remove the Python server and `StreakController`.
+  `dev-migrate` merges to `main`.
 - **D4 calibration (parallel).** Replay-CLI tuning of the §8 knobs against logged sessions; gates
   the shipped defaults, not the wiring.
 
@@ -92,6 +107,9 @@ The pure core, shadow wiring, and durable persistence boundary are complete. TS 
 2. **#117 long wall-clock gap** — Phase 2 rebases the reducer clock on both inactive and active
    presence transitions, so inactive wall time is not integrated. Any additional return-time
    relaxation of m / tier / episode remains a calibration decision; S is unchanged on return.
+3. **Tier 0 calibration** — the browser-compatible O4 export is internally stable across Python
+   and WASM, but it is not the old qint8 export used to select `tau_ok=0.6`. D4 must calibrate the
+   O4 score distribution before Phase 5 treats that threshold as shipped rather than diagnostic.
 
 ## 7. Document map
 

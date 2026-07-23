@@ -25,12 +25,18 @@ const options = {
 function copyStatic() {
   mkdirSync(join(distDir, "popup"), { recursive: true })
   mkdirSync(join(distDir, "offscreen"), { recursive: true })
+  mkdirSync(join(distDir, "assets", "ort"), { recursive: true })
   cpSync(join(extensionRoot, "manifest.json"), join(distDir, "manifest.json"))
   cpSync(join(extensionRoot, "src/popup/popup.html"), join(distDir, "popup/popup.html"))
   cpSync(join(extensionRoot, "src/offscreen/offscreen.html"), join(distDir, "offscreen/offscreen.html"))
   cpSync(join(extensionRoot, "src/offscreen/ding.wav"), join(distDir, "offscreen/ding.wav"))
   cpSync(join(extensionRoot, "src/offscreen/celebrate.wav"), join(distDir, "offscreen/celebrate.wav"))
   cpSync(join(extensionRoot, "icons"), join(distDir, "icons"), { recursive: true })
+  cpSync(join(extensionRoot, "assets"), join(distDir, "assets"), { recursive: true })
+  cpSync(
+    join(extensionRoot, "node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm"),
+    join(distDir, "assets/ort/ort-wasm-simd-threaded.wasm"),
+  )
 }
 
 if (watch) {

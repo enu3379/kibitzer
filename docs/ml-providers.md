@@ -1,5 +1,35 @@
 # ML Providers
 
+## TypeScript migration shadow (Phase 4)
+
+The extension now contains the future serverless provider boundary under
+`apps/extension/src/providers/`. This is deliberately a shadow until Phase 5:
+the Python server remains authoritative and all gauge effects remain
+non-deliverable.
+
+- Tier 0 packages KoEn E5 Tiny `model_O4.onnx` (74.9 MB), its original
+  tokenizer files, and the pinned ONNX Runtime WASM binary. It runs CPU-only,
+  offline, with the same prefix, token limit, mean pooling, dimensionality, and
+  normalization contract as Python.
+- The O4 export was selected because the previous qint8 export's integer
+  kernels did not preserve its Python score space in ONNX Runtime Web. For O4,
+  the committed Python-CPU/WASM parity test checks vector components and cosine
+  within `2e-4`.
+- Tier 0 runs after the shipping server verdict and stores only its last
+  diagnostic result. The popup developer view shows the goal-title score and
+  both verdicts, labeled `발송 안 함`.
+- The Ollama `/api/chat` Tier 1/2 client, canonical trust-boundary prompts,
+  strict response parsers, minimized payload builders, timeout/output-budget
+  logic, and key rotation are ported. Network calls are disabled by default;
+  see
+  [`apps/extension/src/providers/README.md`](../apps/extension/src/providers/README.md)
+  for explicit local configuration.
+
+The shadow Tier 0 score is goal-versus-title only. The current server Tier 0
+also considers exemplars, derived phrases, and the anchor, so a displayed
+verdict difference is a migration diagnostic rather than a parity failure.
+The old qint8 `tau_ok=0.6` must be recalibrated for O4 under D4 before cutover.
+
 ## Provider Policy
 
 Embedding is local CPU-only in Stage 0. CUDA, Metal, DirectML, and GPU-specific

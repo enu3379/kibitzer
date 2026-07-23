@@ -1,5 +1,35 @@
 # Progress
 
+## 2026-07-23 TypeScript Tier 0 and Ollama providers
+
+Completed:
+
+- Ported the embedding and Judge provider interfaces, minimized Tier 1/Tier 2
+  payload builders, strict response parsers, canonical trust-boundary prompts,
+  Ollama `/api/chat` calls, timeout/output-budget behavior, and API-key
+  fallback/rotation into the extension.
+- Packaged KoEn E5 Tiny's 74.9 MB O4 ONNX export, original tokenizer files, and
+  the pinned ONNX Runtime WASM binary. Runtime inference is CPU-only and makes
+  no network request.
+- Rejected the prior qint8 export after direct testing showed different
+  integer-kernel output under WASM. The selected O4 export matches Python
+  `CPUExecutionProvider` vector components and cosine within `2e-4`.
+- Added a serialized, non-authoritative Tier 0 provider shadow after the server
+  verdict. It records only the last session diagnostic; stale queued
+  navigation checks are dropped.
+- Added developer-popup diagnostics for the goal-title score, TS verdict, and
+  server verdict. Ollama calls remain explicit opt-in and no provider result
+  reaches the gauge or notification path.
+- Added MV3 `wasm-unsafe-eval` CSP and deterministic build copying for the
+  packaged model, tokenizer, and exact dependency-matched WASM artifact.
+
+Verified:
+
+- `apps/extension` `npm run build`: 87 tests, source/test typechecks, port
+  contract check, WASM inference, and bundle passed.
+- Packaged extension size is approximately 88 MB: 74.9 MB model, 13 MB WASM,
+  tokenizer/static assets, and a 284 KB background bundle.
+
 ## 2026-07-23 IndexedDB gauge SSOT and effect outbox
 
 Completed:
