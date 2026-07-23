@@ -1,9 +1,6 @@
-// The gauge, wired to run for real. Holds the immersion state in chrome.storage.session
-// (survives service-worker teardown within a browser session), serializes dispatches,
-// and delivers nag/celebrate effects as Chrome notifications.
-//
-// First slice runs Tier-0-only, i.e. the gauge's degraded mode: no Tier 2 LLM gate, so
-// S=0 nags directly. request_tier2 effects are ignored until the Ollama layer lands.
+// The gauge, wired to run for real. Holds the immersion state in the IndexedDB SSOT
+// (lib/db.ts) so it survives browser restarts as well as service-worker teardown,
+// serializes dispatches, and delivers nag/celebrate effects.
 
 import { reduceGauge } from "../core/gauge/reducer.ts"
 import { defaultGaugeConfig } from "../core/gauge/config.ts"
@@ -19,8 +16,7 @@ import { shouldDropUrl } from "./domainFilter.ts"
 import { pageKeyOf } from "./url.ts"
 import { extractPageExcerpt } from "../content/pageExcerpt.ts"
 import { updateBadge } from "./badge.ts"
-
-const EXCERPT_LIMIT = 3500 // extraction cap; the Tier-2 payload re-cleans to 3000
+import { kvGet, kvSet } from "./db.ts"
 import {
   clearHistory,
   lastNagIgnored,
@@ -31,9 +27,11 @@ import {
 } from "./history.ts"
 import type { SessionGoal } from "./session.ts"
 
-const STATE_KEY = "kibitzer:gauge-state:v1"
-const ACTIVE_PAGE_KEY = "kibitzer:active-page:v1"
-const DRIFT_SINCE_KEY = "kibitzer:drift-since:v1"
+const EXCERPT_LIMIT = 3500 // extraction cap; the Tier-2 payload re-cleans to 3000
+
+const STATE_KEY = "gauge-state"
+const ACTIVE_PAGE_KEY = "active-page"
+const DRIFT_SINCE_KEY = "drift-since"
 
 export interface ActivePage {
   pageKey: string
@@ -44,12 +42,11 @@ export interface ActivePage {
 
 /** Remember the active page's details so the async Tier 2 gate can judge it. */
 export async function setActivePage(page: ActivePage): Promise<void> {
-  await chrome.storage.session.set({ [ACTIVE_PAGE_KEY]: page })
+  await kvSet(ACTIVE_PAGE_KEY, page)
 }
 
 async function getActivePage(): Promise<ActivePage | null> {
-  const stored = await chrome.storage.session.get(ACTIVE_PAGE_KEY)
-  const value = stored[ACTIVE_PAGE_KEY] as ActivePage | undefined
+  const value = await kvGet<ActivePage>(ACTIVE_PAGE_KEY)
   return value && typeof value.pageKey === "string" ? value : null
 }
 
@@ -64,13 +61,16 @@ function isGaugeState(value: unknown): value is GaugeState {
 }
 
 async function loadState(): Promise<GaugeState> {
-  const stored = await chrome.storage.session.get(STATE_KEY)
-  const value = stored[STATE_KEY]
-  return isGaugeState(value) ? value : initGaugeState()
+  try {
+    const value = await kvGet<GaugeState>(STATE_KEY)
+    return isGaugeState(value) ? value : initGaugeState()
+  } catch {
+    return initGaugeState()
+  }
 }
 
 async function saveState(state: GaugeState): Promise<void> {
-  await chrome.storage.session.set({ [STATE_KEY]: state })
+  await kvSet(STATE_KEY, state)
 }
 
 export async function currentState(): Promise<GaugeState> {
@@ -78,22 +78,19 @@ export async function currentState(): Promise<GaugeState> {
 }
 
 export async function resetState(): Promise<void> {
-  await chrome.storage.session.set({
-    [STATE_KEY]: initGaugeState(),
-    [DRIFT_SINCE_KEY]: null,
-  })
+  await kvSet(STATE_KEY, initGaugeState())
+  await kvSet(DRIFT_SINCE_KEY, null)
   await clearHistory() // a new goal starts a fresh nag/visit context
 }
 
 // --- drift timing (persona drift_minutes + celebration return_minutes) -----------
 
 async function setDriftSince(ts: number | null): Promise<void> {
-  await chrome.storage.session.set({ [DRIFT_SINCE_KEY]: ts })
+  await kvSet(DRIFT_SINCE_KEY, ts)
 }
 
 async function driftSince(): Promise<number | null> {
-  const stored = await chrome.storage.session.get(DRIFT_SINCE_KEY)
-  const since = stored[DRIFT_SINCE_KEY]
+  const since = await kvGet<number | null>(DRIFT_SINCE_KEY)
   return typeof since === "number" ? since : null
 }
 

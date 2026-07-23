@@ -3,13 +3,14 @@
 // review payload's recent_titles, so the personas can say "오늘 세 번째군요" /
 // "또 그 자리네요" / fold in drift duration and whether the last nudge was ignored.
 //
-// Observations live in storage.session (per browsing session); the nag log lives in
-// storage.local so nag_count_today survives a service-worker teardown within the day.
+// Both logs live in the IndexedDB SSOT (lib/db.ts) so recent-visit context and
+// nag_count_today survive a browser restart, not just a service-worker teardown.
 
 import type { RecentTitle } from "../providers/payloads.ts"
+import { kvDelete, kvGet, kvSet } from "./db.ts"
 
-const OBS_KEY = "kibitzer:recent-obs:v1" // storage.session
-const NAG_LOG_KEY = "kibitzer:nag-log:v1" // storage.local
+const OBS_KEY = "recent-obs"
+const NAG_LOG_KEY = "nag-log"
 const OBS_CAP = 20
 const NAG_CAP = 40
 
@@ -36,9 +37,8 @@ function localMidnight(now: number): number {
 // --- observations (review payload recent_titles) ---------------------------------
 
 async function readObs(): Promise<ObsEntry[]> {
-  const stored = await chrome.storage.session.get(OBS_KEY)
-  const value = stored[OBS_KEY]
-  return Array.isArray(value) ? (value as ObsEntry[]) : []
+  const value = await kvGet<ObsEntry[]>(OBS_KEY)
+  return Array.isArray(value) ? value : []
 }
 
 /** Append the just-judged page. Consecutive duplicates of the same page are collapsed
@@ -50,7 +50,7 @@ export async function recordObservation(entry: ObsEntry): Promise<void> {
     return
   }
   log.push(entry)
-  await chrome.storage.session.set({ [OBS_KEY]: log.slice(-OBS_CAP) })
+  await kvSet(OBS_KEY, log.slice(-OBS_CAP))
 }
 
 /** Recent {title, verdict} in chronological order — feeds recent_titles / repeat_signals. */
@@ -61,9 +61,8 @@ export async function recentTitles(): Promise<RecentTitle[]> {
 // --- nags (nagging_context) ------------------------------------------------------
 
 async function readNags(): Promise<NagEntry[]> {
-  const stored = await chrome.storage.local.get(NAG_LOG_KEY)
-  const value = stored[NAG_LOG_KEY]
-  return Array.isArray(value) ? (value as NagEntry[]) : []
+  const value = await kvGet<NagEntry[]>(NAG_LOG_KEY)
+  return Array.isArray(value) ? value : []
 }
 
 /** Log a delivered nag so the next one knows the count, host, and (later) whether this
@@ -71,7 +70,7 @@ async function readNags(): Promise<NagEntry[]> {
 export async function recordNag(entry: { ts: number; host: string; token: number }): Promise<void> {
   const log = await readNags()
   log.push({ ...entry, acted: false })
-  await chrome.storage.local.set({ [NAG_LOG_KEY]: log.slice(-NAG_CAP) })
+  await kvSet(NAG_LOG_KEY, log.slice(-NAG_CAP))
 }
 
 /** Mark a nag as acted on (user gave explicit feedback other than letting it time out). */
@@ -80,7 +79,7 @@ export async function markNagActed(token: number): Promise<void> {
   const entry = log.find((n) => n.token === token)
   if (!entry || entry.acted) return
   entry.acted = true
-  await chrome.storage.local.set({ [NAG_LOG_KEY]: log })
+  await kvSet(NAG_LOG_KEY, log)
 }
 
 /** Nags delivered since local midnight, BEFORE the one about to fire (matches server). */
@@ -103,6 +102,6 @@ export async function repeatHost(currentHost: string): Promise<boolean> {
 
 /** Clear both logs — called when the goal changes (a fresh context). */
 export async function clearHistory(): Promise<void> {
-  await chrome.storage.session.remove(OBS_KEY)
-  await chrome.storage.local.remove(NAG_LOG_KEY)
+  await kvDelete(OBS_KEY)
+  await kvDelete(NAG_LOG_KEY)
 }
