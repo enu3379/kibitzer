@@ -234,6 +234,15 @@ async function serviceTier2(
     recentTitles(),
     extractActiveExcerpt(effect.pageKey),
   ])
+  // Declared time budget → the judge/writer treat it as background pressure.
+  const timeContext =
+    goal?.availableMinutes != null
+      ? {
+          available_time_minutes: goal.availableMinutes,
+          elapsed_minutes: Math.round((now - goal.startedAt) / 60_000),
+          current_page_drift_minutes: drift,
+        }
+      : null
   const outcome = await tier2Confirm(goal?.text ?? "", page, {
     nagCount: count + 1,
     naggingContext: {
@@ -244,6 +253,7 @@ async function serviceTier2(
     },
     recentTitles: titles,
     excerpt,
+    timeContext,
   })
   // Drop the result if the goal changed (new revision, or cleared) while Tier-2 was in
   // flight — otherwise a verdict/nag judged under the old goal lands against the new one.

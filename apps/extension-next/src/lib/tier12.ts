@@ -30,6 +30,7 @@ export interface Tier2Context {
   naggingContext: Record<string, unknown>
   recentTitles: readonly RecentTitle[]
   excerpt: string | null
+  timeContext: Record<string, unknown> | null
 }
 
 const OLLAMA_KEY = "kibitzer:ollama:v2"
@@ -184,7 +185,7 @@ export async function testOllama(input: Partial<OllamaConfig>): Promise<OllamaTe
 export async function tier2Confirm(
   goalText: string,
   page: { title: string; urlHost: string; score: number },
-  ctx: Tier2Context = { nagCount: 1, naggingContext: {}, recentTitles: [], excerpt: null },
+  ctx: Tier2Context = { nagCount: 1, naggingContext: {}, recentTitles: [], excerpt: null, timeContext: null },
 ): Promise<Tier2Outcome> {
   const p = await providers()
   if (!p) return { flow: "ok", message: null }
@@ -203,7 +204,7 @@ export async function tier2Confirm(
       ctx.recentTitles,
       ctx.excerpt, // page body text → page_excerpt (content evidence for the judge)
       [],
-      null,
+      ctx.timeContext,
     )
     decision = await p.tier2.decideTier2(reviewPayload)
     void recordProviderOk()
@@ -221,7 +222,7 @@ export async function tier2Confirm(
     { rawText: goalText },
     observation,
     decision,
-    null,
+    ctx.timeContext,
     ctx.naggingContext,
   )
   try {
