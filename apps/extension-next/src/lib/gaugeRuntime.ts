@@ -17,6 +17,7 @@ import { playChime } from "./chime.ts"
 import { shouldDropUrl } from "./domainFilter.ts"
 import { pageKeyOf } from "./url.ts"
 import { extractPageExcerpt } from "../content/pageExcerpt.ts"
+import { updateBadge } from "./badge.ts"
 
 const EXCERPT_LIMIT = 3500 // extraction cap; the Tier-2 payload re-cleans to 3000
 import {
@@ -131,6 +132,7 @@ export function dispatch(event: GaugeEvent, goal: SessionGoal | null): Promise<v
       )
     }
     await saveState(transition.state)
+    updateBadge(transition.state, goal, event.ts) // reflect live status on the toolbar
     // Mark when a drift episode began, so the celebration can say how long they were away.
     if (state.activeVerdict !== "DRIFT" && transition.state.activeVerdict === "DRIFT") {
       await setDriftSince(event.ts)

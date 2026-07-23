@@ -12,6 +12,7 @@ import { currentState, dispatch, resetState, setActivePage, testNag } from "./li
 import { getOllamaConfig, ollamaEnabled, setOllamaConfig, testOllama, tier1Rescue } from "./lib/tier12.ts"
 import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
 import { getProviderHealth } from "./lib/providerHealth.ts"
+import { clearBadge } from "./lib/badge.ts"
 import { markNagActed, recordObservation } from "./lib/history.ts"
 import { clearLog, exportLog, klog, logText } from "./lib/klog.ts"
 import { shouldDropUrl } from "./lib/domainFilter.ts"
@@ -269,6 +270,8 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
       // Test shortcut: goal "알림보기" fires a nag notification right away.
       if (goal.text === "알림보기") await testNag(goal)
       void observeActiveTab()
+    } else {
+      clearBadge() // goal cleared → no status to show
     }
     return { goal }
   }
