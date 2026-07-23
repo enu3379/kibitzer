@@ -47,7 +47,9 @@ export interface GaugeConfig {
   tauM: number; // inertia time constant (s)
   tUp: number[]; // promotion thresholds (tier i -> i+1)
   tDown: number[]; // demotion thresholds (tier i+1 -> i)
-  kRecover: number; // recovery denominator in (1-m)/k
+  kRecover: number; // recovery denominator K in (1-m)/K
+  recoverGamma: number; // exponential gain on return-inertia depth (issue #122 "F")
+  recoverFMax: number; // cap on the recovery boost e^(gamma*max(-m,0))
   gapCap: number; // heartbeat gap cap (s)
   rRenag: number;
   bBackoff: number;

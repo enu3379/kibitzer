@@ -121,7 +121,10 @@ function advance(state: GaugeState, now: number, config: GaugeConfig): GaugeTran
     st = { ...st, s: Math.max(0, st.s - drain), renagDebt: st.renagDebt + drain };
     st = maybeRenag(st, config, effects, now);
   } else {
-    const gain = config.rRecover * ((1 - st.m) / config.kRecover) * w * delta;
+    // Recovery accelerates with return-inertia depth (issue #122 "F"): slow just
+    // after a return (m>=0 -> boost 1), accelerating as m deepens negative, capped.
+    const boost = Math.min(Math.exp(config.recoverGamma * Math.max(-st.m, 0)), config.recoverFMax);
+    const gain = config.rRecover * ((1 - st.m) / config.kRecover) * boost * w * delta;
     st = { ...st, s: Math.min(100, st.s + gain) };
   }
 
