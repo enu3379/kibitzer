@@ -43,6 +43,11 @@ export async function embedText(text: string): Promise<number[]> {
   return vector
 }
 
+/** Batch-embed strings (goal-enrichment phrases). Returns L2-normalized vectors. */
+export async function embedTexts(texts: string[]): Promise<number[][]> {
+  return embedder().embed(texts)
+}
+
 export interface Tier0Result {
   score: number
   verdict: Verdict

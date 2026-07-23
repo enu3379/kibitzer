@@ -7,10 +7,11 @@
 // A 1-min alarm feeds heartbeats so dwell time (not click count) drives the gauge.
 
 import { getGoal, setGoal, type SessionGoal } from "./lib/session.ts"
-import { embedText, judgeTier0, TAU_OK } from "./lib/tier0.ts"
-import { addExemplar, admissionEligible, admitAnchor, loadRefs } from "./lib/relevance.ts"
+import { embedText, embedTexts, judgeTier0, TAU_OK } from "./lib/tier0.ts"
+import { addExemplar, admissionEligible, admitAnchor, loadRefs, setDerived } from "./lib/relevance.ts"
+import { filterDerivedPhrases, MAX_PHRASES } from "./lib/goalEnrichment.ts"
 import { currentState, dispatch, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
-import { getOllamaConfig, ollamaEnabled, setOllamaConfig, testOllama, tier1Rescue } from "./lib/tier12.ts"
+import { enrichGoal, getOllamaConfig, ollamaEnabled, setOllamaConfig, testOllama, tier1Rescue } from "./lib/tier12.ts"
 import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
 import { getProviderHealth } from "./lib/providerHealth.ts"
 import { clearBadge } from "./lib/badge.ts"
@@ -104,6 +105,24 @@ async function judgeAndDispatch(url: string, title: string, obsKey: string): Pro
 async function observeActiveTab(): Promise<void> {
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
   if (tab) await observe(tab.url, tab.title)
+}
+
+/** Expand the goal into cross-lingual derived exemplars (Tier 1 → embed → dedup → store).
+ *  Fire-and-forget on goal change; dropped if the goal moves on while enriching. */
+async function enrichGoalDerived(goal: SessionGoal): Promise<void> {
+  if (!(await ollamaEnabled())) return
+  try {
+    const phrases = await enrichGoal(goal.text)
+    if (phrases.length === 0) return
+    const derived = await filterDerivedPhrases(phrases, goal.text, MAX_PHRASES, embedTexts)
+    const current = await getGoal()
+    if (!current || current.revision !== goal.revision) return // goal changed meanwhile
+    await setDerived(derived.map((d) => d.vector))
+    klog(`goal enriched: ${derived.length} phrases [${derived.map((d) => d.phrase).join(" · ")}]`)
+    logEvent("enrich", { count: derived.length, phrases: derived.map((d) => d.phrase) })
+  } catch (error) {
+    klog(`goal enrichment error: ${String(error)}`)
+  }
 }
 
 function ensureHeartbeat(): void {
@@ -289,6 +308,8 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
       // Test shortcut: goal "알림보기" fires a nag notification right away.
       if (goal.text === "알림보기") await testNag(goal)
       void observeActiveTab()
+      // Enrich the goal into cross-lingual Tier-0 exemplars (only when it actually changed).
+      if (previous?.revision !== goal.revision) void enrichGoalDerived(goal)
     } else {
       clearBadge() // goal cleared → no status to show
     }
