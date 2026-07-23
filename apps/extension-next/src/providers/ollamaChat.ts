@@ -76,7 +76,9 @@ export class OllamaChatJudgeProvider implements JudgeProvider {
     this.timeoutMs = options.timeoutMs ?? 120_000
     this.maxOutputTokens = options.maxOutputTokens ?? 512
     this.writerMaxOutputTokens = options.writerMaxOutputTokens ?? 1024
-    this.fetchFn = options.fetch ?? globalThis.fetch
+    // Bind to the global scope: this.fetchFn(...) would otherwise call fetch with
+    // `this` = the provider, which throws "Illegal invocation" in a service worker.
+    this.fetchFn = options.fetch ?? globalThis.fetch.bind(globalThis)
   }
 
   async classifyTier1(payload: Record<string, unknown>): Promise<Tier1Result> {
