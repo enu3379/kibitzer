@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kibitzer 리플레이</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --page: #f2f5f3; --page-ink: #1c2420; --page-ink-2: #57635c; --page-ink-3: #8a958f;
+        --surface: #ffffff; --surface-2: #eef3f0; --line: #dce4df; --line-soft: #e7ede9;
+        --accent: #1e7a4c; --accent-soft: #e2f1e8; --warn: #d97706; --err: #bf4540;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --page: #161b18; --page-ink: #e9efeb; --page-ink-2: #a8b4ad; --page-ink-3: #79857e;
+          --surface: #232a26; --surface-2: #2e3733; --line: #3c463f; --line-soft: #333d37;
+          --accent: #4cc585; --accent-soft: #2a4536; --warn: #e3bc6a; --err: #e07a72;
+        }
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--page); color: var(--page-ink);
+        font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Malgun Gothic", system-ui, sans-serif; line-height: 1.5; }
+      .frame { max-width: 720px; margin: 0 auto; padding: 40px 24px 72px; }
+      h1 { font-size: 22px; font-weight: 800; letter-spacing: -.02em; margin: 0 0 4px; }
+      .lede { color: var(--page-ink-2); font-size: 13.5px; margin: 0 0 24px; }
+      .card { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
+      .card h3 { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--page-ink-3); text-transform: uppercase; margin: 0 0 10px; }
+      .muted { color: var(--page-ink-2); font-size: 12.5px; }
+      button.btn { all: unset; cursor: pointer; font-size: 12.5px; font-weight: 650; padding: 6px 13px; border-radius: 8px;
+        background: var(--surface-2); color: var(--page-ink); border: 1px solid var(--line); }
+      button.btn:hover { border-color: var(--accent); }
+      .rowline { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+      table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+      th, td { text-align: right; padding: 5px 8px; border-top: 1px solid var(--line-soft); }
+      th:first-child, td:first-child { text-align: left; }
+      thead th { color: var(--page-ink-3); font-weight: 600; border-top: none; }
+      tr.cur { background: var(--accent-soft); }
+      tr.cur td { font-weight: 700; }
+      .big { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
+      input[type="range"] { width: 100%; accent-color: var(--accent); }
+      .kv { display: flex; gap: 6px; align-items: baseline; }
+      .kv .v { font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+      canvas { width: 100%; height: 160px; display: block; margin-top: 8px; border-radius: 8px; background: var(--surface-2); }
+      .warnnote { color: var(--warn); font-size: 11.5px; margin-top: 8px; }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <h1>Kibitzer 리플레이</h1>
+      <p class="lede">기록된 세션(이벤트 로그)을 다른 판정 감도로 재실행 — "이 tau였으면 훈수가 언제 떴을까"를 라이브 튜닝 없이 확인합니다. 서버 없이 확장 안에서 동작.</p>
+
+      <div class="card">
+        <h3>소스</h3>
+        <div class="rowline">
+          <button class="btn" id="loadDb">현재 기록 불러오기</button>
+          <button class="btn" id="pickFile">JSONL 파일…</button>
+          <input type="file" id="file" accept=".jsonl,.json,application/json" hidden />
+          <span class="muted" id="src">—</span>
+        </div>
+      </div>
+
+      <div class="card" id="results" hidden>
+        <h3>tau 스윕 — 관측 재문턱</h3>
+        <table id="sweep">
+          <thead><tr><th>tau_ok</th><th>관련(OK)</th><th>이탈(DRIFT)</th><th>기록 대비 뒤집힘</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p class="muted" id="sweepNote" style="margin-top:8px"></p>
+      </div>
+
+      <div class="card" id="gaugeCard" hidden>
+        <h3>게이지 재실행 — 훈수 발생</h3>
+        <div class="kv"><span class="muted">tau_ok</span><span class="v" id="gTau">0.59</span></div>
+        <input type="range" id="gauge" min="0.40" max="0.80" step="0.01" value="0.59" />
+        <div class="rowline" style="margin-top:8px">
+          <span class="big" id="nagCount">0</span><span class="muted">회 훈수 발생 (degraded 모드 · LLM 없이)</span>
+        </div>
+        <canvas id="chart" width="680" height="160"></canvas>
+        <p class="warnnote">근사: 관측 사이를 사용자가 계속 보고 있었다고 가정하고 하트비트를 합성합니다(긴 공백은 유휴로 처리). 실제 프레즌스 게이팅은 반영 안 됨.</p>
+      </div>
+    </div>
+    <script type="module" src="replay.js"></script>
+  </body>
+</html>

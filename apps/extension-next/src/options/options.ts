@@ -139,6 +139,10 @@ const exportClick = (btn: HTMLButtonElement, type: string, label: string) =>
 exportClick(exportLog, "export-log", "디버그 로그 파일")
 exportClick(exportEvents, "export-events", "이벤트 JSON")
 
+$<HTMLButtonElement>("openReplay").addEventListener("click", () => {
+  void chrome.tabs.create({ url: chrome.runtime.getURL("replay/replay.html") })
+})
+
 wipe.addEventListener("click", async () => {
   if (!confirm("모든 활동 데이터(게이지·이력·학습·이벤트·나깅)를 삭제할까요? 목표·키·말투는 유지됩니다.")) return
   await send({ type: "delete-all-data" })
