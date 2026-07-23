@@ -1,0 +1,47 @@
+{
+  "name": "one-heartbeat-drift-drain",
+  "kind": "golden",
+  "description": "One 60s heartbeat on a DRIFT page. S drains by rDrain*accel[0]*60 (=6). Inertia m rises to 1-exp(-60/300). m < tUp[0] so accelTier stays 0; no effects.",
+  "config": {
+    "rDrain": 0.1,
+    "rRecover": 0.1,
+    "accel": [1.0, 1.5, 2.5],
+    "tauM": 300,
+    "tUp": [0.5, 0.8],
+    "tDown": [0.2, 0.5],
+    "kRecover": 2,
+    "gapCap": 90,
+    "rRenag": 40,
+    "bBackoff": 2.0,
+    "rRenagMax": 320,
+    "cArm": 20,
+    "cCelebrate": 80,
+    "rDismiss": 30,
+    "bRefund": 10,
+    "freshWindow": 600,
+    "degradedP": 3,
+    "degradedM": 0.25
+  },
+  "initial_state": {
+    "s": 100,
+    "m": 0,
+    "accelTier": 0,
+    "updatedAt": 0,
+    "activePageKey": "example.com/drift",
+    "activeVerdict": "DRIFT",
+    "degraded": false
+  },
+  "events": [
+    { "type": "heartbeat", "ts": 60000 }
+  ],
+  "tolerance": 1e-6,
+  "expected": {
+    "final_state": {
+      "s": 94.0,
+      "m": 0.18126924692201818,
+      "accelTier": 0,
+      "updatedAt": 60000
+    },
+    "effects_contain": []
+  }
+}

@@ -262,6 +262,56 @@ updated too. The detector's original stored verdict remains immutable so Replay
 CLI can still measure false-OK/false-DRIFT against the page label. User-declared
 drift does not synthesize a new nag at click time.
 
+### D9 — Gauge controller: v0 semantics locked, TypeScript-first rollout → RESOLVED (design, 2026-07-21)
+
+The gauge design (`docs/analysis-plan-a-gauge-design.md`, PR #121) is the v0
+behavior contract, superseding plan A (`AlignmentController`) and — on the
+shipping path — plan B (`StreakController`). §1–§6 (state model, dynamics, Tier 2
+dual gate, nag/renag/celebration semantics) are frozen as the contract; every
+numeric knob in §8 stays a placeholder until D4 Replay-CLI calibration.
+
+Semantics-affecting open questions (§10) decided (2026-07-21):
+- **Q1 S recovery ceiling → full recovery to 100** (no session cap; revisit by dogfooding).
+- **Q3 degraded-mode OK-side margin → keep as designed** (both directions weighted
+  by `f(margin)`); revisit later.
+- **Q4 plan B → dropped from consideration entirely.** `StreakController` survives
+  only as the current shipping default until the Python server is removed; it is not
+  a design constraint (no shared-component compromise).
+- **Q7 page-switch impulse → disabled (`J_page = 0`)**; not in v0.
+- **Q5 recovery denominator → resolved by issue #122 "F"** (2026-07-22): the OK-branch
+  recovery multiplier becomes `((1-m)/K) · min(exp(γ·max(-m,0)), F_max)` (K=2.45, γ=3.0,
+  F_max=6.0, placeholders). Slow just after a return, accelerating with sustained
+  return-inertia depth — no new state variable (reuses m), robust to a single false-DRIFT.
+  Fixes the drain(2.5×)/recovery(1×) asymmetry; full refill drops ~20 min → ~10 min and
+  celebration arrives sooner. Adopted in both reducers; benchmark stays byte-identical.
+
+Rollout revised to **TypeScript-first**, superseding the Python stage roadmap in
+gauge-design §9. Because the endgame is a full TS/serverless refactor (Tier 0 WASM
++ Ollama Tier 1/2 + Gauge in the extension, Python server removed), the gauge is
+built once in TS rather than in Python then re-ported:
+1. Pure `reduceGauge(state, event, config)` core under `apps/extension/src/core/gauge/`
+   — no Chrome/IndexedDB/network/notification code. Language-neutral JSON fixtures
+   (each bundling its config) from the PR #121 simulator are the source of truth.
+2. Shadow mode: consume existing server Tier 0/1 verdicts + the local heartbeat
+   clock; record/display S/m/accel only; the existing controller keeps nagging.
+3. After shadow validation → IndexedDB SSOT (outbox: state + effects in one txn;
+   `chrome.storage.session`/worker memory are not authoritative).
+4. Move Tier 0 WASM + Ollama providers to TS, then switch the gauge to the real
+   trigger and remove the Python server. A single SSOT only from the moment the
+   gauge nags.
+
+Consequence: the Python-side stage 0 (all-page dwell in `observations.py`/`sqlite.py`)
+and `gauge.py`/`gauge_states` from §9 are **not built** — the TS gauge derives dwell
+from its own heartbeat clock. Degraded-mode margin (§3.2) needs `r0`/`tau_ok`, which
+`PipelineResult` does not currently expose to the extension; defer degraded mode or
+add those fields when it is first exercised.
+
+**Ship timing → RESOLVED (2026-07-22):** the gauge stays shadow until the TS cutover —
+**no interim Python trigger.** The Python reducer (`gauge.py`) was validation-only:
+its sole job was to confirm the design runs correctly (byte-identical to TS over the
+benchmark), which is done. Work proceeds **TypeScript-only**; the Python reducer is a
+frozen reference deleted with the server. Canonical roadmap: `docs/ts-migration-plan.md`.
+
 ## Backlog (consolidated 2026-07-08, post-P1)
 
 P0 + P1 + detection fixes + Ollama Cloud stack are all shipped. What remains,
