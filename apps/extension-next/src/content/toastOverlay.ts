@@ -129,4 +129,32 @@ export function showKibitzerToast(payload: ToastPayload): void {
   shadow.querySelector(".card")?.addEventListener("click", () => settle(celebration ? "dismissed" : "accepted"))
 
   document.documentElement.appendChild(host)
+
+  // A subtle two-note chime so the toast is noticed off-screen. Chrome's autoplay policy
+  // allows this once the user has interacted with the page (they were just browsing it);
+  // if it's still blocked, the visual bubble stands on its own.
+  try {
+    const ac = new AudioContext()
+    void ac.resume?.()
+    const beep = (freq: number, at: number, dur: number): void => {
+      const osc = ac.createOscillator()
+      const gain = ac.createGain()
+      osc.type = "sine"
+      osc.frequency.value = freq
+      const t0 = ac.currentTime + at
+      gain.gain.setValueAtTime(0.0001, t0)
+      gain.gain.exponentialRampToValueAtTime(0.05, t0 + 0.02)
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur)
+      osc.connect(gain).connect(ac.destination)
+      osc.start(t0)
+      osc.stop(t0 + dur)
+    }
+    // Celebration: a rising major third (warm). Intervention: a gentle down-step (a nudge).
+    const notes = celebration ? [659.25, 987.77] : [783.99, 587.33]
+    beep(notes[0], 0, 0.14)
+    beep(notes[1], 0.13, 0.18)
+    window.setTimeout(() => void ac.close?.(), 700)
+  } catch {
+    // No Web Audio / autoplay blocked — the visual toast is enough.
+  }
 }

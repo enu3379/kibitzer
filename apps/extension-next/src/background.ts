@@ -11,6 +11,7 @@ import { judgeTier0, TAU_OK } from "./lib/tier0.ts"
 import { currentState, dispatch, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
 import { getOllamaConfig, ollamaEnabled, setOllamaConfig, testOllama, tier1Rescue } from "./lib/tier12.ts"
 import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
+import { markNagActed, recordObservation } from "./lib/history.ts"
 
 const HEARTBEAT_ALARM = "kibitzer-next-heartbeat"
 
@@ -52,9 +53,11 @@ async function observe(url: string | undefined, title: string | undefined): Prom
     verdict = await tier1Rescue(goal.text, title, urlHost) // Tier 1 may rescue to OK
   }
   console.log(`[kbz] observe ${pageKey} tier0=${tier0Verdict}(${score.toFixed(2)}) final=${verdict}`)
+  const now = Date.now()
   await setActivePage({ pageKey, title, urlHost, score })
+  await recordObservation({ title, urlHost, verdict, ts: now }) // recent_titles / repeat context
   await dispatch(
-    { type: "nav", pageKey, verdict, r0: score, tauOk: TAU_OK, degraded: !enabled, ts: Date.now() },
+    { type: "nav", pageKey, verdict, r0: score, tauOk: TAU_OK, degraded: !enabled, ts: now },
     goal,
   )
 }
@@ -116,6 +119,7 @@ interface PopupMessage {
   tier1Model?: string
   tier2Model?: string
   persona?: string
+  displayToken?: number
 }
 
 async function handleMessage(message: PopupMessage): Promise<unknown> {
@@ -176,6 +180,11 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     return { goal }
   }
   if (message?.type === "kibitzer:toast-feedback") {
+    // Any explicit response (not a silent timeout) marks the nag as acted on, so the
+    // next nag's last_nag_ignored is accurate. Celebration tokens won't match a nag.
+    if (message.kind && message.kind !== "timeout" && typeof message.displayToken === "number") {
+      await markNagActed(message.displayToken)
+    }
     const goal = await getGoal()
     if (goal) {
       const now = Date.now()

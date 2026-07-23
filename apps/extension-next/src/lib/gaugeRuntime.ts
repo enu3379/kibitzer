@@ -11,12 +11,19 @@ import { initGaugeState } from "../core/gauge/types.ts"
 import type { GaugeConfig, GaugeEffect, GaugeEvent, GaugeState } from "../core/gauge/types.ts"
 import { showKibitzerToast, type ToastPayload } from "../content/toastOverlay.ts"
 import { tier2Confirm } from "./tier12.ts"
-import { activePersona, pickCelebrate } from "./personas.ts"
+import { activePersona, pickCelebrate, pickFallback } from "./personas.ts"
+import {
+  clearHistory,
+  lastNagIgnored,
+  nagCountToday,
+  recentTitles,
+  recordNag,
+  repeatHost,
+} from "./history.ts"
 import type { SessionGoal } from "./session.ts"
 
 const STATE_KEY = "kibitzer:gauge-state:v1"
 const ACTIVE_PAGE_KEY = "kibitzer:active-page:v1"
-const NAG_COUNT_KEY = "kibitzer:nag-count:v1"
 const DRIFT_SINCE_KEY = "kibitzer:drift-since:v1"
 
 export interface ActivePage {
@@ -64,33 +71,33 @@ export async function currentState(): Promise<GaugeState> {
 export async function resetState(): Promise<void> {
   await chrome.storage.session.set({
     [STATE_KEY]: initGaugeState(),
-    [NAG_COUNT_KEY]: 0,
     [DRIFT_SINCE_KEY]: null,
   })
+  await clearHistory() // a new goal starts a fresh nag/visit context
 }
 
-// --- persona message context (nag ordinal + time-away) ---------------------------
-
-async function getNagCount(): Promise<number> {
-  const stored = await chrome.storage.session.get(NAG_COUNT_KEY)
-  const value = stored[NAG_COUNT_KEY]
-  return typeof value === "number" ? value : 0
-}
-
-async function bumpNagCount(): Promise<void> {
-  await chrome.storage.session.set({ [NAG_COUNT_KEY]: (await getNagCount()) + 1 })
-}
+// --- drift timing (persona drift_minutes + celebration return_minutes) -----------
 
 async function setDriftSince(ts: number | null): Promise<void> {
   await chrome.storage.session.set({ [DRIFT_SINCE_KEY]: ts })
 }
 
-/** Minutes since drift began (≥1), for the persona celebration templates. */
-async function returnMinutes(now: number): Promise<number> {
+async function driftSince(): Promise<number | null> {
   const stored = await chrome.storage.session.get(DRIFT_SINCE_KEY)
   const since = stored[DRIFT_SINCE_KEY]
-  if (typeof since !== "number") return 1
-  return Math.max(1, Math.round((now - since) / 60_000))
+  return typeof since === "number" ? since : null
+}
+
+/** Minutes since drift began (≥1), for the persona celebration templates. */
+async function returnMinutes(now: number): Promise<number> {
+  const since = await driftSince()
+  return since == null ? 1 : Math.max(1, Math.round((now - since) / 60_000))
+}
+
+/** Minutes off-goal so far (null when not drifting) — the persona's drift_minutes. */
+async function driftMinutes(now: number): Promise<number | null> {
+  const since = await driftSince()
+  return since == null ? null : Math.max(0, Math.round((now - since) / 60_000))
 }
 
 function configFor(goal: SessionGoal | null): GaugeConfig {
@@ -146,11 +153,25 @@ async function deliver(effect: GaugeEffect, goal: SessionGoal | null, ts: number
     return
   }
   if (effect.type === "nag") {
-    const message = pendingNagMessage
-      ?? `'${goalText}' 흐름에서 벗어난 것 같아요. 계속 필요한 곁가지인지 확인해볼까요?`
+    const page = await getActivePage()
+    // Persona voice for EVERY nag: the Tier-2 Writer message when we have one (fresh
+    // gate), otherwise the persona's fallback template. This covers degraded mode,
+    // renags, cached-drift nags, and the "알림보기" test — all were showing the plain
+    // line before. The generic sentence is only a last resort (no persona templates).
+    let message = pendingNagMessage
     pendingNagMessage = null
-    await bumpNagCount()
-    await showToast(message, effect.pageKey, "intervention")
+    if (!message) {
+      const persona = await activePersona()
+      const nagCount = (await nagCountToday(ts)) + 1
+      message =
+        pickFallback(persona, nagCount, {
+          goal: goalText,
+          title: page?.title || page?.urlHost || "현재 페이지",
+          host: page?.urlHost || "현재 페이지",
+        }) ?? `'${goalText}' 흐름에서 벗어난 것 같아요. 계속 필요한 곁가지인지 확인해볼까요?`
+    }
+    const token = await showToast(message, effect.pageKey, "intervention")
+    if (token != null) await recordNag({ ts, host: page?.urlHost ?? "", token })
   } else if (effect.type === "celebrate") {
     // Celebrate in the selected persona's voice; fall back to the plain line.
     const persona = await activePersona()
@@ -168,9 +189,26 @@ async function serviceTier2(
 ): Promise<void> {
   const page = await getActivePage()
   if (!page || page.pageKey !== effect.pageKey) return
-  // The nag we're about to (maybe) produce is the next ordinal — drives persona flavor.
-  const nagCount = (await getNagCount()) + 1
-  const outcome = await tier2Confirm(goal?.text ?? "", page, { nagCount })
+  // Build the persona's message context from the nag / visit history (mirrors the
+  // server's _nagging_context). nag_count_today is the count BEFORE this nag.
+  const now = Date.now()
+  const [count, ignored, repeat, drift, titles] = await Promise.all([
+    nagCountToday(now),
+    lastNagIgnored(),
+    repeatHost(page.urlHost),
+    driftMinutes(now),
+    recentTitles(),
+  ])
+  const outcome = await tier2Confirm(goal?.text ?? "", page, {
+    nagCount: count + 1,
+    naggingContext: {
+      nag_count_today: count,
+      last_nag_ignored: ignored,
+      drift_minutes: drift,
+      repeat_host: repeat,
+    },
+    recentTitles: titles,
+  })
   console.log(`[kbz] tier2 gate (${effect.reason}) on ${effect.pageKey} -> ${outcome.flow}`)
   // The Writer's message rides along to the nag toast (if drift is confirmed).
   if (outcome.flow === "drift" && outcome.message) pendingNagMessage = outcome.message
@@ -183,17 +221,19 @@ async function serviceTier2(
 let toastToken = 0
 
 /** Render the in-page toast overlay in the active tab (matches apps/extension —
- *  a quiet on-page bubble, not an OS notification). Injected via executeScript. */
+ *  a quiet on-page bubble, not an OS notification). Injected via executeScript.
+ *  Returns the toast's displayToken (to log the nag), or null if it couldn't show. */
 async function showToast(
   message: string,
   contextLabel: string | null,
   kind: "intervention" | "celebration",
-): Promise<void> {
+): Promise<number | null> {
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
-  if (!tab?.id) return
+  if (!tab?.id) return null
+  const token = (toastToken += 1)
   const payload: ToastPayload = {
     notificationId: `kbz-${Date.now()}`,
-    displayToken: (toastToken += 1),
+    displayToken: token,
     message,
     contextLabel,
     autoDismissMs: 12_000,
@@ -205,7 +245,9 @@ async function showToast(
       func: showKibitzerToast,
       args: [payload],
     })
+    return token
   } catch {
     // Some pages (chrome://, the web store) block injection — skip silently.
+    return null
   }
 }
