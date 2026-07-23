@@ -9,7 +9,7 @@ import {
 test("provider shadow defaults to local Tier 0 and no network providers", () => {
   assert.deepEqual(parseProviderShadowConfig(undefined), {
     version: 1,
-    tier0: { enabled: true, tauOk: 0.6 },
+    tier0: { enabled: true, tauOk: 0.59 },
     tier1: null,
     tier2: null,
   })

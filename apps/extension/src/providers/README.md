@@ -44,7 +44,7 @@ from the extension service-worker console:
 await chrome.storage.local.set({
   "kibitzer:ts-provider-config:v1": {
     version: 1,
-    tier0: { enabled: true, tauOk: 0.6 },
+    tier0: { enabled: true, tauOk: 0.59 },
     tier1: {
       enabled: true,
       apiUrl: "http://127.0.0.1:11434/api/chat",
