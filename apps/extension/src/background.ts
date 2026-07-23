@@ -6,6 +6,7 @@ import {
   PageInfo,
   PageExcerpt,
   PipelineResult,
+  getCurrentSession,
   getLatestObservation,
   getSettings,
   getSessionState,
@@ -21,6 +22,11 @@ import {
 import { createBadgeRefresher } from "./lib/badgeRefresh"
 import { shouldDropUrl } from "./lib/domainFilter"
 import { D7ReviewScheduler, isD7ReviewAlarmName } from "./lib/d7ReviewScheduler"
+import {
+  GAUGE_SHADOW_STORAGE_KEY,
+  GaugeShadowController,
+} from "./lib/gaugeShadow"
+import type { GaugeShadowSnapshot } from "./lib/gaugeShadow"
 import {
   ExplorationResponseKind,
   ExplorationVerdict,
@@ -104,6 +110,7 @@ const latestObservationTokens = new Map<number, string>()
 const pendingToasts = new Map<string, PendingToast>()
 const activeD7Observations = new Map<number, ActiveD7Observation>()
 let goalObservationTail: Promise<void> = Promise.resolve()
+let gaugeShadowWorkTail: Promise<void> = Promise.resolve()
 const d7ReviewScheduler = new D7ReviewScheduler(async (observationId) => {
   await ensureD7ObservationsRestored()
   if (![...activeD7Observations.values()].some((item) => item.observationId === observationId)) return
@@ -118,6 +125,118 @@ const D7_TRACKING_STORAGE_KEY = "d7ActiveObservations"
 const ACTIVE_PAGE_ATTENTION_PREFIX = "kibitzer:active-page-attention:"
 let d7ObservationsRestorePromise: Promise<void> | null = null
 let d7ObservationsPersistTail: Promise<void> = Promise.resolve()
+
+interface GaugeShadowContext {
+  sessionId: string
+  goalMinutes: number | null
+}
+
+const gaugeShadow = new GaugeShadowController({
+  async load() {
+    const data = await chrome.storage.session.get(GAUGE_SHADOW_STORAGE_KEY)
+    return data[GAUGE_SHADOW_STORAGE_KEY]
+  },
+  async save(snapshot) {
+    await chrome.storage.session.set({ [GAUGE_SHADOW_STORAGE_KEY]: snapshot })
+  },
+  async clear() {
+    await chrome.storage.session.remove(GAUGE_SHADOW_STORAGE_KEY)
+  },
+})
+let gaugeShadowContext: GaugeShadowContext | null = null
+
+function runGaugeShadowWork<T>(task: () => Promise<T>): Promise<T> {
+  const result = gaugeShadowWorkTail.then(task, task)
+  gaugeShadowWorkTail = result.then(
+    () => undefined,
+    () => undefined,
+  )
+  return result
+}
+
+async function runGaugeShadowSafely(task: () => Promise<void>): Promise<void> {
+  try {
+    await runGaugeShadowWork(task)
+  } catch (error) {
+    // Shadow diagnostics must never interrupt the shipping controller path.
+    console.warn("kibitzer: gauge shadow update failed", error)
+  }
+}
+
+async function ensureGaugeShadowContext(): Promise<GaugeShadowContext | null> {
+  if (gaugeShadowContext) return gaugeShadowContext
+  const current = await getCurrentSession()
+  if (!current?.session.active || !current.goal) return null
+  gaugeShadowContext = {
+    sessionId: current.session.id,
+    goalMinutes: current.goal.available_time_minutes ?? null,
+  }
+  await gaugeShadow.ensureSession(
+    gaugeShadowContext.sessionId,
+    gaugeShadowContext.goalMinutes,
+    Date.now(),
+  )
+  return gaugeShadowContext
+}
+
+async function resetGaugeShadow(goal: GoalInfo): Promise<void> {
+  gaugeShadowContext = {
+    sessionId: goal.session_id,
+    goalMinutes: goal.available_time_minutes ?? null,
+  }
+  await gaugeShadow.ensureSession(
+    gaugeShadowContext.sessionId,
+    gaugeShadowContext.goalMinutes,
+    Date.now(),
+    true,
+  )
+}
+
+async function clearGaugeShadow(): Promise<void> {
+  gaugeShadowContext = null
+  await gaugeShadow.clear()
+}
+
+async function currentGaugeShadowSnapshot(): Promise<GaugeShadowSnapshot | null> {
+  const context = await ensureGaugeShadowContext()
+  if (!context) return null
+  return gaugeShadow.snapshot(context.sessionId)
+}
+
+async function recordGaugeShadowPresence(
+  kind: "active" | "heartbeat" | "inactive",
+): Promise<void> {
+  await runGaugeShadowSafely(async () => {
+    if (!(await ensureGaugeShadowContext())) return
+    const ts = Date.now()
+    // Both leaving and resuming rebase the clock. This keeps inactive wall time
+    // out of the reducer even though GaugeState intentionally has no active flag.
+    await gaugeShadow.dispatch(
+      kind === "heartbeat"
+        ? { type: "heartbeat", ts }
+        : { type: "inactive", ts },
+    )
+  })
+}
+
+async function recordGaugeShadowNav(
+  url: string,
+  result: PipelineResult | null,
+): Promise<void> {
+  const verdict = result?.verdict
+  if (verdict !== "OK" && verdict !== "DRIFT") return
+  await runGaugeShadowSafely(async () => {
+    if (!(await ensureGaugeShadowContext())) return
+    const page = new URL(url)
+    const pathHash = await urlPathHashFor(url)
+    await gaugeShadow.dispatch({
+      type: "nav",
+      pageKey: `${page.hostname}:${pathHash}`,
+      verdict,
+      ts: Date.now(),
+    })
+  })
+}
 
 function ensureD7ObservationsRestored(): Promise<void> {
   if (!d7ObservationsRestorePromise) {
@@ -250,6 +369,7 @@ async function setGoalAndScheduleCurrentPage(
   return runGoalObservationTask(async () => {
     const goal = await setGoal(rawGoalText, availableTimeMinutes, true)
     if (!goal) return { ok: false, immediate: false }
+    await runGaugeShadowSafely(() => resetGaugeShadow(goal))
     const scheduled = await scheduleCurrentPageForReadyGoal()
     return { ok: true, goal, immediate: scheduled.immediate }
   })
@@ -397,12 +517,14 @@ async function sendD7Presence(
   kind: "active" | "heartbeat" | "inactive",
 ): Promise<void> {
   if (kind !== "inactive" && !(await tabStillActivelyViewed(tabId, tracked.url))) return
+  await recordGaugeShadowPresence(kind)
   const result = await postObservationPresence(tracked.observationId, {
     event_id: newPresenceEventId(),
     kind,
     tab_id: tabId,
     url_path_hash: tracked.urlPathHash,
   })
+  await recordGaugeShadowNav(tracked.url, result)
   if (
     kind !== "inactive" &&
     result?.next_review_check_seconds &&
@@ -523,6 +645,7 @@ async function processObservationDwell(record: ObservationDwellRecord): Promise<
   if (attempt.cancelled) return "cancel"
   const result = attempt.result
   if (!result) return "retry"
+  await recordGaugeShadowNav(record.url, result)
   await updateHistoryWithPipelineResult(record.historyId, result, tab.title ?? "")
   if (result.observation_id) {
     await captureD7ContentAndActivate(record.tabId, result.observation_id, record.url)
@@ -564,6 +687,7 @@ async function processTier2Dwell(record: Tier2DwellRecord): Promise<DwellOutcome
 
   const result = await postObservationExcerpt(record.observationId, excerpt)
   if (!result) return "retry"
+  await recordGaugeShadowNav(record.url, result)
   await updateHistoryResponse(record.historyId, result)
   if (
     result.action === "notify" &&
@@ -915,6 +1039,20 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 chrome.runtime.onMessage.addListener(
   (message: RuntimeMessage | undefined, _sender, sendResponse) => {
+    if (message?.type === "kibitzer:get-gauge-shadow") {
+      void runGaugeShadowWork(currentGaugeShadowSnapshot).then(
+        (snapshot) => sendResponse({ snapshot }),
+        () => sendResponse({ snapshot: null }),
+      )
+      return true
+    }
+    if (message?.type === "kibitzer:clear-gauge-shadow") {
+      void runGaugeShadowWork(clearGaugeShadow).then(
+        () => sendResponse({ ok: true }),
+        () => sendResponse({ ok: false }),
+      )
+      return true
+    }
     if (
       message?.type === "kibitzer:update-history-verdict" &&
       message.observationId &&

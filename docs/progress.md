@@ -1,5 +1,30 @@
 # Progress
 
+## 2026-07-23 TypeScript gauge shadow mode
+
+Completed:
+
+- Connected server Tier 0/1 verdicts and the extension's local presence
+  heartbeat to the pure TypeScript gauge reducer.
+- Serialized transitions and persisted a per-session diagnostic snapshot in
+  `chrome.storage.session`, including bounded effect history, so MV3 worker
+  restarts do not reset the shadow.
+- Rebased the gauge clock on inactive and active presence transitions to
+  exclude inactive wall time; new goals reset the shadow and session end clears
+  it.
+- Added a developer-only popup card for S, inertia, acceleration tier, event
+  count, and the latest recorded effect. Effects remain diagnostics only and
+  cannot reach the notification path.
+- Added controller tests for restart recovery, same-session goal reset,
+  inactive-gap handling, and bounded non-delivery of effects.
+
+Verified:
+
+- `apps/extension` `npm run build`: 62 tests, source/test typechecks, port
+  contract check, and bundle passed.
+- `python -m pytest apps/server/tests -q`: 319 passed, 1 skipped, 56
+  subtests (run with the project virtual environment).
+
 ## 2026-07-18 Tier 2 red-team artifact preservation
 
 Completed:
