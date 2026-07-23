@@ -45,8 +45,13 @@ async function observe(url: string | undefined, title: string | undefined): Prom
   const goal = await getGoal()
   if (!goal || !url || !title) return
   const pageKey = pageKeyOf(url)
-  if (!pageKey || pageKey === lastObservedKey) return
-  lastObservedKey = pageKey
+  if (!pageKey) return
+  // Debounce on pageKey+title, not pageKey alone: an SPA route change that keeps the
+  // path but swaps the title (YouTube video → video) still re-judges, while an update
+  // storm on the identical page is collapsed (the old S 0↔30 yo-yo guard).
+  const obsKey = `${pageKey}\n${title}`
+  if (obsKey === lastObservedKey) return
+  lastObservedKey = obsKey
   // Privacy gate: never observe/embed/judge/send/nag on a sensitive page. Pause the
   // gauge (inactive) so nothing drains or fires while it's the active page.
   if (shouldDropUrl(url)) {
@@ -80,16 +85,44 @@ function ensureHeartbeat(): void {
   void chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 1 })
 }
 
+/** True only when a Chrome window has OS focus AND the user is active. chrome.idle is
+ *  system-wide (idle stays "active" while the user works in another app), so the gauge
+ *  must also require Chrome to be the focused window — otherwise S drains and nags fire
+ *  while Chrome is off-screen. Unknown → assume present (never over-suppress). */
+async function browserPresent(): Promise<boolean> {
+  try {
+    const win = await chrome.windows.getLastFocused()
+    if (!win.focused) return false
+    return (await chrome.idle.queryState(60)) === "active"
+  } catch {
+    return true
+  }
+}
+
 // --- observation surface ---------------------------------------------------------
 
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
-  if (changeInfo.status !== "complete" || !tab.active) return
-  void observe(tab.url, tab.title)
+  // Fire on page-load completion AND on title changes — SPAs (YouTube, etc.) swap the
+  // title without a fresh "complete", and that's how their route changes surface here.
+  if (!tab.active) return
+  if (changeInfo.status === "complete" || changeInfo.title !== undefined) {
+    void observe(tab.url, tab.title)
+  }
 })
 
 chrome.tabs.onActivated.addListener(({ tabId }) => {
   void chrome.tabs.get(tabId).then(
     (tab) => observe(tab.url, tab.title),
+    () => undefined,
+  )
+})
+
+// SPA in-page navigation (history.pushState) — no "complete" event fires, so observe the
+// top frame directly. tabs.onUpdated(title) catches the rest.
+chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
+  if (details.frameId !== 0) return
+  void chrome.tabs.get(details.tabId).then(
+    (tab) => (tab.active ? observe(tab.url ?? details.url, tab.title) : undefined),
     () => undefined,
   )
 })
@@ -101,9 +134,11 @@ chrome.runtime.onStartup.addListener(ensureHeartbeat)
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== HEARTBEAT_ALARM) return
-  void getGoal().then((goal) => {
-    if (goal) return dispatch({ type: "heartbeat", ts: Date.now() }, goal)
-    return undefined
+  void getGoal().then(async (goal) => {
+    if (!goal) return
+    // Only drain while Chrome is focused and the user is active; otherwise pause.
+    const present = await browserPresent()
+    await dispatch({ type: present ? "heartbeat" : "inactive", ts: Date.now() }, goal)
   })
 })
 
@@ -113,6 +148,18 @@ chrome.idle.onStateChanged.addListener((state) => {
     if (!goal) return undefined
     if (state === "active") return observeActiveTab()
     return dispatch({ type: "inactive", ts: Date.now() }, goal)
+  })
+})
+
+// Chrome losing OS focus (user switched to another app) pauses the gauge; regaining it
+// re-observes the active tab. Complements the system-wide idle signal above.
+chrome.windows.onFocusChanged.addListener((windowId) => {
+  void getGoal().then((goal) => {
+    if (!goal) return undefined
+    if (windowId === chrome.windows.WINDOW_ID_NONE) {
+      return dispatch({ type: "inactive", ts: Date.now() }, goal)
+    }
+    return observeActiveTab()
   })
 })
 
