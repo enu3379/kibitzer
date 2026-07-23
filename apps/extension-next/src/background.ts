@@ -13,6 +13,7 @@ import { getOllamaConfig, ollamaEnabled, setOllamaConfig, testOllama, tier1Rescu
 import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
 import { markNagActed, recordObservation } from "./lib/history.ts"
 import { clearLog, exportLog, klog, logText } from "./lib/klog.ts"
+import { shouldDropUrl } from "./lib/domainFilter.ts"
 
 const HEARTBEAT_ALARM = "kibitzer-next-heartbeat"
 
@@ -46,6 +47,13 @@ async function observe(url: string | undefined, title: string | undefined): Prom
   const pageKey = pageKeyOf(url)
   if (!pageKey || pageKey === lastObservedKey) return
   lastObservedKey = pageKey
+  // Privacy gate: never observe/embed/judge/send/nag on a sensitive page. Pause the
+  // gauge (inactive) so nothing drains or fires while it's the active page.
+  if (shouldDropUrl(url)) {
+    klog(`drop (sensitive) ${pageKey}`)
+    await dispatch({ type: "inactive", ts: Date.now() }, goal)
+    return
+  }
   const urlHost = hostOf(url)
   const { score, verdict: tier0Verdict } = await judgeTier0(goal.text, title, TAU_OK)
   const enabled = await ollamaEnabled()

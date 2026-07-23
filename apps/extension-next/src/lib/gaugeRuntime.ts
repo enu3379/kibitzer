@@ -14,6 +14,7 @@ import { tier2Confirm } from "./tier12.ts"
 import { activePersona, pickCelebrate, pickFallback } from "./personas.ts"
 import { klog } from "./klog.ts"
 import { playChime } from "./chime.ts"
+import { shouldDropUrl } from "./domainFilter.ts"
 import {
   clearHistory,
   lastNagIgnored,
@@ -233,9 +234,12 @@ async function showToast(
   contextLabel: string | null,
   kind: "intervention" | "celebration",
 ): Promise<number | null> {
-  void playChime(kind) // audible cue via the offscreen document (works off-screen)
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
   if (!tab?.id) return null
+  // Privacy: never surface a nudge on a sensitive page, even if one was queued before
+  // the user navigated there.
+  if (tab.url && shouldDropUrl(tab.url)) return null
+  void playChime(kind) // audible cue via the offscreen document (works off-screen)
   const token = (toastToken += 1)
   const payload: ToastPayload = {
     notificationId: `kbz-${Date.now()}`,
