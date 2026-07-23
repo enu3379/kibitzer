@@ -10,6 +10,7 @@ import { getGoal, setGoal, type SessionGoal } from "./lib/session.ts"
 import { judgeTier0, TAU_OK } from "./lib/tier0.ts"
 import { currentState, dispatch, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
 import { getOllamaConfig, ollamaEnabled, setOllamaConfig, testOllama, tier1Rescue } from "./lib/tier12.ts"
+import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
 
 const HEARTBEAT_ALARM = "kibitzer-next-heartbeat"
 
@@ -114,6 +115,7 @@ interface PopupMessage {
   apiKeys?: string[]
   tier1Model?: string
   tier2Model?: string
+  persona?: string
 }
 
 async function handleMessage(message: PopupMessage): Promise<unknown> {
@@ -122,8 +124,22 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     // Advance the gauge to "now" so the popup shows a live value between the
     // 1-min heartbeat alarms (a nag can still fire here if S reaches 0).
     if (goal) await dispatch({ type: "heartbeat", ts: Date.now() }, goal)
-    const [state, ollama] = await Promise.all([currentState(), getOllamaConfig()])
-    return { goal, s: Math.round(state.s), accelTier: state.accelTier, ollama }
+    const [state, ollama, persona] = await Promise.all([
+      currentState(),
+      getOllamaConfig(),
+      getPersonaKey(),
+    ])
+    return {
+      goal,
+      s: Math.round(state.s),
+      accelTier: state.accelTier,
+      ollama,
+      persona,
+      personas: personaChoices(),
+    }
+  }
+  if (message?.type === "set-persona") {
+    return { persona: await setPersonaKey(message.persona ?? "") }
   }
   if (message?.type === "test-ollama") {
     return await testOllama({

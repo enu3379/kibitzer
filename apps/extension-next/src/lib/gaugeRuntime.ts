@@ -11,10 +11,13 @@ import { initGaugeState } from "../core/gauge/types.ts"
 import type { GaugeConfig, GaugeEffect, GaugeEvent, GaugeState } from "../core/gauge/types.ts"
 import { showKibitzerToast, type ToastPayload } from "../content/toastOverlay.ts"
 import { tier2Confirm } from "./tier12.ts"
+import { activePersona, pickCelebrate } from "./personas.ts"
 import type { SessionGoal } from "./session.ts"
 
 const STATE_KEY = "kibitzer:gauge-state:v1"
 const ACTIVE_PAGE_KEY = "kibitzer:active-page:v1"
+const NAG_COUNT_KEY = "kibitzer:nag-count:v1"
+const DRIFT_SINCE_KEY = "kibitzer:drift-since:v1"
 
 export interface ActivePage {
   pageKey: string
@@ -59,7 +62,35 @@ export async function currentState(): Promise<GaugeState> {
 }
 
 export async function resetState(): Promise<void> {
-  await chrome.storage.session.set({ [STATE_KEY]: initGaugeState() })
+  await chrome.storage.session.set({
+    [STATE_KEY]: initGaugeState(),
+    [NAG_COUNT_KEY]: 0,
+    [DRIFT_SINCE_KEY]: null,
+  })
+}
+
+// --- persona message context (nag ordinal + time-away) ---------------------------
+
+async function getNagCount(): Promise<number> {
+  const stored = await chrome.storage.session.get(NAG_COUNT_KEY)
+  const value = stored[NAG_COUNT_KEY]
+  return typeof value === "number" ? value : 0
+}
+
+async function bumpNagCount(): Promise<void> {
+  await chrome.storage.session.set({ [NAG_COUNT_KEY]: (await getNagCount()) + 1 })
+}
+
+async function setDriftSince(ts: number | null): Promise<void> {
+  await chrome.storage.session.set({ [DRIFT_SINCE_KEY]: ts })
+}
+
+/** Minutes since drift began (≥1), for the persona celebration templates. */
+async function returnMinutes(now: number): Promise<number> {
+  const stored = await chrome.storage.session.get(DRIFT_SINCE_KEY)
+  const since = stored[DRIFT_SINCE_KEY]
+  if (typeof since !== "number") return 1
+  return Math.max(1, Math.round((now - since) / 60_000))
 }
 
 function configFor(goal: SessionGoal | null): GaugeConfig {
@@ -86,8 +117,12 @@ export function dispatch(event: GaugeEvent, goal: SessionGoal | null): Promise<v
       )
     }
     await saveState(transition.state)
+    // Mark when a drift episode began, so the celebration can say how long they were away.
+    if (state.activeVerdict !== "DRIFT" && transition.state.activeVerdict === "DRIFT") {
+      await setDriftSince(event.ts)
+    }
     for (const effect of transition.effects) {
-      await deliver(effect, goal)
+      await deliver(effect, goal, event.ts)
     }
   }
   const run = queue.then(task, task)
@@ -97,12 +132,12 @@ export function dispatch(event: GaugeEvent, goal: SessionGoal | null): Promise<v
 
 /** Fire a nag notification immediately, for manual testing (goal = "알림보기"). */
 export async function testNag(goal: SessionGoal | null): Promise<void> {
-  await deliver({ type: "nag", pageKey: "test" }, goal)
+  await deliver({ type: "nag", pageKey: "test" }, goal, Date.now())
 }
 
 let pendingNagMessage: string | null = null
 
-async function deliver(effect: GaugeEffect, goal: SessionGoal | null): Promise<void> {
+async function deliver(effect: GaugeEffect, goal: SessionGoal | null, ts: number): Promise<void> {
   const goalText = goal?.text ?? "목표"
   if (effect.type === "request_tier2") {
     // Service the Tier 2 gate off the dispatch queue (Ollama is slow); it dispatches
@@ -114,9 +149,16 @@ async function deliver(effect: GaugeEffect, goal: SessionGoal | null): Promise<v
     const message = pendingNagMessage
       ?? `'${goalText}' 흐름에서 벗어난 것 같아요. 계속 필요한 곁가지인지 확인해볼까요?`
     pendingNagMessage = null
+    await bumpNagCount()
     await showToast(message, effect.pageKey, "intervention")
   } else if (effect.type === "celebrate") {
-    await showToast(`'${goalText}'에 다시 집중하고 있네요 👍`, null, "celebration")
+    // Celebrate in the selected persona's voice; fall back to the plain line.
+    const persona = await activePersona()
+    const message =
+      pickCelebrate(persona, { goal: goalText, returnMinutes: await returnMinutes(ts) }) ??
+      `'${goalText}'에 다시 집중하고 있네요 👍`
+    await setDriftSince(null)
+    await showToast(message, null, "celebration")
   }
 }
 
@@ -126,7 +168,9 @@ async function serviceTier2(
 ): Promise<void> {
   const page = await getActivePage()
   if (!page || page.pageKey !== effect.pageKey) return
-  const outcome = await tier2Confirm(goal?.text ?? "", page)
+  // The nag we're about to (maybe) produce is the next ordinal — drives persona flavor.
+  const nagCount = (await getNagCount()) + 1
+  const outcome = await tier2Confirm(goal?.text ?? "", page, { nagCount })
   console.log(`[kbz] tier2 gate (${effect.reason}) on ${effect.pageKey} -> ${outcome.flow}`)
   // The Writer's message rides along to the nag toast (if drift is confirmed).
   if (outcome.flow === "drift" && outcome.message) pendingNagMessage = outcome.message

@@ -12,6 +12,8 @@ interface StateResponse {
   s: number
   accelTier: number
   ollama?: OllamaConfig
+  persona?: string
+  personas?: Array<{ key: string; name: string }>
 }
 
 const activeView = document.getElementById("active") as HTMLDivElement
@@ -19,6 +21,8 @@ const setupView = document.getElementById("setup") as HTMLDivElement
 const gaugeEl = document.getElementById("gauge") as HTMLDivElement
 const goalTextEl = document.getElementById("goalText") as HTMLElement
 const modeEl = document.getElementById("mode") as HTMLElement
+const personaActiveEl = document.getElementById("personaActive") as HTMLElement
+const personaSelect = document.getElementById("persona") as HTMLSelectElement
 const goalInput = document.getElementById("goal") as HTMLInputElement
 const minutesInput = document.getElementById("minutes") as HTMLInputElement
 const startButton = document.getElementById("set") as HTMLButtonElement
@@ -52,10 +56,25 @@ function modeText(state: StateResponse): string {
   return "제목 유사도만 (LLM 꺼짐)"
 }
 
+function personaName(state: StateResponse): string {
+  const found = state.personas?.find((p) => p.key === state.persona)
+  return found ? `말투 · ${found.name}` : ""
+}
+
 function fillSettings(state: StateResponse | null): void {
   if (state?.goal) {
     goalInput.value = state.goal.text
     minutesInput.value = state.goal.availableMinutes != null ? String(state.goal.availableMinutes) : ""
+  }
+  if (state?.personas) {
+    personaSelect.innerHTML = ""
+    for (const p of state.personas) {
+      const opt = document.createElement("option")
+      opt.value = p.key
+      opt.textContent = p.name
+      personaSelect.appendChild(opt)
+    }
+    if (state.persona) personaSelect.value = state.persona
   }
   if (state?.ollama) {
     keysInput.value = (state.ollama.apiKeys ?? []).join("\n")
@@ -77,6 +96,7 @@ function showActive(state: StateResponse): void {
   goalTextEl.textContent = state.goal?.text ?? ""
   gaugeEl.innerHTML = `${state.s}<small> / 100 몰입</small>`
   modeEl.textContent = modeText(state)
+  personaActiveEl.textContent = personaName(state)
 }
 
 function render(state: StateResponse | null): void {
@@ -126,6 +146,12 @@ testButton.addEventListener("click", async () => {
   }
 })
 
+personaSelect.addEventListener("change", async () => {
+  await chrome.runtime.sendMessage({ type: "set-persona", persona: personaSelect.value })
+  current = await getState()
+  if (current) personaActiveEl.textContent = personaName(current)
+})
+
 editButton.addEventListener("click", () => {
   showSetup()
 })
@@ -141,4 +167,5 @@ setInterval(async () => {
   gaugeEl.innerHTML = `${state.s}<small> / 100 몰입</small>`
   goalTextEl.textContent = state.goal.text
   modeEl.textContent = modeText(state)
+  personaActiveEl.textContent = personaName(state)
 }, 1500)

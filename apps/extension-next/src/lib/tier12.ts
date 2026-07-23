@@ -5,8 +5,13 @@
 // passed through (matching the server's api_key_pool_envs).
 
 import { OllamaChatJudgeProvider } from "../providers/ollamaChat.ts"
-import { buildTier1Payload, buildTier2ReviewPayload } from "../providers/payloads.ts"
+import {
+  buildTier1Payload,
+  buildTier2MessagePayload,
+  buildTier2ReviewPayload,
+} from "../providers/payloads.ts"
 import type { JudgeVerdict } from "../providers/types.ts"
+import { activePersona, composeWriterPrompt, pickFallback } from "./personas.ts"
 
 const OLLAMA_KEY = "kibitzer:ollama:v2"
 
@@ -149,26 +154,59 @@ export async function testOllama(input: Partial<OllamaConfig>): Promise<OllamaTe
   }
 }
 
-/** Confirm a drift via Tier 2. No keys / failure → "ok" (false-positive-first). */
+/** Confirm a drift via Tier 2 — judge (notify/defer) then, if notify, the Writer in the
+ *  selected persona's voice. No keys / judge failure → "ok" (false-positive-first). A
+ *  Writer failure still nags, using the persona's offline fallback template.
+ *
+ *  `nagCount` is the 1-based ordinal of the nag about to be produced (drives the persona's
+ *  "오늘 N번째" flavor and the fallback template index). */
 export async function tier2Confirm(
   goalText: string,
   page: { title: string; urlHost: string; score: number },
+  context: { nagCount: number } = { nagCount: 1 },
 ): Promise<Tier2Outcome> {
   const p = await providers()
   if (!p) return { flow: "ok", message: null }
+  const observation = {
+    title: page.title,
+    urlHost: page.urlHost,
+    verdict: "DRIFT" as const,
+    tierReached: 0,
+    tier0Score: page.score,
+  }
+  let decision
   try {
-    const payload = buildTier2ReviewPayload(
-      { rawText: goalText },
-      { title: page.title, urlHost: page.urlHost, verdict: "DRIFT", tierReached: 0, tier0Score: page.score },
-      [],
-      null,
-      [],
-      null,
-    )
-    const result = await p.tier2.confirmTier2(payload)
-    return { flow: result.confirmDrift ? "drift" : "ok", message: result.message }
+    const reviewPayload = buildTier2ReviewPayload({ rawText: goalText }, observation, [], null, [], null)
+    decision = await p.tier2.decideTier2(reviewPayload)
   } catch (error) {
-    console.warn("[kbz] tier2 error (fail-open to ok, no nag):", error)
+    console.warn("[kbz] tier2 judge error (fail-open to ok, no nag):", error)
     return { flow: "ok", message: null }
+  }
+  if (decision.decision !== "notify") return { flow: "ok", message: null }
+  // Notify confirmed → write the nag in the selected persona's voice.
+  const persona = await activePersona()
+  const naggingContext = {
+    nag_count_today: Math.max(0, context.nagCount - 1),
+    last_nag_ignored: false,
+    repeat_host: false,
+  }
+  const messagePayload = buildTier2MessagePayload(
+    { rawText: goalText },
+    observation,
+    decision,
+    null,
+    naggingContext,
+  )
+  try {
+    const message = await p.tier2.writeTier2Message(messagePayload, composeWriterPrompt(persona))
+    return { flow: "drift", message }
+  } catch (error) {
+    console.warn("[kbz] tier2 writer error (persona fallback template):", error)
+    const message = pickFallback(persona, context.nagCount, {
+      goal: goalText,
+      title: page.title || page.urlHost || "현재 페이지",
+      host: page.urlHost || "현재 페이지",
+    })
+    return { flow: "drift", message }
   }
 }
