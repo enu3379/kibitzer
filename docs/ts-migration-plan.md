@@ -1,17 +1,18 @@
 # Kibitzer TS / serverless migration plan
 
-Status: **v0.1, 2026-07-23.** Canonical execution plan for the whole refactor. Supersedes
+Status: **v0.2, 2026-07-23.** Canonical execution plan for the whole refactor. Supersedes
 the Python stage roadmap in `docs/analysis-plan-a-gauge-design.md` §9. Decision record:
 `docs/planning-notes.md` **D9**. Single forward track: **TypeScript only**.
 
 ## 0. TL;DR — where we are
 
-The **gauge decision core is built, validated, and wired in shadow mode** — a pure TypeScript
-reducer, independently cross-checked against a throwaway Python reducer (byte-identical over the
-shared fixtures and a lifecycle benchmark). The extension now feeds server verdicts and its local
-presence clock into that reducer, persists a diagnostic snapshot in `chrome.storage.session`, and
-can show S in the developer popup. Effects are logged but cannot be delivered. This document is
-the map from that safe shadow to "one TypeScript runtime in the extension, Python server removed."
+The **gauge decision core is built, validated, and wired in persistent shadow mode** — a pure
+TypeScript reducer, independently cross-checked against a throwaway Python reducer (byte-identical
+over the shared fixtures and a lifecycle benchmark). The extension feeds server verdicts and its
+local presence clock into that reducer. IndexedDB is now the gauge SSOT: each checkpoint and its
+new effects commit in one transaction, with effects retained in a pending outbox. The developer
+popup can inspect S and outbox state, but no effect can be delivered. This document is the map from
+that durable shadow to "one TypeScript runtime in the extension, Python server removed."
 
 ## 1. Goal — end-state architecture
 
@@ -47,26 +48,29 @@ gauge is the real attention trigger. No local server process, no HTTP round-trip
 | **TS gauge reducer** (`apps/extension/src/core/gauge/`) | ✅ pure `reduceGauge`, tests + typecheck green |
 | Design-runs-correctly cross-check (Python `gauge.py`) | ✅ byte-identical over fixtures + 61-step benchmark (`max|ΔS|=0`) — **purpose fulfilled, frozen** |
 | Recovery curve (issue #122 "F") | ✅ adopted |
-| Extension shadow runner | ✅ server verdicts + local heartbeat, restart-safe diagnostic snapshot |
-| Popup diagnostics | ✅ S/m/accel/effect log behind the existing developer toggle |
+| Extension shadow runner | ✅ server verdicts + local heartbeat |
+| IndexedDB gauge SSOT | ✅ checkpoint + pending effects in one transaction |
+| Phase 2 state migration | ✅ one-time `chrome.storage.session` → IndexedDB import |
+| Popup diagnostics | ✅ S/m/accel/outbox state behind the existing developer toggle |
 | Effect delivery | ⬜ intentionally disabled; existing Python controller remains authoritative |
-| Pushed / PR'd | ✅ Phase 1 merged; Phase 2 is this migration PR |
+| Pushed / PR'd | ✅ Phase 1 merged; Phase 2 is #125; Phase 3 is the stacked migration PR |
 
-The pure core and its non-authoritative extension shadow are complete. IndexedDB ownership is next.
+The pure core, shadow wiring, and durable persistence boundary are complete. TS providers are next.
 
 ## 4. Phased roadmap (TypeScript, independent PRs → `dev-migrate`)
 
 - **Phase 1 — Pure core (✅ done).** Reducer + fixtures + benchmark.
 - **Phase 2 — Shadow mode (✅ done).** The extension service worker consumes server Tier 0/1
   verdicts + local presence heartbeats as gauge events. It serializes `reduceGauge` transitions,
-  keeps a bounded effect log, and stores a restart-safe diagnostic snapshot in
-  `chrome.storage.session`. The popup exposes S/m/acceleration/effect state only when developer
-  diagnostics are enabled. **Effects are recorded, not delivered** — the existing controller
-  keeps nagging. New goals reset the shadow; ending the session clears it.
-- **Phase 3 — IndexedDB SSOT (next).** Move gauge state to IndexedDB with an outbox (state + effects in
-  one transaction). `chrome.storage.session` / worker memory are not authoritative. Survives MV3
-  worker and browser restarts and supports crash-safe effect delivery.
-- **Phase 4 — Providers to TS.** Port Tier 0 (WASM embeddings) and the Ollama Tier 1/2 calls into
+  and initially used `chrome.storage.session` for its diagnostic snapshot. The popup exposes
+  S/m/acceleration/effect state only when developer diagnostics are enabled. **Effects are
+  recorded, not delivered** — the existing controller keeps nagging.
+- **Phase 3 — IndexedDB SSOT (✅ done).** IndexedDB owns the checkpoint and pending-effect outbox.
+  Reducer state and newly emitted effects commit in one transaction; memory advances only after
+  the commit succeeds. It survives MV3 worker/browser restarts, migrates the Phase 2 session
+  snapshot once, clears on goal replacement/session end/activity deletion, and keeps only a
+  bounded diagnostic view while retaining the full pending outbox. Delivery remains disabled.
+- **Phase 4 — Providers to TS (next).** Port Tier 0 (WASM embeddings) and the Ollama Tier 1/2 calls into
   the extension runtime.
 - **Phase 5 — Cutover.** Switch the gauge to the real trigger, remove the Python server and
   `StreakController`. `dev-migrate` merges to `main`.

@@ -235,8 +235,15 @@ async function getGaugeShadowSnapshot(sessionId: string): Promise<GaugeShadowSna
   }
 }
 
-async function clearGaugeShadowSnapshot(): Promise<void> {
-  await chrome.runtime.sendMessage({ type: "kibitzer:clear-gauge-shadow" }).catch(() => undefined)
+async function clearGaugeShadowSnapshot(): Promise<boolean> {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "kibitzer:clear-gauge-shadow",
+    }) as { ok?: boolean } | undefined
+    return response?.ok === true
+  } catch {
+    return false
+  }
 }
 
 async function refresh(): Promise<void> {
@@ -569,7 +576,7 @@ function gaugeShadowEffectLabel(snapshot: GaugeShadowSnapshot): string {
 function gaugeShadowDebugHtml(snapshot: GaugeShadowSnapshot | null): string {
   if (!devDiagnostics || !snapshot) return ""
   const s = Math.min(100, Math.max(0, snapshot.state.s))
-  const effectCount = snapshot.effectLog.length
+  const effectCount = snapshot.outboxCount
   return `
     <div class="page-card" aria-label="게이지 섀도 진단">
       <div class="scoreline">
@@ -583,7 +590,7 @@ function gaugeShadowDebugHtml(snapshot: GaugeShadowSnapshot | null): string {
         m ${snapshot.state.m.toFixed(3)} · 가속 ${snapshot.state.accelTier}단계 · 이벤트 ${snapshot.eventCount}회
       </p>
       <p class="pc-empty-hint">
-        ${gaugeShadowEffectLabel(snapshot)} · 기록 ${effectCount}건 · 발송 안 함
+        ${gaugeShadowEffectLabel(snapshot)} · IndexedDB outbox ${effectCount}건 · 발송 안 함
       </p>
     </div>`
 }
@@ -1302,6 +1309,10 @@ async function deleteActivityData(): Promise<void> {
     return
   }
 
+  if (!(await clearGaugeShadowSnapshot())) {
+    window.alert("로컬 게이지 데이터를 삭제하지 못했습니다. 확장을 다시 연 뒤 재시도해 주세요.")
+    return
+  }
   await chrome.storage.session.clear().catch(() => undefined)
   const notificationIds = await new Promise<string[]>((resolve) => {
     chrome.notifications.getAll((notifications) => resolve(Object.keys(notifications)))
