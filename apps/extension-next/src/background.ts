@@ -9,7 +9,7 @@
 import { getGoal, setGoal, type SessionGoal } from "./lib/session.ts"
 import { judgeTier0, TAU_OK } from "./lib/tier0.ts"
 import { currentState, dispatch, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
-import { getOllamaConfig, ollamaEnabled, setOllamaConfig, tier1Rescue } from "./lib/tier12.ts"
+import { getOllamaConfig, ollamaEnabled, setOllamaConfig, testOllama, tier1Rescue } from "./lib/tier12.ts"
 
 const HEARTBEAT_ALARM = "kibitzer-next-heartbeat"
 
@@ -124,6 +124,14 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     if (goal) await dispatch({ type: "heartbeat", ts: Date.now() }, goal)
     const [state, ollama] = await Promise.all([currentState(), getOllamaConfig()])
     return { goal, s: Math.round(state.s), accelTier: state.accelTier, ollama }
+  }
+  if (message?.type === "test-ollama") {
+    return await testOllama({
+      apiUrl: message.apiUrl,
+      apiKeys: message.apiKeys,
+      tier1Model: message.tier1Model,
+      tier2Model: message.tier2Model,
+    })
   }
   if (message?.type === "set-ollama") {
     const ollama = await setOllamaConfig({

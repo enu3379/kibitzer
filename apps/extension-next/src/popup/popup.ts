@@ -27,6 +27,12 @@ const keysInput = document.getElementById("ollama-keys") as HTMLTextAreaElement
 const tier1Input = document.getElementById("ollama-tier1") as HTMLInputElement
 const tier2Input = document.getElementById("ollama-tier2") as HTMLInputElement
 const saveOllamaButton = document.getElementById("save-ollama") as HTMLButtonElement
+const testButton = document.getElementById("test-ollama") as HTMLButtonElement
+const resultEl = document.getElementById("ollama-result") as HTMLDivElement
+
+function enteredKeys(): string[] {
+  return keysInput.value.split("\n").map((k) => k.trim()).filter(Boolean)
+}
 
 let current: StateResponse | null = null
 
@@ -93,13 +99,31 @@ startButton.addEventListener("click", async () => {
 saveOllamaButton.addEventListener("click", async () => {
   await chrome.runtime.sendMessage({
     type: "set-ollama",
-    apiKeys: keysInput.value.split("\n").map((k) => k.trim()).filter(Boolean),
+    apiKeys: enteredKeys(),
     tier1Model: tier1Input.value,
     tier2Model: tier2Input.value,
   })
   current = await getState()
   saveOllamaButton.textContent = "저장됨 ✓"
   setTimeout(() => { saveOllamaButton.textContent = "저장" }, 1200)
+})
+
+testButton.addEventListener("click", async () => {
+  resultEl.className = "hint"
+  resultEl.textContent = "테스트 중… (LLM 첫 호출은 느릴 수 있어요)"
+  const result = (await chrome.runtime.sendMessage({
+    type: "test-ollama",
+    apiKeys: enteredKeys(),
+    tier1Model: tier1Input.value,
+    tier2Model: tier2Input.value,
+  })) as { ok: boolean; tier1?: string; tier2?: string; error?: string } | undefined
+  if (result?.ok) {
+    resultEl.className = "hint ok"
+    resultEl.textContent = `연결 OK · ${result.tier1} · ${result.tier2}`
+  } else {
+    resultEl.className = "hint err"
+    resultEl.textContent = `실패: ${result?.error ?? "응답 없음"}`
+  }
 })
 
 editButton.addEventListener("click", () => {

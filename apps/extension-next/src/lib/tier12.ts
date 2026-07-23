@@ -100,6 +100,53 @@ export interface Tier2Outcome {
   message: string | null
 }
 
+export interface OllamaTestResult {
+  ok: boolean
+  tier1?: string
+  tier2?: string
+  error?: string
+}
+
+function errorText(error: unknown): string {
+  if (error && typeof error === "object") {
+    const record = error as { message?: unknown; stage?: unknown; status?: unknown }
+    const parts = [record.message, record.stage, record.status].filter((v) => v != null).map(String)
+    if (parts.length) return parts.join(" · ")
+  }
+  return String(error)
+}
+
+/** One real round-trip to Ollama Cloud with the given config (both models). Reports
+ *  success or a readable error, without saving — for the popup's connection test. */
+export async function testOllama(input: Partial<OllamaConfig>): Promise<OllamaTestResult> {
+  const apiUrl = str(input.apiUrl) || DEFAULTS.apiUrl
+  const apiKeys = keyList(input.apiKeys)
+  const tier1Model = str(input.tier1Model) || DEFAULTS.tier1Model
+  const tier2Model = str(input.tier2Model) || DEFAULTS.tier2Model
+  if (apiKeys.length === 0) return { ok: false, error: "API 키를 먼저 입력하세요" }
+  const base = { apiUrl, apiKeys, timeoutMs: 30_000, maxOutputTokens: 256, writerMaxOutputTokens: 256 }
+  try {
+    const t1 = new OllamaChatJudgeProvider({ ...base, model: tier1Model })
+    const r1 = await t1.classifyTier1(
+      buildTier1Payload({ rawText: "테스트" }, { title: "예시 페이지", urlHost: "example.com" }, []),
+    )
+    const t2 = new OllamaChatJudgeProvider({ ...base, model: tier2Model })
+    await t2.confirmTier2(
+      buildTier2ReviewPayload(
+        { rawText: "테스트" },
+        { title: "예시 페이지", urlHost: "example.com", verdict: "DRIFT", tierReached: 0, tier0Score: 0.3 },
+        [],
+        null,
+        [],
+        null,
+      ),
+    )
+    return { ok: true, tier1: `${tier1Model} ✓ (${r1.verdict})`, tier2: `${tier2Model} ✓` }
+  } catch (error) {
+    return { ok: false, error: errorText(error) }
+  }
+}
+
 /** Confirm a drift via Tier 2. No keys / failure → "ok" (false-positive-first). */
 export async function tier2Confirm(
   goalText: string,

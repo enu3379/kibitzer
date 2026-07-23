@@ -27,7 +27,10 @@
       #set, #save-ollama { background: #4a5bd4; color: #fff; }
       .ghost { background: transparent; color: #888; border: 1px solid #8884; padding: 6px; font-weight: 500; }
       hr { border: 0; border-top: 1px solid #8883; margin: 16px 0 12px; }
-      .hint { font-size: 11px; color: #999; margin: 8px 0 0; }
+      .hint { font-size: 11px; color: #999; margin: 8px 0 0; word-break: break-word; }
+      .hint.ok { color: #1f9d6b; } .hint.err { color: #d1495b; }
+      .btn-row { display: flex; gap: 8px; }
+      .btn-row button { flex: 1; }
       .section-label { font-size: 11px; color: #999; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .05em; }
     </style>
   </head>
@@ -56,7 +59,11 @@
       </label>
       <label>Tier 1 모델 <input id="ollama-tier1" placeholder="nemotron-3-super" /></label>
       <label>Tier 2 모델 <input id="ollama-tier2" placeholder="minimax-m3" /></label>
-      <button id="save-ollama" class="ghost">저장</button>
+      <div class="btn-row">
+        <button id="test-ollama" class="ghost">연결 테스트</button>
+        <button id="save-ollama" class="ghost">저장</button>
+      </div>
+      <div id="ollama-result" class="hint"></div>
     </div>
 
     <script type="module" src="popup.js"></script>
