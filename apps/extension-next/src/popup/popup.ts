@@ -11,7 +11,7 @@ interface StateResponse {
   goal: { text: string; availableMinutes: number | null } | null
   s: number
   accelTier: number
-  ollama: OllamaConfig
+  ollama?: OllamaConfig
 }
 
 const activeView = document.getElementById("active") as HTMLDivElement
@@ -39,8 +39,9 @@ async function getState(): Promise<StateResponse | null> {
 }
 
 function modeText(state: StateResponse): string {
-  const keys = state.ollama.apiKeys.length
-  return keys > 0 ? `LLM 판정: ${state.ollama.tier2Model} · 키 ${keys}개` : "제목 유사도만 (LLM 꺼짐)"
+  const ollama = state.ollama
+  const keys = ollama?.apiKeys?.length ?? 0
+  return keys > 0 ? `LLM 판정: ${ollama.tier2Model} · 키 ${keys}개` : "제목 유사도만 (LLM 꺼짐)"
 }
 
 function fillSettings(state: StateResponse | null): void {
@@ -49,9 +50,9 @@ function fillSettings(state: StateResponse | null): void {
     minutesInput.value = state.goal.availableMinutes != null ? String(state.goal.availableMinutes) : ""
   }
   if (state?.ollama) {
-    keysInput.value = state.ollama.apiKeys.join("\n")
-    tier1Input.value = state.ollama.tier1Model
-    tier2Input.value = state.ollama.tier2Model
+    keysInput.value = (state.ollama.apiKeys ?? []).join("\n")
+    tier1Input.value = state.ollama.tier1Model ?? ""
+    tier2Input.value = state.ollama.tier2Model ?? ""
   }
 }
 
