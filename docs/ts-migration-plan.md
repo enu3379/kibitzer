@@ -1,16 +1,17 @@
 # Kibitzer TS / serverless migration plan
 
-Status: **v0, 2026-07-22.** Canonical execution plan for the whole refactor. Supersedes
+Status: **v0.1, 2026-07-23.** Canonical execution plan for the whole refactor. Supersedes
 the Python stage roadmap in `docs/analysis-plan-a-gauge-design.md` §9. Decision record:
 `docs/planning-notes.md` **D9**. Single forward track: **TypeScript only**.
 
 ## 0. TL;DR — where we are
 
-The **gauge decision core is built and validated** — a pure TypeScript reducer, independently
-cross-checked against a throwaway Python reducer (byte-identical over the shared fixtures and a
-lifecycle benchmark). That cross-check was the Python track's *only* job, and it is done.
-Nothing is wired into the running app yet. This document is the map from "core validated" to
-"one TypeScript runtime in the extension, Python server removed."
+The **gauge decision core is built, validated, and wired in shadow mode** — a pure TypeScript
+reducer, independently cross-checked against a throwaway Python reducer (byte-identical over the
+shared fixtures and a lifecycle benchmark). The extension now feeds server verdicts and its local
+presence clock into that reducer, persists a diagnostic snapshot in `chrome.storage.session`, and
+can show S in the developer popup. Effects are logged but cannot be delivered. This document is
+the map from that safe shadow to "one TypeScript runtime in the extension, Python server removed."
 
 ## 1. Goal — end-state architecture
 
@@ -46,21 +47,25 @@ gauge is the real attention trigger. No local server process, no HTTP round-trip
 | **TS gauge reducer** (`apps/extension/src/core/gauge/`) | ✅ pure `reduceGauge`, tests + typecheck green |
 | Design-runs-correctly cross-check (Python `gauge.py`) | ✅ byte-identical over fixtures + 61-step benchmark (`max|ΔS|=0`) — **purpose fulfilled, frozen** |
 | Recovery curve (issue #122 "F") | ✅ adopted |
-| Wired into any app surface | ⬜ **nothing yet** |
-| Pushed / PR'd | ⬜ local commits only |
+| Extension shadow runner | ✅ server verdicts + local heartbeat, restart-safe diagnostic snapshot |
+| Popup diagnostics | ✅ S/m/accel/effect log behind the existing developer toggle |
+| Effect delivery | ⬜ intentionally disabled; existing Python controller remains authoritative |
+| Pushed / PR'd | ✅ Phase 1 merged; Phase 2 is this migration PR |
 
-Roughly the first ~10% of the refactor: the smallest self-contained core, proven correct.
+The pure core and its non-authoritative extension shadow are complete. IndexedDB ownership is next.
 
 ## 4. Phased roadmap (TypeScript, independent PRs → `dev-migrate`)
 
 - **Phase 1 — Pure core (✅ done).** Reducer + fixtures + benchmark.
-- **Phase 2 — Shadow mode (next).** In the extension service worker: consume server Tier 0/1
-  verdicts + the local heartbeat alarm as gauge events; run `reduceGauge`; record S/m/accel and
-  show S in the popup (debug). **Effects are recorded, not delivered** — the existing controller
-  keeps nagging. No IndexedDB yet.
-- **Phase 3 — IndexedDB SSOT.** Move gauge state to IndexedDB with an outbox (state + effects in
+- **Phase 2 — Shadow mode (✅ done).** The extension service worker consumes server Tier 0/1
+  verdicts + local presence heartbeats as gauge events. It serializes `reduceGauge` transitions,
+  keeps a bounded effect log, and stores a restart-safe diagnostic snapshot in
+  `chrome.storage.session`. The popup exposes S/m/acceleration/effect state only when developer
+  diagnostics are enabled. **Effects are recorded, not delivered** — the existing controller
+  keeps nagging. New goals reset the shadow; ending the session clears it.
+- **Phase 3 — IndexedDB SSOT (next).** Move gauge state to IndexedDB with an outbox (state + effects in
   one transaction). `chrome.storage.session` / worker memory are not authoritative. Survives MV3
-  service-worker teardown.
+  worker and browser restarts and supports crash-safe effect delivery.
 - **Phase 4 — Providers to TS.** Port Tier 0 (WASM embeddings) and the Ollama Tier 1/2 calls into
   the extension runtime.
 - **Phase 5 — Cutover.** Switch the gauge to the real trigger, remove the Python server and
@@ -80,8 +85,9 @@ Roughly the first ~10% of the refactor: the smallest self-contained core, proven
 
 1. **Ship timing → RESOLVED (2026-07-22):** the gauge stays shadow until the TS cutover — **no
    interim Python trigger.** (The Python track was validation-only.)
-2. **#117 long wall-clock gap** — reducer-level cooldown on return after a long absence (relax
-   m / tier / episode; S policy TBD). Deferred; folds into Phase 2 wiring.
+2. **#117 long wall-clock gap** — Phase 2 rebases the reducer clock on both inactive and active
+   presence transitions, so inactive wall time is not integrated. Any additional return-time
+   relaxation of m / tier / episode remains a calibration decision; S is unchanged on return.
 
 ## 7. Document map
 

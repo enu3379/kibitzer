@@ -33,6 +33,7 @@ import {
   ExplorationVerdict,
   loadExplorationHistory,
 } from "../lib/history"
+import type { GaugeShadowSnapshot } from "../lib/gaugeShadow"
 import { providerFailureDiagnostics } from "../lib/providerFailureDiagnostics"
 import { completeDashboardSnapshot } from "./dashboardSnapshot"
 import type { DashboardSnapshot } from "./dashboardSnapshot"
@@ -221,6 +222,23 @@ async function getLocalPageProcessingStage(activeTab: ActiveTab): Promise<LocalP
   }
 }
 
+async function getGaugeShadowSnapshot(sessionId: string): Promise<GaugeShadowSnapshot | null> {
+  if (!devDiagnostics) return null
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "kibitzer:get-gauge-shadow",
+    }) as { snapshot?: GaugeShadowSnapshot | null } | undefined
+    const snapshot = response?.snapshot ?? null
+    return snapshot?.sessionId === sessionId ? snapshot : null
+  } catch {
+    return null
+  }
+}
+
+async function clearGaugeShadowSnapshot(): Promise<void> {
+  await chrome.runtime.sendMessage({ type: "kibitzer:clear-gauge-shadow" }).catch(() => undefined)
+}
+
 async function refresh(): Promise<void> {
   if (editing || summary || settingsOpen || reportOpen || historyOpen) return
   const result = await getSessionState()
@@ -250,13 +268,14 @@ async function refresh(): Promise<void> {
     return
   }
   const activeTab = await getActiveTab()
-  const [current, stats, health, pageState, localStage, settings] = await Promise.all([
+  const [current, stats, health, pageState, localStage, settings, gaugeShadowSnapshot] = await Promise.all([
     getCurrentSession(),
     getSessionStats(),
     getHealthStatus(),
     activeTab === null ? Promise.resolve(null) : getCurrentPageState(activeTab.id, activeTab.url),
     activeTab === null ? Promise.resolve(null) : getLocalPageProcessingStage(activeTab),
     getSettings(),
+    getGaugeShadowSnapshot(result.state.session_id),
   ])
   const serverStage = pageState?.state === "processing" ? pageState.stage ?? null : null
   const processingStage = serverStage ?? localStage
@@ -288,6 +307,7 @@ async function refresh(): Promise<void> {
     processingStage,
     pageTitle,
     pageHost,
+    gaugeShadowSnapshot,
   )
   schedulePoll(processingStage ? PROCESSING_POLL_MS : POLL_MS)
 }
@@ -536,6 +556,38 @@ function pageCardHtml(
     </div>`
 }
 
+function gaugeShadowEffectLabel(snapshot: GaugeShadowSnapshot): string {
+  const last = snapshot.effectLog.at(-1)?.effect
+  if (!last) return "효과 없음"
+  if (last.type === "request_tier2") {
+    return `Tier 2 요청(${last.reason})`
+  }
+  if (last.type === "nag") return "훈수 후보"
+  return "복귀 칭찬 후보"
+}
+
+function gaugeShadowDebugHtml(snapshot: GaugeShadowSnapshot | null): string {
+  if (!devDiagnostics || !snapshot) return ""
+  const s = Math.min(100, Math.max(0, snapshot.state.s))
+  const effectCount = snapshot.effectLog.length
+  return `
+    <div class="page-card" aria-label="게이지 섀도 진단">
+      <div class="scoreline">
+        <span>게이지 섀도</span>
+        <strong>${s.toFixed(1)}</strong>
+      </div>
+      <div class="bar" style="margin-bottom: 8px;">
+        <div class="fill" style="width: ${s.toFixed(1)}%;"></div>
+      </div>
+      <p class="pc-empty-hint">
+        m ${snapshot.state.m.toFixed(3)} · 가속 ${snapshot.state.accelTier}단계 · 이벤트 ${snapshot.eventCount}회
+      </p>
+      <p class="pc-empty-hint">
+        ${gaugeShadowEffectLabel(snapshot)} · 기록 ${effectCount}건 · 발송 안 함
+      </p>
+    </div>`
+}
+
 async function submitPageLabel(page: LatestObservation, label: PageLabel): Promise<void> {
   if (page.label === label) return
   for (const id of ["pl-related", "pl-drift"]) {
@@ -563,6 +615,7 @@ function renderDashboard(
   processingStage: PageCardProcessingStage | null = null,
   processingTitle: string | null = null,
   processingHost: string | null = null,
+  gaugeShadowSnapshot: GaugeShadowSnapshot | null = null,
 ): void {
   const pill = TRACKING_PILLS[state.tracking] ?? TRACKING_PILLS.tracking
   const pillLabel =
@@ -581,6 +634,7 @@ function renderDashboard(
   const driftHint = isAlignment
     ? `정렬도 ${formatScore(state.theta_low)} 미만이면 말하고, ${formatScore(state.theta_high)} 초과면 회복으로 봅니다.`
     : `${state.streak_threshold}회 연속 이탈 시에만 한 번 말을 겁니다.`
+  const gaugeShadow = gaugeShadowDebugHtml(gaugeShadowSnapshot)
 
   const degraded = health?.tiers.tier1 === "degraded" || health?.tiers.tier2 === "degraded"
   const degradedNote = degraded
@@ -649,6 +703,7 @@ function renderDashboard(
     <p class="label">${driftLabel}</p>
     ${driftMeter}
     <p class="hint">${driftHint}</p>
+    ${gaugeShadow}
     <div class="cards">
       <div class="card"><p class="k">관측</p><p class="v">${stats ? stats.observations : "–"}</p></div>
       <div class="card"><p class="k">목표 관련</p><p class="v">${stats ? formatRatio(stats.related_ratio) : "–"}</p></div>
@@ -743,6 +798,7 @@ async function endSession(): Promise<void> {
     handleUnreachable()
     return
   }
+  await clearGaugeShadowSnapshot()
   clearSnapshot()
   summary = stats
   notifyBadge()
@@ -1129,7 +1185,7 @@ function renderSettings(settings: Settings, personas: PersonaSummary[]): void {
       <span class="grow">개발자 진단</span>
       <input id="dev-toggle" type="checkbox" ${devDiagnostics ? "checked" : ""} />
     </div>
-    <p class="subhint">지금 페이지 카드에 판정 단계, r0/τ, 예시·앵커 수치와 판정 근거를 표시합니다.</p>
+    <p class="subhint">지금 페이지 판정 수치와 발송하지 않는 게이지 섀도 상태를 표시합니다.</p>
     <div class="setrow">
       <span class="grow">저장된 활동 데이터</span>
       <button id="delete-activity" class="btn" type="button" style="flex: 0 0 auto; color: var(--red-tx);">모두 삭제</button>

@@ -7,5 +7,6 @@ in-page toast delivery surface.
 
 `popup/` contains goal/session controls.
 
-`lib/` contains shared API and privacy helpers.
-
+`lib/` contains shared API and privacy helpers. `lib/gaugeShadow.ts` is the
+Phase 2 diagnostic runner: it persists reducer state in `chrome.storage.session`
+and records effects without delivering them.
