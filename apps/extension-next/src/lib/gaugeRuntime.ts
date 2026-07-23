@@ -11,6 +11,7 @@ import { initGaugeState } from "../core/gauge/types.ts"
 import type { GaugeConfig, GaugeEffect, GaugeEvent, GaugeState } from "../core/gauge/types.ts"
 import { showKibitzerToast, type ToastPayload } from "../content/toastOverlay.ts"
 import { tier2Confirm } from "./tier12.ts"
+import { getGoal } from "./session.ts"
 import { activePersona, clampSentences, DEFAULT_MAX_SENTENCES, pickCelebrate, pickFallback } from "./personas.ts"
 import { klog } from "./klog.ts"
 import { playChime } from "./chime.ts"
@@ -244,6 +245,13 @@ async function serviceTier2(
     recentTitles: titles,
     excerpt,
   })
+  // Drop the result if the goal changed (new revision, or cleared) while Tier-2 was in
+  // flight — otherwise a verdict/nag judged under the old goal lands against the new one.
+  const current = await getGoal()
+  if (!current || !goal || current.revision !== goal.revision) {
+    klog(`tier2 result dropped (goal changed) on ${effect.pageKey}`)
+    return
+  }
   klog(`tier2 gate (${effect.reason}) on ${effect.pageKey} excerpt=${excerpt?.length ?? 0}c -> ${outcome.flow}`)
   // The Writer's message rides along to the nag toast (if drift is confirmed).
   if (outcome.flow === "drift" && outcome.message) pendingNagMessage = outcome.message

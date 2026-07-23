@@ -262,8 +262,9 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
       message.goal ?? "",
       typeof message.minutes === "number" ? message.minutes : null,
     )
-    // Only restart the gauge when the goal actually changes (or is cleared).
-    if (!goal || previous?.text !== goal.text) await resetState()
+    // Restart the gauge when the goal actually changes (text OR minutes → new revision)
+    // or is cleared.
+    if (!goal || previous?.revision !== goal.revision) await resetState()
     ensureHeartbeat()
     if (goal) {
       lastObservedKey = null // re-judge the active page under the new goal
