@@ -32,6 +32,11 @@
       .btn-row { display: flex; gap: 8px; }
       .btn-row button { flex: 1; }
       .section-label { font-size: 11px; color: #999; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .05em; }
+      #logbox { margin-top: 14px; }
+      #logbox summary { font-size: 11px; color: #999; cursor: pointer; letter-spacing: .05em; text-transform: uppercase; }
+      #logview { font: 10.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-all;
+        max-height: 200px; overflow-y: auto; margin: 8px 0; padding: 8px; border: 1px solid #8884; border-radius: 8px; color: #999; }
+      #logbox .btn-row button { font-size: 11px; padding: 5px; }
     </style>
   </head>
   <body>
@@ -68,6 +73,16 @@
       </div>
       <div id="ollama-result" class="hint"></div>
     </div>
+
+    <details id="logbox">
+      <summary>디버그 로그</summary>
+      <pre id="logview"></pre>
+      <div class="btn-row">
+        <button id="log-refresh" class="ghost">새로고침</button>
+        <button id="log-export" class="ghost">파일로</button>
+        <button id="log-clear" class="ghost">지우기</button>
+      </div>
+    </details>
 
     <script type="module" src="popup.js"></script>
   </body>

@@ -12,6 +12,7 @@ import { currentState, dispatch, resetState, setActivePage, testNag } from "./li
 import { getOllamaConfig, ollamaEnabled, setOllamaConfig, testOllama, tier1Rescue } from "./lib/tier12.ts"
 import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
 import { markNagActed, recordObservation } from "./lib/history.ts"
+import { clearLog, exportLog, klog, logText } from "./lib/klog.ts"
 
 const HEARTBEAT_ALARM = "kibitzer-next-heartbeat"
 
@@ -52,7 +53,7 @@ async function observe(url: string | undefined, title: string | undefined): Prom
   if (verdict === "DRIFT" && enabled) {
     verdict = await tier1Rescue(goal.text, title, urlHost) // Tier 1 may rescue to OK
   }
-  console.log(`[kbz] observe ${pageKey} tier0=${tier0Verdict}(${score.toFixed(2)}) final=${verdict}`)
+  klog(`observe ${pageKey} tier0=${tier0Verdict}(${score.toFixed(2)}) final=${verdict} mode=${enabled ? "ollama" : "degraded"}`)
   const now = Date.now()
   await setActivePage({ pageKey, title, urlHost, score })
   await recordObservation({ title, urlHost, verdict, ts: now }) // recent_titles / repeat context
@@ -144,6 +145,16 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
   }
   if (message?.type === "set-persona") {
     return { persona: await setPersonaKey(message.persona ?? "") }
+  }
+  if (message?.type === "get-log") {
+    return { text: await logText() }
+  }
+  if (message?.type === "export-log") {
+    return await exportLog()
+  }
+  if (message?.type === "clear-log") {
+    await clearLog()
+    return { ok: true }
   }
   if (message?.type === "test-ollama") {
     return await testOllama({

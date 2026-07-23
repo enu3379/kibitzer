@@ -13,6 +13,7 @@ import {
 } from "../providers/payloads.ts"
 import type { JudgeVerdict } from "../providers/types.ts"
 import { activePersona, composeWriterPrompt, pickFallback } from "./personas.ts"
+import { klog } from "./klog.ts"
 
 /** History-derived context for the Tier-2 writer (built by gaugeRuntime from the nag /
  *  visit logs). `nagCount` is the 1-based ordinal of the nag about to be produced. */
@@ -106,7 +107,7 @@ export async function tier1Rescue(goalText: string, title: string, urlHost: stri
     const result = await p.tier1.classifyTier1(buildTier1Payload({ rawText: goalText }, { title, urlHost }, []))
     return result.verdict
   } catch (error) {
-    console.warn("[kbz] tier1 error (keeping DRIFT):", error)
+    klog(`tier1 error (keeping DRIFT): ${String(error)}`)
     return "DRIFT"
   }
 }
@@ -195,9 +196,10 @@ export async function tier2Confirm(
     )
     decision = await p.tier2.decideTier2(reviewPayload)
   } catch (error) {
-    console.warn("[kbz] tier2 judge error (fail-open to ok, no nag):", error)
+    klog(`tier2 judge error (fail-open to ok, no nag): ${String(error)}`)
     return { flow: "ok", message: null }
   }
+  klog(`tier2 judge: ${decision.decision} (${decision.reasonCode}, basis=${decision.basis})`)
   if (decision.decision !== "notify") return { flow: "ok", message: null }
   // Notify confirmed → write the nag in the selected persona's voice.
   const persona = await activePersona()
@@ -212,7 +214,7 @@ export async function tier2Confirm(
     const message = await p.tier2.writeTier2Message(messagePayload, composeWriterPrompt(persona))
     return { flow: "drift", message }
   } catch (error) {
-    console.warn("[kbz] tier2 writer error (persona fallback template):", error)
+    klog(`tier2 writer error (persona fallback template): ${String(error)}`)
     const message = pickFallback(persona, ctx.nagCount, {
       goal: goalText,
       title: page.title || page.urlHost || "현재 페이지",

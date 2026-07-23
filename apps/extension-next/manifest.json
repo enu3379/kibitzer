@@ -32,7 +32,9 @@
     "scripting",
     "alarms",
     "storage",
-    "idle"
+    "idle",
+    "downloads",
+    "offscreen"
   ],
   "host_permissions": [
     "http://127.0.0.1/*",

@@ -11,6 +11,7 @@ const options = {
   entryPoints: [
     join(extensionRoot, "src/background.ts"),
     join(extensionRoot, "src/popup/popup.ts"),
+    join(extensionRoot, "src/offscreen.ts"),
   ],
   outdir: distDir,
   outbase: join(extensionRoot, "src"),
@@ -26,6 +27,7 @@ function copyStatic() {
   mkdirSync(join(distDir, "assets", "ort"), { recursive: true })
   cpSync(join(extensionRoot, "manifest.json"), join(distDir, "manifest.json"))
   cpSync(join(extensionRoot, "src/popup/popup.html"), join(distDir, "popup/popup.html"))
+  cpSync(join(extensionRoot, "src/offscreen.html"), join(distDir, "offscreen.html"))
   cpSync(join(extensionRoot, "icons"), join(distDir, "icons"), { recursive: true })
   // Bundles the ONNX model + tokenizer (model.onnx is fetched by assets:check first).
   cpSync(join(extensionRoot, "assets"), join(distDir, "assets"), { recursive: true })

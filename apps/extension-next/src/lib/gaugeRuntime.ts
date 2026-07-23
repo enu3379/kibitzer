@@ -12,6 +12,8 @@ import type { GaugeConfig, GaugeEffect, GaugeEvent, GaugeState } from "../core/g
 import { showKibitzerToast, type ToastPayload } from "../content/toastOverlay.ts"
 import { tier2Confirm } from "./tier12.ts"
 import { activePersona, pickCelebrate, pickFallback } from "./personas.ts"
+import { klog } from "./klog.ts"
+import { playChime } from "./chime.ts"
 import {
   clearHistory,
   lastNagIgnored,
@@ -117,8 +119,8 @@ export function dispatch(event: GaugeEvent, goal: SessionGoal | null): Promise<v
     const s1 = transition.state.s.toFixed(1)
     if (s0 !== s1 || transition.effects.length > 0) {
       const eff = transition.effects.map((e) => e.type).join(",")
-      console.log(
-        `[kbz] ${event.type} S ${s0}->${s1} m=${transition.state.m.toFixed(2)}` +
+      klog(
+        `${event.type} S ${s0}->${s1} m=${transition.state.m.toFixed(2)}` +
           ` armed=${transition.state.celebrateArmed} v=${transition.state.activeVerdict}` +
           (eff ? ` !! ${eff}` : ""),
       )
@@ -158,6 +160,7 @@ async function deliver(effect: GaugeEffect, goal: SessionGoal | null, ts: number
     // gate), otherwise the persona's fallback template. This covers degraded mode,
     // renags, cached-drift nags, and the "알림보기" test — all were showing the plain
     // line before. The generic sentence is only a last resort (no persona templates).
+    const fromWriter = pendingNagMessage != null
     let message = pendingNagMessage
     pendingNagMessage = null
     if (!message) {
@@ -170,6 +173,7 @@ async function deliver(effect: GaugeEffect, goal: SessionGoal | null, ts: number
           host: page?.urlHost || "현재 페이지",
         }) ?? `'${goalText}' 흐름에서 벗어난 것 같아요. 계속 필요한 곁가지인지 확인해볼까요?`
     }
+    klog(`nag (${fromWriter ? "writer" : "fallback"}): "${message.slice(0, 48)}"`)
     const token = await showToast(message, effect.pageKey, "intervention")
     if (token != null) await recordNag({ ts, host: page?.urlHost ?? "", token })
   } else if (effect.type === "celebrate") {
@@ -179,6 +183,7 @@ async function deliver(effect: GaugeEffect, goal: SessionGoal | null, ts: number
       pickCelebrate(persona, { goal: goalText, returnMinutes: await returnMinutes(ts) }) ??
       `'${goalText}'에 다시 집중하고 있네요 👍`
     await setDriftSince(null)
+    klog(`celebrate: "${message.slice(0, 48)}"`)
     await showToast(message, null, "celebration")
   }
 }
@@ -209,7 +214,7 @@ async function serviceTier2(
     },
     recentTitles: titles,
   })
-  console.log(`[kbz] tier2 gate (${effect.reason}) on ${effect.pageKey} -> ${outcome.flow}`)
+  klog(`tier2 gate (${effect.reason}) on ${effect.pageKey} -> ${outcome.flow}`)
   // The Writer's message rides along to the nag toast (if drift is confirmed).
   if (outcome.flow === "drift" && outcome.message) pendingNagMessage = outcome.message
   await dispatch(
@@ -228,6 +233,7 @@ async function showToast(
   contextLabel: string | null,
   kind: "intervention" | "celebration",
 ): Promise<number | null> {
+  void playChime(kind) // audible cue via the offscreen document (works off-screen)
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
   if (!tab?.id) return null
   const token = (toastToken += 1)

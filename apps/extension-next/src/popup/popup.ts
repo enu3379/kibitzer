@@ -152,6 +152,34 @@ personaSelect.addEventListener("change", async () => {
   if (current) personaActiveEl.textContent = personaName(current)
 })
 
+// --- debug log panel -------------------------------------------------------------
+
+const logBox = document.getElementById("logbox") as HTMLDetailsElement
+const logView = document.getElementById("logview") as HTMLElement
+const logRefresh = document.getElementById("log-refresh") as HTMLButtonElement
+const logExport = document.getElementById("log-export") as HTMLButtonElement
+const logClear = document.getElementById("log-clear") as HTMLButtonElement
+
+async function refreshLog(): Promise<void> {
+  const res = (await chrome.runtime.sendMessage({ type: "get-log" })) as { text?: string } | undefined
+  logView.textContent = res?.text || "(비어 있음)"
+  logView.scrollTop = logView.scrollHeight
+}
+
+logRefresh.addEventListener("click", refreshLog)
+logExport.addEventListener("click", async () => {
+  const res = (await chrome.runtime.sendMessage({ type: "export-log" })) as { ok: boolean; error?: string } | undefined
+  logExport.textContent = res?.ok ? "저장됨 ✓" : "실패"
+  setTimeout(() => { logExport.textContent = "파일로" }, 1200)
+})
+logClear.addEventListener("click", async () => {
+  await chrome.runtime.sendMessage({ type: "clear-log" })
+  await refreshLog()
+})
+// Auto-load the log when the panel is opened, then poll while it stays open.
+logBox.addEventListener("toggle", () => { if (logBox.open) void refreshLog() })
+setInterval(() => { if (logBox.open) void refreshLog() }, 2000)
+
 editButton.addEventListener("click", () => {
   showSetup()
 })
