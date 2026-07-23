@@ -34,6 +34,7 @@ import {
   loadExplorationHistory,
 } from "../lib/history"
 import type { GaugeShadowSnapshot } from "../lib/gaugeShadow"
+import type { ProviderShadowSnapshot } from "../lib/providerShadow"
 import { providerFailureDiagnostics } from "../lib/providerFailureDiagnostics"
 import { completeDashboardSnapshot } from "./dashboardSnapshot"
 import type { DashboardSnapshot } from "./dashboardSnapshot"
@@ -246,6 +247,21 @@ async function clearGaugeShadowSnapshot(): Promise<boolean> {
   }
 }
 
+async function getProviderShadowSnapshot(
+  sessionId: string,
+): Promise<ProviderShadowSnapshot | null> {
+  if (!devDiagnostics) return null
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "kibitzer:get-provider-shadow",
+    }) as { snapshot?: ProviderShadowSnapshot | null } | undefined
+    const snapshot = response?.snapshot ?? null
+    return snapshot?.sessionId === sessionId ? snapshot : null
+  } catch {
+    return null
+  }
+}
+
 async function refresh(): Promise<void> {
   if (editing || summary || settingsOpen || reportOpen || historyOpen) return
   const result = await getSessionState()
@@ -275,7 +291,16 @@ async function refresh(): Promise<void> {
     return
   }
   const activeTab = await getActiveTab()
-  const [current, stats, health, pageState, localStage, settings, gaugeShadowSnapshot] = await Promise.all([
+  const [
+    current,
+    stats,
+    health,
+    pageState,
+    localStage,
+    settings,
+    gaugeShadowSnapshot,
+    providerShadowSnapshot,
+  ] = await Promise.all([
     getCurrentSession(),
     getSessionStats(),
     getHealthStatus(),
@@ -283,6 +308,7 @@ async function refresh(): Promise<void> {
     activeTab === null ? Promise.resolve(null) : getLocalPageProcessingStage(activeTab),
     getSettings(),
     getGaugeShadowSnapshot(result.state.session_id),
+    getProviderShadowSnapshot(result.state.session_id),
   ])
   const serverStage = pageState?.state === "processing" ? pageState.stage ?? null : null
   const processingStage = serverStage ?? localStage
@@ -315,6 +341,7 @@ async function refresh(): Promise<void> {
     pageTitle,
     pageHost,
     gaugeShadowSnapshot,
+    providerShadowSnapshot,
   )
   schedulePoll(processingStage ? PROCESSING_POLL_MS : POLL_MS)
 }
@@ -595,6 +622,31 @@ function gaugeShadowDebugHtml(snapshot: GaugeShadowSnapshot | null): string {
     </div>`
 }
 
+function providerShadowDebugHtml(snapshot: ProviderShadowSnapshot | null): string {
+  if (!devDiagnostics || !snapshot) return ""
+  const tier0 = snapshot.tier0
+  const tier1 = snapshot.tier1
+  const tier0Line = tier0
+    ? tier0.result === "success"
+      ? `Tier 0 goal-title ${tier0.score?.toFixed(4) ?? "–"} → ${tier0.verdict ?? "–"} · 서버 ${tier0.serverVerdict}`
+      : `Tier 0 오류(${esc(tier0.stage ?? "runtime")})`
+    : "Tier 0 대기 중"
+  const tier1Line = tier1
+    ? tier1.result === "success"
+      ? `Tier 1 ${tier1.verdict ?? "–"} · 서버 ${tier1.serverVerdict}`
+      : `Tier 1 오류(${esc(tier1.stage ?? "runtime")})`
+    : "Tier 1 비활성"
+  return `
+    <div class="page-card" aria-label="TS provider 섀도 진단">
+      <div class="scoreline">
+        <span>TS provider 섀도</span>
+        <strong>발송 안 함</strong>
+      </div>
+      <p class="pc-empty-hint">${esc(tier0Line)}</p>
+      <p class="pc-empty-hint">${esc(tier1Line)}</p>
+    </div>`
+}
+
 async function submitPageLabel(page: LatestObservation, label: PageLabel): Promise<void> {
   if (page.label === label) return
   for (const id of ["pl-related", "pl-drift"]) {
@@ -623,6 +675,7 @@ function renderDashboard(
   processingTitle: string | null = null,
   processingHost: string | null = null,
   gaugeShadowSnapshot: GaugeShadowSnapshot | null = null,
+  providerShadowSnapshot: ProviderShadowSnapshot | null = null,
 ): void {
   const pill = TRACKING_PILLS[state.tracking] ?? TRACKING_PILLS.tracking
   const pillLabel =
@@ -642,6 +695,7 @@ function renderDashboard(
     ? `정렬도 ${formatScore(state.theta_low)} 미만이면 말하고, ${formatScore(state.theta_high)} 초과면 회복으로 봅니다.`
     : `${state.streak_threshold}회 연속 이탈 시에만 한 번 말을 겁니다.`
   const gaugeShadow = gaugeShadowDebugHtml(gaugeShadowSnapshot)
+  const providerShadow = providerShadowDebugHtml(providerShadowSnapshot)
 
   const degraded = health?.tiers.tier1 === "degraded" || health?.tiers.tier2 === "degraded"
   const degradedNote = degraded
@@ -711,6 +765,7 @@ function renderDashboard(
     ${driftMeter}
     <p class="hint">${driftHint}</p>
     ${gaugeShadow}
+    ${providerShadow}
     <div class="cards">
       <div class="card"><p class="k">관측</p><p class="v">${stats ? stats.observations : "–"}</p></div>
       <div class="card"><p class="k">목표 관련</p><p class="v">${stats ? formatRatio(stats.related_ratio) : "–"}</p></div>

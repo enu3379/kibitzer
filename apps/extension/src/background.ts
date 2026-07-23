@@ -36,6 +36,9 @@ import {
   updateExplorationHistoryByObservationId,
 } from "./lib/history"
 import {
+  ProviderShadowRunner,
+} from "./lib/providerShadow"
+import {
   DWELL_RECORD_VERSION,
   DwellOutcome,
   DwellRecord,
@@ -130,10 +133,12 @@ let d7ObservationsPersistTail: Promise<void> = Promise.resolve()
 interface GaugeShadowContext {
   sessionId: string
   goalMinutes: number | null
+  rawGoalText: string
 }
 
 const gaugeShadowStore = new GaugeIndexedDbStore()
 const gaugeShadow = new GaugeShadowController(gaugeShadowStore)
+const providerShadow = new ProviderShadowRunner()
 let gaugeShadowContext: GaugeShadowContext | null = null
 let gaugeShadowMigrationPromise: Promise<void> | null = null
 
@@ -181,6 +186,7 @@ async function ensureGaugeShadowContext(): Promise<GaugeShadowContext | null> {
   gaugeShadowContext = {
     sessionId: current.session.id,
     goalMinutes: current.goal.available_time_minutes ?? null,
+    rawGoalText: current.goal.raw_text,
   }
   await gaugeShadow.ensureSession(
     gaugeShadowContext.sessionId,
@@ -194,18 +200,25 @@ async function resetGaugeShadow(goal: GoalInfo): Promise<void> {
   gaugeShadowContext = {
     sessionId: goal.session_id,
     goalMinutes: goal.available_time_minutes ?? null,
+    rawGoalText: goal.raw_text,
   }
-  await gaugeShadow.ensureSession(
-    gaugeShadowContext.sessionId,
-    gaugeShadowContext.goalMinutes,
-    Date.now(),
-    true,
-  )
+  await Promise.all([
+    gaugeShadow.ensureSession(
+      gaugeShadowContext.sessionId,
+      gaugeShadowContext.goalMinutes,
+      Date.now(),
+      true,
+    ),
+    providerShadow.clear(),
+  ])
 }
 
 async function clearGaugeShadow(): Promise<void> {
   gaugeShadowContext = null
-  await gaugeShadow.clear()
+  await Promise.all([
+    gaugeShadow.clear(),
+    providerShadow.clear(),
+  ])
 }
 
 async function currentGaugeShadowSnapshot(): Promise<GaugeShadowSnapshot | null> {
@@ -233,11 +246,14 @@ async function recordGaugeShadowPresence(
 async function recordGaugeShadowNav(
   url: string,
   result: PipelineResult | null,
+  title = "",
 ): Promise<void> {
-  const verdict = result?.verdict
+  if (!result) return
+  const verdict = result.verdict
   if (verdict !== "OK" && verdict !== "DRIFT") return
   await runGaugeShadowSafely(async () => {
-    if (!(await ensureGaugeShadowContext())) return
+    const context = await ensureGaugeShadowContext()
+    if (!context) return
     const page = new URL(url)
     const pathHash = await urlPathHashFor(url)
     await gaugeShadow.dispatch({
@@ -246,6 +262,19 @@ async function recordGaugeShadowNav(
       verdict,
       ts: Date.now(),
     })
+    if (result.observation_id) {
+      void providerShadow.runNavigation({
+        sessionId: context.sessionId,
+        observationId: result.observation_id,
+        goal: context.rawGoalText,
+        title: title || result.page?.title || "",
+        url,
+        serverVerdict: verdict,
+      }).catch((error) => {
+        // TS providers are diagnostic-only in Phase 4.
+        console.warn("kibitzer: provider shadow update failed", error)
+      })
+    }
   })
 }
 
@@ -656,7 +685,7 @@ async function processObservationDwell(record: ObservationDwellRecord): Promise<
   if (attempt.cancelled) return "cancel"
   const result = attempt.result
   if (!result) return "retry"
-  await recordGaugeShadowNav(record.url, result)
+  await recordGaugeShadowNav(record.url, result, tab.title ?? "")
   await updateHistoryWithPipelineResult(record.historyId, result, tab.title ?? "")
   if (result.observation_id) {
     await captureD7ContentAndActivate(record.tabId, result.observation_id, record.url)
@@ -698,7 +727,7 @@ async function processTier2Dwell(record: Tier2DwellRecord): Promise<DwellOutcome
 
   const result = await postObservationExcerpt(record.observationId, excerpt)
   if (!result) return "retry"
-  await recordGaugeShadowNav(record.url, result)
+  await recordGaugeShadowNav(record.url, result, excerpt.title)
   await updateHistoryResponse(record.historyId, result)
   if (
     result.action === "notify" &&
@@ -1059,6 +1088,20 @@ chrome.runtime.onMessage.addListener(
     }
     if (message?.type === "kibitzer:clear-gauge-shadow") {
       void runGaugeShadowWork(clearGaugeShadow).then(
+        () => sendResponse({ ok: true }),
+        () => sendResponse({ ok: false }),
+      )
+      return true
+    }
+    if (message?.type === "kibitzer:get-provider-shadow") {
+      void providerShadow.snapshot().then(
+        (snapshot) => sendResponse({ snapshot }),
+        () => sendResponse({ snapshot: null }),
+      )
+      return true
+    }
+    if (message?.type === "kibitzer:clear-provider-shadow") {
+      void providerShadow.clear().then(
         () => sendResponse({ ok: true }),
         () => sendResponse({ ok: false }),
       )
