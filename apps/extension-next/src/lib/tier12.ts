@@ -20,6 +20,7 @@ import {
   pickFallback,
 } from "./personas.ts"
 import { klog } from "./klog.ts"
+import { recordProviderError, recordProviderOk } from "./providerHealth.ts"
 
 /** History-derived context for the Tier-2 writer (built by gaugeRuntime from the nag /
  *  visit logs). `nagCount` is the 1-based ordinal of the nag about to be produced.
@@ -113,8 +114,10 @@ export async function tier1Rescue(goalText: string, title: string, urlHost: stri
   if (!p) return "DRIFT"
   try {
     const result = await p.tier1.classifyTier1(buildTier1Payload({ rawText: goalText }, { title, urlHost }, []))
+    void recordProviderOk()
     return result.verdict
   } catch (error) {
+    void recordProviderError(error)
     klog(`tier1 error (keeping DRIFT): ${String(error)}`)
     return "DRIFT"
   }
@@ -203,7 +206,9 @@ export async function tier2Confirm(
       null,
     )
     decision = await p.tier2.decideTier2(reviewPayload)
+    void recordProviderOk()
   } catch (error) {
+    void recordProviderError(error)
     klog(`tier2 judge error (fail-open to ok, no nag): ${String(error)}`)
     return { flow: "ok", message: null }
   }
@@ -221,8 +226,10 @@ export async function tier2Confirm(
   )
   try {
     const message = await p.tier2.writeTier2Message(messagePayload, composeWriterPrompt(persona))
+    void recordProviderOk()
     return { flow: "drift", message: clampSentences(message, maxSentences) }
   } catch (error) {
+    void recordProviderError(error)
     klog(`tier2 writer error (persona fallback template): ${String(error)}`)
     const message = pickFallback(persona, ctx.nagCount, {
       goal: goalText,

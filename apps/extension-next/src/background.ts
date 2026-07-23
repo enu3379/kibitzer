@@ -11,6 +11,7 @@ import { judgeTier0, TAU_OK } from "./lib/tier0.ts"
 import { currentState, dispatch, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
 import { getOllamaConfig, ollamaEnabled, setOllamaConfig, testOllama, tier1Rescue } from "./lib/tier12.ts"
 import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
+import { getProviderHealth } from "./lib/providerHealth.ts"
 import { markNagActed, recordObservation } from "./lib/history.ts"
 import { clearLog, exportLog, klog, logText } from "./lib/klog.ts"
 import { shouldDropUrl } from "./lib/domainFilter.ts"
@@ -208,10 +209,11 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     // Advance the gauge to "now" so the popup shows a live value between the
     // 1-min heartbeat alarms (a nag can still fire here if S reaches 0).
     if (goal) await dispatch({ type: "heartbeat", ts: Date.now() }, goal)
-    const [state, ollama, persona] = await Promise.all([
+    const [state, ollama, persona, health] = await Promise.all([
       currentState(),
       getOllamaConfig(),
       getPersonaKey(),
+      getProviderHealth(),
     ])
     return {
       goal,
@@ -220,6 +222,7 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
       ollama,
       persona,
       personas: personaChoices(),
+      health,
     }
   }
   if (message?.type === "set-persona") {

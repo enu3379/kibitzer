@@ -14,6 +14,7 @@ interface StateResponse {
   ollama?: OllamaConfig
   persona?: string
   personas?: Array<{ key: string; name: string }>
+  health?: { ok: boolean; kind: string; message: string; ts: number } | null
 }
 
 const activeView = document.getElementById("active") as HTMLDivElement
@@ -23,6 +24,7 @@ const goalTextEl = document.getElementById("goalText") as HTMLElement
 const modeEl = document.getElementById("mode") as HTMLElement
 const personaActiveEl = document.getElementById("personaActive") as HTMLElement
 const personaSelect = document.getElementById("persona") as HTMLSelectElement
+const providerWarnEl = document.getElementById("providerWarn") as HTMLElement
 const goalInput = document.getElementById("goal") as HTMLInputElement
 const minutesInput = document.getElementById("minutes") as HTMLInputElement
 const startButton = document.getElementById("set") as HTMLButtonElement
@@ -61,6 +63,17 @@ function personaName(state: StateResponse): string {
   return found ? `말투 · ${found.name}` : ""
 }
 
+function renderProviderWarn(state: StateResponse): void {
+  const ollamaOn = Boolean(state.ollama?.apiKeys?.length)
+  const health = state.health
+  if (ollamaOn && health && !health.ok) {
+    providerWarnEl.textContent = `⚠ LLM 오류: ${health.message} · Tier-0(제목 유사도)만 동작 중`
+    providerWarnEl.hidden = false
+  } else {
+    providerWarnEl.hidden = true
+  }
+}
+
 function fillSettings(state: StateResponse | null): void {
   if (state?.goal) {
     goalInput.value = state.goal.text
@@ -97,6 +110,7 @@ function showActive(state: StateResponse): void {
   gaugeEl.innerHTML = `${state.s}<small> / 100 몰입</small>`
   modeEl.textContent = modeText(state)
   personaActiveEl.textContent = personaName(state)
+  renderProviderWarn(state)
 }
 
 function render(state: StateResponse | null): void {
@@ -196,4 +210,5 @@ setInterval(async () => {
   goalTextEl.textContent = state.goal.text
   modeEl.textContent = modeText(state)
   personaActiveEl.textContent = personaName(state)
+  renderProviderWarn(state)
 }, 1500)
