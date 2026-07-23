@@ -38,18 +38,20 @@ Legend — Effort: S(mall)/M(edium)/L(arge). "Blocked on SSOT" = needs the durab
 | P2-1 | **Durable IndexedDB SSOT** | ✅ DONE | Added `lib/db.ts` (IndexedDB: `kv` + `observations` + `events` stores). Moved all live gauge state (S/M/accelTier, drift-since, active page) and the recent-visit / nag logs off `chrome.storage.session` onto it, so they survive **browser restart**, not just SW teardown; reads fail-safe to a fresh gauge. _Effect-outbox deferred_ — effects deliver synchronously in `deliver()`, so a cross-teardown loss is rare; revisit if it bites. |
 | P2-2 | **Structured, durable observation + event log** | ✅ DONE | `lib/events.ts` — typed append-only records in the IndexedDB `events` store, logged at every decision point (observe/tier2/nag/celebrate/feedback/goal). Exportable as JSONL from the popup. The queryable substrate for P3 analytics + replay. |
 
-## P3 — Larger features (mostly blocked on P2)
+## P3 — Larger features (triaged 2026-07-24: core / small / skip)
 
 | # | Gap | Status | Effort | Notes |
 |---|-----|--------|--------|-------|
-| P3-1 | **Tier-0 richness: multi-exemplar + recency anchor + goal enrichment** | MISSING | L | Next implements only `exemplar_score` with **one** exemplar of `max(exemplar, anchor, derived)`. Missing: (a) multi-exemplar from "related" pages (learning loop); (b) session-recency **anchor** vector (mean of recent-OK embeddings) — catches drift-into-adjacent-subtopic; (c) **LLM goal enrichment** → cross-lingual derived phrases (terse "리팩터링" won't match English "extract method"). `completeGoalEnrichment` is ported but never invoked. Blocked on SSOT + embedding storage. |
-| P3-2 | **SEO title-suffix stripping** | MISSING | S–M | `strip_repeated_title_suffix` ("- 나무위키", "\| LG전자") not ported; site furniture blunts the cosine. `history.ts` can feed recent-titles-per-host. |
-| P3-3 | **Self-focus analytics: session stats / report / history views** | MISSING | L | The whole "how did my focus go today" surface (focus ratio, hourly strip, top drift hosts, longest OK stretch, exploration history) is gone. Blocked on SSOT. |
-| P3-4 | **Full "related"/"drift" labeling → exemplar learning** | MISSING | M | Beyond P0-5's S-recovery: persist labels, override verdict in reports, add the page embedding as a goal exemplar. Blocked on SSOT + Tier-0 exemplar store (P3-1). |
-| P3-5 | **Settings surface collapsed (~12 knobs → 3)** | MISSING | M | Absent user controls: `tau_ok` sensitivity, re-nag cooldown, observe/tier2 dwell seconds, controller params, **quiet hours**, **voice/TTS toggle** (Web Speech `speechSynthesis` analog), **delete-all activity data** (privacy), popup snooze/resume/session-end, per-page verdict card. |
-| P3-6 | **Session replay / counterfactual tuning harness** | MISSING | L | `replay_session` re-ran recorded sessions under overridden config to catch detector regressions. Blocked on P2-2; could be a Node/TS script re-running the vendored `reduceGauge`+`judgeTier0` over an exported log. |
-| P3-7 | **Re-point benchmark / eval / red-team harnesses** | PARTIAL | M | `scripts/benchmark_tier0_embeddings.py`, `eval_persona_voice.py`, `redteam/extract_prompt.py`, `smoke_tier*` import `apps.server.*` → break when the server is deleted. Model+prompts are byte-parity, so re-point at `OllamaChatJudgeProvider`/WASM embedder or trust the parity test. |
-| P3-8 | **Session pause + end-of-session summary** | PARTIAL | M | No pause (keep goal, stop tracking) and no end recap. Add a `paused` flag short-circuiting `observe`/heartbeat. |
+| P3-1 | **Tier-0 richness: multi-exemplar + recency anchor + goal enrichment** | ✅ DONE | L | `lib/relevance.ts` scores `max(exemplar, β·anchor, derived)`; "관련 있어요" adds a page exemplar; confirmed-OK pages join a guarded recency anchor; `lib/goalEnrichment.ts` expands the goal into cross-lingual derived exemplars on goal change. Vectors per-goal in the SSOT. Parity tests. |
+| P3-4 | **"related"/"drift" labeling → exemplar learning** | ✅ DONE | M | Folded into P3-1: `related` embeds the page and adds a goal exemplar (the user-taught relevance loop) + recovers S. (Report-verdict override lands with P3-3.) |
+| P3-3 | **Self-focus analytics: session stats / report / history** | CORE (next) | L | "How did my focus go today" — focus ratio, hourly strip, top drift hosts, longest OK stretch. On a **separate page**. Aggregates the `events`/`observations` stores. |
+| P3-5a | **Core settings (options page)**: `tau_ok`, **quiet hours**, **voice/TTS toggle**, **delete-all data**, persona/Ollama moved here | CORE | M | New MV3 `options_ui` page; declutters the popup. |
+| P3-6 | **Session replay / counterfactual tuning** | KEEP (verify) | L | Re-run a recorded session (events log) through `reduceGauge`+`judgeTier0` under overridden params. Node/TS script + minimal UI. |
+| P3-2 | **SEO title-suffix stripping** | SMALL | S | `strip_repeated_title_suffix` ("- 나무위키") — a tiny pure fn fed by recent-titles-per-host. Modest gain. |
+| P3-5b | Cooldown / dwell seconds settings | SHRINK/DEFER | S | Constants already work; expose only as an advanced toggle if at all. |
+| P3-8 | Session pause + end summary | SMALL | S | A `paused` flag short-circuiting observe/heartbeat; summary folds into P3-3. |
+| **P3-5c** | ~~Controller mode (A/B α·θ·k)~~ | ❌ **SKIP** | — | **Obsolete**: the S-gauge (PR #121) replaced the A/B controllers; there is nothing to expose. |
+| P3-7 | Re-point benchmark / red-team harnesses | DEFER | M | Do at server-deletion cutover; model+prompts are byte-parity meanwhile. |
 
 ## Obsolete by design (serverless) — no action
 
