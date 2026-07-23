@@ -64,3 +64,14 @@ editButton.addEventListener("click", () => {
 })
 
 void getState().then(render)
+
+// Live update: while the popup is open and showing the gauge, refresh S every
+// 1.5s (get-state advances the gauge to now on the background side).
+setInterval(async () => {
+  if (activeView.hidden) return
+  const state = await getState()
+  if (!state?.goal) return
+  current = state
+  gaugeEl.innerHTML = `${state.s}<small> / 100 몰입</small>`
+  goalTextEl.textContent = state.goal.text
+}, 1500)

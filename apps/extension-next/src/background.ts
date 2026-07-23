@@ -91,7 +91,11 @@ interface PopupMessage {
 
 async function handleMessage(message: PopupMessage): Promise<unknown> {
   if (message?.type === "get-state") {
-    const [goal, state] = await Promise.all([getGoal(), currentState()])
+    const goal = await getGoal()
+    // Advance the gauge to "now" so the popup shows a live value between the
+    // 1-min heartbeat alarms (a nag can still fire here if S reaches 0).
+    if (goal) await dispatch({ type: "heartbeat", ts: Date.now() }, goal)
+    const state = await currentState()
     return { goal, s: Math.round(state.s), accelTier: state.accelTier }
   }
   if (message?.type === "set-goal") {
