@@ -7,7 +7,8 @@
 // A 1-min alarm feeds heartbeats so dwell time (not click count) drives the gauge.
 
 import { getGoal, setGoal, type SessionGoal } from "./lib/session.ts"
-import { judgeTier0, TAU_OK } from "./lib/tier0.ts"
+import { embedText, judgeTier0, TAU_OK } from "./lib/tier0.ts"
+import { addExemplar, admissionEligible, admitAnchor, loadRefs } from "./lib/relevance.ts"
 import { currentState, dispatch, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
 import { getOllamaConfig, ollamaEnabled, setOllamaConfig, testOllama, tier1Rescue } from "./lib/tier12.ts"
 import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
@@ -76,14 +77,21 @@ async function judgeAndDispatch(url: string, title: string, obsKey: string): Pro
   if (!pageKey) return
   lastObservedKey = obsKey
   const urlHost = hostOf(url)
-  const { score, verdict: tier0Verdict } = await judgeTier0(goal.text, title, TAU_OK)
+  const refs = await loadRefs()
+  const { score, verdict: tier0Verdict, vector: titleVec, parts } = await judgeTier0(goal.text, title, TAU_OK, refs)
   const enabled = await ollamaEnabled()
   let verdict = tier0Verdict
+  let tierReached = 0
   if (verdict === "DRIFT" && enabled) {
     verdict = await tier1Rescue(goal.text, title, urlHost) // Tier 1 may rescue to OK
+    tierReached = 1
   }
-  klog(`observe ${pageKey} tier0=${tier0Verdict}(${score.toFixed(2)}) final=${verdict} mode=${enabled ? "ollama" : "degraded"}`)
-  logEvent("observe", { pageKey, host: urlHost, tier0: tier0Verdict, score: Number(score.toFixed(3)), verdict, mode: enabled ? "ollama" : "degraded" })
+  // Learn the recency anchor from confirmed-OK pages (the guard blocks anchor-only OKs).
+  if (verdict === "OK" && admissionEligible(parts, refs.derived.length > 0, verdict, tierReached)) {
+    await admitAnchor(titleVec)
+  }
+  klog(`observe ${pageKey} tier0=${tier0Verdict}(${score.toFixed(2)} ex=${parts.exemplarScore.toFixed(2)} an=${parts.anchorScore.toFixed(2)}) final=${verdict} mode=${enabled ? "ollama" : "degraded"}`)
+  logEvent("observe", { pageKey, host: urlHost, tier0: tier0Verdict, score: Number(score.toFixed(3)), exemplar: Number(parts.exemplarScore.toFixed(3)), anchor: Number(parts.anchorScore.toFixed(3)), derived: Number(parts.derivedScore.toFixed(3)), verdict, mode: enabled ? "ollama" : "degraded" })
   const now = Date.now()
   await setActivePage({ pageKey, title, urlHost, score })
   await recordObservation({ title, urlHost, verdict, ts: now }) // recent_titles / repeat context
@@ -308,6 +316,16 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
         if (pageKey) {
           klog(`related → OK recover ${pageKey}`)
           await dispatch({ type: "nav", pageKey, verdict: "OK", ts: now }, goal)
+          // Learn: add this page's embedding as a goal exemplar so this class of page
+          // stops drifting at Tier-0 (the user-taught relevance loop).
+          if (tab?.title && tab.url && !shouldDropUrl(tab.url)) {
+            try {
+              await addExemplar(await embedText(tab.title))
+              logEvent("exemplar", { pageKey, title: tab.title })
+            } catch {
+              // embedding failed — the S-recovery above still applies.
+            }
+          }
         }
       }
     }

@@ -18,6 +18,7 @@ import { extractPageExcerpt } from "../content/pageExcerpt.ts"
 import { updateBadge } from "./badge.ts"
 import { kvGet, kvSet } from "./db.ts"
 import { logEvent } from "./events.ts"
+import { clearRelevance } from "./relevance.ts"
 import {
   clearHistory,
   lastNagIgnored,
@@ -82,6 +83,7 @@ export async function resetState(): Promise<void> {
   await kvSet(STATE_KEY, initGaugeState())
   await kvSet(DRIFT_SINCE_KEY, null)
   await clearHistory() // a new goal starts a fresh nag/visit context
+  await clearRelevance() // …and fresh Tier-0 exemplars/anchor/derived vectors
 }
 
 // --- drift timing (persona drift_minutes + celebration return_minutes) -----------
