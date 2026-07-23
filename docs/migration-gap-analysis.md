@@ -20,16 +20,16 @@ Legend — Effort: S(mall)/M(edium)/L(arge). "Blocked on SSOT" = needs the durab
 | P0-6 | **System-notification fallback dropped** | ✅ DONE | `chrome.notifications` fallback with 관련/5분 buttons wired to the same feedback handler when the toast can't inject. |
 | P0-7 | **`max_sentences` clamp not enforced** | ✅ DONE | Ported `clamp_notification_message` (domain/decimal-aware); every nag clamped to `persona.maxSentences ?? 2`. Parity tests added. |
 
-## P1 — Core judging quality
+## P1 — Core judging quality ✅ DONE (commits `70de…`→`P1-6`)
 
-| # | Gap | Status | Effort | Notes |
-|---|-----|--------|--------|-------|
-| P1-1 | **Page content/excerpt never captured — Tier-2 judges title+host only** | MISSING | M | The single biggest judging regression. Original: `apps/extension/src/content/readabilityExtract.ts` `extractPageExcerpt` (main/article, strip script/style, 3500 chars) → server `page_excerpt`. The judge prompt is built around content ("content evidence outweighs a generic title", `basis:title|content|both`). Next: no content script; `tier12.ts:189` passes `currentExcerpt=null`; `basis` can only ever be `title`. Port: `executeScript(extractPageExcerpt)` at the S=0 gate in `serviceTier2`, thread into `buildTier2ReviewPayload`. |
-| P1-2 | **Pages judged instantly — no dwell delay** | MISSING | M | Original waited 5 s (observe) / 10 s (Tier-2) of sustained attention before a page counted. Next judges on `status==="complete"`. Quick glances pollute recent-titles and arm drift. Port: debounce `observe()` behind a per-tab ~5 s timer, cancel on nav-away. |
-| P1-3 | **Provider-error / degraded-mode never surfaced** | PARTIAL | M | If keys expire / 429 / 403 mid-session, LLM judging silently drops to Tier-0-only and the user is never told (`tier12.ts:110/199/217` fail-open, klog only). Original tracked per-call status + a popup degraded banner (`providerFailureDiagnostics.ts`). Port: persist last-call status per tier, expose via `get-state`, show in popup. |
-| P1-4 | **Toolbar badge status indicator** | MISSING | S | No at-a-glance "tracking / snoozed / pending" state; must open the popup. Original: `computeBadgeStatus`+`applyStatusIcon` (old `background.ts:985-1051`). Port the badge logic, drive from `currentState()`; drop the `unreachable` state. |
-| P1-5 | **Goal-revision guard for in-flight async work** | PARTIAL | S–M | Next resets only on goal _text_ change, not minutes; `serviceTier2` is guarded by `pageKey` only, so a Tier-2 verdict requested under an old goal can land after a goal change. Add a monotonic `revision` to `SessionGoal`, stamp `nav`/`request_tier2`, drop stale `tier2_result`. |
-| P1-6 | **Time-budget context not sent to the LLMs** | MISSING | S | Gauge uses `availableMinutes` for gating, but the judge/writer get `time_budget=null`, so they can't calibrate urgency/tone. Assemble a time-context in `serviceTier2`, pass through. |
+| # | Gap | Status | Resolution |
+|---|-----|--------|------------|
+| P1-1 | **Page content/excerpt — Tier-2 judged title+host only** | ✅ DONE | Ported `extractPageExcerpt`; `serviceTier2` injects it into the active (non-sensitive, still-judged) tab and threads the body text into `buildTier2ReviewPayload` as `page_excerpt`. |
+| P1-2 | **Pages judged instantly — no dwell delay** | ✅ DONE | `observe()` schedules judgement after `OBSERVE_DWELL_MS` (5 s); nav-away during the dwell cancels it (`pendingObsKey` guard). Sensitive pages still pause immediately. |
+| P1-3 | **Provider-error / degraded-mode never surfaced** | ✅ DONE | `providerHealth` records classified ok/error per LLM call; popup shows a red degraded banner while Tier-0-only. |
+| P1-4 | **Toolbar badge status indicator** | ✅ DONE | `badge.ts` paints green/amber/red/grey by S band + snooze on every dispatch; cleared with no goal. |
+| P1-5 | **Goal-revision guard for in-flight async work** | ✅ DONE | `SessionGoal.revision` bumps on text OR minutes; reset on either; `serviceTier2` drops the Tier-2 result if the revision moved on. |
+| P1-6 | **Time-budget context not sent to the LLMs** | ✅ DONE | `serviceTier2` builds `{available_time_minutes, elapsed_minutes, current_page_drift_minutes}` and threads it into both Tier-2 payloads. |
 
 ## P2 — Foundational infrastructure
 
