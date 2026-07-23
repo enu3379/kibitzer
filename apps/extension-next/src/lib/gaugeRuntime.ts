@@ -17,6 +17,7 @@ import { pageKeyOf } from "./url.ts"
 import { extractPageExcerpt } from "../content/pageExcerpt.ts"
 import { updateBadge } from "./badge.ts"
 import { kvGet, kvSet } from "./db.ts"
+import { logEvent } from "./events.ts"
 import {
   clearHistory,
   lastNagIgnored,
@@ -181,6 +182,7 @@ async function deliver(effect: GaugeEffect, goal: SessionGoal | null, ts: number
         : `'${goalText}' 흐름에서 벗어난 것 같아요. 계속 필요한 곁가지인지 확인해볼까요?`
     }
     klog(`nag (${fromWriter ? "writer" : "fallback"}): "${message.slice(0, 48)}"`)
+    logEvent("nag", { pageKey: effect.pageKey, source: fromWriter ? "writer" : "fallback", message })
     const token = await showToast(message, effect.pageKey, "intervention")
     if (token != null) await recordNag({ ts, host: page?.urlHost ?? "", token })
   } else if (effect.type === "celebrate") {
@@ -191,6 +193,7 @@ async function deliver(effect: GaugeEffect, goal: SessionGoal | null, ts: number
       `'${goalText}'에 다시 집중하고 있네요 👍`
     await setDriftSince(null)
     klog(`celebrate: "${message.slice(0, 48)}"`)
+    logEvent("celebrate", { message })
     await showToast(message, null, "celebration")
   }
 }
@@ -257,9 +260,11 @@ async function serviceTier2(
   const current = await getGoal()
   if (!current || !goal || current.revision !== goal.revision) {
     klog(`tier2 result dropped (goal changed) on ${effect.pageKey}`)
+    logEvent("tier2", { pageKey: effect.pageKey, reason: effect.reason, flow: outcome.flow, dropped: true })
     return
   }
   klog(`tier2 gate (${effect.reason}) on ${effect.pageKey} excerpt=${excerpt?.length ?? 0}c -> ${outcome.flow}`)
+  logEvent("tier2", { pageKey: effect.pageKey, reason: effect.reason, flow: outcome.flow, excerpt: excerpt?.length ?? 0 })
   // The Writer's message rides along to the nag toast (if drift is confirmed).
   if (outcome.flow === "drift" && outcome.message) pendingNagMessage = outcome.message
   await dispatch(

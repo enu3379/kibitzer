@@ -13,6 +13,7 @@ import { getOllamaConfig, ollamaEnabled, setOllamaConfig, testOllama, tier1Rescu
 import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
 import { getProviderHealth } from "./lib/providerHealth.ts"
 import { clearBadge } from "./lib/badge.ts"
+import { clearEvents, exportEvents, logEvent } from "./lib/events.ts"
 import { markNagActed, recordObservation } from "./lib/history.ts"
 import { clearLog, exportLog, klog, logText } from "./lib/klog.ts"
 import { shouldDropUrl } from "./lib/domainFilter.ts"
@@ -82,6 +83,7 @@ async function judgeAndDispatch(url: string, title: string, obsKey: string): Pro
     verdict = await tier1Rescue(goal.text, title, urlHost) // Tier 1 may rescue to OK
   }
   klog(`observe ${pageKey} tier0=${tier0Verdict}(${score.toFixed(2)}) final=${verdict} mode=${enabled ? "ollama" : "degraded"}`)
+  logEvent("observe", { pageKey, host: urlHost, tier0: tier0Verdict, score: Number(score.toFixed(3)), verdict, mode: enabled ? "ollama" : "degraded" })
   const now = Date.now()
   await setActivePage({ pageKey, title, urlHost, score })
   await recordObservation({ title, urlHost, verdict, ts: now }) // recent_titles / repeat context
@@ -239,6 +241,13 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     await clearLog()
     return { ok: true }
   }
+  if (message?.type === "export-events") {
+    return await exportEvents()
+  }
+  if (message?.type === "clear-events") {
+    await clearEvents()
+    return { ok: true }
+  }
   if (message?.type === "test-ollama") {
     return await testOllama({
       apiUrl: message.apiUrl,
@@ -265,6 +274,7 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     // Restart the gauge when the goal actually changes (text OR minutes → new revision)
     // or is cleared.
     if (!goal || previous?.revision !== goal.revision) await resetState()
+    logEvent("goal", { text: goal?.text ?? null, minutes: goal?.availableMinutes ?? null, revision: goal?.revision ?? null })
     ensureHeartbeat()
     if (goal) {
       lastObservedKey = null // re-judge the active page under the new goal
@@ -282,6 +292,7 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     if (message.kind && message.kind !== "timeout" && typeof message.displayToken === "number") {
       await markNagActed(message.displayToken)
     }
+    logEvent("feedback", { kind: message.kind ?? null })
     const goal = await getGoal()
     if (goal) {
       const now = Date.now()

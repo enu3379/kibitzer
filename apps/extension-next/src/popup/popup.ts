@@ -172,6 +172,7 @@ const logBox = document.getElementById("logbox") as HTMLDetailsElement
 const logView = document.getElementById("logview") as HTMLElement
 const logRefresh = document.getElementById("log-refresh") as HTMLButtonElement
 const logExport = document.getElementById("log-export") as HTMLButtonElement
+const eventsExport = document.getElementById("events-export") as HTMLButtonElement
 const logClear = document.getElementById("log-clear") as HTMLButtonElement
 
 async function refreshLog(): Promise<void> {
@@ -184,7 +185,12 @@ logRefresh.addEventListener("click", refreshLog)
 logExport.addEventListener("click", async () => {
   const res = (await chrome.runtime.sendMessage({ type: "export-log" })) as { ok: boolean; error?: string } | undefined
   logExport.textContent = res?.ok ? "저장됨 ✓" : "실패"
-  setTimeout(() => { logExport.textContent = "파일로" }, 1200)
+  setTimeout(() => { logExport.textContent = "로그 파일" }, 1200)
+})
+eventsExport.addEventListener("click", async () => {
+  const res = (await chrome.runtime.sendMessage({ type: "export-events" })) as { ok: boolean; error?: string } | undefined
+  eventsExport.textContent = res?.ok ? "저장됨 ✓" : "실패"
+  setTimeout(() => { eventsExport.textContent = "이벤트 JSON" }, 1200)
 })
 logClear.addEventListener("click", async () => {
   await chrome.runtime.sendMessage({ type: "clear-log" })
