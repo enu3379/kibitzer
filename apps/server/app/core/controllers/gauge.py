@@ -55,6 +55,8 @@ _CONFIG_KEYMAP: dict[str, str] = {
     "t_up": "tUp",
     "t_down": "tDown",
     "k_recover": "kRecover",
+    "recover_gamma": "recoverGamma",
+    "recover_f_max": "recoverFMax",
     "gap_cap": "gapCap",
     "r_renag": "rRenag",
     "b_backoff": "bBackoff",
@@ -127,7 +129,9 @@ class GaugeConfig:
     tau_m: float = 300.0
     t_up: list[float] = field(default_factory=lambda: [0.5, 0.8])
     t_down: list[float] = field(default_factory=lambda: [0.2, 0.5])
-    k_recover: float = 2.0
+    k_recover: float = 2.45
+    recover_gamma: float = 3.0  # exponential gain on return-inertia depth (issue #122 "F")
+    recover_f_max: float = 6.0  # cap on the recovery boost e^(gamma*max(-m,0))
     gap_cap: float = 90.0
     r_renag: float = 40.0
     b_backoff: float = 2.0
@@ -377,7 +381,10 @@ def _advance(st: GaugeState, now: int, config: GaugeConfig, effects: list[GaugeE
         st.renag_debt += drain
         _maybe_renag(st, config, effects, now)
     else:
-        gain = config.r_recover * ((1.0 - st.m) / config.k_recover) * w * delta
+        # Recovery accelerates with return-inertia depth (issue #122 "F"): slow just
+        # after a return (m>=0 -> boost 1), accelerating as m deepens negative, capped.
+        boost = min(math.exp(config.recover_gamma * max(-st.m, 0.0)), config.recover_f_max)
+        gain = config.r_recover * ((1.0 - st.m) / config.k_recover) * boost * w * delta
         st.s = min(100.0, st.s + gain)
 
     # celebration: arm at S ≤ C_arm, fire (once) on first recovery to S ≥ C_celebrate (§6)
