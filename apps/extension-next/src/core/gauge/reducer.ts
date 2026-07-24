@@ -50,8 +50,13 @@ function accelTransition(
       return { ...st, accelTier: tier + 1 };
     }
     if (st.pendingTier2 == null && !snoozed(st, now)) {
-      effects.push({ type: "request_tier2", reason: "promotion", tier, pageKey: st.activePageKey as string });
-      return { ...st, pendingTier2: { reason: "promotion", tier, pageKey: st.activePageKey as string, requestedAt: now } };
+      const requestId = st.tier2ReqSeq + 1;
+      effects.push({ type: "request_tier2", reason: "promotion", tier, pageKey: st.activePageKey as string, requestId });
+      return {
+        ...st,
+        tier2ReqSeq: requestId,
+        pendingTier2: { reason: "promotion", tier, pageKey: st.activePageKey as string, requestedAt: now, requestId },
+      };
     }
   }
   return st;
@@ -86,8 +91,13 @@ function sZeroGate(st: GaugeState, config: GaugeConfig, effects: GaugeEffect[], 
   const alreadySZero =
     st.pendingTier2 != null && st.pendingTier2.reason === "s_zero" && st.pendingTier2.pageKey === st.activePageKey;
   if (!alreadySZero) {
-    effects.push({ type: "request_tier2", reason: "s_zero", tier: st.accelTier, pageKey });
-    return { ...st, pendingTier2: { reason: "s_zero", tier: st.accelTier, pageKey, requestedAt: now } };
+    const requestId = st.tier2ReqSeq + 1;
+    effects.push({ type: "request_tier2", reason: "s_zero", tier: st.accelTier, pageKey, requestId });
+    return {
+      ...st,
+      tier2ReqSeq: requestId,
+      pendingTier2: { reason: "s_zero", tier: st.accelTier, pageKey, requestedAt: now, requestId },
+    };
   }
   return st;
 }
@@ -138,9 +148,34 @@ function advance(state: GaugeState, now: number, config: GaugeConfig): GaugeTran
   // episode end (m <= 0): reset renag schedule
   if (st.m <= 0) st = { ...st, nagN: 0, renagDebt: 0 };
 
-  // S = 0 final gate — fire only on the crossing into 0
-  if (state.activeVerdict === "DRIFT" && sBefore > 0 && st.s <= 0) {
+  // S = 0 final gate.
+  const atZeroDrift = state.activeVerdict === "DRIFT" && st.s <= 0;
+  // Honor a fresh cached Tier-2 "ok" for the active page (same window sZeroGate uses), so a
+  // page Tier-2 just confirmed on-goal isn't nudged by the recovery even if Tier-0 re-flags it.
+  const lj = st.lastJudgment;
+  const freshOk =
+    lj != null && lj.pageKey === st.activePageKey && lj.flow === "ok" && now - lj.ts <= config.freshWindow * 1000;
+  if (atZeroDrift && sBefore > 0) {
+    // Normal downward crossing into 0 → confirm via Tier-2 (or nag directly if degraded).
     st = sZeroGate(st, config, effects, now);
+  } else if (
+    atZeroDrift &&
+    st.nagN === 0 &&
+    !snoozed(st, now) &&
+    !freshOk &&
+    !effects.some((e) => e.type === "nag") && // never stack on a renag/celebrate already emitted this tick
+    !(st.pendingTier2 != null && st.pendingTier2.reason === "s_zero" && st.pendingTier2.pageKey === st.activePageKey)
+  ) {
+    // Recover a crossing nudge that was suppressed by a snooze (or carried over by the
+    // migration): the crossing edge can't recur (sBefore is already 0) and maybeRenag needs
+    // nagN>=1, so without this the user stays stuck with no nudge. Nudge DIRECTLY, not via a
+    // Tier-2 request: under S=0 navigation churn a fresh request resolves after the user moved
+    // on, the wiring cancels it (tier2_cancel) without advancing nagN, and the gate would
+    // re-fire every heartbeat — storming requests while never nudging. S=0/DRIFT is already
+    // sustained-drift evidence; nag directly and set nagN=1, so this fires at most once and
+    // the debt-based renag takes over.
+    effects.push({ type: "nag", pageKey: st.activePageKey as string });
+    st = { ...st, lastNagTs: now, nagN: st.nagN + 1, renagDebt: 0 };
   }
 
   return { state: { ...st, updatedAt: now }, effects };
@@ -217,5 +252,27 @@ export function reduceGauge(
     }
     case "tier2_result":
       return applyTier2(state, event.ts, event.flow, event.pageKey, config);
+    case "tier2_cancel": {
+      // Release the pending slot only if it is still THIS exact request (by opaque requestId),
+      // so a newer pendingTier2 (e.g. an s_zero on the page the user moved to, or a same-ms
+      // re-request) is never cleared by an older job.
+      const p = state.pendingTier2;
+      if (p != null && p.requestId === event.requestId) {
+        return { state: { ...state, pendingTier2: null }, effects: [] };
+      }
+      return { state, effects: [] };
+    }
+    case "neutral": {
+      // Integrate the page they were on right up to this instant (a drift that ran until the
+      // navigation still counts and can even fire its S=0 gate), then drop the verdict. With
+      // activeVerdict = null, advance() early-returns — S and m freeze — until the dwell's nav
+      // event supplies the new page's verdict and integration resumes all at once. Rebasing the
+      // clock via advance is what keeps the frozen interval from being back-integrated then.
+      const adv = advance(state, event.ts, config);
+      return {
+        state: { ...adv.state, activePageKey: event.pageKey, activeVerdict: null, activeMargin: null },
+        effects: adv.effects,
+      };
+    }
   }
 }

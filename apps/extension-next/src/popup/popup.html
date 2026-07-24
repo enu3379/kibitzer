@@ -6,30 +6,53 @@
     <style>
       :root { color-scheme: light dark; }
       body {
-        font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
-        margin: 0; padding: 14px; width: 260px;
+        font: 14px/1.4 system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+        margin: 0; padding: 14px; width: 268px;
       }
-      h1 { font-size: 13px; margin: 0 0 10px; color: #888; font-weight: 600; letter-spacing: .04em; }
-      .gauge { font-size: 26px; font-weight: 650; margin-bottom: 12px; font-variant-numeric: tabular-nums; }
-      .gauge small { font-size: 13px; color: #888; font-weight: 500; }
-      label { display: block; font-size: 12px; color: #888; margin-bottom: 8px; }
-      input { width: 100%; box-sizing: border-box; padding: 7px 9px; margin-top: 3px;
+      h1 { font-size: 12px; margin: 0 0 12px; color: #888; font-weight: 600; letter-spacing: .06em; }
+      [hidden] { display: none !important; }
+      .gauge { font-size: 34px; font-weight: 680; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+      .gauge small { font-size: 14px; color: #888; font-weight: 500; }
+      .goalline { margin: 8px 0 4px; color: #888; font-size: 13px; }
+      .goalline b { color: inherit; font-weight: 650; }
+      .mode { font-size: 11px; color: #999; margin: 0 0 4px; }
+      .hint { font-size: 11px; color: #999; margin: 6px 0 0; word-break: break-word; }
+      .hint.err { color: #d1495b; }
+      label { display: block; font-size: 12px; color: #888; margin-bottom: 10px; }
+      input { width: 100%; box-sizing: border-box; padding: 8px 9px; margin-top: 4px;
         border: 1px solid #8884; border-radius: 8px; background: transparent; color: inherit; font: inherit; }
-      .row { display: flex; gap: 8px; align-items: end; }
+      .row { display: flex; gap: 8px; }
       .row label { flex: 1; }
-      .row label.mins { flex: 0 0 78px; }
-      button { margin-top: 12px; width: 100%; padding: 8px; border: 0; border-radius: 8px;
-        background: #4a5bd4; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+      .row label.mins { flex: 0 0 82px; }
+      button { width: 100%; padding: 9px; border: 0; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer; }
+      #set { background: #1e7a4c; color: #fff; }
+      .ghost { background: transparent; color: #888; border: 1px solid #8884; padding: 7px; font-weight: 500; margin-top: 8px; }
     </style>
   </head>
   <body>
-    <h1>KIBITZER (next)</h1>
-    <div class="gauge" id="gauge">–</div>
-    <div class="row">
-      <label>목표<input id="goal" placeholder="예: 논문 정리" /></label>
-      <label class="mins">시간(분)<input id="minutes" type="number" min="1" placeholder="60" /></label>
+    <h1>KIBITZER</h1>
+
+    <div id="active" hidden>
+      <div class="gauge" id="gauge">–</div>
+      <div class="goalline">지금 목표 · <b id="goalText"></b></div>
+      <div class="mode" id="mode"></div>
+      <div class="mode" id="personaActive"></div>
+      <div class="hint err" id="providerWarn" hidden></div>
+      <button id="edit" class="ghost">목표 변경</button>
+      <button id="openSettings" class="ghost">설정 · 말투 · AI 판정</button>
     </div>
-    <button id="set">설정</button>
+
+    <div id="setup" hidden>
+      <div class="row">
+        <label>목표<input id="goal" placeholder="예: 논문 정리" /></label>
+        <label class="mins">시간(분)<input id="minutes" type="number" min="1" placeholder="60" /></label>
+      </div>
+      <button id="set">시작</button>
+      <div class="hint">목표를 선언하면 흐름이 어긋날 때만 조용히 알려드려요.</div>
+      <div class="hint">목표에 "알림보기"를 넣으면 토스트가 바로 떠요 (테스트용).</div>
+      <button id="openSettings2" class="ghost">설정 · 말투 · AI 판정 열기</button>
+    </div>
+
     <script type="module" src="popup.js"></script>
   </body>
 </html>

@@ -3,11 +3,20 @@
   "name": "Kibitzer (next)",
   "version": "0.0.1",
   "description": "Serverless attention guard — TypeScript-only, no local server.",
+  "minimum_chrome_version": "120",
+  "incognito": "not_allowed",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
   },
   "action": {
     "default_popup": "popup/popup.html",
@@ -25,21 +34,26 @@
   "permissions": [
     "tabs",
     "webNavigation",
-    "notifications",
     "scripting",
     "alarms",
     "storage",
-    "idle"
+    "idle",
+    "downloads",
+    "offscreen",
+    "notifications"
   ],
   "host_permissions": [
-    "http://127.0.0.1/*",
     "http://*/*",
     "https://*/*"
   ],
   "web_accessible_resources": [
     {
-      "resources": ["assets/*"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "assets/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }
