@@ -8,21 +8,31 @@ Read these in order when starting work:
 4. [Architecture](architecture.md)
 5. [Data Model](data-model.md)
 6. [ML Providers](ml-providers.md)
-7. [Privacy](privacy.md)
-8. [Progress](progress.md)
-9. [Replay Harness](replay-harness.md)
-10. [LLM Wiki Integration](llm-wiki-integration.md)
-11. [Judgment Audit Plan](judgment-audit-plan.md)
-12. [Idle Daemon Plan](idle-daemon-plan.md)
-13. [macOS Menu Bar Plan](macos-menu-bar-plan.md)
-14. [Windows Idle Tray Plan](windows-idle-tray-plan.md)
-15. [Platforms](platforms.md)
-16. [Fun-Layer Roadmap](roadmap-fun-layer.md)
-17. [Planning Notes (living decision log)](planning-notes.md)
+7. [Extension ONNX Model (Tier 0 WASM)](extension-onnx-model.md)
+8. [Privacy](privacy.md)
+9. [Progress](progress.md)
+10. [Replay Harness](replay-harness.md)
+11. [LLM Wiki Integration](llm-wiki-integration.md)
+12. [Judgment Audit Plan](judgment-audit-plan.md)
+13. [Idle Daemon Plan](idle-daemon-plan.md)
+14. [macOS Menu Bar Plan](macos-menu-bar-plan.md)
+15. [Windows Idle Tray Plan](windows-idle-tray-plan.md)
+16. [Platforms](platforms.md)
+17. [Fun-Layer Roadmap](roadmap-fun-layer.md)
+18. [Planning Notes (living decision log)](planning-notes.md)
 
 Benchmarks:
 
 - [Tier 0 Embedding Benchmark and Extension Contract](benchmarks/tier0-embedding/README.md)
+- [Tier 0 Embedding v2 (real-corpus)](benchmarks/tier0-embedding-v2/report.md)
+- [Persona Voice v4 (pre-split Tier 2 audit)](benchmarks/persona-voice-v4/report.md)
+- [Persona Voice v5 (Judge/Writer split audit)](benchmarks/persona-voice-v5/report.md)
+
+Design & security records:
+
+- [Persona Voice Revamp](persona-voice-revamp.md)
+- [Security Review 2026-07-15](security-review-2026-07-15.md)
+- [Tier-2 Red-team: Prompt Extraction & Injection](security-redteam-prompt-extraction.md)
 
 Handoffs (delegated work specs):
 
@@ -31,6 +41,16 @@ Handoffs (delegated work specs):
 - [P1 Claude Design Follow-up](handoff-p1-claude-design.md)
 - [P2 Distribution](handoff-p2-distribution.md)
 - [Extension Bundling](handoff-extension-bundling.md)
+- [Goal Enrichment](handoff-goal-enrichment.md)
+- [Replay CLI](handoff-replay-cli.md)
+- [D7 Review Findings](handoff-d7-review-findings.md)
+- [Tier 2 Judge/Writer Split](handoff-tier2-judge-writer.md)
+- [Pre-distribution Refactor Work Order](handoff-refactor-predist.md)
+- [D9 Packaging Foundation](handoff-d9-packaging-foundation.md)
+- [Windows pystray Lifecycle](handoff-windows-pystray-lifecycle.md)
+- [Windows Launch Notifications (2026-07-18)](handoff-2026-07-18-windows-launch-notifications.md)
+- [Provider Response Failures](handoff-provider-response-failures.md)
+- [Popup Provider Failure Details](handoff-popup-provider-failure-details.md)
 
 ## Stage Boundaries
 
