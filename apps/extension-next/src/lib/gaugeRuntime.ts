@@ -16,6 +16,7 @@ import { playChime, speak } from "./chime.ts"
 import { shouldDropUrl } from "./domainFilter.ts"
 import { getSettings, inQuietHours } from "./settings.ts"
 import { pageKeyOf } from "./url.ts"
+import { browserPresent } from "./presence.ts"
 import { extractPageExcerpt } from "../content/pageExcerpt.ts"
 import { updateBadge } from "./badge.ts"
 import { deleteRecord, drainRecords, kvDeleteIf, kvGet, kvPutAndAppend, kvSet, kvUpdate, kvWriteAndClear, OUTBOX_STORE } from "./db.ts"
@@ -529,6 +530,16 @@ async function showToast(
   // Privacy: never surface a nudge on a sensitive page, even if one was queued before
   // the user navigated there.
   if (tab?.url && shouldDropUrl(tab.url)) return null
+  // Delivery invariant: never surface a nudge (toast, its OS-notification fallback, or the
+  // chime) while Chrome isn't being looked at — the user explicitly never wants an OS
+  // notification popping over another app. Drop it here (ACKed, no retry — the drift is already
+  // logged upstream), mirroring the sensitive-page drop and the quiet-hours suppression. The
+  // OS-notification fallback below intentionally REMAINS for non-injectable pages when Chrome
+  // IS focused (e.g. the user is literally on chrome://extensions).
+  if (!(await browserPresent())) {
+    klog(`nag suppressed (browser unfocused)`)
+    return null
+  }
   void playChime(kind) // audible cue via the offscreen document (works off-screen)
   const token = await nextToastToken()
   if (tab?.id) {

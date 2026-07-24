@@ -22,6 +22,7 @@ import { markNagActed, recentTitles, recordObservation } from "./lib/history.ts"
 import { clearLog, exportLog, klog, logText } from "./lib/klog.ts"
 import { shouldDropUrl } from "./lib/domainFilter.ts"
 import { hostOf, pageKeyOf } from "./lib/url.ts"
+import { browserPresent } from "./lib/presence.ts"
 
 const HEARTBEAT_ALARM = "kibitzer-next-heartbeat"
 
@@ -44,7 +45,29 @@ async function observe(url: string | undefined, title: string | undefined): Prom
   const goal = await getGoal()
   if (!goal || !url || !title) return
   const pageKey = pageKeyOf(url)
-  if (!pageKey) return
+  if (!pageKey) {
+    // Non-http(s) internal pages (chrome://newtab, chrome://extensions, about:blank, the web
+    // store, …) get no page key, so they can never be judged. Treat them exactly like the
+    // sensitive drop below: cancel any pending dwell and hold the gauge NEUTRAL — otherwise
+    // observe() returned here BEFORE the neutral hold, leaving the page-just-left's verdict as
+    // activeVerdict so heartbeats kept draining/recovering S against a page the user has left
+    // (and a later nag referenced that stale page). Synthesize a stable opaque key so the hold
+    // records a distinct, non-null activePageKey; the protocol keeps it readable in the trace.
+    let protocol = "internal"
+    try {
+      protocol = new URL(url).protocol // e.g. "chrome:", "about:"
+    } catch {
+      // Unparseable URL — keep the "internal" constant.
+    }
+    const internalPageKey = `internal#${protocol}`
+    const obsKey = `${internalPageKey}\n${title}`
+    if (obsKey === lastObservedKey) return // same internal page storming — already held
+    await dwell.cancel() // drop any prior page's pending dwell; this page never counts
+    lastObservedKey = obsKey
+    klog(`drop (internal) ${protocol}`)
+    await enterNeutral(internalPageKey, goal)
+    return
+  }
   // Debounce on pageKey+title, not pageKey alone: an SPA route change that keeps the
   // path but swaps the title (YouTube video → video) still re-judges, while an update
   // storm on the identical page is collapsed (the old S 0↔30 yo-yo guard).
@@ -158,10 +181,8 @@ async function ensureHeartbeat(): Promise<void> {
   if (!existing) await chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 1 })
 }
 
-/** True only when a Chrome window has OS focus AND the user is active. chrome.idle is
- *  system-wide (idle stays "active" while the user works in another app), so the gauge
- *  must also require Chrome to be the focused window — otherwise S drains and nags fire
- *  while Chrome is off-screen. Unknown → assume present (never over-suppress). */
+// Presence (Chrome focused AND idle-active) is defined once in ./lib/presence.ts so the gauge
+// heartbeat here and the nudge-delivery gate in gaugeRuntime agree on the exact same signal.
 const PRESENCE_KEY = "presence-last"
 
 // Log presence TRANSITIONS to the event store so replay can reconstruct real idle/focus time
@@ -175,16 +196,6 @@ async function notePresence(present: boolean): Promise<void> {
   if (last === present) return
   await kvSet(PRESENCE_KEY, present)
   logEvent("presence", { present })
-}
-
-async function browserPresent(): Promise<boolean> {
-  try {
-    const win = await chrome.windows.getLastFocused()
-    if (!win.focused) return false
-    return (await chrome.idle.queryState(60)) === "active"
-  } catch {
-    return true
-  }
 }
 
 // --- observation surface ---------------------------------------------------------
@@ -305,9 +316,13 @@ interface PopupMessage {
 async function handleMessage(message: PopupMessage): Promise<unknown> {
   if (message?.type === "get-state") {
     const goal = await getGoal()
-    // Advance the gauge to "now" so the popup shows a live value between the
-    // 1-min heartbeat alarms (a nag can still fire here if S reaches 0).
-    if (goal) await dispatch({ type: "heartbeat", ts: Date.now() }, goal)
+    // Advance the gauge to "now" so the popup shows a live value between the 1-min heartbeat
+    // alarms (a nag can still fire here if S reaches 0) — but gate on presence exactly like the
+    // alarm heartbeat. The popup polls this every ~1.5s; without the gate, opening it right
+    // after being away integrated the whole un-rebased gap at full DRIFT drain. `inactive`
+    // rebases the reducer clock without integrating. (No notePresence here — per the alarm's
+    // comment, only the alarm heartbeat logs presence transitions.)
+    if (goal) await dispatch({ type: (await browserPresent()) ? "heartbeat" : "inactive", ts: Date.now() }, goal)
     const [state, ollama, persona, health] = await Promise.all([
       currentState(),
       getOllamaConfig(),

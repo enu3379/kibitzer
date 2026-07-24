@@ -35,6 +35,10 @@ const store = new Map<string, unknown>() // backs chrome.storage.local
 let activeTab: { id: number; url: string; title: string; active: boolean } | null = null
 const toasts: Array<Record<string, unknown>> = [] // captured injected toast payloads
 const notifications: Array<{ id: string; opts: Record<string, unknown> }> = []
+// Presence knobs (browserPresent = Chrome focused AND idle-active). Default present, so the
+// existing scenarios are unaffected; the presence-gate scenario flips these and restores them.
+let winFocused = true
+let idleActive = true
 
 const chrome = {
   tabs: {
@@ -56,8 +60,8 @@ const chrome = {
     sendMessage: async () => {},
   },
   alarms: { onAlarm: evt("alarms.onAlarm"), create: async () => {}, get: async () => undefined, clear: async () => {} },
-  idle: { onStateChanged: evt("idle"), setDetectionInterval() {}, queryState: async () => "active" },
-  windows: { onFocusChanged: evt("win"), getLastFocused: async () => ({ focused: true }), WINDOW_ID_NONE: -1 },
+  idle: { onStateChanged: evt("idle"), setDetectionInterval() {}, queryState: async () => (idleActive ? "active" : "idle") },
+  windows: { onFocusChanged: evt("win"), getLastFocused: async () => ({ focused: winFocused }), WINDOW_ID_NONE: -1 },
   notifications: {
     onButtonClicked: evt("nb"),
     onClicked: evt("nc"),
@@ -219,6 +223,88 @@ test("E2E: drifting, then navigating to a new page freezes S — no drain on the
     assert.ok(held > 0, "the stale DRIFT did NOT drain S to 0 during the neutral hold")
     assert.equal(toasts.length + notifications.length, 0, "no nag fires during the neutral hold")
   } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: opening an internal page (chrome://newtab) holds S — no drain on the page just left (Fix 1)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    // Fresh session on a clearly off-goal page (a distinct goal → resetState wipes the prior scenario).
+    activeTab = { id: 5, url: "https://video.test/watch?v=dog", title: "귀여운 강아지 영상 몰아보기", active: true }
+    await send({ type: "set-goal", goal: "리액트 컴포넌트 리팩터링", minutes: null })
+    await settle(50)
+
+    // Judge the off-goal page → DRIFT (advance past the dwell, reconcile does the judge).
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+
+    // Drain a while, stopping well before 0 so the freeze below is unambiguous.
+    let drained = 100
+    for (let i = 0; i < 60 && drained > 50; i += 1) {
+      mock.timers.tick(60_000)
+      await fireHeartbeat()
+      await settle(0)
+      drained = (await send({ type: "get-state" })).s as number
+    }
+    assert.ok(drained > 0 && drained < 100, `the drift drained S off full but not to 0 (S=${drained})`)
+
+    // Open a new tab: an internal chrome:// page with NO page key. Pre-fix, observe() returned at
+    // `if (!pageKey) return` BEFORE the neutral hold, so heartbeats kept draining the off-goal
+    // page's now-stale DRIFT while the user sat on a blank tab. Post-fix it holds NEUTRAL.
+    activeTab = { id: 5, url: "chrome://newtab/", title: "New Tab", active: true }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(5, { status: "complete" }, activeTab)
+    await settle(50)
+    const atNav = (await send({ type: "get-state" })).s as number
+
+    // Fifteen minutes of heartbeats while sitting on the new tab — S must be frozen.
+    for (let i = 0; i < 15; i += 1) {
+      mock.timers.tick(60_000)
+      await fireHeartbeat()
+      await settle(0)
+    }
+    const held = (await send({ type: "get-state" })).s as number
+    assert.equal(held, atNav, "the internal page holds the gauge NEUTRAL — no drain on the stale verdict")
+    assert.ok(held > 0, "the stale DRIFT did NOT drain S to 0 while on the new tab")
+    assert.equal(toasts.length + notifications.length, 0, "no nag fires while holding on the internal page")
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: a nag is never surfaced while Chrome is unfocused, but delivers once focused (Fix 3)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 6, url: "https://example.test/article", title: "예시 문서", active: true }
+
+    // Chrome is NOT the focused app. The test-goal "알림보기" fires a nag immediately (testNag),
+    // but the delivery invariant in showToast must drop it — no toast, no OS notification.
+    winFocused = false
+    await send({ type: "set-goal", goal: "알림보기", minutes: null })
+    await settle(50)
+    assert.equal(toasts.length + notifications.length, 0, "no nudge surfaces while Chrome is unfocused")
+
+    // The user is at the keyboard but Chrome is still not focused (idle system-wide is "active"):
+    // presence still requires window focus, so the nudge stays suppressed.
+    idleActive = true
+    await send({ type: "set-goal", goal: "알림보기", minutes: null })
+    await settle(50)
+    assert.equal(toasts.length + notifications.length, 0, "focus, not just idle-active, gates delivery")
+
+    // Chrome regains focus: the OS-fallback/toast is only presence-gated, not disabled, so the
+    // same path now delivers.
+    winFocused = true
+    await send({ type: "set-goal", goal: "알림보기", minutes: null })
+    await settle(50)
+    assert.ok(toasts.length + notifications.length > 0, "the nudge delivers once Chrome is focused again")
+  } finally {
+    winFocused = true
+    idleActive = true
     mock.timers.reset()
   }
 })
