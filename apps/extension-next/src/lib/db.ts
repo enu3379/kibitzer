@@ -12,8 +12,13 @@
 //                  the service worker is torn down between state save and delivery.
 
 const DB_NAME = "kibitzer"
-const DB_VERSION = 2
+const DB_VERSION = 3
 const KV_STORE = "kv"
+// Runtime kv keys reset by the v3 migration (owned by gaugeRuntime/background; listed here
+// because a versionchange transaction can't import them). Pre-closure code could leave a
+// Tier-2 request wedged in pendingTier2 with no serviceable outbox record; a clean reset is
+// safe pre-release (no user data to preserve).
+const RUNTIME_KV_KEYS = ["gauge-state", "drift-since", "active-page", "pending-writer", "pending-dwell"]
 export const OBS_STORE = "observations"
 export const EVENT_STORE = "events"
 export const OUTBOX_STORE = "outbox"
@@ -24,7 +29,7 @@ function open(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise
   dbPromise = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION)
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result
       if (!db.objectStoreNames.contains(KV_STORE)) db.createObjectStore(KV_STORE)
       for (const name of [OBS_STORE, EVENT_STORE, OUTBOX_STORE]) {
@@ -32,6 +37,14 @@ function open(): Promise<IDBDatabase> {
           const store = db.createObjectStore(name, { keyPath: "id", autoIncrement: true })
           store.createIndex("ts", "ts", { unique: false })
         }
+      }
+      // v3: drop any legacy runtime state + queued effects (see RUNTIME_KV_KEYS) so a
+      // pre-closure wedged pendingTier2 can't survive the upgrade. Skipped on fresh installs.
+      const upgradeTx = request.transaction
+      if (event.oldVersion >= 1 && event.oldVersion < 3 && upgradeTx) {
+        upgradeTx.objectStore(OUTBOX_STORE).clear()
+        const kv = upgradeTx.objectStore(KV_STORE)
+        for (const key of RUNTIME_KV_KEYS) kv.delete(key)
       }
     }
     request.onsuccess = () => {

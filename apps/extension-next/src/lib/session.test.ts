@@ -44,3 +44,12 @@ test("epoch is monotonic and never reused across a clear+redeclare", async () =>
 
   assert.equal((await getGoal())?.epoch, 3)
 })
+
+test("concurrent setGoal calls linearize — no two goals share an epoch", async () => {
+  for (const k of Object.keys(store)) delete store[k]
+  // A double-clicked popup button fires two setGoal calls at once. Their read-modify-write of
+  // the epoch counter must be serialized, not both read the same pre-increment value.
+  const [a, b] = await Promise.all([setGoal("A", null), setGoal("B", null)])
+  const epochs = [a?.epoch, b?.epoch].sort()
+  assert.deepEqual(epochs, [1, 2], "distinct, ordered epochs")
+})

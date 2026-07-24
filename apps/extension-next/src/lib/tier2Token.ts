@@ -7,20 +7,16 @@ import type { PendingTier2, Tier2Reason } from "../core/gauge/types.ts"
 export interface Tier2Token {
   pageKey: string
   reason: Tier2Reason
-  // The EXACT pending slot this request opened. page + reason alone can't tell R1 from a
-  // later R2 for the same page.
-  requestedAt: number
-  // Durable goal epoch — distinguishes sessions even across a clear+redeclare (revision
-  // would repeat 0; epoch never does).
+  // The opaque, unique id of the pending slot this request opened — the sole identity check
+  // (page + reason are kept for readability/logging). requestedAt would collide for two
+  // same-millisecond requests; requestId never does.
+  requestId: number
+  // Durable goal epoch — used by the apply guard to also require the same session (a
+  // clear+redeclare repeats revision 0 but never an epoch).
   epoch: number
 }
 
-/** True iff the live pending slot is still this exact request instance. */
+/** True iff the live pending slot is still this exact request instance (by requestId). */
 export function tokenMatchesPending(token: Tier2Token, pending: PendingTier2 | null): boolean {
-  return (
-    pending != null &&
-    pending.pageKey === token.pageKey &&
-    pending.reason === token.reason &&
-    pending.requestedAt === token.requestedAt
-  )
+  return pending != null && pending.requestId === token.requestId
 }

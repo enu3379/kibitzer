@@ -50,8 +50,13 @@ function accelTransition(
       return { ...st, accelTier: tier + 1 };
     }
     if (st.pendingTier2 == null && !snoozed(st, now)) {
+      const requestId = st.tier2ReqSeq + 1;
       effects.push({ type: "request_tier2", reason: "promotion", tier, pageKey: st.activePageKey as string });
-      return { ...st, pendingTier2: { reason: "promotion", tier, pageKey: st.activePageKey as string, requestedAt: now } };
+      return {
+        ...st,
+        tier2ReqSeq: requestId,
+        pendingTier2: { reason: "promotion", tier, pageKey: st.activePageKey as string, requestedAt: now, requestId },
+      };
     }
   }
   return st;
@@ -86,8 +91,13 @@ function sZeroGate(st: GaugeState, config: GaugeConfig, effects: GaugeEffect[], 
   const alreadySZero =
     st.pendingTier2 != null && st.pendingTier2.reason === "s_zero" && st.pendingTier2.pageKey === st.activePageKey;
   if (!alreadySZero) {
+    const requestId = st.tier2ReqSeq + 1;
     effects.push({ type: "request_tier2", reason: "s_zero", tier: st.accelTier, pageKey });
-    return { ...st, pendingTier2: { reason: "s_zero", tier: st.accelTier, pageKey, requestedAt: now } };
+    return {
+      ...st,
+      tier2ReqSeq: requestId,
+      pendingTier2: { reason: "s_zero", tier: st.accelTier, pageKey, requestedAt: now, requestId },
+    };
   }
   return st;
 }
@@ -218,10 +228,11 @@ export function reduceGauge(
     case "tier2_result":
       return applyTier2(state, event.ts, event.flow, event.pageKey, config);
     case "tier2_cancel": {
-      // Release the pending slot only if it is still the request this cancel refers to, so a
-      // newer pendingTier2 (e.g. an s_zero on the page the user moved to) is never cleared.
+      // Release the pending slot only if it is still THIS exact request (by opaque requestId),
+      // so a newer pendingTier2 (e.g. an s_zero on the page the user moved to, or a same-ms
+      // re-request) is never cleared by an older job.
       const p = state.pendingTier2;
-      if (p != null && p.pageKey === event.pageKey && p.requestedAt === event.requestedAt) {
+      if (p != null && p.requestId === event.requestId) {
         return { state: { ...state, pendingTier2: null }, effects: [] };
       }
       return { state, effects: [] };

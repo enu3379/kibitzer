@@ -53,9 +53,9 @@ interface OutboxEntry {
   goal: SessionGoal | null
   ts: number
   writerMessage: string | null
-  // For a request_tier2 effect: the requestedAt of the pending slot it opened, so the job
-  // can identify its exact request instance (not just page+reason) end-to-end.
-  requestedAt?: number
+  // For a request_tier2 effect: the opaque requestId of the pending slot it opened, so the
+  // job identifies its exact request instance end-to-end (page+reason+requestedAt can collide).
+  requestId?: number
 }
 type OutboxRecord = OutboxEntry & { id: number }
 
@@ -179,8 +179,8 @@ async function runEvent(event: GaugeEvent, goal: SessionGoal | null, state: Gaug
       writerMessage = await readWriterFor(effect.pageKey)
       if (writerMessage != null) kvDeletes.push(PENDING_WRITER_KEY)
     }
-    const requestedAt = effect.type === "request_tier2" ? transition.state.pendingTier2?.requestedAt : undefined
-    entries.push({ effect, goal, ts: event.ts, writerMessage, requestedAt })
+    const requestId = effect.type === "request_tier2" ? transition.state.pendingTier2?.requestId : undefined
+    entries.push({ effect, goal, ts: event.ts, writerMessage, requestId })
   }
   await persistStateAndOutbox(transition.state, entries, kvDeletes)
   updateBadge(transition.state, goal, event.ts) // reflect live status on the toolbar
@@ -246,7 +246,7 @@ function startTier2Job(record: OutboxRecord): void {
   if (effect.type !== "request_tier2") return
   if (inFlightTier2.has(record.id)) return
   inFlightTier2.add(record.id)
-  void serviceTier2(effect, record.goal, record.requestedAt ?? -1)
+  void serviceTier2(effect, record.goal, record.requestId ?? -1)
     .then(() => deleteRecord(OUTBOX_STORE, record.id)) // ACK only after durable reflection
     .catch((error) => klog(`tier2 job kept for retry: ${String(error)}`))
     .finally(() => inFlightTier2.delete(record.id))
@@ -268,11 +268,7 @@ function dispatchTier2(
     const current = await getGoal()
     const fresh = current != null && current.epoch === token.epoch && state.activePageKey === token.pageKey
     if (!fresh) {
-      await runEvent(
-        { type: "tier2_cancel", pageKey: token.pageKey, requestedAt: token.requestedAt, ts: Date.now() },
-        goal,
-        state,
-      )
+      await runEvent({ type: "tier2_cancel", requestId: token.requestId, ts: Date.now() }, goal, state)
       return
     }
     if (flow === "drift" && message) await setPendingWriter(token.pageKey, message)
@@ -287,11 +283,7 @@ function cancelTier2(token: Tier2Token): Promise<void> {
   return enqueue(async () => {
     const state = await loadState()
     if (!tokenMatchesPending(token, state.pendingTier2)) return
-    await runEvent(
-      { type: "tier2_cancel", pageKey: token.pageKey, requestedAt: token.requestedAt, ts: Date.now() },
-      null,
-      state,
-    )
+    await runEvent({ type: "tier2_cancel", requestId: token.requestId, ts: Date.now() }, null, state)
   })
 }
 
@@ -392,9 +384,9 @@ async function extractActiveExcerpt(pageKey: string): Promise<string | null> {
 async function serviceTier2(
   effect: Extract<GaugeEffect, { type: "request_tier2" }>,
   goal: SessionGoal | null,
-  requestedAt: number,
+  requestId: number,
 ): Promise<void> {
-  const token: Tier2Token = { pageKey: effect.pageKey, reason: effect.reason, requestedAt, epoch: goal?.epoch ?? -1 }
+  const token: Tier2Token = { pageKey: effect.pageKey, reason: effect.reason, requestId, epoch: goal?.epoch ?? -1 }
   // Superseded before we even started (a newer request took the slot, or a prior run of this
   // same job already resolved it and we're a retry): nothing to service or clear — resolve so
   // the record is ACKed. The authoritative re-check happens inside dispatchTier2/cancelTier2.

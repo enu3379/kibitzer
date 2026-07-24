@@ -44,24 +44,39 @@ export async function getGoal(): Promise<SessionGoal | null> {
   }
 }
 
+// Serialize all goal mutations so their read-modify-write (of the goal AND the durable epoch
+// counter) is linearized — two concurrent setGoal calls (e.g. a double-clicked popup button)
+// must get distinct, ordered epochs, not both read the same pre-increment value.
+let mutationQueue: Promise<unknown> = Promise.resolve()
+function serialize<T>(op: () => Promise<T>): Promise<T> {
+  const run = mutationQueue.then(op, op)
+  mutationQueue = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
+}
+
 /** Set (or clear, when text is empty) the session goal. Bumps `revision` and the durable
- *  `epoch` when either the text or the available-minutes changes. Returns the stored goal. */
-export async function setGoal(text: string, availableMinutes: number | null): Promise<SessionGoal | null> {
-  const trimmed = text.trim()
-  if (!trimmed) {
-    await chrome.storage.local.remove(GOAL_KEY)
-    return null
-  }
-  const previous = await getGoal()
-  const changed =
-    !previous || previous.text !== trimmed || previous.availableMinutes !== availableMinutes
-  const goal: SessionGoal = {
-    text: trimmed,
-    availableMinutes,
-    startedAt: changed ? nowMs() : previous.startedAt,
-    revision: changed ? (previous?.revision ?? -1) + 1 : previous.revision,
-    epoch: changed ? await bumpEpoch() : previous.epoch,
-  }
-  await chrome.storage.local.set({ [GOAL_KEY]: goal })
-  return goal
+ *  `epoch` when either the text or the available-minutes changes. Serialized. */
+export function setGoal(text: string, availableMinutes: number | null): Promise<SessionGoal | null> {
+  return serialize(async () => {
+    const trimmed = text.trim()
+    if (!trimmed) {
+      await chrome.storage.local.remove(GOAL_KEY)
+      return null
+    }
+    const previous = await getGoal()
+    const changed =
+      !previous || previous.text !== trimmed || previous.availableMinutes !== availableMinutes
+    const goal: SessionGoal = {
+      text: trimmed,
+      availableMinutes,
+      startedAt: changed ? nowMs() : previous.startedAt,
+      revision: changed ? (previous?.revision ?? -1) + 1 : previous.revision,
+      epoch: changed ? await bumpEpoch() : previous.epoch,
+    }
+    await chrome.storage.local.set({ [GOAL_KEY]: goal })
+    return goal
+  })
 }

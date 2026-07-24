@@ -18,6 +18,11 @@ export interface PendingTier2 {
   tier: number;
   pageKey: string;
   requestedAt: number;
+  // Opaque, strictly-increasing id (from GaugeState.tier2ReqSeq) that uniquely identifies
+  // THIS request instance. requestedAt (an epoch-ms timestamp) can collide for two requests
+  // created in the same millisecond; requestId cannot, so an old durable job can't apply to
+  // or cancel a newer same-page/reason request.
+  requestId: number;
 }
 
 /** GaugeState — contract §2. All time fields are epoch milliseconds. */
@@ -31,6 +36,7 @@ export interface GaugeState {
   degraded: boolean;
   activeMargin: number | null; // |r0 - tauOk| for degraded mode
   pendingTier2: PendingTier2 | null;
+  tier2ReqSeq: number; // monotonic source of PendingTier2.requestId (never reused within a state's life)
   lastJudgment: Judgment | null;
   nagN: number; // nag ordinal this episode (reset when m<=0)
   renagDebt: number;
@@ -71,9 +77,9 @@ export type GaugeEvent =
   | { type: "tier2_result"; flow: Flow; pageKey: string; ts: number }
   // Clear a pending Tier-2 request that resolved stale (page/goal moved on) without applying
   // a verdict — releases the pendingTier2 slot so promotion can request again, with no
-  // side effect on the now-active page. Only clears if the slot still matches (pageKey +
-  // requestedAt). Wiring-only; the shared fixtures never emit it.
-  | { type: "tier2_cancel"; pageKey: string; requestedAt: number; ts: number }
+  // side effect on the now-active page. Only clears if the slot is still this exact request
+  // (matched by requestId). Wiring-only; the shared fixtures never emit it.
+  | { type: "tier2_cancel"; requestId: number; ts: number }
   | { type: "snooze"; until: number; ts: number };
 
 /** GaugeEffect — contract §4 (intents; shadow mode records but does not act). */
@@ -99,6 +105,7 @@ export function initGaugeState(): GaugeState {
     degraded: false,
     activeMargin: null,
     pendingTier2: null,
+    tier2ReqSeq: 0,
     lastJudgment: null,
     nagN: 0,
     renagDebt: 0,
