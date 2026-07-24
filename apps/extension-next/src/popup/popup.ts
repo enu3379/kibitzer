@@ -33,12 +33,10 @@ async function getState(): Promise<StateResponse | null> {
   }
 }
 
-function modeText(state: StateResponse): string {
-  const ollama = state.ollama
-  if (ollama && ollama.apiKeys?.length) {
-    return `LLM 판정: ${ollama.tier2Model} · 키 ${ollama.apiKeys.length}개`
-  }
-  return "제목 유사도만 (LLM 꺼짐)"
+function renderMode(state: StateResponse): void {
+  const on = Boolean(state.ollama?.apiKeys?.length)
+  modeEl.textContent = on ? "● AI 판정 활성화" : "○ AI 판정 꺼짐 (제목 유사도만)"
+  modeEl.classList.toggle("on", on)
 }
 
 function personaName(state: StateResponse): string {
@@ -72,7 +70,7 @@ function showActive(state: StateResponse): void {
   setupView.hidden = true
   goalTextEl.textContent = state.goal?.text ?? ""
   gaugeEl.innerHTML = `${state.s}<small> / 100 몰입</small>`
-  modeEl.textContent = modeText(state)
+  renderMode(state)
   personaActiveEl.textContent = personaName(state)
   renderProviderWarn(state)
 }
@@ -110,7 +108,7 @@ setInterval(async () => {
   current = state
   gaugeEl.innerHTML = `${state.s}<small> / 100 몰입</small>`
   goalTextEl.textContent = state.goal.text
-  modeEl.textContent = modeText(state)
+  renderMode(state)
   personaActiveEl.textContent = personaName(state)
   renderProviderWarn(state)
 }, 1500)
