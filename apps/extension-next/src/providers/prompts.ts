@@ -1,7 +1,19 @@
+// Hardened Tier-1 prompt (old server PR #119): validated on three real-provider
+// datasets — Tier-1-caused false-OKs down 40–60%, pooled McNemar p = 5.7e-6. The
+// stakes are identical here: a Tier-1 OK is final and (when the anchor is enabled)
+// feeds anchor admission, so strictness against false-OK is the design priority.
 export const TIER1_OLLAMA_SYSTEM_PROMPT =
   "Classify whether the current browser navigation is aligned with the user's declared " +
-  "goal. The declared goal includes any goal.derived_phrases; titles matching them are " +
-  "goal-related even when they share no words with the raw goal. Return strict JSON only: " +
+  "goal. You review pages already flagged as likely off-goal; a drift verdict is " +
+  "re-reviewed downstream, but ok is final — answer ok only when the title clearly " +
+  "serves the goal's specific task (synonyms, another language, a narrower subtopic, or " +
+  "a required tool or step all count). A different entity, product, place, or task than " +
+  "the goal — even with similar wording or platform — is drift; so are adjacent " +
+  "shopping, chatter, news, or comparisons that do not advance the task, titles " +
+  "matching only the spelling of an ambiguous goal, and portal or app titles with no " +
+  "topical signal. If uncertain, answer drift. The declared goal includes any " +
+  "goal.derived_phrases; titles matching them are goal-related even when they share no " +
+  "words with the raw goal. Return strict JSON only: " +
   '{"verdict":"ok|drift","reason":"<10 words>"}.'
 
 export const TIER2_TRUST_BOUNDARY =
