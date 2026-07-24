@@ -51,15 +51,16 @@ async function observe(url: string | undefined, title: string | undefined): Prom
   // storm on the identical page is collapsed (the old S 0↔30 yo-yo guard).
   const obsKey = `${pageKey}\n${title}`
   if (obsKey === lastObservedKey) return
-  // A new candidate page cancels the previous page's pending dwell (it never counted).
-  await dwell.cancel()
   // Privacy gate: sensitive pages pause the gauge immediately — no dwell, no judging.
   if (shouldDropUrl(url)) {
+    await dwell.cancel() // drop any prior page's pending dwell; this page never counts
     lastObservedKey = obsKey
     klog(`drop (sensitive) ${pageKey}`)
     await dispatch({ type: "inactive", ts: Date.now() }, goal)
     return
   }
+  // A new candidate atomically REPLACES the previous checkpoint (a single durable write) —
+  // no cancel-then-schedule gap where a teardown in between would leave nothing to recover.
   await dwell.schedule(url, title, obsKey)
 }
 
@@ -111,7 +112,7 @@ async function enrichGoalDerived(goal: SessionGoal): Promise<void> {
     if (phrases.length === 0) return
     const derived = await filterDerivedPhrases(phrases, goal.text, MAX_PHRASES, embedTexts)
     const current = await getGoal()
-    if (!current || current.revision !== goal.revision) return // goal changed meanwhile
+    if (!current || current.epoch !== goal.epoch) return // goal changed meanwhile
     await setDerived(derived.map((d) => d.vector))
     klog(`goal enriched: ${derived.length} phrases [${derived.map((d) => d.phrase).join(" · ")}]`)
     logEvent("enrich", { count: derived.length, phrases: derived.map((d) => d.phrase) })
@@ -327,16 +328,17 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     )
     // Restart the gauge when the goal actually changes (text OR minutes → new revision)
     // or is cleared.
-    if (!goal || previous?.revision !== goal.revision) await resetState()
+    if (!goal || previous?.epoch !== goal.epoch) await resetState()
     logEvent("goal", { text: goal?.text ?? null, minutes: goal?.availableMinutes ?? null, revision: goal?.revision ?? null })
     ensureHeartbeat()
+    await dwell.cancel() // a pending dwell from the old goal must not judge under the new one
     if (goal) {
       lastObservedKey = null // re-judge the active page under the new goal
       // Test shortcut: goal "알림보기" fires a nag notification right away.
       if (goal.text === "알림보기") await testNag(goal)
       void observeActiveTab()
       // Enrich the goal into cross-lingual Tier-0 exemplars (only when it actually changed).
-      if (previous?.revision !== goal.revision) void enrichGoalDerived(goal)
+      if (previous?.epoch !== goal.epoch) void enrichGoalDerived(goal)
     } else {
       clearBadge() // goal cleared → no status to show
     }

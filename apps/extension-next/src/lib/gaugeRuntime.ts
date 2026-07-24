@@ -5,7 +5,8 @@
 import { reduceGauge } from "../core/gauge/reducer.ts"
 import { defaultGaugeConfig } from "../core/gauge/config.ts"
 import { initGaugeState } from "../core/gauge/types.ts"
-import type { Flow, GaugeConfig, GaugeEffect, GaugeEvent, GaugeState, Tier2Reason } from "../core/gauge/types.ts"
+import type { Flow, GaugeConfig, GaugeEffect, GaugeEvent, GaugeState } from "../core/gauge/types.ts"
+import { tokenMatchesPending, type Tier2Token } from "./tier2Token.ts"
 import { showKibitzerToast, type ToastPayload } from "../content/toastOverlay.ts"
 import { tier2Confirm } from "./tier12.ts"
 import { getGoal } from "./session.ts"
@@ -17,7 +18,7 @@ import { getSettings, inQuietHours } from "./settings.ts"
 import { pageKeyOf } from "./url.ts"
 import { extractPageExcerpt } from "../content/pageExcerpt.ts"
 import { updateBadge } from "./badge.ts"
-import { clearStore, deleteRecord, drainRecords, kvDelete, kvGet, kvPutAndAppend, kvSet, OUTBOX_STORE } from "./db.ts"
+import { deleteRecord, drainRecords, kvGet, kvPutAndAppend, kvSet, kvWriteAndClear, OUTBOX_STORE } from "./db.ts"
 import { logEvent } from "./events.ts"
 import { clearRelevance } from "./relevance.ts"
 import {
@@ -52,6 +53,9 @@ interface OutboxEntry {
   goal: SessionGoal | null
   ts: number
   writerMessage: string | null
+  // For a request_tier2 effect: the requestedAt of the pending slot it opened, so the job
+  // can identify its exact request instance (not just page+reason) end-to-end.
+  requestedAt?: number
 }
 type OutboxRecord = OutboxEntry & { id: number }
 
@@ -92,13 +96,22 @@ export async function currentState(): Promise<GaugeState> {
   return loadState()
 }
 
-export async function resetState(): Promise<void> {
-  await kvSet(STATE_KEY, initGaugeState())
-  await kvSet(DRIFT_SINCE_KEY, null)
-  await clearStore(OUTBOX_STORE) // drop effects queued under the old goal
-  await kvDelete(PENDING_WRITER_KEY) // …and any Writer nag text staged for them
-  await clearHistory() // a new goal starts a fresh nag/visit context
-  await clearRelevance() // …and fresh Tier-0 exemplars/anchor/derived vectors
+export function resetState(): Promise<void> {
+  // Serialize with dispatch (so a reset can't interleave with an in-flight event) and wipe
+  // the gauge state, drift clock, staged Writer message, and queued effects in ONE
+  // transaction — a half-applied reset could otherwise revive stale state or effects.
+  return enqueue(async () => {
+    await kvWriteAndClear(
+      [
+        { key: STATE_KEY, value: initGaugeState() },
+        { key: DRIFT_SINCE_KEY, value: null },
+      ],
+      [PENDING_WRITER_KEY],
+      [OUTBOX_STORE],
+    )
+    await clearHistory() // a new goal starts a fresh nag/visit context
+    await clearRelevance() // …and fresh Tier-0 exemplars/anchor/derived vectors
+  })
 }
 
 // --- drift timing (persona drift_minutes + celebration return_minutes) -----------
@@ -153,14 +166,23 @@ async function runEvent(event: GaugeEvent, goal: SessionGoal | null, state: Gaug
         (eff ? ` !! ${eff}` : ""),
     )
   }
-  // Bind the Writer nag text (staged durably by the Tier-2 apply) to its nag effect now, so
-  // it rides the outbox record rather than an in-memory global that teardown would drop.
+  // Bind the Writer nag text (staged durably by the Tier-2 apply) to its nag effect, and a
+  // request_tier2's requestedAt to its record, so both ride the outbox rather than in-memory
+  // state that teardown would drop. The consumed Writer key is deleted in the SAME atomic
+  // write as the outbox append (see persistStateAndOutbox), so the read→delete→enqueue can't
+  // lose it across a teardown.
   const entries: OutboxEntry[] = []
+  const kvDeletes: string[] = []
   for (const effect of transition.effects) {
-    const writerMessage = effect.type === "nag" ? await consumeWriterFor(effect.pageKey) : null
-    entries.push({ effect, goal, ts: event.ts, writerMessage })
+    let writerMessage: string | null = null
+    if (effect.type === "nag") {
+      writerMessage = await readWriterFor(effect.pageKey)
+      if (writerMessage != null) kvDeletes.push(PENDING_WRITER_KEY)
+    }
+    const requestedAt = effect.type === "request_tier2" ? transition.state.pendingTier2?.requestedAt : undefined
+    entries.push({ effect, goal, ts: event.ts, writerMessage, requestedAt })
   }
-  await persistStateAndOutbox(transition.state, entries)
+  await persistStateAndOutbox(transition.state, entries, kvDeletes)
   updateBadge(transition.state, goal, event.ts) // reflect live status on the toolbar
   // Mark when a drift episode began, so the celebration can say how long they were away.
   if (state.activeVerdict !== "DRIFT" && transition.state.activeVerdict === "DRIFT") {
@@ -177,14 +199,18 @@ export function dispatch(event: GaugeEvent, goal: SessionGoal | null): Promise<v
   })
 }
 
-/** Persist the gauge checkpoint and enqueue its effects. With effects, both land in one
- *  transaction (atomic); with none, it is a plain state save. */
-async function persistStateAndOutbox(state: GaugeState, entries: OutboxEntry[]): Promise<void> {
+/** Persist the gauge checkpoint, enqueue its effects, and drop the consumed Writer key —
+ *  all in one transaction (atomic) when there are effects; a plain state save otherwise. */
+async function persistStateAndOutbox(
+  state: GaugeState,
+  entries: OutboxEntry[],
+  kvDeletes: string[],
+): Promise<void> {
   if (entries.length === 0) {
     await saveState(state)
     return
   }
-  await kvPutAndAppend([{ key: STATE_KEY, value: state }], OUTBOX_STORE, entries)
+  await kvPutAndAppend([{ key: STATE_KEY, value: state }], OUTBOX_STORE, entries, kvDeletes)
 }
 
 // Tier-2 jobs currently being serviced, by outbox record id — single-flight, so a duplicate
@@ -220,32 +246,30 @@ function startTier2Job(record: OutboxRecord): void {
   if (effect.type !== "request_tier2") return
   if (inFlightTier2.has(record.id)) return
   inFlightTier2.add(record.id)
-  void serviceTier2(effect, record.goal)
+  void serviceTier2(effect, record.goal, record.requestedAt ?? -1)
     .then(() => deleteRecord(OUTBOX_STORE, record.id)) // ACK only after durable reflection
     .catch((error) => klog(`tier2 job kept for retry: ${String(error)}`))
     .finally(() => inFlightTier2.delete(record.id))
 }
 
 /** Apply a fresh Tier-2 outcome, guarded (serialized) against the live state: only if the
- *  pending slot still matches (same page + reason), the goal revision is unchanged, and the
+ *  pending slot is still this exact request instance, the goal epoch is unchanged, and the
  *  judged page is still active. Otherwise release the slot without touching the current page
- *  (tier2_cancel). This is the page/goal-revision guard the stale-verdict fix (B2) builds on. */
+ *  (tier2_cancel). This is the page/goal guard the stale-verdict fix (B2) builds on. */
 function dispatchTier2(
-  token: { pageKey: string; reason: Tier2Reason; goalRevision: number },
+  token: Tier2Token,
   flow: Flow,
   message: string | null,
   goal: SessionGoal | null,
 ): Promise<void> {
   return enqueue(async () => {
     const state = await loadState()
-    const pending = state.pendingTier2
-    if (!pending || pending.pageKey !== token.pageKey || pending.reason !== token.reason) return // superseded
+    if (!tokenMatchesPending(token, state.pendingTier2)) return // superseded by a newer request
     const current = await getGoal()
-    const fresh =
-      current != null && current.revision === token.goalRevision && state.activePageKey === token.pageKey
+    const fresh = current != null && current.epoch === token.epoch && state.activePageKey === token.pageKey
     if (!fresh) {
       await runEvent(
-        { type: "tier2_cancel", pageKey: pending.pageKey, requestedAt: pending.requestedAt, ts: Date.now() },
+        { type: "tier2_cancel", pageKey: token.pageKey, requestedAt: token.requestedAt, ts: Date.now() },
         goal,
         state,
       )
@@ -257,14 +281,14 @@ function dispatchTier2(
 }
 
 /** Release a pending Tier-2 slot judged stale before the gate even ran (page/goal moved on
- *  during the dwell), so promotion isn't wedged. No side effect on the current page. */
-function cancelTier2(token: { pageKey: string; reason: Tier2Reason }): Promise<void> {
+ *  during the dwell), so promotion isn't wedged. Only clears this exact request instance — a
+ *  newer same-page/reason request is left intact — and never touches the current page. */
+function cancelTier2(token: Tier2Token): Promise<void> {
   return enqueue(async () => {
     const state = await loadState()
-    const pending = state.pendingTier2
-    if (!pending || pending.pageKey !== token.pageKey || pending.reason !== token.reason) return
+    if (!tokenMatchesPending(token, state.pendingTier2)) return
     await runEvent(
-      { type: "tier2_cancel", pageKey: pending.pageKey, requestedAt: pending.requestedAt, ts: Date.now() },
+      { type: "tier2_cancel", pageKey: token.pageKey, requestedAt: token.requestedAt, ts: Date.now() },
       null,
       state,
     )
@@ -284,12 +308,11 @@ async function setPendingWriter(pageKey: string, message: string): Promise<void>
   await kvSet(PENDING_WRITER_KEY, { pageKey, message })
 }
 
-/** Read and clear the staged Writer message iff it is for this page. */
-async function consumeWriterFor(pageKey: string): Promise<string | null> {
+/** Read the staged Writer message iff it is for this page (no delete — the caller removes
+ *  the key inside the same atomic outbox write, so a teardown can't drop it mid-move). */
+async function readWriterFor(pageKey: string): Promise<string | null> {
   const value = await kvGet<{ pageKey: string; message: string }>(PENDING_WRITER_KEY)
-  if (!value || value.pageKey !== pageKey) return null
-  await kvDelete(PENDING_WRITER_KEY)
-  return value.message
+  return value && value.pageKey === pageKey ? value.message : null
 }
 
 async function deliver(
@@ -369,13 +392,21 @@ async function extractActiveExcerpt(pageKey: string): Promise<string | null> {
 async function serviceTier2(
   effect: Extract<GaugeEffect, { type: "request_tier2" }>,
   goal: SessionGoal | null,
+  requestedAt: number,
 ): Promise<void> {
-  const token = { pageKey: effect.pageKey, reason: effect.reason, goalRevision: goal?.revision ?? -1 }
+  const token: Tier2Token = { pageKey: effect.pageKey, reason: effect.reason, requestedAt, epoch: goal?.epoch ?? -1 }
+  // Superseded before we even started (a newer request took the slot, or a prior run of this
+  // same job already resolved it and we're a retry): nothing to service or clear — resolve so
+  // the record is ACKed. The authoritative re-check happens inside dispatchTier2/cancelTier2.
+  if (!tokenMatchesPending(token, (await loadState()).pendingTier2)) {
+    klog(`tier2 skipped (superseded/settled) on ${effect.pageKey}`)
+    return
+  }
   const page = await getActivePage()
   const current = await getGoal()
   // Stale before the gate even ran (user navigated away / changed the goal during the dwell):
   // don't spend an Ollama call, but DO release the pending slot so promotion isn't wedged.
-  if (!page || page.pageKey !== effect.pageKey || !goal || !current || current.revision !== goal.revision) {
+  if (!page || page.pageKey !== effect.pageKey || !goal || !current || current.epoch !== goal.epoch) {
     klog(`tier2 cancelled (stale pre-gate) on ${effect.pageKey}`)
     logEvent("tier2", { pageKey: effect.pageKey, reason: effect.reason, cancelled: true })
     await cancelTier2(token)

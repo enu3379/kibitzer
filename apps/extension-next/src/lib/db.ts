@@ -90,20 +90,39 @@ export async function kvDelete(key: string): Promise<void> {
   await txDone(tx)
 }
 
-/** Atomically put kv entries AND append records to `store` in a single transaction, so
- *  both commit together or not at all. Used to checkpoint the gauge state and enqueue its
- *  effects durably in one step. */
+/** Atomically put kv entries, delete kv keys, AND append records to `store` in a single
+ *  transaction, so they all commit together or not at all. Used to checkpoint the gauge
+ *  state, drop the consumed Writer message, and enqueue effects durably in one step. */
 export async function kvPutAndAppend(
   kv: Array<{ key: string; value: unknown }>,
   store: string,
   records: object[],
+  kvDeletes: string[] = [],
 ): Promise<void> {
   const db = await open()
   const tx = db.transaction([KV_STORE, store], "readwrite")
   const kvOs = tx.objectStore(KV_STORE)
   for (const { key, value } of kv) kvOs.put(value, key)
+  for (const key of kvDeletes) kvOs.delete(key)
   const recOs = tx.objectStore(store)
   for (const record of records) recOs.add(record)
+  await txDone(tx)
+}
+
+/** Atomically put kv entries, delete kv keys, and clear whole stores in one transaction —
+ *  for a reset that must not leave the gauge half-wiped (state cleared but effects revived,
+ *  or vice versa) if it races a dispatch or the worker dies mid-way. */
+export async function kvWriteAndClear(
+  puts: Array<{ key: string; value: unknown }>,
+  kvDeletes: string[],
+  clearStores: string[],
+): Promise<void> {
+  const db = await open()
+  const tx = db.transaction([KV_STORE, ...clearStores], "readwrite")
+  const kvOs = tx.objectStore(KV_STORE)
+  for (const { key, value } of puts) kvOs.put(value, key)
+  for (const key of kvDeletes) kvOs.delete(key)
+  for (const store of clearStores) tx.objectStore(store).clear()
   await txDone(tx)
 }
 

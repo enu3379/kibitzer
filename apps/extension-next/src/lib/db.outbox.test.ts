@@ -15,6 +15,7 @@ import {
   kvGet,
   kvPutAndAppend,
   kvSet,
+  kvWriteAndClear,
   OUTBOX_STORE,
 } from "./db.ts"
 
@@ -80,6 +81,19 @@ test("a throwing handler leaves its record; a later drain redelivers it (at-leas
   })
   assert.equal((await getAllRecords(OUTBOX_STORE)).length, 0, "delivered and removed")
   assert.equal(attempts, 2)
+})
+
+test("kvWriteAndClear resets state, drops keys, and clears the outbox atomically", async () => {
+  await clearStore(OUTBOX_STORE)
+  await kvSet("gauge-state", { s: 10 })
+  await kvSet("pending-writer", { pageKey: "x", message: "hi" })
+  await kvPutAndAppend([], OUTBOX_STORE, [{ effect: { type: "nag", pageKey: "x" } }])
+
+  await kvWriteAndClear([{ key: "gauge-state", value: { s: 100 } }], ["pending-writer"], [OUTBOX_STORE])
+
+  assert.deepEqual(await kvGet("gauge-state"), { s: 100 }, "state reset")
+  assert.equal(await kvGet("pending-writer"), undefined, "writer dropped")
+  assert.equal((await getAllRecords(OUTBOX_STORE)).length, 0, "outbox cleared")
 })
 
 test("kvDeleteIf deletes only when the current value still matches (CAS)", async () => {

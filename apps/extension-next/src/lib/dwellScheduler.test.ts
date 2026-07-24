@@ -45,6 +45,18 @@ test("resumes a dwell scheduled by a torn-down worker (restart restore)", async 
   assert.equal(await checkpoint(), undefined)
 })
 
+test("schedule replaces the checkpoint in place — no cancel-then-schedule gap", async () => {
+  const clock = makeClock(1000)
+  const s = new DwellScheduler({ dwellMs: 5000, judge: async () => {}, now: () => clock.t, ...noTimer })
+  await s.schedule("https://a/x", "X", "a/x\nX")
+  assert.equal((await checkpoint())?.obsKey, "a/x\nX")
+  // A new candidate overwrites atomically (single durable write); the checkpoint is never
+  // absent, so a teardown can't land in a gap with nothing to recover. (background.observe
+  // relies on this instead of cancel()+schedule().)
+  await s.schedule("https://b/y", "Y", "b/y\nY")
+  assert.equal((await checkpoint())?.obsKey, "b/y\nY")
+})
+
 test("a superseding candidate cancels the stale dwell", async () => {
   const clock = makeClock(1000)
   const judged: string[] = []
