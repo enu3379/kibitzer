@@ -464,7 +464,18 @@ async function serviceTier2(
   await dispatchTier2(token, outcome.flow, outcome.flow === "drift" ? outcome.message : null, goal)
 }
 
-let toastToken = 0
+const TOAST_TOKEN_KEY = "toast-token"
+
+/** A durable, strictly-increasing display token. In-memory (`let toastToken = 0`) reset to 0
+ *  on every service-worker restart, so a post-restart nag reused an id an earlier nag's
+ *  recordNag had stored — making markNagActed act on the wrong nag. Persisting it keeps ids
+ *  unique across restarts. Serialized (showToast runs inside the gauge dispatch queue). */
+async function nextToastToken(): Promise<number> {
+  const current = await kvGet<number>(TOAST_TOKEN_KEY)
+  const next = (typeof current === "number" ? current : 0) + 1
+  await kvSet(TOAST_TOKEN_KEY, next)
+  return next
+}
 
 /** Render the in-page toast overlay in the active tab (matches apps/extension — a quiet
  *  on-page bubble). Injected via executeScript; falls back to an OS notification when the
@@ -480,7 +491,7 @@ async function showToast(
   // the user navigated there.
   if (tab?.url && shouldDropUrl(tab.url)) return null
   void playChime(kind) // audible cue via the offscreen document (works off-screen)
-  const token = (toastToken += 1)
+  const token = await nextToastToken()
   if (tab?.id) {
     const payload: ToastPayload = {
       notificationId: `kbz-${token}`,

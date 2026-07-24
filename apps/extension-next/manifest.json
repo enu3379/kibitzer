@@ -4,6 +4,7 @@
   "version": "0.0.1",
   "description": "Serverless attention guard — TypeScript-only, no local server.",
   "minimum_chrome_version": "120",
+  "incognito": "not_allowed",
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },

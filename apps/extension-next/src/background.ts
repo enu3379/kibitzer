@@ -241,10 +241,16 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
 })
 
 // Feedback from the OS-notification fallback (buttons: 0=related, 1=break), routed
-// through the same handler as the in-page toast.
+// through the same handler as the in-page toast. The notification id is `kbz-<token>`; carry
+// that displayToken through so markNagActed records the nag as acted (parity with the toast).
 chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) => {
   if (!notificationId.startsWith("kbz-")) return
-  void handleMessage({ type: "kibitzer:toast-feedback", kind: buttonIndex === 0 ? "related" : "break" })
+  const displayToken = Number(notificationId.slice(4))
+  void handleMessage({
+    type: "kibitzer:toast-feedback",
+    kind: buttonIndex === 0 ? "related" : "break",
+    displayToken: Number.isFinite(displayToken) ? displayToken : undefined,
+  })
   void chrome.notifications.clear(notificationId)
 })
 chrome.notifications.onClicked.addListener((notificationId) => {
