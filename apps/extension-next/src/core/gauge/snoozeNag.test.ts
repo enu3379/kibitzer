@@ -58,6 +58,19 @@ test("the S=0 recovery nudges DIRECTLY and fires once — no request_tier2 storm
   assert.ok(!t2.effects.some((e) => e.type === "request_tier2"), "still no request storm")
 })
 
+test("the S=0 recovery respects a fresh Tier-2 OK for the active page (no nudge)", () => {
+  const state = pinnedAtZero({
+    degraded: false,
+    m: 0.3,
+    snoozedUntil: now - 1000,
+    nagN: 0,
+    activePageKey: "site/a",
+    lastJudgment: { pageKey: "site/a", flow: "ok", ts: now - 1000 }, // Tier-2 just said OK
+  })
+  const { effects } = reduceGauge(state, { type: "heartbeat", ts: now }, config)
+  assert.ok(!effects.some((e) => e.type === "nag"), "a page Tier-2 just confirmed OK is not recovery-nagged")
+})
+
 test("a page already nudged (nagN>=1) does not re-fire the initial S=0 gate", () => {
   // Non-degraded so the initial gate would emit request_tier2 (distinct from a debt-based
   // renag "nag"); m below the promotion threshold so accelTransition doesn't emit its own

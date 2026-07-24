@@ -150,6 +150,11 @@ function advance(state: GaugeState, now: number, config: GaugeConfig): GaugeTran
 
   // S = 0 final gate.
   const atZeroDrift = state.activeVerdict === "DRIFT" && st.s <= 0;
+  // Honor a fresh cached Tier-2 "ok" for the active page (same window sZeroGate uses), so a
+  // page Tier-2 just confirmed on-goal isn't nudged by the recovery even if Tier-0 re-flags it.
+  const lj = st.lastJudgment;
+  const freshOk =
+    lj != null && lj.pageKey === st.activePageKey && lj.flow === "ok" && now - lj.ts <= config.freshWindow * 1000;
   if (atZeroDrift && sBefore > 0) {
     // Normal downward crossing into 0 → confirm via Tier-2 (or nag directly if degraded).
     st = sZeroGate(st, config, effects, now);
@@ -157,6 +162,8 @@ function advance(state: GaugeState, now: number, config: GaugeConfig): GaugeTran
     atZeroDrift &&
     st.nagN === 0 &&
     !snoozed(st, now) &&
+    !freshOk &&
+    !effects.some((e) => e.type === "nag") && // never stack on a renag/celebrate already emitted this tick
     !(st.pendingTier2 != null && st.pendingTier2.reason === "s_zero" && st.pendingTier2.pageKey === st.activePageKey)
   ) {
     // Recover a crossing nudge that was suppressed by a snooze (or carried over by the

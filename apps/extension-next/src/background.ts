@@ -17,7 +17,7 @@ import { getProviderHealth } from "./lib/providerHealth.ts"
 import { clearBadge } from "./lib/badge.ts"
 import { clearEvents, exportEvents, logEvent } from "./lib/events.ts"
 import { getSettings, setSettings, type Settings } from "./lib/settings.ts"
-import { clearStore, OBS_STORE } from "./lib/db.ts"
+import { clearStore, kvGet, kvSet, OBS_STORE } from "./lib/db.ts"
 import { DwellScheduler } from "./lib/dwellScheduler.ts"
 import { markNagActed, recentTitles, recordObservation } from "./lib/history.ts"
 import { clearLog, exportLog, klog, logText } from "./lib/klog.ts"
@@ -156,12 +156,18 @@ async function ensureHeartbeat(): Promise<void> {
  *  system-wide (idle stays "active" while the user works in another app), so the gauge
  *  must also require Chrome to be the focused window — otherwise S drains and nags fire
  *  while Chrome is off-screen. Unknown → assume present (never over-suppress). */
-// Log presence TRANSITIONS (active↔inactive) to the event store — sparse, so replay can
-// reconstruct real idle/focus time instead of assuming presence through every gap (B7).
-let lastPresence: boolean | null = null
-function notePresence(present: boolean): void {
-  if (present === lastPresence) return
-  lastPresence = present
+const PRESENCE_KEY = "presence-last"
+
+// Log presence TRANSITIONS to the event store so replay can reconstruct real idle/focus time
+// (B7). Only the heartbeat calls this — with the SAME definition the gauge uses
+// (browserPresent = Chrome focused AND idle-active) — so all sources agree; the idle/focus
+// handlers just drive the live gauge. The last state is DURABLE (a module `let` reset to null
+// on every SW wake would log a redundant event ~every minute and could evict older observes
+// under the event cap), so a transition is logged at most once per real change.
+async function notePresence(present: boolean): Promise<void> {
+  const last = await kvGet<boolean>(PRESENCE_KEY)
+  if (last === present) return
+  await kvSet(PRESENCE_KEY, present)
   logEvent("presence", { present })
 }
 
@@ -225,14 +231,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     if (!goal) return
     // Only drain while Chrome is focused and the user is active; otherwise pause.
     const present = await browserPresent()
-    notePresence(present)
+    await notePresence(present) // record presence transitions off the same signal the gauge uses
     await dispatch({ type: present ? "heartbeat" : "inactive", ts: Date.now() }, goal)
   })
 })
 
 chrome.idle.setDetectionInterval(60)
 chrome.idle.onStateChanged.addListener((state) => {
-  notePresence(state === "active")
   void getGoal().then(async (goal) => {
     if (!goal) return
     if (state === "active") return observeActiveTab()
@@ -247,7 +252,6 @@ chrome.idle.onStateChanged.addListener((state) => {
 // re-observes the active tab. Complements the system-wide idle signal above.
 chrome.windows.onFocusChanged.addListener((windowId) => {
   const lostFocus = windowId === chrome.windows.WINDOW_ID_NONE
-  notePresence(!lostFocus)
   void getGoal().then(async (goal) => {
     if (!goal) return
     if (lostFocus) {

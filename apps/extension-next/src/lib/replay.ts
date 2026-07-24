@@ -112,6 +112,7 @@ export function replayGauge(
   presence: PresencePoint[] = [],
 ): GaugeReplay {
   const config = defaultGaugeConfig(availableMinutes)
+  const presenceSorted = [...presence].sort((a, b) => a.ts - b.ts) // presentAt requires sorted
   let state: GaugeState = initGaugeState()
   const series: Array<{ ts: number; s: number }> = []
   const nagTimes: number[] = []
@@ -134,7 +135,7 @@ export function replayGauge(
           const bt = lastTs + b * HEARTBEAT_MS
           // Only drain while the user was actually present; an away minute is an inactive
           // rebase (contract §5: inactive integrates nothing).
-          step(presentAt(presence, bt) ? { type: "heartbeat", ts: bt } : { type: "inactive", ts: bt })
+          step(presentAt(presenceSorted, bt) ? { type: "heartbeat", ts: bt } : { type: "inactive", ts: bt })
           series.push({ ts: state.updatedAt, s: state.s })
         }
       }

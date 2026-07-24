@@ -42,6 +42,23 @@ test("replayGauge does not drain S while the user was away (B7 presence-aware)",
   assert.equal(away.nagCount, 0, "an away 40-min gap does not nag")
 })
 
+test("replayGauge sorts presence defensively — unsorted input yields the same result", () => {
+  const t0 = 1_000_000
+  const observes = [
+    { ts: t0, pageKey: "a", score: 0.2, tier0: "DRIFT" },
+    { ts: t0 + 40 * 60_000, pageKey: "a", score: 0.2, tier0: "DRIFT" },
+  ]
+  const sorted = replayGauge(observes, 0.59, null, [
+    { ts: t0 + 1000, present: false },
+    { ts: t0 + 20 * 60_000, present: true },
+  ])
+  const shuffled = replayGauge(observes, 0.59, null, [
+    { ts: t0 + 20 * 60_000, present: true },
+    { ts: t0 + 1000, present: false },
+  ])
+  assert.equal(sorted.nagCount, shuffled.nagCount, "presence order must not change the outcome")
+})
+
 test("extractObserves keeps scored observes and sorts by ts", () => {
   const events: KibitzerEvent[] = [
     ev(200, "observe", { pageKey: "b", score: 0.8, tier0: "OK" }),
