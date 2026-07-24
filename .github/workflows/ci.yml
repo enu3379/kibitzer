@@ -71,3 +71,11 @@ jobs:
       - name: Build extension
         working-directory: apps/extension
         run: npm run build
+
+      - name: Install extension-next dependencies
+        working-directory: apps/extension-next
+        run: npm ci
+
+      - name: Build extension-next
+        working-directory: apps/extension-next
+        run: npm run build

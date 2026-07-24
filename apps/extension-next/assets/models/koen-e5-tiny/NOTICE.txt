@@ -1,0 +1,9 @@
+KoEn E5 Tiny model assets
+
+Source: https://huggingface.co/exp-models/dragonkue-KoEn-E5-Tiny
+Pinned revision: 961b7a2790353075d1819ad74852be9562550a2f
+Model source path: onnx/model_O4.onnx
+License declared by the source repository: Apache-2.0
+
+The exact packaged files, byte sizes, and SHA-256 digests are recorded in
+model-manifest.json. Kibitzer does not fetch model code or weights at runtime.

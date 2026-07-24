@@ -1,16 +1,20 @@
 # Kibitzer TS / serverless migration plan
 
-Status: **v0, 2026-07-22.** Canonical execution plan for the whole refactor. Supersedes
+Status: **v0.3, 2026-07-23.** Canonical execution plan for the whole refactor. Supersedes
 the Python stage roadmap in `docs/analysis-plan-a-gauge-design.md` §9. Decision record:
 `docs/planning-notes.md` **D9**. Single forward track: **TypeScript only**.
 
 ## 0. TL;DR — where we are
 
-The **gauge decision core is built and validated** — a pure TypeScript reducer, independently
-cross-checked against a throwaway Python reducer (byte-identical over the shared fixtures and a
-lifecycle benchmark). That cross-check was the Python track's *only* job, and it is done.
-Nothing is wired into the running app yet. This document is the map from "core validated" to
-"one TypeScript runtime in the extension, Python server removed."
+The **gauge decision core is built, validated, and wired in persistent shadow mode** — a pure
+TypeScript reducer, independently cross-checked against a throwaway Python reducer (byte-identical
+over the shared fixtures and a lifecycle benchmark). The extension feeds server verdicts and its
+local presence clock into that reducer. IndexedDB is now the gauge SSOT: each checkpoint and its
+new effects commit in one transaction, with effects retained in a pending outbox. The developer
+popup can inspect S and outbox state, but no effect can be delivered. Tier 0 now also runs locally
+through packaged WASM in a non-authoritative provider shadow, and the Ollama Tier 1/2 client,
+prompts, parsers, and minimized payload builders live in the extension bundle. This document is the
+map from that durable shadow to "one TypeScript runtime in the extension, Python server removed."
 
 ## 1. Goal — end-state architecture
 
@@ -46,25 +50,45 @@ gauge is the real attention trigger. No local server process, no HTTP round-trip
 | **TS gauge reducer** (`apps/extension/src/core/gauge/`) | ✅ pure `reduceGauge`, tests + typecheck green |
 | Design-runs-correctly cross-check (Python `gauge.py`) | ✅ byte-identical over fixtures + 61-step benchmark (`max|ΔS|=0`) — **purpose fulfilled, frozen** |
 | Recovery curve (issue #122 "F") | ✅ adopted |
-| Wired into any app surface | ⬜ **nothing yet** |
-| Pushed / PR'd | ⬜ local commits only |
+| Extension shadow runner | ✅ server verdicts + local heartbeat |
+| IndexedDB gauge SSOT | ✅ checkpoint + pending effects in one transaction |
+| Phase 2 state migration | ✅ one-time `chrome.storage.session` → IndexedDB import |
+| TS Tier 0 | ✅ packaged O4 ONNX + pure-JS tokenizer + CPU WASM; Python/WASM parity test |
+| TS Ollama Tier 1/2 | ✅ client, prompts, parsers, payloads, timeout/key/error contracts |
+| Provider shadow | ✅ Tier 0 live diagnostics; Ollama explicit opt-in; no gauge input |
+| Popup diagnostics | ✅ gauge S/m/accel/outbox + last provider-shadow result |
+| Effect delivery | ⬜ intentionally disabled; existing Python controller remains authoritative |
+| Pushed / PR'd | ✅ Phase 1–3 merged into `dev-migrate`; Phase 4 is the current migration PR |
 
-Roughly the first ~10% of the refactor: the smallest self-contained core, proven correct.
+The pure core, durable persistence boundary, and TS provider implementations are complete.
+Cutover orchestration is next.
 
 ## 4. Phased roadmap (TypeScript, independent PRs → `dev-migrate`)
 
 - **Phase 1 — Pure core (✅ done).** Reducer + fixtures + benchmark.
-- **Phase 2 — Shadow mode (next).** In the extension service worker: consume server Tier 0/1
-  verdicts + the local heartbeat alarm as gauge events; run `reduceGauge`; record S/m/accel and
-  show S in the popup (debug). **Effects are recorded, not delivered** — the existing controller
-  keeps nagging. No IndexedDB yet.
-- **Phase 3 — IndexedDB SSOT.** Move gauge state to IndexedDB with an outbox (state + effects in
-  one transaction). `chrome.storage.session` / worker memory are not authoritative. Survives MV3
-  service-worker teardown.
-- **Phase 4 — Providers to TS.** Port Tier 0 (WASM embeddings) and the Ollama Tier 1/2 calls into
-  the extension runtime.
-- **Phase 5 — Cutover.** Switch the gauge to the real trigger, remove the Python server and
-  `StreakController`. `dev-migrate` merges to `main`.
+- **Phase 2 — Shadow mode (✅ done).** The extension service worker consumes server Tier 0/1
+  verdicts + local presence heartbeats as gauge events. It serializes `reduceGauge` transitions,
+  and initially used `chrome.storage.session` for its diagnostic snapshot. The popup exposes
+  S/m/acceleration/effect state only when developer diagnostics are enabled. **Effects are
+  recorded, not delivered** — the existing controller keeps nagging.
+- **Phase 3 — IndexedDB SSOT (✅ done).** IndexedDB owns the checkpoint and pending-effect outbox.
+  Reducer state and newly emitted effects commit in one transaction; memory advances only after
+  the commit succeeds. It survives MV3 worker/browser restarts, migrates the Phase 2 session
+  snapshot once, clears on goal replacement/session end/activity deletion, and keeps only a
+  bounded diagnostic view while retaining the full pending outbox. Delivery remains disabled.
+- **Phase 4 — Providers to TS (✅ done).** Tier 0 uses a packaged KoEn E5 Tiny O4 ONNX
+  export with `onnxruntime-web/wasm` and a pure-JS tokenizer. The same O4 export is checked
+  against Python `CPUExecutionProvider`; vector components and cosine agree within `2e-4`.
+  Ollama Tier 1/2 request contracts, canonical prompts, strict parsers, payload minimization,
+  key rotation, output-budget handling, and safe failures are ported and tested. Tier 0 runs
+  in a best-effort diagnostics shadow after the server verdict. Tier 1 is explicit opt-in;
+  Tier 2 is bundled but does not consume the gauge outbox yet. No TS provider result can
+  change the gauge or deliver an effect in this phase.
+- **Phase 5 — Cutover (next).** Make extension storage own the goal/exemplars/provider
+  configuration and recent context, route TS Tier 0/1 verdicts into the gauge, consume and
+  acknowledge `request_tier2` outbox entries with stale-page cancellation, enable
+  nag/celebration delivery, then remove the Python server and `StreakController`.
+  `dev-migrate` merges to `main`.
 - **D4 calibration (parallel).** Replay-CLI tuning of the §8 knobs against logged sessions; gates
   the shipped defaults, not the wiring.
 
@@ -80,8 +104,12 @@ Roughly the first ~10% of the refactor: the smallest self-contained core, proven
 
 1. **Ship timing → RESOLVED (2026-07-22):** the gauge stays shadow until the TS cutover — **no
    interim Python trigger.** (The Python track was validation-only.)
-2. **#117 long wall-clock gap** — reducer-level cooldown on return after a long absence (relax
-   m / tier / episode; S policy TBD). Deferred; folds into Phase 2 wiring.
+2. **#117 long wall-clock gap** — Phase 2 rebases the reducer clock on both inactive and active
+   presence transitions, so inactive wall time is not integrated. Any additional return-time
+   relaxation of m / tier / episode remains a calibration decision; S is unchanged on return.
+3. **Tier 0 calibration** — the browser-compatible O4 export is internally stable across Python
+   and WASM, but it is not the old qint8 export used to select `tau_ok=0.6`. D4 must calibrate the
+   O4 score distribution before Phase 5 treats that threshold as shipped rather than diagnostic.
 
 ## 7. Document map
 
