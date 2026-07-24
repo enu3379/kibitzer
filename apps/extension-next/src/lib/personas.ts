@@ -3,6 +3,7 @@
 // Writer contract + the selected persona's style layer. Templates are the offline fallback.
 
 import { TIER2_WRITER_SYSTEM_PROMPT } from "../providers/prompts.ts"
+import { resolveJosa } from "./josa.ts"
 import { PERSONA_DEFAULT, PERSONA_ORDER, PERSONAS, type PersonaData } from "./personas.data.ts"
 
 export type { PersonaData }
@@ -99,10 +100,36 @@ export function clampSentences(message: string, maxSentences: number): string {
   return sentences.join(" ")
 }
 
-function fill(template: string, values: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (whole, name) =>
-    Object.prototype.hasOwnProperty.call(values, name) ? values[name] : whole,
-  )
+/** Substitute {placeholders}, fixing any batchim-dependent particle attached right
+ *  after one so it agrees with the substituted value ("{goal}이" + "뉴스 보기" →
+ *  "뉴스 보기가"). Closing quotes between placeholder and particle are kept:
+ *  "'{title}'이라" → "'나 혼자 산다'라". The Python server never had this fix.
+ *  Unknown placeholders and undeterminable endings are left as written. */
+export function fillTemplate(template: string, values: Record<string, string>): string {
+  const re = /\{(\w+)\}/g
+  let out = ""
+  let last = 0
+  let match: RegExpExecArray | null
+  while ((match = re.exec(template)) !== null) {
+    out += template.slice(last, match.index)
+    last = re.lastIndex
+    const name = match[1]
+    if (!Object.prototype.hasOwnProperty.call(values, name)) {
+      out += match[0]
+      continue
+    }
+    const value = values[name]
+    out += value
+    let cursor = last
+    while (cursor < template.length && SENTENCE_CLOSERS.includes(template[cursor])) cursor += 1
+    const josa = resolveJosa(value, template.slice(cursor))
+    if (josa) {
+      out += template.slice(last, cursor) + josa.particle
+      last = cursor + josa.consumed
+      re.lastIndex = last
+    }
+  }
+  return out + template.slice(last)
 }
 
 /** Offline nag message when the Writer is unavailable. Indexed by nag ordinal, cyclic
@@ -115,7 +142,7 @@ export function pickFallback(
   const pool = persona.fallbackTemplates
   if (pool.length === 0) return null
   const template = pool[Math.max(0, nagCount - 1) % pool.length]
-  return fill(template, { ...values, nag_count: String(nagCount) })
+  return fillTemplate(template, { ...values, nag_count: String(nagCount) })
 }
 
 /** Celebration message on drift-departure → return; picked at random (matches server). */
@@ -126,5 +153,5 @@ export function pickCelebrate(
   const pool = persona.celebrateTemplates
   if (pool.length === 0) return null
   const template = pool[Math.floor(Math.random() * pool.length)]
-  return fill(template, { goal: values.goal, return_minutes: String(values.returnMinutes) })
+  return fillTemplate(template, { goal: values.goal, return_minutes: String(values.returnMinutes) })
 }
