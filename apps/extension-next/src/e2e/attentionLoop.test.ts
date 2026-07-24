@@ -139,3 +139,37 @@ test("E2E: goal → drift on an off-goal page → S drains to 0 → nag delivere
     mock.timers.reset()
   }
 })
+
+test("E2E: a sensitive page is dropped — never judged, no drain, no nag (P0-1 privacy)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    // Fresh session on a neutral page (a distinct goal → resetState wipes the prior scenario).
+    activeTab = { id: 2, url: "https://example.test/neutral", title: "중립 페이지", active: true }
+    await send({ type: "set-goal", goal: "분기 보고서 작성", minutes: null })
+    await settle(50)
+
+    // Navigate to a SENSITIVE page (a bank). observe() must drop it before any judging.
+    activeTab = { id: 2, url: "https://chase.com/account/summary", title: "Account Summary", active: true }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(2, { status: "complete" }, activeTab)
+    await settle(50)
+
+    // Try hard to make it judge — advance past a dwell and reconcile. There is no checkpoint
+    // (the sensitive page scheduled none), so nothing is judged.
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(300)
+    for (let i = 0; i < 10; i += 1) {
+      mock.timers.tick(60_000)
+      await fireHeartbeat()
+      await settle(0)
+    }
+
+    const st = await send({ type: "get-state" })
+    assert.equal(st.s, 100, "a sensitive page pauses the gauge — S must not drain")
+    assert.equal(toasts.length + notifications.length, 0, "no nag is ever surfaced for a sensitive page")
+  } finally {
+    mock.timers.reset()
+  }
+})
