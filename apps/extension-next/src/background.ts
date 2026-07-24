@@ -99,6 +99,10 @@ async function judgeAndDispatch(url: string, title: string, obsKey: string): Pro
   // page they left. Drop it — the page they're on now gets its own dwell + judge.
   if (!(await stillJudging(pageKey, epoch))) {
     klog(`judge dropped (page/goal moved on) ${pageKey}`)
+    // This page was never actually judged (lastObservedKey was set optimistically at entry).
+    // Clear the debounce marker so returning to it later re-judges, instead of observe()
+    // silently debouncing it as "already judged" — which would leave it never re-judged.
+    if (lastObservedKey === obsKey) lastObservedKey = null
     return
   }
   // Learn the recency anchor from confirmed-OK pages (the guard blocks anchor-only OKs).

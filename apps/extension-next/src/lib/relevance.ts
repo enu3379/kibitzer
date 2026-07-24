@@ -10,7 +10,7 @@
 // Vectors are L2-normalized by the embedder (and meanVector re-normalizes), so cosine is
 // the plain dot product. Stored per goal in the IndexedDB kv store; cleared on goal change.
 
-import { kvDelete, kvGet, kvSet } from "./db.ts"
+import { kvDelete, kvGet, kvSet, kvUpdate } from "./db.ts"
 
 export const BETA = 0.85
 export const ANCHOR_WINDOW = 10
@@ -112,11 +112,13 @@ export async function loadRefs(): Promise<Tier0Refs> {
   return { exemplars, anchor: meanVector(anchorVecs), derived }
 }
 
-/** Add a "related"-labeled page's embedding as a goal exemplar (capped). */
+/** Add a "related"-labeled page's embedding as a goal exemplar (capped). Atomic read-modify-
+ *  write so a concurrent judge/feedback can't drop an entry. */
 export async function addExemplar(vec: number[]): Promise<void> {
-  const log = await readVecs(EXEMPLAR_KEY)
-  log.push(vec)
-  await kvSet(EXEMPLAR_KEY, log.slice(-EXEMPLAR_CAP))
+  await kvUpdate<number[][]>(EXEMPLAR_KEY, (log0) => {
+    const log = Array.isArray(log0) ? log0 : []
+    return [...log, vec].slice(-EXEMPLAR_CAP)
+  })
 }
 
 function sameVec(a: readonly number[], b: readonly number[]): boolean {
@@ -130,10 +132,11 @@ function sameVec(a: readonly number[], b: readonly number[]): boolean {
  *  teardown-then-reconcile can re-judge the same page; without this it would double-weight
  *  that page in the anchor mean and burn two of ANCHOR_WINDOW slots. */
 export async function admitAnchor(vec: number[]): Promise<void> {
-  const log = await readVecs(ANCHOR_KEY)
-  if (log.length > 0 && sameVec(log[log.length - 1], vec)) return
-  log.push(vec)
-  await kvSet(ANCHOR_KEY, log.slice(-ANCHOR_WINDOW))
+  await kvUpdate<number[][]>(ANCHOR_KEY, (log0) => {
+    const log = Array.isArray(log0) ? log0 : []
+    if (log.length > 0 && sameVec(log[log.length - 1], vec)) return log
+    return [...log, vec].slice(-ANCHOR_WINDOW)
+  })
 }
 
 export async function setDerived(vecs: number[][]): Promise<void> {

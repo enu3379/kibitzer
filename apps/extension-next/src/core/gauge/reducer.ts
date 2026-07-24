@@ -148,18 +148,27 @@ function advance(state: GaugeState, now: number, config: GaugeConfig): GaugeTran
   // episode end (m <= 0): reset renag schedule
   if (st.m <= 0) st = { ...st, nagN: 0, renagDebt: 0 };
 
-  // S = 0 final gate. Fire on the downward crossing into 0, AND when the gauge is pinned at 0
-  // and drifting but the initial nudge never happened (it was suppressed by a snooze at the
-  // crossing, or S=0 was carried over by the migration) and we aren't already waiting on a
-  // Tier-2 request — otherwise, once snooze ends, the crossing edge can't recur (sBefore is
-  // already 0) and maybeRenag never runs (nagN is 0), so the user stays stuck with no nudge.
+  // S = 0 final gate.
   const atZeroDrift = state.activeVerdict === "DRIFT" && st.s <= 0;
-  const stuckUnnudged =
-    sBefore <= 0 &&
-    st.nagN === 0 &&
-    !(st.pendingTier2 != null && st.pendingTier2.reason === "s_zero");
-  if (atZeroDrift && (sBefore > 0 || stuckUnnudged)) {
+  if (atZeroDrift && sBefore > 0) {
+    // Normal downward crossing into 0 → confirm via Tier-2 (or nag directly if degraded).
     st = sZeroGate(st, config, effects, now);
+  } else if (
+    atZeroDrift &&
+    st.nagN === 0 &&
+    !snoozed(st, now) &&
+    !(st.pendingTier2 != null && st.pendingTier2.reason === "s_zero" && st.pendingTier2.pageKey === st.activePageKey)
+  ) {
+    // Recover a crossing nudge that was suppressed by a snooze (or carried over by the
+    // migration): the crossing edge can't recur (sBefore is already 0) and maybeRenag needs
+    // nagN>=1, so without this the user stays stuck with no nudge. Nudge DIRECTLY, not via a
+    // Tier-2 request: under S=0 navigation churn a fresh request resolves after the user moved
+    // on, the wiring cancels it (tier2_cancel) without advancing nagN, and the gate would
+    // re-fire every heartbeat — storming requests while never nudging. S=0/DRIFT is already
+    // sustained-drift evidence; nag directly and set nagN=1, so this fires at most once and
+    // the debt-based renag takes over.
+    effects.push({ type: "nag", pageKey: st.activePageKey as string });
+    st = { ...st, lastNagTs: now, nagN: st.nagN + 1, renagDebt: 0 };
   }
 
   return { state: { ...st, updatedAt: now }, effects };

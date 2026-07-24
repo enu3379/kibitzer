@@ -42,6 +42,22 @@ test("a still-snoozed page pinned at S=0 is NOT nudged", () => {
   assert.ok(!effects.some((e) => e.type === "nag"), "must stay quiet while snoozed")
 })
 
+test("the S=0 recovery nudges DIRECTLY and fires once — no request_tier2 storm under churn", () => {
+  // Non-degraded, pinned at 0, snooze ended, never nudged, m below the promotion threshold.
+  const state = pinnedAtZero({ degraded: false, m: 0.3, snoozedUntil: now - 1000, nagN: 0 })
+  const t1 = reduceGauge(state, { type: "heartbeat", ts: now }, config)
+  assert.ok(t1.effects.some((e) => e.type === "nag"), "recovery nudges directly")
+  assert.ok(
+    !t1.effects.some((e) => e.type === "request_tier2"),
+    "no Tier-2 request (a churn-cancelled request would re-fire forever)",
+  )
+  assert.equal(t1.state.nagN, 1, "nagN advances so the initial gate can't re-fire")
+
+  // A later heartbeat (nagN=1 now) must not emit a fresh recovery request either.
+  const t2 = reduceGauge(t1.state, { type: "heartbeat", ts: now + 1000 }, config)
+  assert.ok(!t2.effects.some((e) => e.type === "request_tier2"), "still no request storm")
+})
+
 test("a page already nudged (nagN>=1) does not re-fire the initial S=0 gate", () => {
   // Non-degraded so the initial gate would emit request_tier2 (distinct from a debt-based
   // renag "nag"); m below the promotion threshold so accelTransition doesn't emit its own

@@ -18,7 +18,7 @@ import { getSettings, inQuietHours } from "./settings.ts"
 import { pageKeyOf } from "./url.ts"
 import { extractPageExcerpt } from "../content/pageExcerpt.ts"
 import { updateBadge } from "./badge.ts"
-import { deleteRecord, drainRecords, kvDeleteIf, kvGet, kvPutAndAppend, kvSet, kvWriteAndClear, OUTBOX_STORE } from "./db.ts"
+import { deleteRecord, drainRecords, kvDeleteIf, kvGet, kvPutAndAppend, kvSet, kvUpdate, kvWriteAndClear, OUTBOX_STORE } from "./db.ts"
 import { logEvent } from "./events.ts"
 import { clearRelevance } from "./relevance.ts"
 import {
@@ -469,12 +469,11 @@ const TOAST_TOKEN_KEY = "toast-token"
 /** A durable, strictly-increasing display token. In-memory (`let toastToken = 0`) reset to 0
  *  on every service-worker restart, so a post-restart nag reused an id an earlier nag's
  *  recordNag had stored — making markNagActed act on the wrong nag. Persisting it keeps ids
- *  unique across restarts. Serialized (showToast runs inside the gauge dispatch queue). */
+ *  unique across restarts; the atomic kvUpdate keeps them unique under concurrency too (the
+ *  test-nag path `testNag` delivers outside the dispatch queue, so a plain get+set could
+ *  race a heartbeat delivery and mint a duplicate). */
 async function nextToastToken(): Promise<number> {
-  const current = await kvGet<number>(TOAST_TOKEN_KEY)
-  const next = (typeof current === "number" ? current : 0) + 1
-  await kvSet(TOAST_TOKEN_KEY, next)
-  return next
+  return kvUpdate<number>(TOAST_TOKEN_KEY, (current) => (typeof current === "number" ? current : 0) + 1)
 }
 
 /** Render the in-page toast overlay in the active tab (matches apps/extension — a quiet

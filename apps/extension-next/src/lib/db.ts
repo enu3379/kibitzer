@@ -226,6 +226,27 @@ export async function drainRecords<T extends { id: number }>(
   }
 }
 
+/** Atomic read-modify-write for a kv key: `updater(current)` runs on the freshly-read value
+ *  and its result is written back, all in one transaction. IndexedDB serializes readwrite
+ *  transactions on a store, so concurrent callers don't lose updates the way a separate
+ *  kvGet+kvSet would. The updater MUST be synchronous. Returns the new value. */
+export async function kvUpdate<T>(key: string, updater: (current: T | undefined) => T): Promise<T> {
+  const db = await open()
+  return await new Promise<T>((resolve, reject) => {
+    const tx = db.transaction(KV_STORE, "readwrite")
+    const os = tx.objectStore(KV_STORE)
+    const getReq = os.get(key)
+    let next: T
+    getReq.onsuccess = () => {
+      next = updater(getReq.result as T | undefined)
+      os.put(next, key) // same still-active transaction
+    }
+    tx.oncomplete = () => resolve(next)
+    tx.onabort = () => reject(tx.error ?? new Error("kvUpdate aborted"))
+    tx.onerror = () => reject(tx.error ?? new Error("kvUpdate failed"))
+  })
+}
+
 /** Atomic compare-and-delete for a kv key: delete it only if `matches(currentValue)` — so a
  *  stale reader can't clobber a value another writer has since replaced. The read and the
  *  conditional delete run in one transaction. No-op if the key is absent or unmatched. */

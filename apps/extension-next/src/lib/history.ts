@@ -7,7 +7,7 @@
 // nag_count_today survive a browser restart, not just a service-worker teardown.
 
 import type { RecentTitle } from "../providers/payloads.ts"
-import { kvDelete, kvGet, kvSet } from "./db.ts"
+import { kvDelete, kvGet, kvSet, kvUpdate } from "./db.ts"
 
 const OBS_KEY = "recent-obs"
 const NAG_LOG_KEY = "nag-log"
@@ -41,16 +41,18 @@ async function readObs(): Promise<ObsEntry[]> {
   return Array.isArray(value) ? value : []
 }
 
-/** Append the just-judged page. Consecutive duplicates of the same page are collapsed
- *  so a SPA update storm doesn't flood the recent-titles window. */
+/** Append the just-judged page. Consecutive duplicates of the same page are collapsed so a
+ *  SPA update storm doesn't flood the recent-titles window. Atomic read-modify-write so two
+ *  concurrent judges can't drop an entry. */
 export async function recordObservation(entry: ObsEntry): Promise<void> {
-  const log = await readObs()
-  const last = log.at(-1)
-  if (last && last.title === entry.title && last.urlHost === entry.urlHost && last.verdict === entry.verdict) {
-    return
-  }
-  log.push(entry)
-  await kvSet(OBS_KEY, log.slice(-OBS_CAP))
+  await kvUpdate<ObsEntry[]>(OBS_KEY, (log0) => {
+    const log = Array.isArray(log0) ? log0 : []
+    const last = log.at(-1)
+    if (last && last.title === entry.title && last.urlHost === entry.urlHost && last.verdict === entry.verdict) {
+      return log
+    }
+    return [...log, entry].slice(-OBS_CAP)
+  })
 }
 
 /** Recent {title, verdict} in chronological order — feeds recent_titles / repeat_signals. */

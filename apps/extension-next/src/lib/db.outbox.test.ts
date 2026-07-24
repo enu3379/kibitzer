@@ -15,6 +15,7 @@ import {
   kvGet,
   kvPutAndAppend,
   kvSet,
+  kvUpdate,
   kvWriteAndClear,
   OUTBOX_STORE,
 } from "./db.ts"
@@ -94,6 +95,21 @@ test("kvWriteAndClear resets state, drops keys, and clears the outbox atomically
   assert.deepEqual(await kvGet("gauge-state"), { s: 100 }, "state reset")
   assert.equal(await kvGet("pending-writer"), undefined, "writer dropped")
   assert.equal((await getAllRecords(OUTBOX_STORE)).length, 0, "outbox cleared")
+})
+
+test("kvUpdate serializes concurrent read-modify-writes (no lost update)", async () => {
+  // A plain kvGet+kvSet would let concurrent callers read the same value and lose updates
+  // (the toast-token / anchor / recent-titles regression). kvUpdate is one transaction each,
+  // and IndexedDB serializes readwrite transactions on a store, so all N apply.
+  await kvSet("counter", 0)
+  await Promise.all(Array.from({ length: 12 }, () => kvUpdate<number>("counter", (n) => (n ?? 0) + 1)))
+  assert.equal(await kvGet("counter"), 12, "every concurrent increment landed")
+
+  // Array append (the admitAnchor / recordObservation shape) likewise keeps every entry.
+  await kvSet("list", [])
+  await Promise.all([0, 1, 2].map((i) => kvUpdate<number[]>("list", (a) => [...(a ?? []), i])))
+  const list = (await kvGet<number[]>("list")) ?? []
+  assert.deepEqual([...list].sort(), [0, 1, 2], "no appended entry lost")
 })
 
 test("kvDeleteIf deletes only when the current value still matches (CAS)", async () => {
