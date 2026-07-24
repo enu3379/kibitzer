@@ -1,7 +1,6 @@
-// Kibitzer (next) — serverless MV3 service worker.
+// Kibitzer — serverless MV3 service worker.
 //
-// Authoritative pipeline (Tier-0-only first slice; the Ollama Tier 1/2 layer and the
-// IndexedDB SSOT are follow-up PRs):
+// Authoritative pipeline:
 //   page settles / tab activates → embed title vs goal (Tier 0 WASM) → verdict
 //   → gauge (degraded mode) → S drains on drift → S=0 → real nag notification.
 // A 1-min alarm feeds heartbeats so dwell time (not click count) drives the gauge.

@@ -1,16 +1,14 @@
 # Gauge v0 — language-neutral behavior contract
 
-Status: v0 (2026-07-21). Frozen semantics from `docs/analysis-plan-a-gauge-design.md`
-§1–§6 (planning-notes **D9**). This file is the **single source of truth** that both
-implementations must satisfy:
+Status: v0 (2026-07-21), authoritative TypeScript runtime after the 2026-07-24
+cutover. Frozen semantics come from `docs/analysis-plan-a-gauge-design.md`
+§1–§6 and planning-notes D9.
 
-- **A track (TypeScript)** — `apps/extension/src/core/gauge/` (the migration target).
-- **B track (Python)** — `apps/server/app/core/controllers/gauge.py` (interim, real-data
-  validation; deleted when the Python server is removed).
-
-Both implement a **pure reducer** with no I/O and validate against the shared fixtures
-in `fixtures/gauge/*.json`. Divergence between the two implementations is a contract
-bug: fix the fixture first (the contract), then both implementations.
+The production implementation is the pure reducer under
+`apps/extension-next/src/core/gauge/`. The retired Python reducer was used only
+as an independent validation track; it remains reachable through
+`pre-serverless-cutover-2026-07-24`. Shared fixtures and historical
+cross-language results remain evidence for this contract.
 
 Locked decisions (design §10 → D9): S recovers fully to 100 (no session cap); degraded
 mode weights **both** directions by `f(margin)`; plan B (`streak`) is not a design
@@ -29,9 +27,8 @@ reduceGauge(state: GaugeState, event: GaugeEvent, config: GaugeConfig) -> GaugeT
   `event.ts` (epoch milliseconds). Same `(state, event, config)` ⇒ same output, always.
 - **Deterministic float math.** IEEE-754 doubles, `exp` from the platform math library.
   Fixtures compare floats within `tolerance` (default `1e-6`).
-- `GaugeTransition = { state: GaugeState, effects: GaugeEffect[] }`. Effects are **intents**;
-  shadow mode records them but does not act. The reducer MUST still emit them so the
-  contract is stable when wiring is added later.
+- `GaugeTransition = { state: GaugeState, effects: GaugeEffect[] }`. Effects are
+  **intents**; the runtime checkpoints them in a durable outbox before delivery.
 
 ## 2. GaugeState
 
@@ -53,13 +50,13 @@ reduceGauge(state: GaugeState, event: GaugeEvent, config: GaugeConfig) -> GaugeT
 | `celebrateArmed` | bool | false | S ≤ C_arm에서 set, 칭찬 발송 시 clear |
 | `snoozedUntil` | int ms \| null | null | 사용자 스누즈 (유일한 외부 게이트) |
 
-`gauge_states`/IndexedDB 영속 필드는 이 구조를 그대로 직렬화한다.
+IndexedDB의 gauge checkpoint는 이 구조를 직렬화한다.
 
 ## 3. GaugeEvent (discriminated union on `type`)
 
 | type | fields | source |
 |---|---|---|
-| `nav` | `pageKey, verdict("OK"\|"DRIFT"), r0?, tauOk?, degraded?, ts` | 서버 `PipelineResult` (신규 관측 판정) |
+| `nav` | `pageKey, verdict("OK"\|"DRIFT"), r0?, tauOk?, degraded?, ts` | extension Tier 0/1 observation pipeline |
 | `heartbeat` | `ts` | presence 하트비트 틱 (활성 중) |
 | `inactive` | `ts` | 자리 비움/탭 블러 — 적분 정지 |
 | `tier2_result` | `flow("drift"\|"ok"), pageKey, ts` | Tier2 Judge 응답 (승격/S=0 관문) |
@@ -141,5 +138,5 @@ else:                        s' = min(100, s + Rrecover * ((1 - m') / kRecover)
 - `kind:"golden"` — 짧고 손계산 가능한 스텝, `final_state` 정확값 단언 (수식을 고정).
 - `kind:"property"` — 긴 시나리오, `assert`로 질적 성질 단언 (S 도달 0, S 거의 불변 등).
 - 재캘리브레이션(§8 노브 변경) 시 `config`가 fixture에 박혀 있으므로 golden 값만 재생성.
-- 두 트랙의 테스트 러너가 **같은 파일**을 로드한다: Python `test_gauge_fixtures.py`,
-  TS `reducer.fixtures.test.ts`. 새 fixture는 자동 발견(디렉터리 글롭).
+- 현재 TS `reducer.fixtures.test.ts`가 같은 fixture 디렉터리를 자동 발견한다.
+  Python `test_gauge_fixtures.py`의 과거 교차검증 결과는 보존 태그의 증거다.

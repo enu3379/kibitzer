@@ -17,13 +17,17 @@
 
 - 작업 브랜치는 머지되면 자동 삭제된다. 짧게 유지할 것.
 - `main`·`dev`는 룰셋이 보호한다: 직접 push·force-push·삭제 불가, CI 통과 필수, 머지 방식도 강제됨(dev는 squash만, main은 merge commit만 버튼이 뜬다).
+- `dev-legacy` — 마이그레이션 직전 `dev` 스냅샷. 읽기 전용 참조용이며 **forward-merge 금지**(절대 앞으로 머지하지 않는다).
+- `dev-migrate` — 마이그레이션 통합 브랜치였으나, 마이그레이션이 머지된 지금은 **은퇴(retired)**했다.
+- `pre-serverless-cutover-2026-07-24` — 구 런타임 전체를 고정한 복구 태그.
+- `serverless-migration-head-2026-07-24` — squash 전 마이그레이션 커밋 이력을 고정한 증거 태그.
 
 ## 작업 흐름
 
 1. **작업 지시서에서 시작** — 배경과 수용 기준을 이슈(또는 `docs/handoff-*.md`)에 적는다. 사람이든 에이전트든 그 문서만 보고 착수할 수 있어야 한다.
 2. `dev`에서 브랜치를 딴다.
 3. PR을 `dev`로 연다. 제목은 Conventional Commits 형식, 관련 이슈가 있으면 본문에 `Closes #이슈번호`.
-4. CI(macOS·Windows: 서버 pytest + 확장 빌드) 통과 후 squash 머지한다. 리뷰 승인은 머지 조건이 아니지만, CODEOWNERS가 상대에게 리뷰 요청을 자동으로 보낸다.
+4. CI(macOS·Windows, Node 22: extension-next 빌드) 통과 후 squash 머지한다. 리뷰 승인은 머지 조건이 아니지만, CODEOWNERS가 상대에게 리뷰 요청을 자동으로 보낸다.
 
 ## PR 제목 = 커밋 컨벤션
 
@@ -59,4 +63,4 @@ PR은 작게 — 하나의 PR은 하나의 주제만 다룬다.
 - 에이전트(Claude Code, Codex 등)도 이 문서의 규칙을 그대로 따른다.
 - 전략 결정은 [docs/planning-notes.md](docs/planning-notes.md)에 D-번호(D1, D2, …)로 기록하고, 에이전트에게 넘기는 기계적 작업은 `docs/handoff-*.md`로 작성한다.
 - AI가 작성·보조한 PR은 템플릿의 **AI-assisted** 체크박스를 켠다 — 리뷰어가 리뷰 강도를 판단하는 신호.
-- 시크릿은 절대 커밋하지 않는다: `.env`, `configs/models.local.yaml`은 로컬 전용이고 git이 무시한다. CI에 필요한 값은 GitHub Secrets에 넣는다.
+- 시크릿은 절대 커밋하지 않는다: Ollama 키·엔드포인트는 확장 옵션 UI에 저장되며 저장소에는 어떤 시크릿도 두지 않는다(`.env`는 없다). CI에 필요한 값은 GitHub Secrets에 넣는다.

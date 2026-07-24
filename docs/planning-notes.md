@@ -714,6 +714,43 @@ its sole job was to confirm the design runs correctly (byte-identical to TS over
 benchmark), which is done. Work proceeds **TypeScript-only**; the Python reducer is a
 frozen reference deleted with the server. Canonical roadmap: `docs/ts-migration-plan.md`.
 
+### D14 — Serverless cutover scope and preservation → RESOLVED (2026-07-24)
+
+The active product becomes the single TypeScript MV3 runtime in
+`apps/extension-next`; the Python FastAPI server, relay extension, menubar/tray,
+packaging, and platform launch scripts leave the active tree in PR #139.
+
+The deletion gate is **runtime correctness and privacy**, not complete
+user-interface parity. The runtime-audit gates B1–B5 and B9 are closed before
+deletion. The remaining B6–B8/B10 work is accepted as explicit post-cutover
+UX/analysis/context work:
+
+- #135 — judgment-review dashboard and verdict correction.
+- #136 — Tier-0 OK audit routing and title-quality gate.
+- #141 — session pause/end, reports/history, current-page verdict card, and
+  end-summary parity.
+- B7/B8 tails — learning-aware replay and additional persisted provider
+  context, subject to a separate privacy decision.
+
+This acceptance does not allow documentation to claim those features already
+exist. README and migration status must name the follow-ups until they land.
+
+The unused LLM Wiki project integration is retired in the same cutover:
+generated `raw/` and `wiki/` snapshots, project schema, and sync/search helpers
+leave the active tree. Canonical documentation remains directly under `docs/`.
+
+Preservation is layered:
+
+- `dev-legacy` and `pre-serverless-cutover-2026-07-24` point to `f8be749`, the
+  complete pre-migration runtime.
+- `serverless-migration-head-2026-07-24` points to `4303e1e`, preserving the
+  full migration history before PR #138 was squash-merged as `59307a0`.
+- `pr139-before-rebuild-2026-07-24` preserves the original deletion commit
+  before #139 was rebuilt on the squashed `dev`.
+
+`dev-legacy` is read-only and never forward-merged. A bad cutover is reverted
+on `dev`; the tags are immutable recovery/evidence points.
+
 ## Backlog (consolidated 2026-07-08, post-P1)
 
 P0 + P1 + detection fixes + Ollama Cloud stack are all shipped. What remains,

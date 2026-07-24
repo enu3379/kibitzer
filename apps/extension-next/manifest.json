@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Kibitzer (next)",
+  "name": "Kibitzer",
   "version": "0.0.1",
   "description": "Serverless attention guard — TypeScript-only, no local server.",
   "minimum_chrome_version": "120",
