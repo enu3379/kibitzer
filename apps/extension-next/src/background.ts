@@ -22,7 +22,7 @@ import { markNagActed, recentTitles, recordObservation } from "./lib/history.ts"
 import { clearLog, exportLog, klog, logText } from "./lib/klog.ts"
 import { shouldDropUrl } from "./lib/domainFilter.ts"
 import { hostOf, pageKeyOf } from "./lib/url.ts"
-import { browserPresent } from "./lib/presence.ts"
+import { browserPresent, isFocusedWindow } from "./lib/presence.ts"
 
 const HEARTBEAT_ALARM = "kibitzer-next-heartbeat"
 
@@ -199,20 +199,33 @@ async function notePresence(present: boolean): Promise<void> {
 }
 
 // --- observation surface ---------------------------------------------------------
+//
+// Every listener is scoped to the active tab of the FOCUSED window. Tab.active is per-window
+// ("does not necessarily mean the window is focused"), so with two Chrome windows BOTH have an
+// active tab — and a title-churning page (SPA, live news, a dev server) in the unfocused window
+// would keep firing observe(): each hit REPLACES the single dwell checkpoint, starving the
+// focused page's judgement, while its own judgement is dropped by the lastFocusedWindow-scoped
+// stillJudging — wedging the gauge in a NEUTRAL hold (S frozen, no drift detection). When
+// Chrome is entirely unfocused, observations drop too — safe and intended: windows.onFocusChanged
+// already re-observes the active tab on focus regain (and cancels the dwell on focus loss).
 
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
   // Fire on page-load completion AND on title changes — SPAs (YouTube, etc.) swap the
   // title without a fresh "complete", and that's how their route changes surface here.
   if (!tab.active) return
   if (changeInfo.status === "complete" || changeInfo.title !== undefined) {
-    void observe(tab.url, tab.title)
+    void isFocusedWindow(tab.windowId).then((focused) => (focused ? observe(tab.url, tab.title) : undefined))
   }
 })
 
-chrome.tabs.onActivated.addListener(({ tabId }) => {
-  void chrome.tabs.get(tabId).then(
-    (tab) => observe(tab.url, tab.title),
-    () => undefined,
+chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
+  void isFocusedWindow(windowId).then((focused) =>
+    focused
+      ? chrome.tabs.get(tabId).then(
+          (tab) => observe(tab.url, tab.title),
+          () => undefined,
+        )
+      : undefined,
   )
 })
 
@@ -221,7 +234,8 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
 chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
   if (details.frameId !== 0) return
   void chrome.tabs.get(details.tabId).then(
-    (tab) => (tab.active ? observe(tab.url ?? details.url, tab.title) : undefined),
+    async (tab) =>
+      tab.active && (await isFocusedWindow(tab.windowId)) ? observe(tab.url ?? details.url, tab.title) : undefined,
     () => undefined,
   )
 })

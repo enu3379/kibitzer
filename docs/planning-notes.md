@@ -1196,3 +1196,14 @@ the extension badge.
   heartbeat is now presence-gated identically to the 1-min alarm (it was
   integrating the whole away-gap at full DRIFT drain on the first poll after a
   return).
+- 2026-07-25: Fourth root cause from the same incident fixed — observation is
+  now scoped to the FOCUSED window's active tab (`isFocusedWindow` in
+  `lib/presence.ts`, gating all three observation listeners). `Tab.active` is
+  per-window, so with two Chrome windows a title-churning page in the unfocused
+  side window (SPA, live news, a localhost dev page) kept firing `observe()`,
+  each hit replacing the single dwell checkpoint — starving the focused page's
+  judgement while its own was dropped by the lastFocusedWindow-scoped
+  `stillJudging`, wedging the gauge in a NEUTRAL hold (S frozen, no drift
+  detection). Side-window title churn no longer steals the dwell or freezes
+  the gauge. When Chrome is entirely unfocused observations drop too — safe:
+  `windows.onFocusChanged` re-observes the active tab on focus regain.

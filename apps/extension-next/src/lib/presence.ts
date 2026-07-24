@@ -15,3 +15,17 @@ export async function browserPresent(): Promise<boolean> {
     return true
   }
 }
+
+/** True iff `windowId` is the currently focused Chrome window. Tab.active is PER-WINDOW
+ *  ("does not necessarily mean the window is focused"), so with two Chrome windows BOTH have
+ *  an active tab — observation listeners must additionally check that the tab's window is the
+ *  focused one, or a side window's churning page steals the single dwell checkpoint. Unknown →
+ *  assume yes (never over-suppress), matching browserPresent's philosophy. */
+export async function isFocusedWindow(windowId: number): Promise<boolean> {
+  try {
+    const win = await chrome.windows.getLastFocused()
+    return win.focused === true && win.id === windowId
+  } catch {
+    return true
+  }
+}

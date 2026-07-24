@@ -1,24 +1,26 @@
-// browserPresent gates every gauge drain AND every nudge delivery, so its two-part definition
-// (a Chrome window is focused AND chrome.idle is "active") must hold exactly. presence.ts only
-// touches chrome.windows/chrome.idle, stubbed in-memory here (mirrors session.test.ts).
+// browserPresent gates every gauge drain AND every nudge delivery, and isFocusedWindow scopes
+// the observation surface to the focused window's active tab, so their definitions must hold
+// exactly. presence.ts only touches chrome.windows/chrome.idle, stubbed in-memory here
+// (mirrors session.test.ts).
 
 import assert from "node:assert/strict"
 import test from "node:test"
 
 let focused = true
+let focusedWindowId = 1
 let idleState: "active" | "idle" | "locked" = "active"
 let throwOnQuery = false
 ;(globalThis as unknown as { chrome: unknown }).chrome = {
   windows: {
     getLastFocused: async () => {
       if (throwOnQuery) throw new Error("no last-focused window")
-      return { focused }
+      return { focused, id: focusedWindowId }
     },
   },
   idle: { queryState: async (_secs: number) => idleState },
 }
 
-const { browserPresent } = await import("./presence.ts")
+const { browserPresent, isFocusedWindow } = await import("./presence.ts")
 
 test("present only when a Chrome window is focused AND the user is active", async () => {
   focused = true
@@ -48,4 +50,28 @@ test("absent when the machine is locked", async () => {
 test("unknown → assume present (never over-suppress the gauge or wedge a nudge silent)", async () => {
   throwOnQuery = true
   assert.equal(await browserPresent(), true)
+})
+
+test("isFocusedWindow: true for the focused window's own id", async () => {
+  focused = true
+  focusedWindowId = 7
+  throwOnQuery = false
+  assert.equal(await isFocusedWindow(7), true)
+})
+
+test("isFocusedWindow: false for another window's id (Tab.active is per-window — id must match)", async () => {
+  focused = true
+  focusedWindowId = 7
+  assert.equal(await isFocusedWindow(8), false)
+})
+
+test("isFocusedWindow: false when Chrome is entirely unfocused, even for the matching id", async () => {
+  focused = false
+  focusedWindowId = 7
+  assert.equal(await isFocusedWindow(7), false)
+})
+
+test("isFocusedWindow: unknown → assume yes (never over-suppress observation)", async () => {
+  throwOnQuery = true
+  assert.equal(await isFocusedWindow(999), true)
 })
