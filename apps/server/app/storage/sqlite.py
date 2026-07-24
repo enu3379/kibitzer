@@ -3076,6 +3076,7 @@ class SQLiteStore:
         observation_id: str,
         label: str,
         exemplar_cap: int,
+        sync_exemplar: bool = True,
         ts: datetime | None = None,
     ) -> tuple[PageLabelRecord, int | None]:
         now = ts or _utc_now()
@@ -3099,7 +3100,7 @@ class SQLiteStore:
                 and int(observation["goal_revision"]) == current_revision
             )
 
-            if label == "related":
+            if label == "related" and sync_exemplar:
                 features = json.loads(observation["features_json"])
                 emb = features.get("emb")
                 if not isinstance(emb, list) or not emb:
@@ -3130,11 +3131,12 @@ class SQLiteStore:
                     "observation_id": observation_id,
                     "label": label,
                     "previous_label": previous_label,
+                    "exemplar_sync": sync_exemplar,
                 },
                 now,
             )
 
-            if label == "related" and observation_is_current:
+            if label == "related" and observation_is_current and sync_exemplar:
                 self._cancel_active_intervention_candidates_for_observation_in_conn(
                     conn,
                     session_id,
@@ -3143,7 +3145,7 @@ class SQLiteStore:
                 )
 
             exemplar_count: int | None = None
-            if label == "related" and observation_is_current:
+            if label == "related" and observation_is_current and sync_exemplar:
                 exemplar_count, exemplar_id = self._add_goal_exemplar_from_observation(
                     conn,
                     session_id,
@@ -3162,7 +3164,7 @@ class SQLiteStore:
                         exemplar_cap,
                         now,
                     )
-            elif label == "drift":
+            elif label == "drift" and sync_exemplar:
                 conn.execute(
                     "DELETE FROM goal_exemplars WHERE session_id = ? AND observation_id = ?",
                     (session_id, observation_id),

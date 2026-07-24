@@ -320,7 +320,11 @@ async def replay_session(
                 continue
             if event.event_type == "page_label.recorded":
                 observation_id = event.payload.get("observation_id")
-                if isinstance(observation_id, str) and event.payload.get("label") == "drift":
+                if (
+                    isinstance(observation_id, str)
+                    and event.payload.get("label") == "drift"
+                    and event.payload.get("exemplar_sync") is not False
+                ):
                     state.remove_exemplar(observation_id)
                 continue
             if event.event_type == "session.snoozed":
