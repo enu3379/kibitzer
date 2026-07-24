@@ -2,7 +2,7 @@
   "name": "kibitzer-extension-next",
   "private": true,
   "type": "module",
-  "description": "Serverless (TypeScript-only) Kibitzer extension. Built in parallel with apps/extension; supersedes it and apps/server at cutover.",
+  "description": "The serverless, TypeScript-only Kibitzer Chrome extension.",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",

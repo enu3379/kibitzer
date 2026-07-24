@@ -1,5 +1,32 @@
 # Progress
 
+## 2026-07-24 Serverless cutover
+
+Completed:
+
+- Squash-merged PR #138 into `dev` as `59307a0`; its tree exactly matches the
+  pre-squash `dev-migrate` head.
+- Preserved the old runtime at `dev-legacy` and
+  `pre-serverless-cutover-2026-07-24` (`f8be749`), the full migration history at
+  `serverless-migration-head-2026-07-24` (`4303e1e`), and the original deletion
+  commit at `pr139-before-rebuild-2026-07-24`.
+- Rebuilt PR #139 on the squashed `dev` so its active diff contains the
+  cutover/removal work rather than the 92 migration commits.
+- Removed the Python server, relay extension, menubar/tray, packaging, and
+  platform launch stack from the active tree.
+- Corrected the Ollama privacy disclosure to cover recent-title/verdict and
+  compact time/nag context, including an in-product notice next to the API key.
+- Retired the unused LLM Wiki integration, generated `raw/`/`wiki/` snapshots,
+  project schema, and sync/search helpers. Canonical docs remain under `docs/`.
+- Recorded the accepted post-cutover parity work in D14 and issues #135, #136,
+  and #141.
+
+Verified:
+
+- `apps/extension-next` `npm run build`: 109/109 tests, source/test
+  typechecks, model/WASM hash verification, and bundle passed.
+- `git diff --check` passed.
+
 ## 2026-07-23 TypeScript Tier 0 and Ollama providers
 
 Completed:

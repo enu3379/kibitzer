@@ -19,6 +19,8 @@
 - `main`·`dev`는 룰셋이 보호한다: 직접 push·force-push·삭제 불가, CI 통과 필수, 머지 방식도 강제됨(dev는 squash만, main은 merge commit만 버튼이 뜬다).
 - `dev-legacy` — 마이그레이션 직전 `dev` 스냅샷. 읽기 전용 참조용이며 **forward-merge 금지**(절대 앞으로 머지하지 않는다).
 - `dev-migrate` — 마이그레이션 통합 브랜치였으나, 마이그레이션이 머지된 지금은 **은퇴(retired)**했다.
+- `pre-serverless-cutover-2026-07-24` — 구 런타임 전체를 고정한 복구 태그.
+- `serverless-migration-head-2026-07-24` — squash 전 마이그레이션 커밋 이력을 고정한 증거 태그.
 
 ## 작업 흐름
 

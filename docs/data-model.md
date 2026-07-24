@@ -1,186 +1,131 @@
-# Data Model
+# Data model
 
-## Observation
+Status: serverless runtime after the 2026-07-24 cutover.
 
-```text
-id
-ts
-session_id
-source
-payload
-features
-verdict
-```
+## Storage boundaries
 
-`observations.verdict` is the detector's original output and remains immutable
-for replay and confusion-matrix auditing. When an observation has a `page_labels`
-row, the label defines the product's effective verdict: `related` maps to `OK`
-and `drift` maps to `DRIFT`. Current-page UI, session/report statistics, recent
-judgment context, and anchor admission use that effective verdict.
+Kibitzer uses two browser-local stores:
 
-For `browser_nav`, payload contains:
+| Store | Durable data |
+|---|---|
+| `chrome.storage.local` | declared goal + epoch, user settings, persona, Ollama configuration, provider health, compact diagnostic log |
+| IndexedDB `kibitzer` v3 | live runtime state, observations, structured events, and the durable effect outbox |
 
-```json
-{
-  "url": "https://example.com/path",
-  "title": "Example Title",
-  "tab_id": 123
-}
-```
-
-The server persists minimized URL metadata:
-
-- host
-- path hash
-- no query string
-- no fragment
+There is no SQLite database or server-side copy.
 
 ## Goal
 
 ```text
-raw_text
-exemplars
-provenance
-available_time_minutes (optional)
+text
+availableMinutes | null
+startedAt
+revision
+epoch
 ```
 
-Stage 0 supports only `provenance = "declared"`.
+`revision` changes within a goal's life. `epoch` is monotonic across
+clear-and-redeclare cycles, so asynchronous Tier-2 work cannot mistake a new
+goal for an older session with the same revision.
 
-## SessionState
+## Page identity
+
+Runtime records do not persist a raw URL. For HTTP(S) pages, `pageKey` is:
 
 ```text
-goal
-anchor
-controller
-obs_count
-time_budget_clock
+host + "#" + cyrb53(pathname + query)
 ```
 
-The anchor is the average of the latest effectively-OK observation embeddings.
-DRIFT observations are never admitted. An explicit user `related` label is
-eligible even when the detector's original anchor-admission flag was false.
+Keeping the host supports repeat-host context. Hashing the path and query keeps
+raw path data out of storage while distinguishing query-addressed pages such
+as separate video IDs. This compact hash is a privacy minimization mechanism,
+not a cryptographic commitment.
 
-## SQLite Tables
+Titles may be retained in bounded recent context and event records. Sensitive
+domains are rejected before observation.
 
-```text
-sessions
-goals
-goal_exemplars
-observations
-page_labels
-observation_requests
-observation_processing_states
-controller_states
-drift_clock_states
-drift_page_dwell_states
-d7_prepared_reviews
-observation_excerpts
-dwell_presence_events
-intervention_candidates
-interventions
-feedback
-event_log
-```
+## IndexedDB stores
 
-`observation_requests` is the durable browser-navigation idempotency ledger.
-It stores only the opaque key, a hash of the canonical request, and the terminal
-response JSON—never the raw URL or page body. A null response marks the active
-claim. A completed row is replayed verbatim on transport retry; a key whose
-request hash differs is rejected.
+### `kv`
 
-`observation_processing_states` is the current-goal-revision lookup used by
-the popup while a browser navigation is being judged. It stores only minimized
-page identity (`tab_id`, host, and path hash), title, and the active `tier0` or
-`tier1` stage. Intake creates the row before Tier 0 work, advances it before a
-Tier 1 provider call, and removes it when intake finishes or fails. Goal
-revision changes remove older rows, and stale rows are pruned defensively.
+Named runtime values, including:
 
-`drift_clock_states` stores the active observation and page identity
-(`url_host` + path hash), cumulative/continuous/current-page seconds, the next
-review boundary, and a timestamped review lock. `drift_page_dwell_states`
-retains the per-page dwell totals needed to survive tab flips within the
-current episode. `dwell_presence_events` keeps presence event IDs only for
-duplicate suppression. Both helper tables are pruned when the session ends.
-`d7_prepared_reviews` stores at most one queued or prepared threshold-gated
-Tier-2 outcome for the session: observation and goal revision, delivery
-boundary, then the typed decision, optional generated message, and projected
-review clocks once generation finishes. It remains protected
-by the `drift_clock_states` review lock and is deleted on delivery, defer,
-invalidation, clock reset, or session end.
+- immersion-gauge checkpoint and Tier-2 request sequence;
+- durable dwell candidate/checkpoint;
+- pending Writer message and active-page state;
+- learned exemplars, recency anchor, and derived goal phrases;
+- bounded recent observation and nag context;
+- presence/replay bookkeeping.
 
-## Interventions and Feedback
+Reset operations update/delete related keys and clear record stores in one
+transaction where atomicity matters.
 
-An intervention candidate is created when the controller requests a Tier 2
-excerpt review. Creating the candidate does not reset streak/alignment evidence
-or start the intervention cooldown. Only one `pending` or `in_flight` candidate
-may exist per session.
+### `outbox`
+
+Auto-incremented effect records:
 
 ```text
 id
-session_id
-observation_id
-status              pending | in_flight | confirmed | cancelled | expired
-requested_at
-expires_at
-updated_at
-intervention_id
-result_json         terminal PipelineResult for confirmed/cancelled candidates
-```
-
-The pending lifetime includes the configured remaining Tier 2 dwell plus a
-60-second resume grace period. Tier 2 cancellation leaves controller evidence
-intact. Tier 2 confirmation consumes the evidence and links the candidate to a
-new intervention. Candidate resolution, the Tier 2 result event, and the
-terminal response are committed together; retrying a resolved candidate does
-not call the judge or create another intervention.
-
-An intervention is created only after Tier 2 confirms drift:
-
-```text
-id
-session_id
-observation_id
 ts
-message
-status
+effect: request_tier2 | nag | celebrate
 ```
 
-Feedback is keyed by intervention and kind. The server treats repeated feedback for the same intervention/kind as a duplicate and does not repeat side effects.
+Gauge state and newly emitted effects commit atomically. Draining is
+at-least-once: acknowledged effects are deleted; transient failures stay for a
+later retry. Tier-2 work additionally carries a request ID, page key, and goal
+epoch so superseded results are cancelled safely.
+
+### `events`
+
+Bounded structured audit/replay records:
 
 ```text
 id
-session_id
-intervention_id
-observation_id
-kind
 ts
+type
+data
 ```
 
-Supported kinds:
+Examples include goal changes, observation scores and verdicts, presence,
+Tier-2 outcomes, delivery, feedback, and learned exemplars. The options page
+can export these records as JSONL or clear them.
 
-- `related`: add the observation embedding to session goal exemplars, then mark the intervention `related`.
-- `accepted`: mark the intervention `accepted`.
-- `snooze`: set controller `snoozed_until`, then mark the intervention `snoozed`.
+### `observations`
 
-Goal exemplar cap enforcement preserves the declared-goal exemplar when possible and removes older feedback exemplars first.
+A bounded durable record store reserved for per-page observation/analysis
+records. Current recent-title/nag context is kept in bounded `kv` entries.
 
-Page labels are observation-scoped and do not require an intervention. A
-`related` correction adds the observation embedding as an exemplar and resolves
-an unhandled intervention for that observation. The streak controller clears its
-accumulated streak. The alignment controller instead replaces only the latest
-observation's relevance with `0.85`, recomputes `A_t`, and reapplies its
-thresholds. The extension also updates the matching exploration-history verdict.
-The original detector verdict is retained for audit.
+## Gauge checkpoint
 
-## Raw Data Retention
+The checkpoint serializes the pure reducer state: `S`, momentum, acceleration
+tier, active page/verdict, degraded margin, pending Tier-2 token, nag debt,
+celebration state, snooze state, and update time. It is the source of truth for
+recovery after MV3 service-worker teardown.
 
-When the D7 time-budget rule is enabled, each non-sensitive browser
-observation may retain one normalized, character-limited page excerpt locally.
-The store keeps only the current excerpt plus the configured recent context
-window; older excerpts are pruned transactionally and excerpts are deleted on
-both explicit and implicit session end. They are never copied into `event_log`,
-reports, or feedback.
-This enables the content half of D7's bounded Tier-2 comparison. With D7
-disabled, excerpts remain transient as in the original pipeline.
+The trajectory anchor is disabled by default (`ANCHOR_WINDOW=0`), but learned
+exemplars and guarded relevance state still live locally and are deleted by
+the activity-data reset.
 
-Keystrokes are out of scope for Stage 0. If added later, raw keystroke text must never be written to disk.
+## Ollama payloads
+
+Ollama is opt-in. Payload builders produce minimized, bounded shapes:
+
+- Tier 1: goal, current title/host, and bounded recent titles/verdicts.
+- Tier 2 Context Judge: goal, current title/host/verdict/score, bounded current
+  excerpt, compressed recent titles, and compact time context.
+- Tier 2 Message Writer: goal, title/host, the Judge decision, and compact
+  time/nag context.
+
+Raw URLs, IndexedDB rows, stored vectors, and the full event log are not
+provider payloads.
+
+## Delete and retention behavior
+
+“Delete activity data” clears gauge/dwell/outbox state, observations, events,
+logs, recent context, and learned vectors. It intentionally keeps the current
+goal, Ollama configuration/key, persona, and user settings; the options UI
+labels that distinction. Clearing or replacing a goal also resets the
+goal-scoped runtime state.
+
+The record stores are capped and recent context is bounded. Exact caps are
+implementation constants in `apps/extension-next/src/lib/db.ts`,
+`events.ts`, `history.ts`, and `klog.ts`.

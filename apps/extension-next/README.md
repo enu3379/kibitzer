@@ -1,4 +1,4 @@
-# Kibitzer (next) — serverless extension
+# Kibitzer — serverless extension
 
 A local, non-blocking attention guard, packaged as a **single Chrome MV3 extension** with
 **no local server**. You declare a goal in the toolbar popup; the extension watches your
@@ -7,9 +7,13 @@ judges), and only speaks up — a non-blocking in-page toast — when drift from
 accumulates.
 
 This is the serverless successor to the former Python server + relay extension. It runs
-entirely in the browser: all session state, history, learning, and the event log live in
-the extension's own IndexedDB. The cutover is complete — this is the product; the legacy
-apps have been removed from the working tree and are preserved on the `dev-legacy` branch.
+entirely in the browser: `chrome.storage.local` owns the goal and settings, while
+IndexedDB owns gauge/runtime state, history, learning, durable jobs, and the event log.
+The cutover is complete — this is the product; the legacy apps have been removed from the
+working tree and are preserved on the `dev-legacy` branch.
+The immutable tags `pre-serverless-cutover-2026-07-24` and
+`serverless-migration-head-2026-07-24` preserve the old runtime and full migration
+history respectively.
 
 ## Prerequisites
 
@@ -50,8 +54,8 @@ To pick up a rebuild, click the extension's **↻ reload** button on `chrome://e
 3. Open **설정** (the options page) to tune sensitivity, quiet hours, voice read-out,
    persona (nudge tone), the AI judge, and data controls.
 
-Without any AI key the extension still works in **Tier-0 mode** (on-device title/excerpt
-similarity only). Add keys to get the LLM judge + persona-written nudges:
+Without any AI key the extension still works in **Tier-0 mode** (on-device title
+relevance). Add keys to get the LLM judge + persona-written nudges:
 
 - In **설정 → AI 판정 · Ollama Cloud**, paste one or more [ollama.com](https://ollama.com)
   API keys (one per line — multiple keys auto-rotate). Defaults: Tier-1
@@ -68,11 +72,14 @@ builds reproducibly. The small tokenizer files are committed. Everything runs on
 ## Data & privacy
 
 - All state (gauge, visit/nag history, learned exemplars, structured event log) lives in
-  the extension's local **IndexedDB** — nothing is sent to any server.
+  the extension's local **IndexedDB**.
 - A sensitive-domain filter (banking, webmail, health, auth, localhost) drops those pages
   before any judging and suppresses nudges there.
 - Page body text is read only immediately before a potential intervention, and only for
   the active, non-sensitive tab.
+- Ollama Cloud is opt-in. When enabled, minimized requests may contain the goal, current
+  title/host, a bounded current-page excerpt, recent page titles and verdicts, and compact
+  time/nag context. Raw URLs, stored vectors, and the full event log are not sent.
 - **설정 → 데이터** exports the debug log / event log (JSONL) and wipes all activity data.
 
 ## Offline tuning (replay)
@@ -113,7 +120,8 @@ Cutover is complete: this extension is the product, and the legacy server + rela
 extension have been deleted from the working tree (preserved on `dev-legacy`). The pure
 decision core (gauge reducer/config, Tier-1/2 prompts, KoEn-E5 model, personas) is ported
 byte-parity, the P0–P3 wiring in `docs/migration-gap-analysis.md` landed, and the
-release-blocking behavioural gaps from the 2026-07-24 runtime audit (B1–B6/B9) are fixed
+release-blocking correctness/privacy gaps from the 2026-07-24 runtime audit
+(B1–B5/B9) are fixed
 and merged: a durable effect outbox and persistent dwell timer for MV3 worker-teardown
 recovery, verdict-generation guards against stale-page races, a hashed page key, a
 complete delete-all, and an `incognito` guard. The trajectory anchor is disabled by
@@ -125,4 +133,5 @@ Remaining follow-ups are tracked as issues rather than blockers:
 
 - **#135** — port the judgment-review dashboard.
 - **#136** — port the Tier-0 OK audit routing.
+- **#141** — restore session lifecycle, reports, and current-page UX parity.
 - B7/B8 tails from `docs/migration-gap-analysis.md`.

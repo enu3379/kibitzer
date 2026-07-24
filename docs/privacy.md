@@ -2,56 +2,62 @@
 
 ## Principles
 
-- Drop sensitive domains before creating observations.
-- Never collect page body continuously. D7 retains at most one bounded
-  excerpt per observation after a qualifying navigation dwell. A failed post
-  may be retried once on the next heartbeat, but heartbeats do not otherwise
-  recapture content.
-- With D7 enabled, retain only the bounded current/recent excerpt window
-  required for a time-budget Tier 2 comparison; prune older entries locally
-  and never put excerpt text in events, reports, or feedback.
-- Never persist raw URL paths, query strings, or fragments.
-- Store the full page location only as an opaque hash.
-- Keep feedback and derived vectors, not raw browsing content.
+- Drop sensitive domains before dwell, embedding, provider calls, persistence,
+  or delivery.
+- Run Tier 0 locally with the packaged KoEn-E5 ONNX model.
+- Read page body text only immediately before a possible Tier-2 intervention,
+  from the active non-sensitive tab, and cap the cleaned excerpt at 3,000
+  characters in the provider payload.
+- Persist page identity as visible host plus a hash of path and query; never
+  persist a raw path, query, or fragment.
+- Keep Ollama Cloud disabled until the user supplies a key.
 
-## Sensitive Domain Examples
+## Sensitive domains
 
-The default list blocks:
+`configs/sensitive_domains.json` is imported at build time by
+`apps/extension-next/src/lib/domainFilter.ts`. The default rules cover banking,
+payments, webmail, health, authentication, cloud-console secrets, and local
+administration surfaces. The background worker drops a matching page before
+judging and refuses to show a Kibitzer toast there.
 
-- banking
-- medical portals
-- payment and checkout
-- password and auth pages
-- cloud console secrets pages
-- local admin consoles
+## Ollama payload boundary
 
-Both extension and server enforce this. The server gate is authoritative.
+When Ollama Cloud is enabled, minimized requests may contain:
 
-## API Payload Boundaries
+- the declared goal;
+- current page title and host;
+- recent page titles with their OK/DRIFT verdicts;
+- a bounded current-page excerpt for Tier 2;
+- current Tier-0 score/verdict and compact time/nag context.
 
-Tier 1 API sees titles and hosts only.
+They do not contain:
 
-The Tier 2 Context Judge sees bounded current/recent excerpts only when D7's
-elapsed-time review is due. The conditional persona Writer never receives page
-body or recent excerpt text; it sees only the current title/host, the accepted
-decision, time state, and nagging context. The server applies the authoritative
-sensitive-domain gate before an observation can accept content.
+- a raw URL, path, query, or fragment;
+- stored embedding vectors;
+- the full IndexedDB event log;
+- an unbounded browsing-history export;
+- content from a sensitive-domain page.
 
-## Local Data Deletion
+The Tier-2 message writer receives the accepted judgment and compact nag/time
+context, not the current excerpt. The options page repeats the network
+disclosure next to the API-key field.
 
-**설정 → 저장된 활동 데이터 → 모두 삭제** removes sessions, goals,
-observations, feedback, intervention messages, event-log rows, idempotency
-response records, the extension's temporary activity state, popup snapshot,
-and outstanding Kibitzer notifications. Runtime settings remain available.
+## Local storage and deletion
 
-SQLite secure deletion is enabled so future row deletions overwrite deleted
-content in database pages. Filesystem snapshots, backups, and SSD wear-leveling
-remain outside Kibitzer's deletion guarantee. Kibitzer does not automatically
-expire activity data; automatic retention needs a separate product decision
-because replay and future usage analysis depend on that history.
+IndexedDB stores the goal-backed gauge state, durable dwell and outbox records,
+observations, event log, learned exemplars, and recent visit/nag context.
+Chrome local storage holds the declared goal/epoch, settings, persona, provider
+health, and Ollama configuration.
 
-## Failure Mode
+**설정 → 모든 활동 데이터 삭제** removes gauge, observation, history,
+learning, event, and nag activity. Goal, Ollama configuration, and persona are
+intentionally retained and the UI states that boundary. Browser/profile
+backups and storage-device snapshots are outside Kibitzer's deletion
+guarantee.
 
-If a domain is mistakenly allowed, the server still persists only an opaque
-location hash and caps the small local content window. Sensitive domain rules
-should be updated in config, not patched into code.
+## Incognito and failure behavior
+
+The manifest sets `incognito: not_allowed`. Provider failures are recorded only
+as coarse status categories; raw responses, request bodies, and API keys are
+not written to activity logs. Tier 1 keeps the Tier-0 DRIFT verdict on failure;
+Tier 2 fails open without a nudge.

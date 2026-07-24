@@ -7,9 +7,11 @@ the declared goal accumulates. It never blocks browsing or typing.
 
 Kibitzer is serverless: everything runs inside a single Chrome MV3 extension.
 No local server, no cloud state. The only data that ever leaves the machine is
-an explicit, opt-in judge call to Ollama Cloud when you supply an API key — and
-even then only a page title and short excerpt, never the raw page or your
-history.
+an explicit, opt-in judge call to Ollama Cloud when you supply an API key.
+Those minimized requests may include the declared goal, the current page title
+and host, a bounded current-page excerpt, recent page titles with their
+verdicts, and compact time/nag context. Kibitzer never sends raw URLs, stored
+vectors, the full event log, or an unbounded browsing-history export.
 
 ## Quick Start
 
@@ -52,11 +54,11 @@ Chrome events → Tier 0 (WASM embeddings) → immersion gauge
 - **Delivery** is an in-page toast on the active tab, redisplayed after tab
   switches while pending (system notifications only as a fallback).
 
-**IndexedDB is the single source of truth.** All session state, gauge, visit
-and nag history, learned exemplars, the durable Tier-2 job and effect outbox,
-durable dwell timers, and the structured event log live in the extension's own
-IndexedDB — which is what lets an MV3 service worker be torn down and revived
-without losing or double-applying work.
+**Browser-local storage is the authority.** `chrome.storage.local` owns the
+declared goal and user/provider settings. IndexedDB owns the gauge, visit and
+nag history, learned exemplars, durable Tier-2 job/effect outbox, dwell
+checkpoint, and structured event log. This split lets an MV3 service worker be
+torn down and revived without losing or double-applying work.
 
 ## Repository Layout
 
@@ -64,10 +66,8 @@ without losing or double-applying work.
 apps/extension-next/  The product: the serverless Chrome MV3 extension
 configs/              persona sources + sensitive_domains.json (privacy list)
 fixtures/gauge/       language-neutral gauge contract fixtures
-scripts/              gen-personas.py, LLM Wiki helpers, fixture data
+scripts/              gen-personas.py + historical benchmark fixture data
 docs/                 design + decision history, migration plan, gauge contract
-raw/ wiki/            LLM Wiki project sources and generated pages
-purpose.md schema.md  LLM Wiki project definition
 ```
 
 `configs/personas.yaml` + `configs/personas/*.yaml` are the source data for the
@@ -80,7 +80,7 @@ is imported directly by the extension's `src/lib/domainFilter.ts`.
 ```text
 Embedding  KoEn-E5 Tiny O4 ONNX, on-device via onnxruntime-web (WASM)
 Judges     Ollama Cloud (opt-in) — Tier-1 nemotron-3-super, Tier-2 minimax-m3
-Storage    IndexedDB (single source of truth, in the extension)
+Storage    chrome.storage.local + IndexedDB (extension-local authority)
 Runtime    TypeScript, Chrome MV3 only — no server, no other runtime
 ```
 
@@ -92,52 +92,8 @@ sensitive-domain filter (banking, webmail, health, auth, localhost) drops those
 pages before any judging and suppresses nudges there. All activity data stays in
 the extension's IndexedDB and can be exported or wiped from the options page.
 The single exception to on-device processing is the opt-in Ollama Cloud judge,
-which sees only a title and short excerpt when you have entered a key.
-
-## LLM Wiki Usage
-
-This project root is also an LLM Wiki project. It contains:
-
-```text
-purpose.md
-schema.md
-wiki/
-raw/sources/
-.llm-wiki/
-```
-
-The working contract is documented in
-[docs/llm-wiki-integration.md](docs/llm-wiki-integration.md). Stable docs are
-copied into `raw/sources/project-docs/` as LLM Wiki source snapshots; edit the
-canonical files in the repo root and `docs/`.
-
-Refresh those snapshots after adding new durable README/docs files:
-
-```bash
-bash scripts/sync-llm-wiki-sources.sh
-```
-
-Refresh generated code search sources after adding or changing important code:
-
-```bash
-bash scripts/sync-llm-wiki-code-sources.sh
-```
-
-Refresh both documentation snapshots and generated code-search pages:
-
-```bash
-bash scripts/refresh-llm-wiki-context.sh
-```
-
-Search the registered Kibitzer project through the local LLM Wiki API:
-
-```bash
-node scripts/llm-wiki-search.mjs "gauge reducer intervention" 5
-```
-
-Search runs are logged under `.llm-wiki/runs/search/`. The current operating
-mode keeps LLM Wiki API/MCP enabled for project lookup while Source Watch and
-auto-ingest stay disabled to avoid surprise LLM spend.
+which receives the minimized context described above only after you enter a
+key. The options page repeats this disclosure next to the key field.
 
 ## Status
 
@@ -145,9 +101,19 @@ The migration to a single serverless TypeScript extension is complete.
 `apps/extension-next/` is the whole product; the former Python FastAPI server
 and MV3 relay extension have been removed from the working tree. The
 pre-migration code is preserved on the `dev-legacy` branch.
+The unused LLM Wiki project integration and generated snapshots were retired
+with the cutover; canonical documentation lives directly under `docs/`.
+Immutable recovery points are also published as
+`pre-serverless-cutover-2026-07-24` (legacy runtime) and
+`serverless-migration-head-2026-07-24` (full migration history).
 
 The trajectory anchor is disabled by default (`ANCHOR_WINDOW=0`), with
 O4-recalibrated floors documented in
 [docs/results-2026-07-24-anchor-floor-o4.md](docs/results-2026-07-24-anchor-floor-o4.md).
+UX/analysis parity follow-ups remain tracked in
+[#135](https://github.com/enu3379/kibitzer/issues/135),
+[#136](https://github.com/enu3379/kibitzer/issues/136), and
+[#141](https://github.com/enu3379/kibitzer/issues/141); they are not represented
+as already implemented.
 See [docs/progress.md](docs/progress.md) for the detailed log and
 [docs/ts-migration-plan.md](docs/ts-migration-plan.md) for the migration plan.

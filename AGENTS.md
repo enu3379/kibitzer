@@ -30,7 +30,7 @@ python scripts/gen-personas.py   # → apps/extension-next/src/lib/personas.data
 - `configs/` — personas YAML sources + `sensitive_domains.json` (imported by `src/lib/domainFilter.ts`)
 - `fixtures/gauge/` — shared reducer contract fixtures used by extension-next tests
 - `docs/` — design docs, planning notes, handoff docs, progress log
-- `scripts/` — `gen-personas.py` + LLM-wiki helpers + fixtures data
+- `scripts/` — `gen-personas.py` + historical benchmark fixture data
 
 ## Workflow rules (operational minimum)
 
@@ -41,4 +41,7 @@ python scripts/gen-personas.py   # → apps/extension-next/src/lib/personas.data
 5. Check the **AI-assisted** box in the PR template.
 6. Never commit secrets. Ollama keys/endpoints live in the extension options UI now (there is no `.env`).
 
-`dev-legacy` is the frozen pre-migration snapshot (read-only reference — never merge it forward). The `dev-migrate` integration branch is retired now that the migration merged.
+`dev-legacy` is the frozen pre-migration snapshot (read-only reference — never merge it forward).
+`pre-serverless-cutover-2026-07-24` preserves that exact tree, while
+`serverless-migration-head-2026-07-24` preserves the full pre-squash migration
+history. The `dev-migrate` integration branch is retired.

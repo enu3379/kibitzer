@@ -1,132 +1,101 @@
 # Architecture
 
+Status: serverless runtime after the 2026-07-24 cutover. Historical server
+designs remain available through `pre-serverless-cutover-2026-07-24`.
+
 ## Components
 
 ```text
-Chrome Extension
+Chrome MV3 extension
+  popup + options UI
   background service worker
-  content script for requested excerpts
-  notification delivery and feedback
-
-Local Server
-  session state
-  idle/active runtime mode
-  observation pipeline
-  provider orchestration
-  controller state
-  SQLite logs
-
-External APIs
-  Tier 1 cheap classifier
-  Tier 2 context Judge and conditional persona Writer
+  active-page excerpt content script
+  IndexedDB + chrome.storage.local
+  packaged KoEn-E5 ONNX/WASM Tier 0
+  optional Ollama Tier 1 / Tier 2
+  in-page toast, badge, chime, and feedback
 ```
 
-## Server as SSOT
+There is no local server, OS tray process, or HTTP state authority. The
+extension service worker coordinates work but is disposable: durable state
+lives in browser storage and pending work can recover after worker teardown.
 
-The server owns:
+## Authority and storage
 
-- active session
-- declared goal
-- exemplars
-- OK anchor
-- controller state
-- event log
-- intervention history
+The extension is the only runtime authority:
 
-The extension owns no authoritative session state. It keeps only versioned,
-short-lived dwell checkpoints in `chrome.storage.session`, paired with
-`chrome.alarms`, so an MV3 service-worker restart cannot lose pending work.
-Each navigation keeps the same idempotency key across retries; policy and
-committed results remain server-owned.
+- `chrome.storage.local` owns the declared goal and its monotonic epoch,
+  user settings, selected persona, provider health, and opt-in Ollama
+  configuration.
+- IndexedDB owns the gauge checkpoint, durable dwell checkpoint, pending
+  effect outbox, learned relevance state, recent visit/nag context,
+  observations, and the structured event log.
+- The current page body is read only at the Tier-2 gate for the active,
+  non-sensitive tab. It is bounded before an optional provider call and is not
+  retained as a general browsing archive.
 
-## Runtime Modes
+`docs/data-model.md` records the persistence boundary in more detail.
 
-The local server is intended to be safe to start at login:
+## Observation flow
 
 ```text
-idle    health/session APIs are available; judging resources are cold
-active  a goal-backed session has initialized embeddings and judge providers
+tab activation / settled navigation / title change
+  → reject non-http(s), incognito, or sensitive-domain input
+  → checkpoint a durable dwell candidate
+  → verify page + goal epoch after dwell
+  → Tier 0: packaged KoEn-E5 O4 embedding
+  → optional Tier 1 rescue for a Tier-0 DRIFT
+  → append observation context and update the immersion gauge
+  → atomically checkpoint gauge state + enqueue effects
+  → durable outbox drain
+      request_tier2
+        → revalidate active page + goal epoch
+        → request a bounded active-page excerpt
+        → optional Ollama Context Judge
+        → optional persona Message Writer
+        → revalidate the durable request token
+        → feed result back into the gauge
+      nag / celebrate
+        → deliver toast, badge, chime/TTS, and record feedback context
 ```
 
-`GET /health` exposes the current mode. macOS uses a LaunchAgent to start the
-idle server at login; Windows startup and tray status are implemented as a
-platform adapter over the same endpoint.
+A heartbeat integrates dwell only while Chrome is present and the tab is
+eligible. Focus loss, idle/locked state, goal changes, or page changes cancel
+or rebase pending work. Page and goal tokens prevent late asynchronous results
+from acting on newer state.
 
-## Observation Flow
+## Durable-effect rule
 
-```text
-browser event
-  -> extension dwell gate
-  -> sensitive-domain pre-drop
-  -> POST /observations/browser-nav
-  -> normalize
-  -> server privacy gate
-  -> CPU embedding
-  -> Tier 0 relevance
-  -> optional Tier 1 classifier
-  -> controller update
-  -> time budget off: optional candidate + request_excerpt (controller evidence retained)
-     -> combined Tier 2 Context Judge
-     -> notify only: persona Message Writer
-  -> time budget on: D7 bounded content capture + server-owned presence heartbeat
-     -> server schedules a one-shot review check for threshold - 30 s
-     -> combined time-budget Context Judge + conditional persona Message Writer
-     -> prepared result persists on the server until the threshold presence
-     -> revalidate active page, goal revision, effective verdict, and eligibility
-  -> confirmed drift consumes controller evidence
-  -> notification
-```
+The gauge reducer is pure and emits effect intents. Its new state and effects
+commit in one IndexedDB transaction. An outbox record is deleted only after its
+handler acknowledges it; Tier-2 work keeps a durable request token until the
+final result is accepted or cancelled. This gives at-least-once recovery
+without allowing a stale result to affect a different page or goal.
 
-The Context Judge sees the current title/excerpt, compressed recent title
-history, bounded recent excerpts, and D7 clock context in one call. It does not
-receive persona or nagging instructions. A `defer` decision ends the review;
-only `notify` invokes the plain-text Writer with title/host, time state, nagging
-context, and the selected persona. Judge failures defer conservatively, while
-Writer failures use the local persona fallback.
+## Provider and privacy boundary
 
-D7 navigation records do not activate a dwell clock by themselves. The
-extension must assert an `active` presence for the focused, non-idle Chrome
-tab; it sends `inactive` when Chrome loses OS focus or the user becomes
-idle/locked. Heartbeats extend only the server-owned active clock, while a
-later `active` event can safely recover it after tab/window changes or service
-worker teardown.
+Tier 0 is offline. Ollama Cloud is disabled until the user supplies a key.
+When enabled, minimized requests may include:
 
-D7 starts Tier 2 up to 30 seconds before the computed review threshold. The
-clock values sent to both Judge and Writer are projected to the threshold, not
-sampled from the earlier invocation time. The server runs generation in a
-background task so the MV3 worker receives its scheduling response immediately.
-If generation finishes early, the server persists the prepared outcome;
-the extension reports presence again at the threshold and never owns the
-decision or message. If generation runs past the threshold, the extension
-rechecks briefly until the still-valid result is ready. Navigation, focus loss,
-goal revision, page label correction, snooze/cooldown, or server-side lock loss
-discards the prepared outcome. The minute heartbeat remains a recovery fallback.
+- the declared goal;
+- current title and host;
+- a bounded current-page excerpt at the Tier-2 gate;
+- recent titles and verdicts;
+- compact time and nag context.
 
-## Extension-to-Server Actions
+Raw URLs, stored vectors, the full event log, and unbounded browsing history
+are not sent. Sensitive domains are dropped before judging. See
+`docs/privacy.md` for the complete contract.
 
-Server responses use explicit actions:
+## Replaceable seams
 
-```json
-{"action":"none","observation_id":"obs_..."}
-```
+- Tier-0 embedding and Tier-1/2 judge providers
+- pure gauge reducer and config
+- durable store/outbox boundary
+- dwell and presence schedulers
+- page-excerpt adapter
+- toast/badge/chime delivery
+- persona prompt and fallback layer
 
-```json
-{"action":"request_excerpt","observation_id":"obs_...","candidate_id":"cand_..."}
-```
-
-```json
-{"action":"notify","intervention_id":"int_...","message":"..."}
-```
-
-The extension should not infer policy from verdicts. It follows the action field.
-
-## Replaceable Seams
-
-- `EmbeddingProvider`
-- `JudgeProvider`
-- `MessageProvider`
-- `Controller`
-- `DeliveryAdapter`
-- `SourceAdapter`
-
-Stage 0 implements only the browser source and Chrome notification delivery.
+The legacy Python implementations are reference material only; they are not a
+second live authority.
