@@ -11,6 +11,9 @@ const options = {
   entryPoints: [
     join(extensionRoot, "src/background.ts"),
     join(extensionRoot, "src/popup/popup.ts"),
+    join(extensionRoot, "src/options/options.ts"),
+    join(extensionRoot, "src/replay/replay.ts"),
+    join(extensionRoot, "src/offscreen.ts"),
   ],
   outdir: distDir,
   outbase: join(extensionRoot, "src"),
@@ -23,9 +26,14 @@ const options = {
 
 function copyStatic() {
   mkdirSync(join(distDir, "popup"), { recursive: true })
+  mkdirSync(join(distDir, "options"), { recursive: true })
+  mkdirSync(join(distDir, "replay"), { recursive: true })
   mkdirSync(join(distDir, "assets", "ort"), { recursive: true })
   cpSync(join(extensionRoot, "manifest.json"), join(distDir, "manifest.json"))
   cpSync(join(extensionRoot, "src/popup/popup.html"), join(distDir, "popup/popup.html"))
+  cpSync(join(extensionRoot, "src/options/options.html"), join(distDir, "options/options.html"))
+  cpSync(join(extensionRoot, "src/replay/replay.html"), join(distDir, "replay/replay.html"))
+  cpSync(join(extensionRoot, "src/offscreen.html"), join(distDir, "offscreen.html"))
   cpSync(join(extensionRoot, "icons"), join(distDir, "icons"), { recursive: true })
   // Bundles the ONNX model + tokenizer (model.onnx is fetched by assets:check first).
   cpSync(join(extensionRoot, "assets"), join(distDir, "assets"), { recursive: true })

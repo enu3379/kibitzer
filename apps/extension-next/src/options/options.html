@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kibitzer 설정</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --page: #f2f5f3; --page-ink: #1c2420; --page-ink-2: #57635c; --page-ink-3: #8a958f;
+        --surface: #ffffff; --surface-2: #eef3f0;
+        --line: #dce4df; --line-soft: #e7ede9;
+        --accent: #1e7a4c; --accent-ink: #ffffff; --accent-soft: #e2f1e8;
+        --ok-fg: #175f3b; --err: #bf4540; --err-soft: #f7e2e0; --err-fg: #8f322c;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --page: #161b18; --page-ink: #e9efeb; --page-ink-2: #a8b4ad; --page-ink-3: #79857e;
+          --surface: #232a26; --surface-2: #2e3733;
+          --line: #3c463f; --line-soft: #333d37;
+          --accent: #4cc585; --accent-ink: #0c1f14; --accent-soft: #2a4536;
+          --ok-fg: #8fdcb4; --err: #e07a72; --err-soft: #4a2a27; --err-fg: #f0a8a1;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; background: var(--page); color: var(--page-ink);
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Apple SD Gothic Neo", "Pretendard", "Malgun Gothic", system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased; line-height: 1.5;
+      }
+      .frame { max-width: 640px; margin: 0 auto; padding: 40px 24px 72px; }
+      .head { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+      .head .name { font-size: 22px; font-weight: 800; letter-spacing: -.02em; }
+      .lede { color: var(--page-ink-2); font-size: 13.5px; margin: 0 0 28px; }
+      .card { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 12px; padding: 6px 16px; margin-bottom: 14px; }
+      .card > h3 { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--page-ink-3); text-transform: uppercase; margin: 14px 0 4px; }
+      .row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line-soft); }
+      .row:first-of-type { border-top: none; }
+      .lab { flex: 1; min-width: 0; }
+      .lab b { display: block; font-size: 13px; font-weight: 650; }
+      .lab small { color: var(--page-ink-3); font-size: 11.5px; }
+      .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums; }
+
+      /* toggle switch */
+      .switch { all: unset; cursor: pointer; width: 38px; height: 23px; border-radius: 12px; background: var(--line);
+        position: relative; transition: background .18s; flex: none; }
+      .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 19px; height: 19px; border-radius: 50%;
+        background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform .18s; }
+      .switch[aria-checked="true"] { background: var(--accent); }
+      .switch[aria-checked="true"]::after { transform: translateX(15px); }
+      .switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+      input[type="time"], input[type="text"], input[type="number"], textarea, select {
+        font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--line);
+        border-radius: 7px; padding: 6px 9px; }
+      input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      input:disabled { opacity: .45; }
+      .times { display: flex; gap: 6px; align-items: center; color: var(--page-ink-3); }
+      .times input { width: 82px; font-variant-numeric: tabular-nums; }
+
+      /* range */
+      .range { display: flex; flex-direction: column; gap: 4px; padding: 12px 0; border-top: 1px solid var(--line-soft); }
+      .range .top { display: flex; align-items: baseline; }
+      .range .top b { font-size: 13px; font-weight: 650; flex: 1; }
+      .range .top .v { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--accent); }
+      input[type="range"] { width: 100%; accent-color: var(--accent); }
+      .range small { color: var(--page-ink-3); font-size: 11.5px; }
+
+      /* persona grid */
+      .pgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px 0; }
+      .pcard { all: unset; box-sizing: border-box; cursor: pointer; padding: 9px 11px; border-radius: 9px;
+        background: var(--surface-2); border: 1px solid var(--line-soft); display: block; }
+      .pcard .pn { font-weight: 700; font-size: 12.5px; }
+      .pcard[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+      .pcard[aria-pressed="true"] .pn { color: var(--accent); }
+      .pcard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+      textarea { width: 100%; resize: vertical; min-height: 52px; }
+      .field { display: block; padding: 10px 0; border-top: 1px solid var(--line-soft); }
+      .field > span { display: block; font-size: 12px; color: var(--page-ink-2); margin-bottom: 5px; }
+      .field .two { display: flex; gap: 8px; }
+      .field .two input { flex: 1; }
+
+      button.btn { all: unset; cursor: pointer; font-size: 12.5px; font-weight: 650; padding: 7px 14px; border-radius: 8px;
+        background: var(--surface-2); color: var(--page-ink); border: 1px solid var(--line); text-align: center; }
+      button.btn:hover { border-color: var(--accent); }
+      button.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+      button.btn.danger { color: var(--err); border-color: var(--err); }
+      button.btn.danger:hover { background: var(--err-soft); }
+      button.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .btnrow { display: flex; gap: 8px; padding: 12px 0; flex-wrap: wrap; }
+      .hint { font-size: 11.5px; color: var(--page-ink-3); margin: 4px 0 12px; word-break: break-word; }
+      .hint.ok { color: var(--ok-fg); } .hint.err { color: var(--err-fg); }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <div class="head">
+        <svg width="30" height="25" viewBox="0 0 26 22" fill="none" aria-hidden="true">
+          <circle cx="9.5" cy="7" r="1.7" fill="var(--page-ink)" />
+          <circle cx="16.5" cy="7" r="1.7" fill="var(--page-ink)" />
+          <path d="M6 10 C6 5.2 9 3 13 3 C17 3 20 5.2 20 10" stroke="var(--page-ink)" stroke-width="1.8" fill="none" />
+          <rect x="3" y="10" width="20" height="9" rx="2.4" fill="var(--accent)" />
+          <rect x="7.6" y="9" width="2.6" height="2.4" rx="1.2" fill="var(--page-ink)" />
+          <rect x="15.8" y="9" width="2.6" height="2.4" rx="1.2" fill="var(--page-ink)" />
+        </svg>
+        <span class="name">Kibitzer 설정</span>
+      </div>
+      <p class="lede">판정 감도·알림·말투·AI 판정·데이터를 여기서 관리합니다. 목표 선언과 훈수 응답은 툴바 팝업에서.</p>
+
+      <!-- 판정 감도 -->
+      <div class="card">
+        <h3>판정 감도</h3>
+        <div class="range">
+          <div class="top"><b>목표 이탈 민감도</b><span class="v" id="tauVal">0.59</span></div>
+          <input type="range" id="tau" min="0.40" max="0.80" step="0.01" value="0.59" />
+          <small>높일수록 엄격 — 조금만 벗어나도 이탈로 봅니다. 낮추면 관대. (기본 0.59)</small>
+        </div>
+      </div>
+
+      <!-- 알림 -->
+      <div class="card">
+        <h3>알림</h3>
+        <div class="row">
+          <span class="lab"><b>방해 금지 시간</b><small>이 시간대엔 훈수를 조용히</small></span>
+          <span class="times"><input type="time" id="quietStart" value="22:00" /><span>–</span><input type="time" id="quietEnd" value="08:00" /></span>
+          <button class="switch" id="quietSw" role="switch" aria-checked="false" aria-label="방해 금지 시간"></button>
+        </div>
+        <div class="row">
+          <span class="lab"><b>음성으로 읽기</b><small>훈수를 소리 내어 읽어줍니다 (Web Speech)</small></span>
+          <button class="switch" id="ttsSw" role="switch" aria-checked="false" aria-label="음성 알림"></button>
+        </div>
+      </div>
+
+      <!-- 말투 -->
+      <div class="card">
+        <h3>훈수 말투</h3>
+        <div class="pgrid" id="pgrid"></div>
+      </div>
+
+      <!-- AI 판정 -->
+      <div class="card">
+        <h3>AI 판정 · Ollama Cloud</h3>
+        <label class="field">
+          <span>API 키 · 한 줄에 하나, 여러 개면 자동 로테이션</span>
+          <textarea id="keys" rows="3" placeholder="ollama.com API 키 (여러 개면 줄바꿈)&#10;비우면 제목 유사도만 (Tier-0)"></textarea>
+        </label>
+        <label class="field">
+          <span>모델</span>
+          <span class="two">
+            <input type="text" id="tier1" placeholder="Tier 1: nemotron-3-super" />
+            <input type="text" id="tier2" placeholder="Tier 2: minimax-m3" />
+          </span>
+        </label>
+        <div class="btnrow">
+          <button class="btn" id="test">연결 테스트</button>
+          <button class="btn primary" id="saveOllama">저장</button>
+        </div>
+        <div class="hint" id="ollamaResult"></div>
+      </div>
+
+      <!-- 데이터 -->
+      <div class="card">
+        <h3>데이터 · 로컬에만 저장됨</h3>
+        <div class="btnrow">
+          <button class="btn" id="exportLog">디버그 로그 파일</button>
+          <button class="btn" id="exportEvents">이벤트 JSON</button>
+          <button class="btn" id="openReplay">리플레이 열기</button>
+        </div>
+        <div class="row">
+          <span class="lab"><b>모든 활동 데이터 삭제</b><small>게이지·이력·학습·이벤트·나깅 기록을 전부 지웁니다 (목표·키·말투는 유지)</small></span>
+          <button class="btn danger" id="wipe">삭제</button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

@@ -76,7 +76,9 @@ export class OllamaChatJudgeProvider implements JudgeProvider {
     this.timeoutMs = options.timeoutMs ?? 120_000
     this.maxOutputTokens = options.maxOutputTokens ?? 512
     this.writerMaxOutputTokens = options.writerMaxOutputTokens ?? 1024
-    this.fetchFn = options.fetch ?? globalThis.fetch
+    // Bind to the global scope: this.fetchFn(...) would otherwise call fetch with
+    // `this` = the provider, which throws "Illegal invocation" in a service worker.
+    this.fetchFn = options.fetch ?? globalThis.fetch.bind(globalThis)
   }
 
   async classifyTier1(payload: Record<string, unknown>): Promise<Tier1Result> {
@@ -203,31 +205,33 @@ export class OllamaChatJudgeProvider implements JudgeProvider {
         () => controller.abort(),
         options.timeoutMs ?? this.timeoutMs,
       )
-      let response: Response
       try {
         const key = keys[index] ?? ""
         const headers: Record<string, string> = {
           "content-type": "application/json",
         }
         if (key) headers.authorization = `Bearer ${key}`
-        response = await this.fetchFn(this.apiUrl, {
+        const response = await this.fetchFn(this.apiUrl, {
           method: "POST",
           headers,
           body: JSON.stringify(requestBody),
           signal: controller.signal,
         })
+        lastStatus = response.status
+        if (
+          RETRYABLE_KEY_STATUSES.has(response.status)
+          && index + 1 < keys.length
+        ) {
+          continue
+        }
+        if (!response.ok) throw new ProviderHttpError(response.status)
+        // Read the body INSIDE the abort window: a server that sends headers then stalls the
+        // body would otherwise hang forever (clearTimeout used to run before this), and with
+        // serialized judging that froze the whole pipeline.
+        return await responseJson(response)
       } finally {
         clearTimeout(timeout)
       }
-      lastStatus = response.status
-      if (
-        RETRYABLE_KEY_STATUSES.has(response.status)
-        && index + 1 < keys.length
-      ) {
-        continue
-      }
-      if (!response.ok) throw new ProviderHttpError(response.status)
-      return responseJson(response)
     }
     throw new ProviderHttpError(lastStatus ?? 500)
   }

@@ -14,7 +14,9 @@ const FALLBACK_T_BUDGET_SECONDS = 15 * 60;
 
 /** T_budget = clamp(B_ref * (goal / T_ref)^alpha, min_total, B_max). */
 export function tBudgetSeconds(goalMinutes: number | null): number {
-  if (goalMinutes == null) return FALLBACK_T_BUDGET_SECONDS;
+  // Guard null AND non-positive / non-finite (a negative goal would make Math.pow return NaN,
+  // poisoning rDrain/rRecover = 100/NaN and paralysing the whole gauge).
+  if (goalMinutes == null || !(goalMinutes > 0)) return FALLBACK_T_BUDGET_SECONDS;
   const raw = B_REF_SECONDS * Math.pow((goalMinutes * 60) / T_REF_SECONDS, BUDGET_ALPHA);
   return Math.min(B_MAX_SECONDS, Math.max(MIN_TOTAL_SECONDS, Math.round(raw)));
 }
