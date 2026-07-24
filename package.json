@@ -2,8 +2,7 @@
   "name": "kibitzer-workspace",
   "private": true,
   "scripts": {
-    "extension:build": "npm --prefix apps/extension run build",
-    "extension:test": "npm --prefix apps/extension run test"
+    "extension:build": "npm --prefix apps/extension-next run build",
+    "extension:test": "npm --prefix apps/extension-next run test"
   }
 }
-
