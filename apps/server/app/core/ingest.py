@@ -83,6 +83,7 @@ async def ingest_browser_nav(
             beta=config.relevance.beta,
             derived_exemplars=current.goal.derived_vectors,
             derived_tau=config.goal_enrichment.derived_tau,
+            anchor_tiebreak_floor=config.relevance.anchor_tiebreak_floor,
         )
         observation.features.r0 = score.score
         observation.features.tau_ok = tau_ok
@@ -138,6 +139,7 @@ async def ingest_browser_nav(
             derived_tau=config.goal_enrichment.derived_tau,
             verdict=observation.verdict,
             tier_reached=observation.features.tier_reached,
+            tier1_anchor_floor=config.relevance.tier1_anchor_floor,
         )
         store.record_observation(observation, goal_revision=captured_goal_revision)
     finally:

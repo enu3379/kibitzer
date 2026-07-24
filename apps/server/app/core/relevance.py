@@ -36,12 +36,25 @@ def anchor_admission_eligible(
     derived_tau: float,
     verdict: Verdict | None,
     tier_reached: int | None,
+    tier1_anchor_floor: float = 0.0,
 ) -> bool:
+    # A Tier 1 OK alone is not enough to steer the anchor: one false OK on a
+    # self-similar page cluster (e.g. a webtoon binge) seeds a self-reinforcing
+    # anchor loop. Tier 1 OKs get their own affinity gate and must not fall
+    # through to the epsilon branch — epsilon (0.05) is low enough that even
+    # unrelated Korean titles clear it, which would void the Tier 1 floor.
+    if verdict == Verdict.OK and (tier_reached or 0) >= 1:
+        return _goal_affinity(score, derived_tau) >= tier1_anchor_floor
     return (
         score.exemplar_score >= anchor_epsilon
         or (has_derived_exemplars and score.derived_score >= derived_tau)
-        or (verdict == Verdict.OK and (tier_reached or 0) >= 1)
     )
+
+
+def _goal_affinity(score: Tier0Score, derived_tau: float) -> float:
+    """Similarity to the goal itself (exemplars or derived phrases), anchor excluded."""
+    derived = score.derived_score if score.derived_score >= derived_tau else 0.0
+    return max(score.exemplar_score, derived)
 
 
 def cosine(a: list[float], b: list[float]) -> float:
@@ -62,13 +75,19 @@ def tier0_score_parts(
     beta: float,
     derived_exemplars: list[list[float]] | None = None,
     derived_tau: float = 0.0,
+    anchor_tiebreak_floor: float = 0.0,
 ) -> Tier0Score:
     exemplar_score = max((cosine(emb, ex) for ex in exemplars), default=0.0)
     anchor_score = beta * cosine(emb, anchor) if anchor else 0.0
     derived_score = max((cosine(emb, ex) for ex in (derived_exemplars or [])), default=0.0)
     derived_contribution = derived_score if derived_score >= derived_tau else 0.0
+    # The anchor is a tiebreaker, not a standalone judge: it may only lift pages
+    # that already show direct goal affinity. Without this floor, a polluted
+    # anchor can solo-OK pages the goal knows nothing about.
+    affinity = max(exemplar_score, derived_contribution)
+    anchor_contribution = anchor_score if affinity >= anchor_tiebreak_floor else 0.0
     return Tier0Score(
-        score=max(exemplar_score, anchor_score, derived_contribution),
+        score=max(exemplar_score, anchor_contribution, derived_contribution),
         exemplar_score=exemplar_score,
         anchor_score=anchor_score,
         derived_score=derived_score,
@@ -82,8 +101,11 @@ def tier0_score(
     beta: float,
     derived_exemplars: list[list[float]] | None = None,
     derived_tau: float = 0.0,
+    anchor_tiebreak_floor: float = 0.0,
 ) -> float:
-    return tier0_score_parts(emb, exemplars, anchor, beta, derived_exemplars, derived_tau).score
+    return tier0_score_parts(
+        emb, exemplars, anchor, beta, derived_exemplars, derived_tau, anchor_tiebreak_floor
+    ).score
 
 
 def tier1_final_relevance(verdict: Verdict) -> float:

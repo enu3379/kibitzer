@@ -72,6 +72,16 @@ relevance:
   # the OK verdict but are excluded from the anchor, so one borderline OK can
   # no longer whitelist a whole platform. Tune via the replay CLI later.
   anchor_epsilon: 0.05
+  # Anchor tiebreaker floor (2026-07-21 pollution-loop experiment): the anchor
+  # may only lift pages whose direct goal affinity (exemplar/derived) is at
+  # least this value. Kills the self-similar binge loop (one false OK on a
+  # webtoon-series page chained 7 false-OKs); measured recall cost was zero —
+  # no related page was ever rescued by the anchor alone. Revalidate against
+  # real session logs via the replay CLI before treating 0.30 as final.
+  anchor_tiebreak_floor: 0.30
+  # Tier 1 OKs join the anchor only with the same direct-affinity floor; the
+  # previous unconditional admission was the loop's only remaining entry point.
+  tier1_anchor_floor: 0.30
 
 goal_enrichment:
   enabled: true

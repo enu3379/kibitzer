@@ -601,6 +601,7 @@ async def _replay_observation(
         beta=state.config.relevance.beta,
         derived_exemplars=state.derived_vectors,
         derived_tau=state.config.goal_enrichment.derived_tau,
+        anchor_tiebreak_floor=state.config.relevance.anchor_tiebreak_floor,
     )
     tier0_verdict = Verdict.OK if score.score >= state.config.relevance.tau_ok else Verdict.DRIFT
     verdict_replay = tier0_verdict
@@ -624,6 +625,7 @@ async def _replay_observation(
         derived_tau=state.config.goal_enrichment.derived_tau,
         verdict=verdict_replay,
         tier_reached=tier_replay,
+        tier1_anchor_floor=state.config.relevance.tier1_anchor_floor,
     )
 
     row.r0_replay = score.score
