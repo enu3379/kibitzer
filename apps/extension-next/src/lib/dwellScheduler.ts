@@ -10,6 +10,14 @@ import { dwellDecision, type PendingDwell } from "./dwell.ts"
 
 export const PENDING_DWELL_KEY = "pending-dwell"
 
+/** The pageKey portion of an obsKey (`pageKey + "\n" + title`) — the page identity a title
+ *  change does not alter. With query-inclusive pageKeys (B4) this correctly separates SPA
+ *  content (youtube ?v=A vs ?v=B) while treating same-URL title churn as the same page. */
+function pageKeyOfObs(obsKey: string): string {
+  const nl = obsKey.indexOf("\n")
+  return nl === -1 ? obsKey : obsKey.slice(0, nl)
+}
+
 export interface DwellSchedulerOptions {
   dwellMs: number
   judge: (pending: PendingDwell) => Promise<void>
@@ -46,18 +54,20 @@ export class DwellScheduler {
     this.timer = null
   }
 
-  /** Checkpoint a candidate observation and arm the dwell. A BYTE-IDENTICAL candidate (same
-   *  page AND title) whose dwell is still pending keeps the existing deadline, so a storm of
-   *  duplicate events for the exact same page can't keep pushing it out and starve the judge.
-   *  Any different obsKey — including a same-path SPA content change (new title) — starts a
-   *  fresh dwell, so real content isn't judged under-dwelt. Preserving only a still-FUTURE
-   *  deadline also avoids instantly judging a stale past-deadline checkpoint revived after a
-   *  teardown. (Same-URL title churn like notification counters is only fully absorbed once
-   *  pageKey carries the query — B4.) */
+  /** Checkpoint a candidate observation and arm the dwell. A candidate on the SAME pageKey
+   *  whose dwell is still pending keeps the existing deadline (only title/url refresh), so
+   *  same-page title churn (notification counters like "(3) Home") or a storm of duplicate
+   *  events can't keep pushing the deadline out and starve the judge. A different pageKey —
+   *  including SPA content (youtube ?v=A→?v=B, now distinct under B4) — starts a fresh dwell,
+   *  so real content isn't judged under-dwelt. Preserving only a still-FUTURE deadline also
+   *  avoids instantly judging a stale past-deadline checkpoint revived after a teardown. */
   async schedule(url: string, title: string, obsKey: string): Promise<void> {
     const existing = await kvGet<PendingDwell>(PENDING_DWELL_KEY)
-    const sameObs = existing != null && existing.obsKey === obsKey && existing.dueAt > this.now()
-    const dueAt = sameObs ? existing.dueAt : this.now() + this.opts.dwellMs
+    const samePage =
+      existing != null &&
+      pageKeyOfObs(existing.obsKey) === pageKeyOfObs(obsKey) &&
+      existing.dueAt > this.now()
+    const dueAt = samePage ? existing.dueAt : this.now() + this.opts.dwellMs
     await kvSet(PENDING_DWELL_KEY, { url, title, obsKey, dueAt })
     this.disarm()
     this.arm(() => void this.fire(obsKey), Math.max(0, dueAt - this.now()))

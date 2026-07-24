@@ -75,13 +75,31 @@ test("duplicate events for the IDENTICAL obsKey don't push the deadline out — 
   assert.deepEqual(judged, ["x.com/home\nHome"], "judged at the original deadline despite the storm")
 })
 
-test("a same-path content change (new title) starts a FRESH dwell — no under-dwell (SPA fix)", async () => {
+test("same-page title churn (same pageKey, new title) keeps the deadline — still judged", async () => {
+  const clock = makeClock(1000)
+  const judged: string[] = []
+  const s = new DwellScheduler({
+    dwellMs: 5000,
+    judge: async (p) => void judged.push(p.obsKey),
+    now: () => clock.t,
+    ...noTimer,
+  })
+  await s.schedule("https://x.com/home", "(1) Home", "x.com#h\n(1) Home") // dueAt = 6000
+  clock.t = 3000
+  await s.schedule("https://x.com/home", "(2) Home", "x.com#h\n(2) Home") // notification counter
+  assert.equal((await checkpoint())?.dueAt, 6000, "same pageKey keeps the deadline through churn")
+  clock.t = 6000
+  await s.fire("x.com#h\n(2) Home")
+  assert.deepEqual(judged, ["x.com#h\n(2) Home"], "judged with the latest title at the original deadline")
+})
+
+test("SPA content change (distinct pageKey via query, B4) starts a FRESH dwell — no under-dwell", async () => {
   const clock = makeClock(1000)
   const s = new DwellScheduler({ dwellMs: 5000, judge: async () => {}, now: () => clock.t, ...noTimer })
-  await s.schedule("https://youtube.com/watch?v=A", "Video A", "youtube.com/watch\nVideo A") // dueAt 6000
+  // Under B4 youtube ?v=A and ?v=B hash to different pageKeys, so their obsKeys differ.
+  await s.schedule("https://youtube.com/watch?v=A", "Video A", "youtube.com#hA\nVideo A") // dueAt 6000
   clock.t = 4000
-  // Same pageKey (query dropped) but different content/title → must NOT inherit A's deadline.
-  await s.schedule("https://youtube.com/watch?v=B", "Video B", "youtube.com/watch\nVideo B")
+  await s.schedule("https://youtube.com/watch?v=B", "Video B", "youtube.com#hB\nVideo B")
   assert.equal((await checkpoint())?.dueAt, 9000, "B gets its own full 5s dwell")
 })
 
