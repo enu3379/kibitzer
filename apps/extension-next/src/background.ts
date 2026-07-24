@@ -19,7 +19,7 @@ import { clearEvents, exportEvents, logEvent } from "./lib/events.ts"
 import { getSettings, setSettings, type Settings } from "./lib/settings.ts"
 import { clearStore, OBS_STORE } from "./lib/db.ts"
 import { DwellScheduler } from "./lib/dwellScheduler.ts"
-import { markNagActed, recordObservation } from "./lib/history.ts"
+import { markNagActed, recentTitles, recordObservation } from "./lib/history.ts"
 import { clearLog, exportLog, klog, logText } from "./lib/klog.ts"
 import { shouldDropUrl } from "./lib/domainFilter.ts"
 import { hostOf, pageKeyOf } from "./lib/url.ts"
@@ -91,7 +91,9 @@ async function judgeAndDispatch(url: string, title: string, obsKey: string): Pro
   let verdict = tier0Verdict
   let tierReached = 0
   if (verdict === "DRIFT" && enabled) {
-    verdict = await tier1Rescue(goal.text, title, urlHost) // Tier 1 may rescue to OK
+    // Give Tier-1 the recent-visit context (mirrors the server) so it can judge the escalation
+    // pattern, not just this title in isolation.
+    verdict = await tier1Rescue(goal.text, title, urlHost, await recentTitles()) // Tier 1 may rescue to OK
     tierReached = 1
   }
   // B2: the dwell + embed + Tier-1 rescue took time; the user may have navigated away or

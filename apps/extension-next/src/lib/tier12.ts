@@ -111,11 +111,18 @@ async function providers(): Promise<{ tier1: OllamaChatJudgeProvider; tier2: Oll
 }
 
 /** Let Tier 1 rescue a Tier-0 DRIFT (may return OK) or confirm it. Failure keeps DRIFT. */
-export async function tier1Rescue(goalText: string, title: string, urlHost: string): Promise<JudgeVerdict> {
+export async function tier1Rescue(
+  goalText: string,
+  title: string,
+  urlHost: string,
+  recentTitles: readonly RecentTitle[] = [],
+): Promise<JudgeVerdict> {
   const p = await providers()
   if (!p) return "DRIFT"
   try {
-    const result = await p.tier1.classifyTier1(buildTier1Payload({ rawText: goalText }, { title, urlHost }, []))
+    const result = await p.tier1.classifyTier1(
+      buildTier1Payload({ rawText: goalText }, { title, urlHost }, recentTitles),
+    )
     void recordProviderOk()
     return result.verdict
   } catch (error) {
@@ -213,7 +220,9 @@ export async function tier2Confirm(
     title: page.title,
     urlHost: page.urlHost,
     verdict: "DRIFT" as const,
-    tierReached: 0,
+    // Reaching the Tier-2 gate means the page escalated past Tier-0 and (Tier-2 requires an
+    // Ollama provider, so) Tier-1 ran — report tier_reached=1, not a hardcoded 0.
+    tierReached: 1,
     tier0Score: page.score,
   }
   let decision
