@@ -17,7 +17,8 @@ import { getProviderHealth } from "./lib/providerHealth.ts"
 import { clearBadge } from "./lib/badge.ts"
 import { clearEvents, exportEvents, logEvent } from "./lib/events.ts"
 import { getSettings, setSettings, type Settings } from "./lib/settings.ts"
-import { clearStore, OBS_STORE } from "./lib/db.ts"
+import { clearStore, kvDelete, kvGet, kvSet, OBS_STORE } from "./lib/db.ts"
+import { dwellDecision, type PendingDwell } from "./lib/dwell.ts"
 import { markNagActed, recordObservation } from "./lib/history.ts"
 import { clearLog, exportLog, klog, logText } from "./lib/klog.ts"
 import { shouldDropUrl } from "./lib/domainFilter.ts"
@@ -29,16 +30,55 @@ let lastObservedKey: string | null = null
 
 // A page is judged only after it has been dwelt on for OBSERVE_DWELL_MS of sustained
 // attention — a quick glance / bounce never counts, embeds, or pollutes recent-titles.
-// (Sensitive pages are handled immediately, without waiting.)
+// (Sensitive pages are handled immediately, without waiting.) The live timer is a
+// setTimeout, but the pending observation is also checkpointed to the SSOT so a
+// service-worker teardown mid-dwell doesn't drop it — reconcileDwell() resumes it on wake.
 const OBSERVE_DWELL_MS = 5000
+const PENDING_DWELL_KEY = "pending-dwell"
 let dwellTimer: ReturnType<typeof setTimeout> | null = null
-let pendingObsKey: string | null = null
 
-function cancelDwell(): void {
+async function cancelDwell(): Promise<void> {
   if (dwellTimer) {
     clearTimeout(dwellTimer)
     dwellTimer = null
   }
+  await kvDelete(PENDING_DWELL_KEY)
+}
+
+async function scheduleDwell(url: string, title: string, obsKey: string): Promise<void> {
+  await kvSet(PENDING_DWELL_KEY, { url, title, obsKey, dueAt: Date.now() + OBSERVE_DWELL_MS })
+  if (dwellTimer) clearTimeout(dwellTimer)
+  dwellTimer = setTimeout(() => {
+    dwellTimer = null
+    void fireDwell(obsKey)
+  }, OBSERVE_DWELL_MS)
+}
+
+/** Fire the checkpointed dwell — from the live timer (`expectedObsKey` set) or a wake-time
+ *  reconcile (`null`). Skips a superseded candidate, re-arms if the dwell hasn't elapsed,
+ *  else judges. */
+async function fireDwell(expectedObsKey: string | null): Promise<void> {
+  const pending = await kvGet<PendingDwell>(PENDING_DWELL_KEY)
+  const decision = dwellDecision(pending, expectedObsKey, Date.now())
+  if (decision.action === "skip") return
+  if (decision.action === "rearm") {
+    // A "rearm" implies a pending record existed (dwellDecision skips a null one).
+    const obsKey = pending?.obsKey ?? null
+    if (dwellTimer) clearTimeout(dwellTimer)
+    dwellTimer = setTimeout(() => {
+      dwellTimer = null
+      void fireDwell(obsKey)
+    }, decision.delayMs)
+    return
+  }
+  await kvDelete(PENDING_DWELL_KEY)
+  await judgeAndDispatch(decision.pending.url, decision.pending.title, decision.pending.obsKey)
+}
+
+/** On service-worker wake, resume a dwell that was in flight when the previous lifetime
+ *  ended (teardown mid-dwell). Runs on module load and onStartup. */
+async function reconcileDwell(): Promise<void> {
+  await fireDwell(null)
 }
 
 /** Entry for every observation trigger (nav / activate / SPA). Debounces per page, pauses
@@ -55,8 +95,7 @@ async function observe(url: string | undefined, title: string | undefined): Prom
   const obsKey = `${pageKey}\n${title}`
   if (obsKey === lastObservedKey) return
   // A new candidate page cancels the previous page's pending dwell (it never counted).
-  cancelDwell()
-  pendingObsKey = obsKey
+  await cancelDwell()
   // Privacy gate: sensitive pages pause the gauge immediately — no dwell, no judging.
   if (shouldDropUrl(url)) {
     lastObservedKey = obsKey
@@ -64,16 +103,12 @@ async function observe(url: string | undefined, title: string | undefined): Prom
     await dispatch({ type: "inactive", ts: Date.now() }, goal)
     return
   }
-  dwellTimer = setTimeout(() => {
-    dwellTimer = null
-    void judgeAndDispatch(url, title, obsKey)
-  }, OBSERVE_DWELL_MS)
+  await scheduleDwell(url, title, obsKey)
 }
 
 /** Embed title vs goal (Tier 0), optionally rescue via Tier 1 (Ollama), and feed the
- *  verdict into the gauge — after the dwell, and only if the page is still the candidate. */
+ *  verdict into the gauge — after the dwell has elapsed (see fireDwell). */
 async function judgeAndDispatch(url: string, title: string, obsKey: string): Promise<void> {
-  if (pendingObsKey !== obsKey) return // navigated away during the dwell
   const goal = await getGoal()
   if (!goal) return
   const pageKey = pageKeyOf(url)
@@ -179,11 +214,16 @@ chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
 chrome.runtime.onInstalled.addListener(ensureHeartbeat)
 chrome.runtime.onStartup.addListener(ensureHeartbeat)
 
-// On every service-worker spin-up (wake or browser start), deliver any effects a prior
-// lifetime persisted but was torn down before delivering. Complements the atomic outbox in
-// gaugeRuntime: the write is durable, this drains it.
+// On every service-worker spin-up (wake or browser start), recover work a prior lifetime
+// checkpointed but was torn down before finishing: deliver any queued gauge effects
+// (atomic outbox, B1) and resume a dwell that was mid-flight (B3). The 1-min heartbeat
+// alarm guarantees a wake within a minute, bounding recovery latency.
 void flushOutbox()
-chrome.runtime.onStartup.addListener(() => void flushOutbox())
+void reconcileDwell()
+chrome.runtime.onStartup.addListener(() => {
+  void flushOutbox()
+  void reconcileDwell()
+})
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== HEARTBEAT_ALARM) return
