@@ -1,5 +1,47 @@
 # Progress
 
+## 2026-07-20 Worktree reconciliation and docs backfill
+
+Completed:
+
+- Audited the local pre-split working tree against `dev`: the uncommitted
+  Tier-2 guard-prompt hardening and persona v4 fragments were confirmed
+  superseded by the Context Judge / Message Writer split (`331a0ba`) and the
+  persona v5 lineup, and archived on `archive/security-hardening-20260720`
+  instead of rebased. Three local 07-10 Windows tray commits turned out to be
+  already squash-merged as PR #24 (the tray was later reworked by #105); the
+  local branch was dropped.
+- Ran a six-agent audit of all local branches/worktrees: 42 branches verified
+  squash-merged (or content-superseded with the original preserved on
+  `origin`) and deleted together with their clean worktrees; local
+  `dev`/`main` fast-forwarded. Kept as genuinely unmerged work:
+  `fix/security-audit-hardening` (closed #71's complete per-install
+  auth/pairing implementation — `auth.py` LoopbackAuthenticator, body-size
+  middleware, extension `auth.ts`, pairing-reset scripts — exists nowhere
+  else), `feature/judgment-review` ⊇ `feature/tier0-audit-routing` (Tier-0 OK
+  audit routing + title-quality gate + local judgment-review dashboard,
+  2026-07-10, never PRed), `feature/tier0-benchmark-v2` (unlanded HTML
+  analysis report), and remote `origin/codex/d7-structure-review` (495-line
+  D7 architecture review not on `dev`). A dirty 2026-07-10 WIP worktree was
+  archived wholesale as `archive/local-wip-split-20260710`.
+- Merged the three divergent copies of `docs/planning-notes.md`: the local
+  copy carried D9–D13 (packaging, app/extension role split, pre-distribution
+  audit, red-team, security review) and the persona-revamp working rounds;
+  the `dev` copy carried D3/D7/D8 design detail including the 2026-07-16
+  Tier-2 rework design; the never-PRed `chore/predist-audit-docs` branch
+  (2026-07-15) carried the audit reconciliation (14 actionable findings +
+  errata), the user-confirmed post-audit product calls (port candidate pool,
+  per-install token, C6 retention window, M6 deletion), and the
+  channel-staging decisions (ad-hoc signing requirement, Homebrew cask
+  deferred per the 2026-09-01 Gatekeeper policy). Statuses refreshed for the
+  #69/#71/#74 closures, `331a0ba`, and draft #106.
+- Landed previously local-only records: `docs/security-review-2026-07-15.md`,
+  `docs/handoff-refactor-predist.md` (the corrected 2026-07-15 reconciled
+  work order from `chore/predist-audit-docs`, superseding the unreconciled
+  draft), `docs/persona-voice-revamp.md`, and the
+  `docs/benchmarks/persona-voice-v4/` evidence (the v5 benchmark already on
+  `dev` references v4 as its baseline).
+
 ## 2026-07-18 Tier 2 red-team artifact preservation
 
 Completed:
