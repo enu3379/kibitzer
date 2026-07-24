@@ -345,7 +345,8 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     const previous = await getGoal()
     const goal: SessionGoal | null = await setGoal(
       message.goal ?? "",
-      typeof message.minutes === "number" ? message.minutes : null,
+      // Accept only a positive, finite budget (defence in depth with the popup + config guard).
+      typeof message.minutes === "number" && message.minutes > 0 ? message.minutes : null,
     )
     // Restart the gauge when the goal actually changes (text OR minutes → new revision)
     // or is cleared.

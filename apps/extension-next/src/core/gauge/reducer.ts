@@ -148,8 +148,17 @@ function advance(state: GaugeState, now: number, config: GaugeConfig): GaugeTran
   // episode end (m <= 0): reset renag schedule
   if (st.m <= 0) st = { ...st, nagN: 0, renagDebt: 0 };
 
-  // S = 0 final gate — fire only on the crossing into 0
-  if (state.activeVerdict === "DRIFT" && sBefore > 0 && st.s <= 0) {
+  // S = 0 final gate. Fire on the downward crossing into 0, AND when the gauge is pinned at 0
+  // and drifting but the initial nudge never happened (it was suppressed by a snooze at the
+  // crossing, or S=0 was carried over by the migration) and we aren't already waiting on a
+  // Tier-2 request — otherwise, once snooze ends, the crossing edge can't recur (sBefore is
+  // already 0) and maybeRenag never runs (nagN is 0), so the user stays stuck with no nudge.
+  const atZeroDrift = state.activeVerdict === "DRIFT" && st.s <= 0;
+  const stuckUnnudged =
+    sBefore <= 0 &&
+    st.nagN === 0 &&
+    !(st.pendingTier2 != null && st.pendingTier2.reason === "s_zero");
+  if (atZeroDrift && (sBefore > 0 || stuckUnnudged)) {
     st = sZeroGate(st, config, effects, now);
   }
 

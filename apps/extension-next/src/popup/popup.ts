@@ -89,7 +89,8 @@ startButton.addEventListener("click", async () => {
   await chrome.runtime.sendMessage({
     type: "set-goal",
     goal: goalInput.value,
-    minutes: Number.isFinite(minutes) ? minutes : null,
+    // Only a positive budget is meaningful; a 0/negative would poison the gauge config.
+    minutes: minutes != null && Number.isFinite(minutes) && minutes > 0 ? minutes : null,
   })
   render(await getState())
 })
