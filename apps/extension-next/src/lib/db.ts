@@ -157,20 +157,45 @@ export async function deleteRecord(store: string, id: number): Promise<void> {
   await txDone(tx)
 }
 
-/** Deliver each record (oldest id first) via `handler`, deleting those the handler
- *  resolves for. A handler that throws leaves its record in place for a later drain — so
- *  delivery is at-least-once: an effect survives a service-worker teardown mid-drain. */
+/** Process each record (oldest id first) via `handler`; delete a record only when the
+ *  handler resolves `true` (acknowledged). Returning `false` — or throwing — leaves the
+ *  record for a later drain, so delivery is at-least-once. `false` is for work that owns its
+ *  own async lifetime (e.g. a durable job that deletes its record when it truly completes);
+ *  a throw is a transient failure to retry. */
 export async function drainRecords<T extends { id: number }>(
   store: string,
-  handler: (record: T) => Promise<void>,
+  handler: (record: T) => Promise<boolean>,
 ): Promise<void> {
   const records = await getAllRecords<T>(store)
   for (const record of records) {
+    let ack = false
     try {
-      await handler(record)
+      ack = await handler(record)
     } catch {
-      continue // leave undelivered; a later drain retries
+      ack = false // leave for retry
     }
-    await deleteRecord(store, record.id)
+    if (ack) await deleteRecord(store, record.id)
   }
+}
+
+/** Atomic compare-and-delete for a kv key: delete it only if `matches(currentValue)` — so a
+ *  stale reader can't clobber a value another writer has since replaced. The read and the
+ *  conditional delete run in one transaction. No-op if the key is absent or unmatched. */
+export async function kvDeleteIf(
+  key: string,
+  matches: (value: unknown) => boolean,
+): Promise<void> {
+  const db = await open()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(KV_STORE, "readwrite")
+    const os = tx.objectStore(KV_STORE)
+    const getReq = os.get(key)
+    getReq.onsuccess = () => {
+      // Issue the delete synchronously inside the same still-active transaction.
+      if (getReq.result !== undefined && matches(getReq.result)) os.delete(key)
+    }
+    tx.oncomplete = () => resolve()
+    tx.onabort = () => reject(tx.error ?? new Error("kvDeleteIf aborted"))
+    tx.onerror = () => reject(tx.error ?? new Error("kvDeleteIf failed"))
+  })
 }

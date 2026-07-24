@@ -69,6 +69,11 @@ export type GaugeEvent =
   | { type: "heartbeat"; ts: number }
   | { type: "inactive"; ts: number }
   | { type: "tier2_result"; flow: Flow; pageKey: string; ts: number }
+  // Clear a pending Tier-2 request that resolved stale (page/goal moved on) without applying
+  // a verdict — releases the pendingTier2 slot so promotion can request again, with no
+  // side effect on the now-active page. Only clears if the slot still matches (pageKey +
+  // requestedAt). Wiring-only; the shared fixtures never emit it.
+  | { type: "tier2_cancel"; pageKey: string; requestedAt: number; ts: number }
   | { type: "snooze"; until: number; ts: number };
 
 /** GaugeEffect — contract §4 (intents; shadow mode records but does not act). */

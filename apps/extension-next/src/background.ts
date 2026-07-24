@@ -17,8 +17,8 @@ import { getProviderHealth } from "./lib/providerHealth.ts"
 import { clearBadge } from "./lib/badge.ts"
 import { clearEvents, exportEvents, logEvent } from "./lib/events.ts"
 import { getSettings, setSettings, type Settings } from "./lib/settings.ts"
-import { clearStore, kvDelete, kvGet, kvSet, OBS_STORE } from "./lib/db.ts"
-import { dwellDecision, type PendingDwell } from "./lib/dwell.ts"
+import { clearStore, OBS_STORE } from "./lib/db.ts"
+import { DwellScheduler } from "./lib/dwellScheduler.ts"
 import { markNagActed, recordObservation } from "./lib/history.ts"
 import { clearLog, exportLog, klog, logText } from "./lib/klog.ts"
 import { shouldDropUrl } from "./lib/domainFilter.ts"
@@ -30,56 +30,13 @@ let lastObservedKey: string | null = null
 
 // A page is judged only after it has been dwelt on for OBSERVE_DWELL_MS of sustained
 // attention — a quick glance / bounce never counts, embeds, or pollutes recent-titles.
-// (Sensitive pages are handled immediately, without waiting.) The live timer is a
-// setTimeout, but the pending observation is also checkpointed to the SSOT so a
-// service-worker teardown mid-dwell doesn't drop it — reconcileDwell() resumes it on wake.
+// (Sensitive pages are handled immediately, without waiting.) The scheduler keeps the
+// pending observation in the SSOT so a teardown mid-dwell is recovered on the next wake.
 const OBSERVE_DWELL_MS = 5000
-const PENDING_DWELL_KEY = "pending-dwell"
-let dwellTimer: ReturnType<typeof setTimeout> | null = null
-
-async function cancelDwell(): Promise<void> {
-  if (dwellTimer) {
-    clearTimeout(dwellTimer)
-    dwellTimer = null
-  }
-  await kvDelete(PENDING_DWELL_KEY)
-}
-
-async function scheduleDwell(url: string, title: string, obsKey: string): Promise<void> {
-  await kvSet(PENDING_DWELL_KEY, { url, title, obsKey, dueAt: Date.now() + OBSERVE_DWELL_MS })
-  if (dwellTimer) clearTimeout(dwellTimer)
-  dwellTimer = setTimeout(() => {
-    dwellTimer = null
-    void fireDwell(obsKey)
-  }, OBSERVE_DWELL_MS)
-}
-
-/** Fire the checkpointed dwell — from the live timer (`expectedObsKey` set) or a wake-time
- *  reconcile (`null`). Skips a superseded candidate, re-arms if the dwell hasn't elapsed,
- *  else judges. */
-async function fireDwell(expectedObsKey: string | null): Promise<void> {
-  const pending = await kvGet<PendingDwell>(PENDING_DWELL_KEY)
-  const decision = dwellDecision(pending, expectedObsKey, Date.now())
-  if (decision.action === "skip") return
-  if (decision.action === "rearm") {
-    // A "rearm" implies a pending record existed (dwellDecision skips a null one).
-    const obsKey = pending?.obsKey ?? null
-    if (dwellTimer) clearTimeout(dwellTimer)
-    dwellTimer = setTimeout(() => {
-      dwellTimer = null
-      void fireDwell(obsKey)
-    }, decision.delayMs)
-    return
-  }
-  await kvDelete(PENDING_DWELL_KEY)
-  await judgeAndDispatch(decision.pending.url, decision.pending.title, decision.pending.obsKey)
-}
-
-/** On service-worker wake, resume a dwell that was in flight when the previous lifetime
- *  ended (teardown mid-dwell). Runs on module load and onStartup. */
-async function reconcileDwell(): Promise<void> {
-  await fireDwell(null)
-}
+const dwell = new DwellScheduler({
+  dwellMs: OBSERVE_DWELL_MS,
+  judge: (pending) => judgeAndDispatch(pending.url, pending.title, pending.obsKey),
+})
 
 /** Entry for every observation trigger (nav / activate / SPA). Debounces per page, pauses
  *  immediately on sensitive pages, and otherwise schedules the judgement after a dwell so
@@ -95,7 +52,7 @@ async function observe(url: string | undefined, title: string | undefined): Prom
   const obsKey = `${pageKey}\n${title}`
   if (obsKey === lastObservedKey) return
   // A new candidate page cancels the previous page's pending dwell (it never counted).
-  await cancelDwell()
+  await dwell.cancel()
   // Privacy gate: sensitive pages pause the gauge immediately — no dwell, no judging.
   if (shouldDropUrl(url)) {
     lastObservedKey = obsKey
@@ -103,11 +60,11 @@ async function observe(url: string | undefined, title: string | undefined): Prom
     await dispatch({ type: "inactive", ts: Date.now() }, goal)
     return
   }
-  await scheduleDwell(url, title, obsKey)
+  await dwell.schedule(url, title, obsKey)
 }
 
 /** Embed title vs goal (Tier 0), optionally rescue via Tier 1 (Ollama), and feed the
- *  verdict into the gauge — after the dwell has elapsed (see fireDwell). */
+ *  verdict into the gauge — invoked by the dwell scheduler once the dwell has elapsed. */
 async function judgeAndDispatch(url: string, title: string, obsKey: string): Promise<void> {
   const goal = await getGoal()
   if (!goal) return
@@ -219,10 +176,10 @@ chrome.runtime.onStartup.addListener(ensureHeartbeat)
 // (atomic outbox, B1) and resume a dwell that was mid-flight (B3). The 1-min heartbeat
 // alarm guarantees a wake within a minute, bounding recovery latency.
 void flushOutbox()
-void reconcileDwell()
+void dwell.reconcile()
 chrome.runtime.onStartup.addListener(() => {
   void flushOutbox()
-  void reconcileDwell()
+  void dwell.reconcile()
 })
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -237,20 +194,25 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 chrome.idle.setDetectionInterval(60)
 chrome.idle.onStateChanged.addListener((state) => {
-  void getGoal().then((goal) => {
-    if (!goal) return undefined
+  void getGoal().then(async (goal) => {
+    if (!goal) return
     if (state === "active") return observeActiveTab()
-    return dispatch({ type: "inactive", ts: Date.now() }, goal)
+    // Left the machine: a page glanced at for 1s must not judge 5s later — drop the dwell,
+    // not just pause the gauge (sustained-attention requirement).
+    await dwell.cancel()
+    await dispatch({ type: "inactive", ts: Date.now() }, goal)
   })
 })
 
 // Chrome losing OS focus (user switched to another app) pauses the gauge; regaining it
 // re-observes the active tab. Complements the system-wide idle signal above.
 chrome.windows.onFocusChanged.addListener((windowId) => {
-  void getGoal().then((goal) => {
-    if (!goal) return undefined
+  void getGoal().then(async (goal) => {
+    if (!goal) return
     if (windowId === chrome.windows.WINDOW_ID_NONE) {
-      return dispatch({ type: "inactive", ts: Date.now() }, goal)
+      await dwell.cancel() // focus lost mid-dwell: the glance never earned a judgement
+      await dispatch({ type: "inactive", ts: Date.now() }, goal)
+      return
     }
     return observeActiveTab()
   })

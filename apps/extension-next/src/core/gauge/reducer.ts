@@ -217,5 +217,14 @@ export function reduceGauge(
     }
     case "tier2_result":
       return applyTier2(state, event.ts, event.flow, event.pageKey, config);
+    case "tier2_cancel": {
+      // Release the pending slot only if it is still the request this cancel refers to, so a
+      // newer pendingTier2 (e.g. an s_zero on the page the user moved to) is never cleared.
+      const p = state.pendingTier2;
+      if (p != null && p.pageKey === event.pageKey && p.requestedAt === event.requestedAt) {
+        return { state: { ...state, pendingTier2: null }, effects: [] };
+      }
+      return { state, effects: [] };
+    }
   }
 }

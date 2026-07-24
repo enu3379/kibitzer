@@ -1,6 +1,7 @@
 // Integration test for the durable effect outbox (B1). Exercises real IndexedDB semantics
-// via fake-indexeddb, not a stub — this is the atomic-write + at-least-once-drain contract
-// the gauge relies on to never lose a nag/celebration across a service-worker teardown.
+// via fake-indexeddb, not a stub — this is the atomic-write + ack/keep-drain + CAS-delete
+// contract the gauge relies on to never lose a nag/celebration or double-run a Tier-2 job
+// across a service-worker teardown.
 
 import "fake-indexeddb/auto"
 import assert from "node:assert/strict"
@@ -10,8 +11,10 @@ import {
   clearStore,
   drainRecords,
   getAllRecords,
+  kvDeleteIf,
   kvGet,
   kvPutAndAppend,
+  kvSet,
   OUTBOX_STORE,
 } from "./db.ts"
 
@@ -37,32 +40,30 @@ test("kvPutAndAppend commits the state checkpoint and its effects together, FIFO
   assert.ok(recs[0].id < recs[1].id, "delivered oldest-first by autoincrement id")
 })
 
-test("drainRecords delivers oldest-first and deletes only what was delivered", async () => {
+test("drainRecords deletes only records the handler ACKs (true); false keeps them", async () => {
   await clearStore(OUTBOX_STORE)
   await kvPutAndAppend([], OUTBOX_STORE, [
-    { effect: { type: "nag", pageKey: "a" } },
-    { effect: { type: "nag", pageKey: "b" } },
-    { effect: { type: "nag", pageKey: "c" } },
+    { effect: { type: "nag", pageKey: "a" } }, // ack → delete
+    { effect: { type: "request_tier2", pageKey: "b" } }, // keep (owns its own lifetime)
+    { effect: { type: "nag", pageKey: "c" } }, // ack → delete
   ])
 
-  // Simulate a delivery failure mid-drain: "b" throws, so it must survive for a later drain
-  // while "a" and "c" are delivered and removed.
-  const delivered: string[] = []
+  const seen: string[] = []
   await drainRecords<OutboxRec>(OUTBOX_STORE, async (rec) => {
-    if (rec.effect.pageKey === "b") throw new Error("teardown")
-    delivered.push(rec.effect.pageKey ?? "")
+    seen.push(rec.effect.pageKey ?? rec.effect.type)
+    return rec.effect.type !== "request_tier2" // durable jobs are not ACKed by the drain
   })
 
-  assert.deepEqual(delivered, ["a", "c"])
+  assert.deepEqual(seen, ["a", "b", "c"])
   const left = await getAllRecords<OutboxRec>(OUTBOX_STORE)
   assert.deepEqual(
     left.map((r) => r.effect.pageKey),
     ["b"],
-    "only the failed effect remains queued",
+    "the kept (unacked) record survives the drain",
   )
 })
 
-test("a later drain redelivers what an interrupted one left (at-least-once)", async () => {
+test("a throwing handler leaves its record; a later drain redelivers it (at-least-once)", async () => {
   await clearStore(OUTBOX_STORE)
   await kvPutAndAppend([], OUTBOX_STORE, [{ effect: { type: "nag", pageKey: "x" } }])
 
@@ -75,7 +76,20 @@ test("a later drain redelivers what an interrupted one left (at-least-once)", as
 
   await drainRecords<OutboxRec>(OUTBOX_STORE, async () => {
     attempts += 1
+    return true
   })
   assert.equal((await getAllRecords(OUTBOX_STORE)).length, 0, "delivered and removed")
   assert.equal(attempts, 2)
+})
+
+test("kvDeleteIf deletes only when the current value still matches (CAS)", async () => {
+  await kvSet("pending-dwell", { obsKey: "A", dueAt: 100 })
+  // A stale deleter that read version A must NOT delete once it has been replaced by B.
+  await kvSet("pending-dwell", { obsKey: "B", dueAt: 200 })
+  await kvDeleteIf("pending-dwell", (v) => (v as { obsKey: string }).obsKey === "A")
+  assert.deepEqual(await kvGet("pending-dwell"), { obsKey: "B", dueAt: 200 }, "newer value untouched")
+
+  // The matching deleter removes it.
+  await kvDeleteIf("pending-dwell", (v) => (v as { obsKey: string }).obsKey === "B")
+  assert.equal(await kvGet("pending-dwell"), undefined, "matched value deleted")
 })
