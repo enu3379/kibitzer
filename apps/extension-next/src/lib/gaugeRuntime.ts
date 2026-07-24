@@ -163,16 +163,33 @@ function enqueue(task: () => Promise<void>): Promise<void> {
  *  through the same atomic-checkpoint path. */
 async function runEvent(event: GaugeEvent, goal: SessionGoal | null, state: GaugeState): Promise<void> {
   const transition = reduceGauge(state, event, configFor(goal))
-  // Diagnostic trace (service-worker console): watch S drain/recover and why an effect fired.
+  // Diagnostic trace: tie every S move / verdict change / effect to the page the verdict is
+  // based on, so a score change can be read against the page that caused it. NEUTRAL = the
+  // gauge is holding steady while a page's dwell is judged (no drain / no recover). The klog
+  // line is for humans; the durable `tick` event lets offline replay reconstruct the S curve
+  // against the active page.
   const s0 = state.s.toFixed(1)
   const s1 = transition.state.s.toFixed(1)
-  if (s0 !== s1 || transition.effects.length > 0) {
+  const verdictChanged = state.activeVerdict !== transition.state.activeVerdict
+  if (s0 !== s1 || transition.effects.length > 0 || verdictChanged) {
     const eff = transition.effects.map((e) => e.type).join(",")
+    const vLabel = transition.state.activeVerdict ?? "NEUTRAL"
+    const page = transition.state.activePageKey ?? "—"
     klog(
       `${event.type} S ${s0}->${s1} m=${transition.state.m.toFixed(2)}` +
-        ` armed=${transition.state.celebrateArmed} v=${transition.state.activeVerdict}` +
+        ` armed=${transition.state.celebrateArmed} v=${vLabel} page=${page}` +
         (eff ? ` !! ${eff}` : ""),
     )
+    logEvent("tick", {
+      event: event.type,
+      s: Math.round(transition.state.s),
+      m: Number(transition.state.m.toFixed(3)),
+      verdict: transition.state.activeVerdict, // null ⇒ NEUTRAL (holding for a dwell)
+      page: transition.state.activePageKey, // the page the verdict is based on
+      prevVerdict: state.activeVerdict,
+      prevPage: state.activePageKey,
+      ...(transition.effects.length ? { effects: transition.effects.map((e) => e.type) } : {}),
+    })
   }
   // Bind the Writer nag text (staged durably by the Tier-2 apply) to its nag effect, and a
   // request_tier2's requestedAt to its record, so both ride the outbox rather than in-memory
@@ -194,9 +211,17 @@ async function runEvent(event: GaugeEvent, goal: SessionGoal | null, state: Gaug
   }
   await persistStateAndOutbox(transition.state, entries, kvDeletes)
   updateBadge(transition.state, goal, event.ts) // reflect live status on the toolbar
-  // Mark when a drift episode began, so the celebration can say how long they were away.
-  if (state.activeVerdict !== "DRIFT" && transition.state.activeVerdict === "DRIFT") {
+  // Track when the drift episode began (persona drift_minutes / celebration return_minutes).
+  // Start the clock on entering DRIFT, but only when one isn't already running: a NEUTRAL hold
+  // between two off-goal pages nulls the verdict in between, and without the "already running"
+  // guard the next DRIFT would reset the clock on every navigation and undercount a continuous
+  // cross-page drift. Clear it the moment the gauge fully recovers on-goal (S crosses back to
+  // 100 on OK) so the NEXT drift is timed from its own start; the celebration path clears it on
+  // its own if it fires first.
+  if (transition.state.activeVerdict === "DRIFT" && (await driftSince()) == null) {
     await setDriftSince(event.ts)
+  } else if (transition.state.activeVerdict === "OK" && transition.state.s >= 100 && state.s < 100) {
+    await setDriftSince(null)
   }
   await drainOutbox()
 }
@@ -206,6 +231,21 @@ export function dispatch(event: GaugeEvent, goal: SessionGoal | null): Promise<v
   return enqueue(async () => {
     const state = await loadState()
     await runEvent(event, goal, state)
+  })
+}
+
+/** Put the gauge into the NEUTRAL holding state for a newly-observed page: stop integrating the
+ *  previous page's verdict so S neither drains nor recovers while we wait for this page's dwell
+ *  and judgement (which resume integration all at once via a `nav` event). A no-op when the
+ *  gauge is already neutral or already holds THIS exact page — so same-page title churn and
+ *  repeated observations never disturb a live verdict. Serialized with dispatch so the
+ *  read-then-neutral can't race an in-flight event. */
+export function enterNeutral(pageKey: string, goal: SessionGoal | null): Promise<void> {
+  return enqueue(async () => {
+    const state = await loadState()
+    if (state.activeVerdict == null) return // already neutral (or never judged this session)
+    if (state.activePageKey === pageKey) return // still the page we hold a verdict for
+    await runEvent({ type: "neutral", pageKey, ts: Date.now() }, goal, state)
   })
 }
 

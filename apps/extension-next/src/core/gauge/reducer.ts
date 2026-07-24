@@ -262,5 +262,17 @@ export function reduceGauge(
       }
       return { state, effects: [] };
     }
+    case "neutral": {
+      // Integrate the page they were on right up to this instant (a drift that ran until the
+      // navigation still counts and can even fire its S=0 gate), then drop the verdict. With
+      // activeVerdict = null, advance() early-returns — S and m freeze — until the dwell's nav
+      // event supplies the new page's verdict and integration resumes all at once. Rebasing the
+      // clock via advance is what keeps the frozen interval from being back-integrated then.
+      const adv = advance(state, event.ts, config);
+      return {
+        state: { ...adv.state, activePageKey: event.pageKey, activeVerdict: null, activeMargin: null },
+        effects: adv.effects,
+      };
+    }
   }
 }

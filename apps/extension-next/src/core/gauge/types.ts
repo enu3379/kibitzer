@@ -80,6 +80,12 @@ export type GaugeEvent =
   // side effect on the now-active page. Only clears if the slot is still this exact request
   // (matched by requestId). Wiring-only; the shared fixtures never emit it.
   | { type: "tier2_cancel"; requestId: number; ts: number }
+  // A new page is being observed but its verdict isn't known yet (the dwell hasn't produced a
+  // judgement). Integrate the page they were on up to this instant, then stop: hold the gauge
+  // steady (no drain / no recover) until the dwell's nav event supplies the fresh verdict, so a
+  // page the user has left can't keep moving S on a stale verdict. Wiring-only; the shared
+  // parity fixtures never emit it.
+  | { type: "neutral"; pageKey: string; ts: number }
   | { type: "snooze"; until: number; ts: number };
 
 /** GaugeEffect — contract §4 (intents; shadow mode records but does not act). */

@@ -10,7 +10,7 @@ import { getGoal, setGoal, type SessionGoal } from "./lib/session.ts"
 import { embedText, embedTexts, judgeTier0 } from "./lib/tier0.ts"
 import { addExemplar, admissionEligible, admitAnchor, loadRefs, setDerived } from "./lib/relevance.ts"
 import { filterDerivedPhrases, MAX_PHRASES } from "./lib/goalEnrichment.ts"
-import { currentState, dispatch, flushOutbox, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
+import { currentState, dispatch, enterNeutral, flushOutbox, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
 import { enrichGoal, getOllamaConfig, ollamaEnabled, setOllamaConfig, testOllama, tier1Rescue } from "./lib/tier12.ts"
 import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
 import { getProviderHealth } from "./lib/providerHealth.ts"
@@ -56,9 +56,16 @@ async function observe(url: string | undefined, title: string | undefined): Prom
     await dwell.cancel() // drop any prior page's pending dwell; this page never counts
     lastObservedKey = obsKey
     klog(`drop (sensitive) ${pageKey}`)
-    await dispatch({ type: "inactive", ts: Date.now() }, goal)
+    // NEUTRAL, not just a one-tick pause: we won't judge this page, so the previous page's
+    // verdict must not keep draining/recovering S across the heartbeats spent here.
+    await enterNeutral(pageKey, goal)
     return
   }
+  // Stop integrating the page just left the moment a new page is observed: hold the gauge
+  // NEUTRAL (no drain / no recover) through the dwell, so a possibly-stale verdict can't move S
+  // while we wait. The judgement resumes integration all at once when it lands. enterNeutral
+  // no-ops if we already hold this page or are already neutral (e.g. same-page title churn).
+  await enterNeutral(pageKey, goal)
   // A new candidate atomically REPLACES the previous checkpoint (a single durable write) —
   // no cancel-then-schedule gap where a teardown in between would leave nothing to recover.
   await dwell.schedule(url, title, obsKey)
