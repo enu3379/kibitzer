@@ -6,7 +6,10 @@ docs/audit/step0/
 !.env.example
 configs/models.local.yaml
 .claude/
+.claude-worktrees/
+.codex-worktrees/
 .agents/
+tmp/
 .llm-wiki/runs/
 __pycache__/
 .pytest_cache/
