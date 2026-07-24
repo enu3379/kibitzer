@@ -33,24 +33,9 @@ let lastObservedKey: string | null = null
 // (Sensitive pages are handled immediately, without waiting.) The scheduler keeps the
 // pending observation in the SSOT so a teardown mid-dwell is recovered on the next wake.
 const OBSERVE_DWELL_MS = 5000
-
-// Serialize judgements so two dwells that elapse close together (e.g. a slow Tier-1 rescue on
-// page A still running when page B's dwell fires) can't interleave their setActivePage /
-// dispatch / anchor-admit / recordObservation and pin the active page to the older one or lose
-// a read-modify-write. Judges run one at a time, in the order their dwells fired.
-let judgeChain: Promise<unknown> = Promise.resolve()
-function serializeJudge(fn: () => Promise<void>): Promise<void> {
-  const run = judgeChain.then(fn, fn)
-  judgeChain = run.then(
-    () => undefined,
-    () => undefined,
-  )
-  return run
-}
-
 const dwell = new DwellScheduler({
   dwellMs: OBSERVE_DWELL_MS,
-  judge: (pending) => serializeJudge(() => judgeAndDispatch(pending.url, pending.title, pending.obsKey)),
+  judge: (pending) => judgeAndDispatch(pending.url, pending.title, pending.obsKey),
 })
 
 /** Entry for every observation trigger (nav / activate / SPA). Debounces per page, pauses
@@ -79,6 +64,16 @@ async function observe(url: string | undefined, title: string | undefined): Prom
   await dwell.schedule(url, title, obsKey)
 }
 
+/** True iff, after the async embed/rescue, we are STILL judging the same page under the same
+ *  goal session — i.e. the user hasn't navigated away and the goal hasn't been changed/cleared.
+ *  Guards against applying a stale verdict to whatever page/goal is current now (B2). */
+async function stillJudging(pageKey: string, epoch: number): Promise<boolean> {
+  const goal = await getGoal()
+  if (!goal || goal.epoch !== epoch) return false // goal changed or cleared mid-judge
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+  return !!tab?.url && pageKeyOf(tab.url) === pageKey // still on the judged page
+}
+
 /** Embed title vs goal (Tier 0), optionally rescue via Tier 1 (Ollama), and feed the
  *  verdict into the gauge — invoked by the dwell scheduler once the dwell has elapsed. */
 async function judgeAndDispatch(url: string, title: string, obsKey: string): Promise<void> {
@@ -86,6 +81,7 @@ async function judgeAndDispatch(url: string, title: string, obsKey: string): Pro
   if (!goal) return
   const pageKey = pageKeyOf(url)
   if (!pageKey) return
+  const epoch = goal.epoch
   lastObservedKey = obsKey
   const urlHost = hostOf(url)
   const tauOk = (await getSettings()).tauOk
@@ -97,6 +93,13 @@ async function judgeAndDispatch(url: string, title: string, obsKey: string): Pro
   if (verdict === "DRIFT" && enabled) {
     verdict = await tier1Rescue(goal.text, title, urlHost) // Tier 1 may rescue to OK
     tierReached = 1
+  }
+  // B2: the dwell + embed + Tier-1 rescue took time; the user may have navigated away or
+  // changed the goal. Applying this verdict now would drive the gauge / active page for a
+  // page they left. Drop it — the page they're on now gets its own dwell + judge.
+  if (!(await stillJudging(pageKey, epoch))) {
+    klog(`judge dropped (page/goal moved on) ${pageKey}`)
+    return
   }
   // Learn the recency anchor from confirmed-OK pages (the guard blocks anchor-only OKs).
   if (verdict === "OK" && admissionEligible(parts, refs.derived.length > 0, verdict, tierReached)) {

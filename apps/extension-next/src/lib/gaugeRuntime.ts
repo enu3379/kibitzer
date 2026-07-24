@@ -105,7 +105,10 @@ export function resetState(): Promise<void> {
     // REUSED: an in-flight (zombie) job from before the reset would otherwise collide with a
     // fresh request that got the same id and wrongly cancel/apply to it.
     const prev = await loadState()
-    const fresh = { ...initGaugeState(), tier2ReqSeq: prev.tier2ReqSeq }
+    // Guard a non-finite counter (a legacy/corrupt state) — else the next request would
+    // compute `undefined/NaN + 1 = NaN` and permanently wedge pendingTier2 (NaN never matches).
+    const carriedSeq = Number.isFinite(prev.tier2ReqSeq) ? prev.tier2ReqSeq : 0
+    const fresh = { ...initGaugeState(), tier2ReqSeq: carriedSeq }
     await kvWriteAndClear(
       [
         { key: STATE_KEY, value: fresh },
