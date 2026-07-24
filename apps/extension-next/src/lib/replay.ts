@@ -19,6 +19,36 @@ export interface ObserveRecord {
   tier0: string // recorded Tier-0 verdict at capture time
 }
 
+export interface PresencePoint {
+  ts: number
+  present: boolean
+}
+
+/** Pull the presence transitions (active↔inactive) out of the event log. Sparse: the runtime
+ *  logs one only when presence actually changes. */
+export function extractPresence(events: KibitzerEvent[]): PresencePoint[] {
+  const out: PresencePoint[] = []
+  for (const e of events) {
+    if (e.type !== "presence") continue
+    const d = e.data ?? {}
+    if (typeof d.present !== "boolean") continue
+    out.push({ ts: e.ts, present: d.present })
+  }
+  return out.sort((a, b) => a.ts - b.ts)
+}
+
+/** Whether the user was present at time `t`, per the recorded transitions. Assumes present
+ *  before the first transition (and when there are none — backward-compatible with old logs
+ *  that predate presence logging). */
+export function presentAt(presence: PresencePoint[], t: number): boolean {
+  let present = true
+  for (const p of presence) {
+    if (p.ts > t) break
+    present = p.present
+  }
+  return present
+}
+
 /** Pull the Tier-0 observations (with a numeric score) out of the raw event log. */
 export function extractObserves(events: KibitzerEvent[]): ObserveRecord[] {
   const out: ObserveRecord[] = []
@@ -70,12 +100,16 @@ const MAX_HEARTBEATS_PER_GAP = 60 // cap a single gap at ~1h of assumed presence
 
 /** Re-run the gauge over the recorded observations at a given tau_ok, in degraded mode so
  *  nags fire from the embedding verdict alone (no LLM needed). Heartbeats are synthesized
- *  between observations to reconstruct the drain/recovery — this assumes the user was
- *  present during each gap (long gaps are treated as inactive), an approximation. */
+ *  between observations to reconstruct the drain/recovery. When presence transitions are
+ *  supplied, each synthesized minute is a heartbeat only if the user was present then, and an
+ *  inactive rebase otherwise — so an away stretch (e.g. 39 min AFK) no longer drains S as if
+ *  the user were actively drifting. Without presence data it falls back to assuming presence
+ *  (long gaps still treated as inactive). */
 export function replayGauge(
   observes: ObserveRecord[],
   tauOk: number,
   availableMinutes: number | null = null,
+  presence: PresencePoint[] = [],
 ): GaugeReplay {
   const config = defaultGaugeConfig(availableMinutes)
   let state: GaugeState = initGaugeState()
@@ -97,7 +131,10 @@ export function replayGauge(
         step({ type: "inactive", ts: o.ts - 1 }) // long idle: rebase, don't integrate
       } else {
         for (let b = 1; b <= beats; b += 1) {
-          step({ type: "heartbeat", ts: lastTs + b * HEARTBEAT_MS })
+          const bt = lastTs + b * HEARTBEAT_MS
+          // Only drain while the user was actually present; an away minute is an inactive
+          // rebase (contract §5: inactive integrates nothing).
+          step(presentAt(presence, bt) ? { type: "heartbeat", ts: bt } : { type: "inactive", ts: bt })
           series.push({ ts: state.updatedAt, s: state.s })
         }
       }

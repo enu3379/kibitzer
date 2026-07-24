@@ -2,7 +2,14 @@
 // origin as the service worker) or an imported JSONL, and runs the pure replay engine.
 
 import { getEvents, type KibitzerEvent } from "../lib/events.ts"
-import { extractObserves, replayGauge, tauSweep, type ObserveRecord } from "../lib/replay.ts"
+import {
+  extractObserves,
+  extractPresence,
+  replayGauge,
+  tauSweep,
+  type ObserveRecord,
+  type PresencePoint,
+} from "../lib/replay.ts"
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
 const results = $<HTMLDivElement>("results")
@@ -16,6 +23,7 @@ const nagCountEl = $<HTMLElement>("nagCount")
 const chart = $<HTMLCanvasElement>("chart")
 
 let observes: ObserveRecord[] = []
+let presence: PresencePoint[] = []
 
 const TAUS: number[] = []
 for (let t = 0.45; t <= 0.751; t += 0.02) TAUS.push(Math.round(t * 100) / 100)
@@ -39,6 +47,7 @@ function parseJsonl(text: string): KibitzerEvent[] {
 
 function load(events: KibitzerEvent[], label: string): void {
   observes = extractObserves(events)
+  presence = extractPresence(events)
   const span = observes.length ? Math.round((observes.at(-1)!.ts - observes[0].ts) / 60_000) : 0
   srcEl.textContent = `${label} · 관측 ${observes.length}개 · ${span}분`
   if (observes.length === 0) {
@@ -66,7 +75,7 @@ function renderSweep(): void {
 function renderGauge(): void {
   const tau = Number(gaugeSlider.value)
   gTau.textContent = tau.toFixed(2)
-  const replay = replayGauge(observes, tau, null)
+  const replay = replayGauge(observes, tau, null, presence)
   nagCountEl.textContent = String(replay.nagCount)
   drawChart(replay.series, replay.nagTimes)
 }

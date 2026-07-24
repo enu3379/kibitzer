@@ -156,6 +156,15 @@ async function ensureHeartbeat(): Promise<void> {
  *  system-wide (idle stays "active" while the user works in another app), so the gauge
  *  must also require Chrome to be the focused window — otherwise S drains and nags fire
  *  while Chrome is off-screen. Unknown → assume present (never over-suppress). */
+// Log presence TRANSITIONS (active↔inactive) to the event store — sparse, so replay can
+// reconstruct real idle/focus time instead of assuming presence through every gap (B7).
+let lastPresence: boolean | null = null
+function notePresence(present: boolean): void {
+  if (present === lastPresence) return
+  lastPresence = present
+  logEvent("presence", { present })
+}
+
 async function browserPresent(): Promise<boolean> {
   try {
     const win = await chrome.windows.getLastFocused()
@@ -216,12 +225,14 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     if (!goal) return
     // Only drain while Chrome is focused and the user is active; otherwise pause.
     const present = await browserPresent()
+    notePresence(present)
     await dispatch({ type: present ? "heartbeat" : "inactive", ts: Date.now() }, goal)
   })
 })
 
 chrome.idle.setDetectionInterval(60)
 chrome.idle.onStateChanged.addListener((state) => {
+  notePresence(state === "active")
   void getGoal().then(async (goal) => {
     if (!goal) return
     if (state === "active") return observeActiveTab()
@@ -235,9 +246,11 @@ chrome.idle.onStateChanged.addListener((state) => {
 // Chrome losing OS focus (user switched to another app) pauses the gauge; regaining it
 // re-observes the active tab. Complements the system-wide idle signal above.
 chrome.windows.onFocusChanged.addListener((windowId) => {
+  const lostFocus = windowId === chrome.windows.WINDOW_ID_NONE
+  notePresence(!lostFocus)
   void getGoal().then(async (goal) => {
     if (!goal) return
-    if (windowId === chrome.windows.WINDOW_ID_NONE) {
+    if (lostFocus) {
       await dwell.cancel() // focus lost mid-dwell: the glance never earned a judgement
       await dispatch({ type: "inactive", ts: Date.now() }, goal)
       return

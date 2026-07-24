@@ -9,7 +9,7 @@
 
 import { readFileSync } from "node:fs"
 
-import { extractObserves, replayGauge, tauSweep } from "../src/lib/replay.ts"
+import { extractObserves, extractPresence, replayGauge, tauSweep } from "../src/lib/replay.ts"
 import type { KibitzerEvent } from "../src/lib/events.ts"
 
 function parseJsonl(text: string): KibitzerEvent[] {
@@ -55,6 +55,7 @@ const availableMinutes = process.argv[3] ? Number(process.argv[3]) : null
 
 const events = parseJsonl(readFileSync(path, "utf8"))
 const observes = extractObserves(events)
+const presence = extractPresence(events)
 
 console.log(`\nKibitzer replay — ${path}`)
 console.log(`events: ${events.length}   observations (scored): ${observes.length}`)
@@ -81,7 +82,7 @@ console.log("  (* = current default; flips = Tier-0 verdict differs from the rec
 
 console.log("\ngauge re-run (degraded, LLM-free) — nags per tau")
 for (const tau of [0.5, 0.55, 0.59, 0.65, 0.7]) {
-  const r = replayGauge(observes, tau, availableMinutes)
+  const r = replayGauge(observes, tau, availableMinutes, presence)
   console.log(`tau ${tau.toFixed(2)}: ${String(r.nagCount).padStart(3)} nags   S ${sparkline(r.series)}`)
 }
 console.log("")
