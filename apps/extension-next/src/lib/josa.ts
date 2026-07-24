@@ -27,7 +27,9 @@ const LATIN_RIEUL = new Set(["l", "r"])
  *  skipping trailing quotes/punctuation. Null when no such char exists — callers
  *  should then leave the template's particle as written. */
 export function wordEnding(value: string): WordEnding | null {
-  const chars = Array.from(value)
+  // NFC first: decomposed Hangul (NFD, e.g. from macOS file names) is conjoining
+  // jamo that would fall outside the precomposed-syllable range below.
+  const chars = Array.from(value.normalize("NFC"))
   for (let i = chars.length - 1; i >= 0; i -= 1) {
     const ch = chars[i]
     const cp = ch.codePointAt(0) ?? 0

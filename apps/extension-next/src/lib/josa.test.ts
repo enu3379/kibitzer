@@ -26,6 +26,16 @@ test("wordEnding maps Latin letters by their Korean letter names", () => {
   assert.deepEqual(wordEnding("gmail"), { batchim: true, rieul: true }) // 엘
 })
 
+test("wordEnding treats NFD-decomposed Hangul like NFC", () => {
+  assert.deepEqual(wordEnding("뉴스 보기".normalize("NFD")), { batchim: false, rieul: false })
+  assert.deepEqual(wordEnding("리포트 작성".normalize("NFD")), { batchim: true, rieul: false })
+  assert.deepEqual(wordEnding("서울".normalize("NFD")), { batchim: true, rieul: true })
+  assert.deepEqual(resolveJosa("뉴스보기".normalize("NFD"), "이 안 보인다"), {
+    particle: "가",
+    consumed: 1,
+  })
+})
+
 test("wordEnding is null without a sound-bearing char", () => {
   assert.equal(wordEnding(""), null)
   assert.equal(wordEnding("?!…"), null)
