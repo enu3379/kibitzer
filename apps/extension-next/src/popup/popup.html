@@ -27,6 +27,8 @@
       button { width: 100%; padding: 9px; border: 0; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer; }
       #set { background: #1e7a4c; color: #fff; }
       .ghost { background: transparent; color: #888; border: 1px solid #8884; padding: 7px; font-weight: 500; margin-top: 8px; }
+      .ghost.danger { color: #d1495b; border-color: #d1495b44; }
+      .row button { flex: 1; }
     </style>
   </head>
   <body>
@@ -38,8 +40,11 @@
       <div class="mode" id="mode"></div>
       <div class="mode" id="personaActive"></div>
       <div class="hint err" id="providerWarn" hidden></div>
-      <button id="edit" class="ghost">목표 변경</button>
-      <button id="openSettings" class="ghost">설정 · 말투 · AI 판정</button>
+      <div class="row">
+        <button id="edit" class="ghost">목표 변경</button>
+        <button id="end" class="ghost danger">종료하기</button>
+      </div>
+      <button id="openSettings" class="ghost">설정</button>
     </div>
 
     <div id="setup" hidden>
@@ -50,7 +55,7 @@
       <button id="set">시작</button>
       <div class="hint">목표를 선언하면 흐름이 어긋날 때만 조용히 알려드려요.</div>
       <div class="hint">목표에 "알림보기"를 넣으면 토스트가 바로 떠요 (테스트용).</div>
-      <button id="openSettings2" class="ghost">설정 · 말투 · AI 판정 열기</button>
+      <button id="openSettings2" class="ghost">설정</button>
     </div>
 
     <script type="module" src="popup.js"></script>

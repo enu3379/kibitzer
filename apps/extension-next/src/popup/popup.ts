@@ -22,6 +22,7 @@ const goalInput = document.getElementById("goal") as HTMLInputElement
 const minutesInput = document.getElementById("minutes") as HTMLInputElement
 const startButton = document.getElementById("set") as HTMLButtonElement
 const editButton = document.getElementById("edit") as HTMLButtonElement
+const endButton = document.getElementById("end") as HTMLButtonElement
 
 let current: StateResponse | null = null
 
@@ -96,6 +97,10 @@ startButton.addEventListener("click", async () => {
 })
 
 editButton.addEventListener("click", showSetup)
+endButton.addEventListener("click", async () => {
+  await chrome.runtime.sendMessage({ type: "set-goal", goal: "", minutes: null })
+  render(await getState())
+})
 for (const id of ["openSettings", "openSettings2"]) {
   document.getElementById(id)?.addEventListener("click", () => chrome.runtime.openOptionsPage())
 }
