@@ -1,5 +1,31 @@
 # Progress
 
+## 2026-07-20 Runtime build/version stamps across server, extension, menubar
+
+Completed:
+
+- Added `apps/server/app/build_info.py`; `/health` and `/identity` now report
+  `version`, `git_commit` (short hash, `+dirty` on uncommitted tracked
+  changes), and `started_at` so a stale server process is diagnosable without
+  inspecting the machine. Falls back to `git_commit: null` outside a git
+  checkout (packaged builds).
+- Extension build injects build time and commit via esbuild define
+  (`src/lib/buildInfo.ts`); the popup dashboard shows an
+  `extension vX (commit) · build time · server vX (commit)` footer.
+- `scripts/macos_build_menu_bar.sh` generates `build/BuildInfo.swift` and the
+  menu bar app shows both its own build stamp and the server's version/commit/
+  start time (this would have made the 07-20 stale-binary red-dot incident a
+  one-glance diagnosis). Windows tray parity is a follow-up.
+
+Verified:
+
+- `python -m pytest apps/server/tests -q` passes (323 tests, 1 skipped, 56
+  subtests) including new `test_build_info.py`.
+- `npm run build` in `apps/extension` passes; bundle contains the injected
+  build stamp.
+- `bash scripts/macos_build_menu_bar.sh` builds, and the single-file
+  `swiftc KibitzerMenuBar.swift` fallback still compiles with a `dev` stamp.
+
 ## 2026-07-18 Tier 2 red-team artifact preservation
 
 Completed:

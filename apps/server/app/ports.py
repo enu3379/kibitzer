@@ -12,6 +12,7 @@ from typing import Any
 from urllib.request import urlopen
 from uuid import uuid4
 
+from .build_info import build_info
 from .runtime_paths import RuntimePaths, resolve_runtime_paths
 from .server_lifecycle import (
     make_control_record,
@@ -35,11 +36,12 @@ class PortSelectionError(RuntimeError):
         super().__init__(f"No Kibitzer port available. Attempted: {attempted}. {details}")
 
 
-def identity_payload(instance_id: str) -> dict[str, str | int]:
+def identity_payload(instance_id: str) -> dict[str, str | int | None]:
     return {
         "service": SERVICE_NAME,
         "protocol_version": PROTOCOL_VERSION,
         "instance_id": instance_id,
+        **build_info(),
     }
 
 

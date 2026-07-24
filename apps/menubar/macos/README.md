@@ -32,3 +32,8 @@ bash scripts/macos_run_menu_bar.sh
 If Swift reports an unsupported SDK/compiler mismatch, update or reinstall Xcode
 Command Line Tools. The build script keeps Swift module cache output under
 `apps/menubar/macos/build/` so normal builds do not write outside the repo.
+
+The build script also generates `build/BuildInfo.swift` (version, git commit,
+build time) so the menu can show which binary and which server code is actually
+running — rebuild after pulling to keep the stamp current. Compiling
+`KibitzerMenuBar.swift` alone still works and falls back to a `dev` stamp.

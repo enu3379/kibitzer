@@ -33,6 +33,7 @@ import {
   ExplorationVerdict,
   loadExplorationHistory,
 } from "../lib/history"
+import { extensionBuildInfo } from "../lib/buildInfo"
 import { providerFailureDiagnostics } from "../lib/providerFailureDiagnostics"
 import { completeDashboardSnapshot } from "./dashboardSnapshot"
 import type { DashboardSnapshot } from "./dashboardSnapshot"
@@ -552,6 +553,29 @@ async function submitPageLabel(page: LatestObservation, label: PageLabel): Promi
   await refresh()
 }
 
+function formatBuildTime(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  const pad = (value: number) => String(value).padStart(2, "0")
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+// Which build of the extension and which server code is actually running —
+// a stale unpacked bundle or a server started before the last edit is
+// otherwise invisible (the popup always "looks" current).
+function versionFooterHtml(health: HealthStatus | null): string {
+  const build = extensionBuildInfo()
+  let extensionPart = `확장 v${chrome.runtime.getManifest().version}`
+  if (build.commit) extensionPart += ` (${build.commit})`
+  if (build.builtAt) extensionPart += ` · 빌드 ${formatBuildTime(build.builtAt)}`
+  let serverPart = "서버 정보 없음"
+  if (health?.version) {
+    serverPart = `서버 v${health.version}`
+    if (health.git_commit) serverPart += ` (${health.git_commit})`
+  }
+  return `<p class="buildinfo">${esc(extensionPart)} · ${esc(serverPart)}</p>`
+}
+
 function renderDashboard(
   state: SessionState,
   goalText: string,
@@ -656,7 +680,8 @@ function renderDashboard(
     <div class="btn-row">
       <button id="snooze-toggle" class="btn"${dis}>${snoozed ? "지금 재개" : "30분 조용히"}</button>
       <button id="session-end" class="btn"${dis}>세션 종료</button>
-    </div>`
+    </div>
+    ${versionFooterHtml(offline ? null : health)}`
 
   if (pending) {
     const bindFeedback = (id: string, kind: FeedbackKind) => {
