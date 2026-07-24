@@ -6,9 +6,10 @@ browsing, judges relevance on-device (a local KoEn-E5 embedding + optional Ollam
 judges), and only speaks up — a non-blocking in-page toast — when drift from the goal
 accumulates.
 
-This is the serverless successor to `apps/extension` + `apps/server`. It runs entirely in
-the browser: all session state, history, learning, and the event log live in the
-extension's own IndexedDB. At cutover it replaces both older apps.
+This is the serverless successor to the former Python server + relay extension. It runs
+entirely in the browser: all session state, history, learning, and the event log live in
+the extension's own IndexedDB. The cutover is complete — this is the product; the legacy
+apps have been removed from the working tree and are preserved on the `dev-legacy` branch.
 
 ## Prerequisites
 
@@ -106,14 +107,22 @@ tools/replay.ts       Node CLI replay
 dist/                 build output — this is what you load unpacked (git-ignored)
 ```
 
-## Status — work in progress, **not cutover-ready**
+## Status
 
-The pure decision core (gauge reducer/config, Tier-1/2 prompts, KoEn-E5 model, personas)
-is ported and byte-parity, and the P0–P3 wiring in `docs/migration-gap-analysis.md` is
-landed. But a 2026-07-24 runtime audit found **release-blocking behavioural gaps** the
-build (green) does not catch — MV3 worker-teardown recovery (no atomic effect outbox,
-non-persistent dwell timer), async races applying stale verdicts to the current page, a
-privacy regression in the page key (raw host+path, drops query/fragment, unhashed), an
-incomplete delete-all, and a missing `incognito` guard. These are tracked as **Cutover
-blockers** in `docs/migration-gap-analysis.md` and must be fixed before `apps/extension` /
-`apps/server` are deleted. Treat this build as a testable preview, not a replacement.
+Cutover is complete: this extension is the product, and the legacy server + relay
+extension have been deleted from the working tree (preserved on `dev-legacy`). The pure
+decision core (gauge reducer/config, Tier-1/2 prompts, KoEn-E5 model, personas) is ported
+byte-parity, the P0–P3 wiring in `docs/migration-gap-analysis.md` landed, and the
+release-blocking behavioural gaps from the 2026-07-24 runtime audit (B1–B6/B9) are fixed
+and merged: a durable effect outbox and persistent dwell timer for MV3 worker-teardown
+recovery, verdict-generation guards against stale-page races, a hashed page key, a
+complete delete-all, and an `incognito` guard. The trajectory anchor is disabled by
+default (`ANCHOR_WINDOW=0`) with O4-recalibrated floors
+(`docs/results-2026-07-24-anchor-floor-o4.md`), and an E2E background test now covers the
+observe→judge→deliver loop.
+
+Remaining follow-ups are tracked as issues rather than blockers:
+
+- **#135** — port the judgment-review dashboard.
+- **#136** — port the Tier-0 OK audit routing.
+- B7/B8 tails from `docs/migration-gap-analysis.md`.
