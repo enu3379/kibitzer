@@ -2279,8 +2279,16 @@ class SQLiteStore:
         verdict: str,
         reason: str,
         ts: datetime | None = None,
+        audit: dict[str, Any] | None = None,
     ) -> None:
         now = ts or _utc_now()
+        payload: dict[str, Any] = {
+            "observation_id": observation_id,
+            "verdict": verdict,
+            "reason": reason,
+        }
+        if audit:
+            payload["audit"] = audit
         with self._connect() as conn:
             self._ensure_schema(conn)
             conn.execute(
@@ -2291,11 +2299,7 @@ class SQLiteStore:
                 conn,
                 session_id,
                 "tier1.classified",
-                {
-                    "observation_id": observation_id,
-                    "verdict": verdict,
-                    "reason": reason,
-                },
+                payload,
                 now,
             )
 
@@ -2307,6 +2311,35 @@ class SQLiteStore:
         phase: str,
         stage: str | None,
         ts: datetime | None = None,
+        audit: dict[str, Any] | None = None,
+    ) -> None:
+        now = ts or _utc_now()
+        payload: dict[str, Any] = {
+            "observation_id": observation_id,
+            "error_type": error_type,
+            "phase": phase,
+            "stage": stage,
+        }
+        if audit:
+            payload["audit"] = audit
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            self._append_event(
+                conn,
+                session_id,
+                "tier1.provider_error",
+                payload,
+                now,
+            )
+
+    def record_tier1_audit_reused(
+        self,
+        session_id: str,
+        observation_id: str,
+        source_observation_id: str,
+        verdict: str,
+        audit: dict[str, Any],
+        ts: datetime | None = None,
     ) -> None:
         now = ts or _utc_now()
         with self._connect() as conn:
@@ -2314,12 +2347,12 @@ class SQLiteStore:
             self._append_event(
                 conn,
                 session_id,
-                "tier1.provider_error",
+                "tier1.audit_reused",
                 {
                     "observation_id": observation_id,
-                    "error_type": error_type,
-                    "phase": phase,
-                    "stage": stage,
+                    "source_observation_id": source_observation_id,
+                    "verdict": verdict,
+                    "audit": audit,
                 },
                 now,
             )
@@ -3076,8 +3109,10 @@ class SQLiteStore:
         observation_id: str,
         label: str,
         exemplar_cap: int,
+        sync_exemplar: bool = True,
+        allow_exemplar: bool = True,
         ts: datetime | None = None,
-    ) -> tuple[PageLabelRecord, int | None]:
+    ) -> tuple[PageLabelRecord, int | None, bool]:
         now = ts or _utc_now()
         with self._connect() as conn:
             self._ensure_schema(conn)
@@ -3099,7 +3134,7 @@ class SQLiteStore:
                 and int(observation["goal_revision"]) == current_revision
             )
 
-            if label == "related":
+            if label == "related" and sync_exemplar and allow_exemplar:
                 features = json.loads(observation["features_json"])
                 emb = features.get("emb")
                 if not isinstance(emb, list) or not emb:
@@ -3130,11 +3165,13 @@ class SQLiteStore:
                     "observation_id": observation_id,
                     "label": label,
                     "previous_label": previous_label,
+                    "exemplar_sync": sync_exemplar,
+                    "exemplar_allowed": allow_exemplar if label == "related" else None,
                 },
                 now,
             )
 
-            if label == "related" and observation_is_current:
+            if label == "related" and observation_is_current and sync_exemplar:
                 self._cancel_active_intervention_candidates_for_observation_in_conn(
                     conn,
                     session_id,
@@ -3143,32 +3180,47 @@ class SQLiteStore:
                 )
 
             exemplar_count: int | None = None
-            if label == "related" and observation_is_current:
-                exemplar_count, exemplar_id = self._add_goal_exemplar_from_observation(
-                    conn,
-                    session_id,
-                    observation_id,
-                    exemplar_cap,
-                    now,
-                    features=features,
-                )
-                if exemplar_id:
-                    self._append_goal_exemplar_added_event(
+            exemplar_added = False
+            if label == "related" and observation_is_current and sync_exemplar:
+                if allow_exemplar:
+                    exemplar_count, exemplar_id = self._add_goal_exemplar_from_observation(
                         conn,
                         session_id,
                         observation_id,
-                        exemplar_id,
-                        exemplar_count,
                         exemplar_cap,
                         now,
+                        features=features,
                     )
-            elif label == "drift":
+                    exemplar_added = exemplar_id is not None
+                    if exemplar_id:
+                        self._append_goal_exemplar_added_event(
+                            conn,
+                            session_id,
+                            observation_id,
+                            exemplar_id,
+                            exemplar_count,
+                            exemplar_cap,
+                            now,
+                        )
+                else:
+                    # Low-quality-title guardrail: record the page fact but keep
+                    # generic/url_like/empty-titled pages out of the exemplar set.
+                    conn.execute(
+                        "DELETE FROM goal_exemplars WHERE session_id = ? AND observation_id = ?",
+                        (session_id, observation_id),
+                    )
+                    exemplar_count = self._goal_exemplar_count(conn, session_id)
+            elif label == "drift" and sync_exemplar:
                 conn.execute(
                     "DELETE FROM goal_exemplars WHERE session_id = ? AND observation_id = ?",
                     (session_id, observation_id),
                 )
 
-        return PageLabelRecord(id=label_id, observation_id=observation_id, label=label, ts=now), exemplar_count
+        return (
+            PageLabelRecord(id=label_id, observation_id=observation_id, label=label, ts=now),
+            exemplar_count,
+            exemplar_added,
+        )
 
     def cancel_active_intervention_candidates_for_observation(
         self,
@@ -3335,6 +3387,21 @@ class SQLiteStore:
         cap: int,
         ts: datetime | None = None,
     ) -> int:
+        count, _added = self.add_goal_exemplar_from_observation_with_result(
+            session_id,
+            observation_id,
+            cap,
+            ts,
+        )
+        return count
+
+    def add_goal_exemplar_from_observation_with_result(
+        self,
+        session_id: str,
+        observation_id: str,
+        cap: int,
+        ts: datetime | None = None,
+    ) -> tuple[int, bool]:
         now = ts or _utc_now()
         with self._connect() as conn:
             self._ensure_schema(conn)
@@ -3355,7 +3422,7 @@ class SQLiteStore:
                     cap,
                     now,
                 )
-        return count
+        return count, exemplar_id is not None
 
     def goal_exemplar_count(self, session_id: str) -> int:
         with self._connect() as conn:
@@ -3375,6 +3442,53 @@ class SQLiteStore:
                 ORDER BY ts ASC, id ASC
                 """,
                 (session_id,),
+            ).fetchall()
+        return [self._observation_from_row(row) for row in rows]
+
+    def host_verdicts_in_time_range(
+        self,
+        session_id: str,
+        start: datetime,
+        end: datetime,
+    ) -> list[tuple[str | None, str | None]]:
+        """(url_host, effective verdict) pairs for observations in [start, end].
+
+        Effective = the user's page label when present (D8), else the detector
+        verdict — mixed-host audit triggers should honor explicit user facts.
+        """
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                """
+                SELECT observations.url_host,
+                       CASE page_labels.label
+                         WHEN 'related' THEN 'OK'
+                         WHEN 'drift' THEN 'DRIFT'
+                         ELSE observations.verdict
+                       END AS verdict
+                FROM observations
+                LEFT JOIN page_labels ON page_labels.observation_id = observations.id
+                WHERE observations.session_id = ?
+                  AND julianday(observations.ts) >= julianday(?)
+                  AND julianday(observations.ts) <= julianday(?)
+                ORDER BY observations.ts ASC, observations.id ASC
+                """,
+                (session_id, start.isoformat(), end.isoformat()),
+            ).fetchall()
+        return [(row["url_host"], row["verdict"]) for row in rows]
+
+    def observations_with_title(self, session_id: str, title: str) -> list[ObservationRecord]:
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                """
+                SELECT id, session_id, ts, source, url_host, url_path_hash, title, tab_id,
+                       features_json, verdict, tier_reached, tier1_reason, goal_revision
+                FROM observations
+                WHERE session_id = ? AND TRIM(COALESCE(title, '')) = ?
+                ORDER BY ts DESC, id DESC
+                """,
+                (session_id, title.strip()),
             ).fetchall()
         return [self._observation_from_row(row) for row in rows]
 

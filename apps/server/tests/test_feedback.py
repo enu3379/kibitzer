@@ -163,6 +163,32 @@ class FeedbackApiTest(unittest.TestCase):
         self.assertAlmostEqual(state["alignment_score"], 0.5 * 0.85 + 0.5 * float(later_r))
         self.assertEqual(state["obs_count"], 2)
 
+    def test_related_feedback_on_generic_title_records_without_exemplar(self) -> None:
+        client = self._client()
+        try:
+            session_id = self._start_goal(client)
+            notification = self._notify(client, "YouTube")
+            feedback = client.post(
+                "/feedback",
+                json={
+                    "kind": "related",
+                    "intervention_id": notification["intervention_id"],
+                    "observation_id": notification["observation_id"],
+                },
+            ).json()
+        finally:
+            client.__exit__(None, None, None)
+
+        self.assertFalse(feedback["duplicate"])
+        self.assertEqual(feedback["intervention_status"], "related")
+        self.assertFalse(feedback["exemplar_added"])
+        self.assertEqual(self.store.goal_exemplar_count(session_id), 1)
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            exemplar_events = conn.execute(
+                "SELECT COUNT(*) FROM event_log WHERE event_type = 'goal.exemplar_added'"
+            ).fetchone()[0]
+        self.assertEqual(exemplar_events, 0)
+
     def test_related_feedback_respects_exemplar_cap(self) -> None:
         client = self._client(exemplar_cap=2)
         try:

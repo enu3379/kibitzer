@@ -85,6 +85,22 @@ goal_enrichment:
   derived_tau: 0.25
   timeout_seconds: 20
 
+judgment_audit:
+  enabled: true
+  # Provisional ONNX-scale band (tau_ok 0.6 era): audits Tier-0 OKs whose r0
+  # sits in [tau_ok, audit_ok_below). The hash-era calibration was 0.35 under
+  # tau_ok 0.15. Benchmark-v2 sweep (bare onnx_score, 2026-07-20): all 10
+  # benchmark false-OKs sit in [0.61, 0.76]; 0.70 catches 8/10 via low_margin
+  # at 8/25 (32%) pre-reuse benchmark volume — the knee point. Enrichment
+  # lifts related scores above the band and per-page reuse cuts repeat cost,
+  # so live volume runs lower. Final calibration on the private corpus replay
+  # (docs/handoff-audit-routing.md, re-implementation note 2).
+  audit_ok_below: 0.7
+  audit_low_quality_titles: true
+  audit_mixed_hosts: true
+  mixed_host_window_minutes: 10
+  risk_hosts: []
+
 controller:
   type: "streak"
   k: 3

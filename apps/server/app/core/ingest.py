@@ -14,6 +14,7 @@ from ..storage.sqlite import (
     ReturnCandidateRecord,
     SQLiteStore,
 )
+from .audit_routing import choose_audit_trigger, host_family
 from .controller_flow import apply_controller
 from .normalization import (
     browser_nav_embedding_text,
@@ -26,6 +27,7 @@ from .relevance import (
     tier0_score_parts,
     tier1_final_relevance,
 )
+from .title_quality import classify_title, is_low_quality_title
 from .runtime_resources import RuntimeResources
 from .runtime_settings import effective_controller_config, quiet_hours_active, runtime_settings
 from .tier1_payload import build_tier1_payload
@@ -70,6 +72,8 @@ async def ingest_browser_nav(
             browser_nav_embedding_text(observation),
             store.recent_titles_for_host(str(observation.payload.get("url_host") or "")),
         )
+        title_quality = classify_title(embedding_text)
+        observation.features.title_quality = title_quality
         vectors = await runtime.embedding_provider().embed([embedding_text])
         observation.features.emb = vectors[0]
         score = tier0_score_parts(
@@ -94,7 +98,57 @@ async def ingest_browser_nav(
             Verdict.OK if observation.features.r0 >= tau_ok else Verdict.DRIFT
         )
         tier1_provider = runtime.tier1_provider()
-        if observation.verdict == Verdict.DRIFT and tier1_provider:
+        family = host_family(str(observation.payload.get("url_host") or ""))
+        audit_payload: dict[str, object] | None = None
+        if observation.verdict == Verdict.OK and tier1_provider:
+            audit_config = config.judgment_audit
+            audit_decision = choose_audit_trigger(
+                verdict=observation.verdict,
+                tier0_score=observation.features.r0,
+                title_quality=title_quality,
+                host_family=family,
+                host_family_verdicts=_host_family_verdicts(
+                    store,
+                    current.session.id,
+                    family,
+                    observation.ts,
+                    audit_config.mixed_host_window_minutes,
+                ),
+                config=audit_config,
+            )
+            if audit_decision.trigger:
+                observation.features.audit_trigger = audit_decision.trigger
+                audit_payload = {
+                    "trigger": audit_decision.trigger,
+                    "tier0_score": observation.features.r0,
+                }
+
+        cached_audit = None
+        if audit_payload:
+            cached_audit = _cached_audit_outcome(
+                store,
+                current.session.id,
+                family,
+                str(observation.payload.get("title") or ""),
+            )
+
+        if cached_audit is not None:
+            # Same (host family, title) was already audited this session: reuse
+            # the outcome instead of re-spending a Tier-1 call on a revisit.
+            observation.verdict = Verdict(cached_audit.verdict)
+            observation.features.r_final = tier1_final_relevance(observation.verdict)
+            observation.tier1_reason = cached_audit.tier1_reason
+            observation.features.tier_reached = 1
+            observation.features.audit_cached = True
+            store.record_tier1_audit_reused(
+                session_id=current.session.id,
+                observation_id=observation.id,
+                source_observation_id=cached_audit.id,
+                verdict=cached_audit.verdict,
+                audit=audit_payload,
+                ts=observation.ts,
+            )
+        elif tier1_provider and (observation.verdict == Verdict.DRIFT or audit_payload):
             store.set_observation_processing_stage(observation, captured_goal_revision, "tier1")
             recent = store.recent_observation_summaries(
                 current.session.id,
@@ -102,6 +156,8 @@ async def ingest_browser_nav(
                 captured_goal_revision,
             )
             payload = build_tier1_payload(current.goal, observation, recent, config.tier1)
+            if audit_payload:
+                payload["audit"] = audit_payload
             try:
                 result = await tier1_provider.classify_tier1(payload)
             except Exception as exc:
@@ -114,6 +170,7 @@ async def ingest_browser_nav(
                     phase="judge",
                     stage=exc.stage if isinstance(exc, ProviderResponseError) else None,
                     ts=observation.ts,
+                    audit=audit_payload,
                 )
             else:
                 runtime.record_provider_call_success(1)
@@ -127,17 +184,24 @@ async def ingest_browser_nav(
                     verdict=result.verdict.value,
                     reason=result.reason,
                     ts=observation.ts,
+                    audit=audit_payload,
                 )
         # Anchor admission guard: only pages with genuine goal affinity — direct
         # exemplar similarity, or an LLM-vetted OK — may steer the anchor. An OK
-        # that rode the anchor alone keeps its verdict but gets no vote.
-        observation.features.anchor_eligible = anchor_admission_eligible(
-            score,
-            has_derived_exemplars=bool(current.goal.derived_vectors),
-            anchor_epsilon=config.relevance.anchor_epsilon,
-            derived_tau=config.goal_enrichment.derived_tau,
-            verdict=observation.verdict,
-            tier_reached=observation.features.tier_reached,
+        # that rode the anchor alone keeps its verdict but gets no vote. Low-
+        # quality titles (generic/url_like/empty) never steer the anchor at all:
+        # their embeddings describe platform furniture, not the goal.
+        observation.features.anchor_eligible = (
+            False
+            if is_low_quality_title(title_quality)
+            else anchor_admission_eligible(
+                score,
+                has_derived_exemplars=bool(current.goal.derived_vectors),
+                anchor_epsilon=config.relevance.anchor_epsilon,
+                derived_tau=config.goal_enrichment.derived_tau,
+                verdict=observation.verdict,
+                tier_reached=observation.features.tier_reached,
+            )
         )
         store.record_observation(observation, goal_revision=captured_goal_revision)
     finally:
@@ -222,6 +286,47 @@ async def ingest_browser_nav(
         if celebration:
             return celebration
     return result
+
+
+def _host_family_verdicts(
+    store: SQLiteStore,
+    session_id: str,
+    family: str,
+    observed_at: datetime,
+    window_minutes: float,
+) -> set[Verdict]:
+    if not family:
+        return set()
+    cutoff = observed_at - timedelta(minutes=window_minutes)
+    verdicts: set[Verdict] = set()
+    for url_host, verdict in store.host_verdicts_in_time_range(session_id, cutoff, observed_at):
+        if host_family(url_host) != family:
+            continue
+        if verdict in {Verdict.OK.value, Verdict.DRIFT.value}:
+            verdicts.add(Verdict(verdict))
+    return verdicts
+
+
+def _cached_audit_outcome(
+    store: SQLiteStore,
+    session_id: str,
+    family: str,
+    title: str,
+) -> ObservationRecord | None:
+    normalized_title = title.strip()
+    if not family or not normalized_title:
+        return None
+    for prior in store.observations_with_title(session_id, normalized_title):
+        if host_family(prior.url_host) != family:
+            continue
+        if not prior.features.get("audit_trigger"):
+            continue
+        tier_reached = prior.features.get("tier_reached", prior.tier_reached)
+        if not isinstance(tier_reached, int) or tier_reached < 1:
+            continue
+        if prior.verdict in {Verdict.OK.value, Verdict.DRIFT.value}:
+            return prior
+    return None
 
 
 def observation_page_info(observation: Observation | ObservationRecord) -> PageInfo:

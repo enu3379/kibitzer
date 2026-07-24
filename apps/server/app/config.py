@@ -61,6 +61,17 @@ class GoalEnrichmentConfig(BaseModel):
     timeout_seconds: float = Field(default=20, gt=0)
 
 
+class JudgmentAuditConfig(BaseModel):
+    enabled: bool = True
+    # ONNX-scale provisional default (tau_ok 0.6 era); recalibrate on the
+    # private corpus replay when available — see handoff-audit-routing.md.
+    audit_ok_below: float = Field(default=0.7, ge=0.0, le=1.0)
+    audit_low_quality_titles: bool = True
+    audit_mixed_hosts: bool = True
+    mixed_host_window_minutes: float = Field(default=10, gt=0)
+    risk_hosts: list[str] = Field(default_factory=list)
+
+
 class Tier1SendConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -195,6 +206,7 @@ class AppConfig(BaseModel):
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     relevance: RelevanceConfig = Field(default_factory=RelevanceConfig)
     goal_enrichment: GoalEnrichmentConfig = Field(default_factory=GoalEnrichmentConfig)
+    judgment_audit: JudgmentAuditConfig = Field(default_factory=JudgmentAuditConfig)
     tier1: Tier1Config = Field(default_factory=Tier1Config)
     tier2: Tier2Config = Field(default_factory=Tier2Config)
     controller: ControllerConfig = Field(default_factory=ControllerConfig)
@@ -230,6 +242,7 @@ def load_config(
             "embedding",
             "relevance",
             "goal_enrichment",
+            "judgment_audit",
             "tier1",
             "tier2",
             "controller",

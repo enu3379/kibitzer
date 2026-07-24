@@ -77,12 +77,13 @@ async def submit_feedback(request: Request, feedback: FeedbackRequest) -> Feedba
     )
 
     exemplar_count: int | None = None
+    exemplar_added = False
     verdict = None
     snoozed_until = None
     status = intervention.status
 
     if feedback.kind == FeedbackKind.RELATED:
-        _page_label, exemplar_count, verdict = apply_page_label_override(
+        _page_label, exemplar_count, verdict, exemplar_added = apply_page_label_override(
             store,
             effective_controller_config(request.app.state.config, store),
             observation,
@@ -121,6 +122,7 @@ async def submit_feedback(request: Request, feedback: FeedbackRequest) -> Feedba
         intervention_status=status,
         verdict=verdict,
         exemplar_count=exemplar_count,
+        exemplar_added=exemplar_added,
         snoozed_until=snoozed_until,
     )
 

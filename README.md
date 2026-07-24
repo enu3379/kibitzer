@@ -123,6 +123,24 @@ Search runs are logged under `.llm-wiki/runs/search/`. The current operating
 mode keeps LLM Wiki API/MCP enabled for project lookup while Source Watch and
 auto-ingest stay disabled to avoid surprise LLM spend.
 
+## Local Judgment Review
+
+To inspect the complete Tier-0 → Tier-1 → Tier-2 judgment trail and apply
+page-fact labels across recorded sessions:
+
+```bash
+.venv/bin/python scripts/judgment_review.py
+```
+
+Then open `http://127.0.0.1:8799`. The tool reads the same SQLite database the
+app server uses (resolved via the shared runtime paths) and binds to loopback
+only; do not expose this port because titles and goals are private browsing
+data. Labels on the active session go through the Kibitzer app server so
+related-page exemplar learning and D8 verdict propagation stay consistent with
+the extension. Labels on past sessions are record-only page-facts
+(`sync_exemplar=False`) and never mutate historical exemplars or replay
+semantics. Use `--db`, `--port`, or `--app-server` to override the defaults.
+
 ## Current Status
 
 The Stage 0 loop is implemented end to end: sessions and declared goals,

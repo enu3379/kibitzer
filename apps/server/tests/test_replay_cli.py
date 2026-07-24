@@ -10,7 +10,7 @@ from unittest import mock
 
 from apps.server.tests.support import AlwaysNotifyTier2Provider, TestClient
 
-from apps.server.app.config import AppConfig, ControllerConfig, GoalEnrichmentConfig, ServerConfig, Tier1Config, Tier2Config
+from apps.server.app.config import AppConfig, ControllerConfig, GoalEnrichmentConfig, JudgmentAuditConfig, ServerConfig, Tier1Config, Tier2Config
 from apps.server.app.core.goal_enrichment import DerivedPhrase
 from apps.server.app.main import create_app
 from apps.server.app.providers.embeddings.hash_cpu import HashCpuEmbeddingProvider
@@ -67,6 +67,7 @@ class ReplayCliTest(unittest.TestCase):
                 enabled=False,
                 derived_tau=derived_tau,
             ),
+            judgment_audit=JudgmentAuditConfig(enabled=False),
             tier1=Tier1Config(enabled=tier1_enabled),
             tier2=Tier2Config(enabled=False),
             controller=ControllerConfig(k=1, coldstart_observations=1, cooldown_seconds=0),

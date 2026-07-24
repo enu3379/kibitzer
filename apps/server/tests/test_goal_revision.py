@@ -136,7 +136,7 @@ class GoalRevisionStoreTest(unittest.TestCase):
             ).fetchone()[0]
         self.assertEqual(attachment_count, 0)
 
-        _label, exemplar_count = self.store.record_page_label(
+        _label, exemplar_count, _added = self.store.record_page_label(
             self.session.id,
             ok.id,
             "related",

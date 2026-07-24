@@ -66,6 +66,9 @@ class LatestObservationFeatures(BaseModel):
     derived_score: float | None = None
     anchor_eligible: bool | None = None
     tier_reached: int | None = None
+    title_quality: str | None = None
+    audit_trigger: str | None = None
+    audit_cached: bool | None = None
 
 
 class LatestObservationResponse(BaseModel):
@@ -100,6 +103,7 @@ class PageLabelResponse(BaseModel):
     label: Literal["related", "drift"]
     verdict: Literal["OK", "DRIFT"] | None = None
     exemplar_count: int | None = None
+    exemplar_added: bool = False
 
 
 class ContentCaptureResponse(BaseModel):
@@ -227,7 +231,7 @@ async def label_observation(
         if not isinstance(emb, list) or not emb:
             raise HTTPException(status_code=400, detail="observation has no embedding")
 
-    page_label, exemplar_count, verdict = apply_page_label_override(
+    page_label, exemplar_count, verdict, exemplar_added = apply_page_label_override(
         store,
         effective_controller_config(request.app.state.config, store),
         observation,
@@ -247,6 +251,7 @@ async def label_observation(
         label=body.label,
         verdict=verdict,
         exemplar_count=exemplar_count,
+        exemplar_added=exemplar_added,
     )
 
 
@@ -343,6 +348,9 @@ def _latest_observation_response(
             derived_score=features.get("derived_score"),
             anchor_eligible=features.get("anchor_eligible"),
             tier_reached=features.get("tier_reached", observation.tier_reached),
+            title_quality=features.get("title_quality"),
+            audit_trigger=features.get("audit_trigger"),
+            audit_cached=features.get("audit_cached"),
         ),
         tier1_reason=observation.tier1_reason,
         tau_ok=features.get("tau_ok", tau_ok),

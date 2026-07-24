@@ -54,6 +54,7 @@ export interface FeedbackResult {
   intervention_status: string
   verdict?: "OK" | "DRIFT" | null
   exemplar_count?: number | null
+  exemplar_added?: boolean
   snoozed_until?: string | null
 }
 
@@ -66,6 +67,9 @@ export interface LatestObservationFeatures {
   derived_score?: number | null
   anchor_eligible?: boolean | null
   tier_reached?: number | null
+  title_quality?: string | null
+  audit_trigger?: string | null
+  audit_cached?: boolean | null
 }
 
 export interface LatestObservation {
@@ -96,6 +100,7 @@ export interface PageLabelResult {
   label: PageLabel
   verdict: "OK" | "DRIFT" | null
   exemplar_count?: number | null
+  exemplar_added?: boolean
 }
 
 export interface PendingIntervention {
