@@ -106,9 +106,14 @@ tools/replay.ts       Node CLI replay
 dist/                 build output — this is what you load unpacked (git-ignored)
 ```
 
-## Status
+## Status — work in progress, **not cutover-ready**
 
-Serverless migration is feature-complete for the core attention guard (P0–P2 and most of
-P3 in `docs/migration-gap-analysis.md`). Remaining P3 items — session analytics page
-(P3-3), SEO title-suffix stripping (P3-2), session pause (P3-8) — are enhancements, not
-blockers. `apps/extension` and `apps/server` remain until the cutover that deletes them.
+The pure decision core (gauge reducer/config, Tier-1/2 prompts, KoEn-E5 model, personas)
+is ported and byte-parity, and the P0–P3 wiring in `docs/migration-gap-analysis.md` is
+landed. But a 2026-07-24 runtime audit found **release-blocking behavioural gaps** the
+build (green) does not catch — MV3 worker-teardown recovery (no atomic effect outbox,
+non-persistent dwell timer), async races applying stale verdicts to the current page, a
+privacy regression in the page key (raw host+path, drops query/fragment, unhashed), an
+incomplete delete-all, and a missing `incognito` guard. These are tracked as **Cutover
+blockers** in `docs/migration-gap-analysis.md` and must be fixed before `apps/extension` /
+`apps/server` are deleted. Treat this build as a testable preview, not a replacement.

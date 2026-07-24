@@ -8,6 +8,29 @@ Legend — Effort: S(mall)/M(edium)/L(arge). "Blocked on SSOT" = needs the durab
 
 ---
 
+## ⚠️ Cutover blockers — 2026-07-24 runtime audit
+
+A behavioural audit of `fix/extension-next-wasm-csp` (independent of the P0–P3 sweep below) found defects that a green build does **not** catch. **These block deleting `apps/extension` / `apps/server`.** The P0–P3 tables that follow track feature *presence*; this table tracks behavioural *equivalence*. Fix in the recommended order (top-down).
+
+| # | Sev | Defect | Anchor |
+|---|-----|--------|--------|
+| B1 | Blocker | **No atomic effect outbox** — state is persisted before effects run; SW teardown between `saveState` and `deliver` loses a nag/celebration and can wedge `pendingTier2`. The P2-1 note deferred this ("rare"); the audit rejects that for cutover. | `src/lib/gaugeRuntime.ts:136` |
+| B2 | Blocker | **Stale async verdict applied to the current page** — slow Tier-0/1 results aren't re-checked against the now-active page; a DRIFT verdict for `old/page` nags on `new/page`. Guard needs page-key + goal-revision. | `src/background.ts:75`, `src/core/gauge/reducer.ts:151` |
+| B3 | Blocker | **Dwell timer is a plain `setTimeout`** — dies on MV3 worker teardown; the original recovered it via a persistent alarm (with tests). No equivalent here. | `src/background.ts:67` |
+| B4 | Blocker | **Privacy regression in page key** — `host+pathname`, unhashed, query/fragment dropped: `?q=one`/`?q=two` collide and raw `/users/<id>/secret` paths are stored. Original hashed the full location. | `src/lib/url.ts:5` |
+| B5 | Blocker | **Delete-all + incognito** — "delete all activity" keeps the goal and active-page title/host; original also cleared goal/session. Manifest is missing `incognito: not_allowed`. | `src/background.ts:288`, `src/lib/session.ts:3`, `manifest.json` |
+| B6 | High | **Feedback not at parity** — no explicit DRIFT label / current-page verdict card / pending-intervention; OS-notification buttons don't carry the `displayToken`, body-click isn't recorded `accepted`, and the in-memory token resets to 0 on SW restart (collision risk). | `src/background.ts:213`, `src/lib/gaugeRuntime.ts:290` |
+| B7 | High | **Replay is not the original's replay** — only re-thresholds stored scores over synthesized heartbeats; ignores real idle/focus, exemplar/anchor/enrichment learning, Tier-1 history, and the feedback timeline. A session with 39 min `inactive` replayed identically to an always-active one. | `src/lib/replay.ts:22` |
+| B8 | High | **Tier inputs reduced** — Tier-1 always gets empty recent-titles + derived-phrases; Tier-2 always gets empty recent-page-content and `tierReached` pinned to 0. | `src/lib/tier12.ts:113`, `src/lib/tier12.ts:205` |
+| B9 | High | **Negative time input** — popup accepts negative minutes (`parseInt("-5")` passes the `isFinite` check), poisoning gauge config with NaN. Also: if S hits 0 during snooze, the same page never re-nags after snooze ends. | `src/popup/popup.ts:86`, `src/core/gauge/config.ts:15` |
+| B10 | High | **Session UX missing** — end/pause/end-summary, daily & session reports, navigation history, and verdict correction are unimplemented (this doc's P3-3/P3-8 concede "next"). | `docs/migration-gap-analysis.md` P3-3 |
+
+Not equivalent yet but lower priority: SEO title-suffix strip (P3-2), custom persona, independent Tier-1/Tier-2 provider config, cooldown/dwell settings. **Confirmed intentional** architecture changes (not gaps): server lifecycle / port discovery / menubar-tray removal, A/B controller → S-gauge.
+
+**Verified parity (audit):** new `npm run build` 46/46 + typecheck + WASM inference + bundle; gauge reducer/config byte-identical; ONNX/WASM vectors, Ollama parser/prompt, key rotation, 10 personas, base sensitive-domain filter, toast clamp. Caveat: the 46 tests are almost all pure-function/provider tests — **no integration test exercises `background.ts` / `gaugeRuntime.ts` / IndexedDB / session / feedback / popup.** Porting the original's background integration tests is part of the fix.
+
+---
+
 ## P0 — Safety / cheap correctness ✅ DONE (commits `6c80109`, `2bc6ecb`, `42557f1`)
 
 | # | Gap | Status | Resolution |
