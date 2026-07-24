@@ -33,9 +33,24 @@ let lastObservedKey: string | null = null
 // (Sensitive pages are handled immediately, without waiting.) The scheduler keeps the
 // pending observation in the SSOT so a teardown mid-dwell is recovered on the next wake.
 const OBSERVE_DWELL_MS = 5000
+
+// Serialize judgements so two dwells that elapse close together (e.g. a slow Tier-1 rescue on
+// page A still running when page B's dwell fires) can't interleave their setActivePage /
+// dispatch / anchor-admit / recordObservation and pin the active page to the older one or lose
+// a read-modify-write. Judges run one at a time, in the order their dwells fired.
+let judgeChain: Promise<unknown> = Promise.resolve()
+function serializeJudge(fn: () => Promise<void>): Promise<void> {
+  const run = judgeChain.then(fn, fn)
+  judgeChain = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
+}
+
 const dwell = new DwellScheduler({
   dwellMs: OBSERVE_DWELL_MS,
-  judge: (pending) => judgeAndDispatch(pending.url, pending.title, pending.obsKey),
+  judge: (pending) => serializeJudge(() => judgeAndDispatch(pending.url, pending.title, pending.obsKey)),
 })
 
 /** Entry for every observation trigger (nav / activate / SPA). Debounces per page, pauses
@@ -121,8 +136,11 @@ async function enrichGoalDerived(goal: SessionGoal): Promise<void> {
   }
 }
 
-function ensureHeartbeat(): void {
-  void chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 1 })
+async function ensureHeartbeat(): Promise<void> {
+  // Create only if absent — re-`create`ing with the same name resets the period, which would
+  // delay the next heartbeat up to a full minute every time the goal is (re)declared.
+  const existing = await chrome.alarms.get(HEARTBEAT_ALARM)
+  if (!existing) await chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 1 })
 }
 
 /** True only when a Chrome window has OS focus AND the user is active. chrome.idle is
@@ -330,7 +348,7 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     // or is cleared.
     if (!goal || previous?.epoch !== goal.epoch) await resetState()
     logEvent("goal", { text: goal?.text ?? null, minutes: goal?.availableMinutes ?? null, revision: goal?.revision ?? null })
-    ensureHeartbeat()
+    void ensureHeartbeat()
     await dwell.cancel() // a pending dwell from the old goal must not judge under the new one
     if (goal) {
       lastObservedKey = null // re-judge the active page under the new goal

@@ -57,6 +57,36 @@ test("schedule replaces the checkpoint in place — no cancel-then-schedule gap"
   assert.equal((await checkpoint())?.obsKey, "b/y\nY")
 })
 
+test("title churn on the same page does not push the deadline out — the page still gets judged", async () => {
+  const clock = makeClock(1000)
+  const judged: string[] = []
+  const s = new DwellScheduler({
+    dwellMs: 5000,
+    judge: async (p) => void judged.push(p.obsKey),
+    now: () => clock.t,
+    ...noTimer,
+  })
+  await s.schedule("https://x.com/home", "(1) Home", "x.com/home\n(1) Home") // dueAt = 6000
+  clock.t = 3000
+  await s.schedule("https://x.com/home", "(2) Home", "x.com/home\n(2) Home") // notification counter churn
+  assert.equal((await checkpoint())?.dueAt, 6000, "same path keeps the original deadline")
+  clock.t = 4000
+  await s.schedule("https://x.com/home", "(3) Home", "x.com/home\n(3) Home")
+  assert.equal((await checkpoint())?.dueAt, 6000)
+  clock.t = 6000
+  await s.fire("x.com/home\n(3) Home")
+  assert.deepEqual(judged, ["x.com/home\n(3) Home"], "judged at the original deadline despite churn")
+})
+
+test("a genuinely different page (path) starts a fresh dwell", async () => {
+  const clock = makeClock(1000)
+  const s = new DwellScheduler({ dwellMs: 5000, judge: async () => {}, now: () => clock.t, ...noTimer })
+  await s.schedule("https://a/x", "X", "a/x\nX") // dueAt 6000
+  clock.t = 3000
+  await s.schedule("https://b/y", "Y", "b/y\nY") // different path → reset
+  assert.equal((await checkpoint())?.dueAt, 8000)
+})
+
 test("a superseding candidate cancels the stale dwell", async () => {
   const clock = makeClock(1000)
   const judged: string[] = []

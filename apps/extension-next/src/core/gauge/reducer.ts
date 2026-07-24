@@ -51,7 +51,7 @@ function accelTransition(
     }
     if (st.pendingTier2 == null && !snoozed(st, now)) {
       const requestId = st.tier2ReqSeq + 1;
-      effects.push({ type: "request_tier2", reason: "promotion", tier, pageKey: st.activePageKey as string });
+      effects.push({ type: "request_tier2", reason: "promotion", tier, pageKey: st.activePageKey as string, requestId });
       return {
         ...st,
         tier2ReqSeq: requestId,
@@ -92,7 +92,7 @@ function sZeroGate(st: GaugeState, config: GaugeConfig, effects: GaugeEffect[], 
     st.pendingTier2 != null && st.pendingTier2.reason === "s_zero" && st.pendingTier2.pageKey === st.activePageKey;
   if (!alreadySZero) {
     const requestId = st.tier2ReqSeq + 1;
-    effects.push({ type: "request_tier2", reason: "s_zero", tier: st.accelTier, pageKey });
+    effects.push({ type: "request_tier2", reason: "s_zero", tier: st.accelTier, pageKey, requestId });
     return {
       ...st,
       tier2ReqSeq: requestId,

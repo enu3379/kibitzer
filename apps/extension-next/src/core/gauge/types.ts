@@ -84,7 +84,10 @@ export type GaugeEvent =
 
 /** GaugeEffect — contract §4 (intents; shadow mode records but does not act). */
 export type GaugeEffect =
-  | { type: "request_tier2"; reason: Tier2Reason; tier: number; pageKey: string }
+  // requestId ties this effect to the exact pendingTier2 slot it opened. Two request_tier2
+  // effects can be emitted in ONE reduce (promotion then s_zero, which overwrites the slot);
+  // each must carry its OWN id so the wiring doesn't tag both with the final slot's id.
+  | { type: "request_tier2"; reason: Tier2Reason; tier: number; pageKey: string; requestId: number }
   | { type: "nag"; pageKey: string }
   | { type: "celebrate" };
 

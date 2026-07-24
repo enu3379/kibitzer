@@ -119,9 +119,19 @@ export async function addExemplar(vec: number[]): Promise<void> {
   await kvSet(EXEMPLAR_KEY, log.slice(-EXEMPLAR_CAP))
 }
 
-/** Admit an OK page's embedding into the recency anchor window (capped). */
+function sameVec(a: readonly number[], b: readonly number[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false
+  return true
+}
+
+/** Admit an OK page's embedding into the recency anchor window (capped). Idempotent against
+ *  an immediate re-admit of the same vector — a durable dwell is at-least-once, so a
+ *  teardown-then-reconcile can re-judge the same page; without this it would double-weight
+ *  that page in the anchor mean and burn two of ANCHOR_WINDOW slots. */
 export async function admitAnchor(vec: number[]): Promise<void> {
   const log = await readVecs(ANCHOR_KEY)
+  if (log.length > 0 && sameVec(log[log.length - 1], vec)) return
   log.push(vec)
   await kvSet(ANCHOR_KEY, log.slice(-ANCHOR_WINDOW))
 }

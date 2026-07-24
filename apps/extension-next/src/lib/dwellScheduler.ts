@@ -10,6 +10,13 @@ import { dwellDecision, type PendingDwell } from "./dwell.ts"
 
 export const PENDING_DWELL_KEY = "pending-dwell"
 
+/** The host+path portion of an obsKey (`pageKey + "\n" + title`) — the page identity that a
+ *  title change does not alter. */
+function pathOf(obsKey: string): string {
+  const nl = obsKey.indexOf("\n")
+  return nl === -1 ? obsKey : obsKey.slice(0, nl)
+}
+
 export interface DwellSchedulerOptions {
   dwellMs: number
   judge: (pending: PendingDwell) => Promise<void>
@@ -46,12 +53,18 @@ export class DwellScheduler {
     this.timer = null
   }
 
-  /** Checkpoint a new candidate observation and arm the dwell. Overwrites any prior pending
-   *  (a new candidate cancels the previous page's dwell — it never counted). */
+  /** Checkpoint a candidate observation and arm the dwell. A candidate on the SAME page
+   *  (same host+path) as the current checkpoint keeps the existing deadline — only the
+   *  title/url are refreshed — so title churn (notification counters like "(3) Home") or a
+   *  storm of duplicate events can't keep pushing the deadline out and starve the judge. A
+   *  genuinely new page (different path) starts a fresh dwell. */
   async schedule(url: string, title: string, obsKey: string): Promise<void> {
-    await kvSet(PENDING_DWELL_KEY, { url, title, obsKey, dueAt: this.now() + this.opts.dwellMs })
+    const existing = await kvGet<PendingDwell>(PENDING_DWELL_KEY)
+    const samePage = existing != null && pathOf(existing.obsKey) === pathOf(obsKey)
+    const dueAt = samePage ? existing.dueAt : this.now() + this.opts.dwellMs
+    await kvSet(PENDING_DWELL_KEY, { url, title, obsKey, dueAt })
     this.disarm()
-    this.arm(() => void this.fire(obsKey), this.opts.dwellMs)
+    this.arm(() => void this.fire(obsKey), Math.max(0, dueAt - this.now()))
   }
 
   /** Cancel any pending dwell (navigated away / went idle / lost focus). */

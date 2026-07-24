@@ -18,7 +18,7 @@ import { getSettings, inQuietHours } from "./settings.ts"
 import { pageKeyOf } from "./url.ts"
 import { extractPageExcerpt } from "../content/pageExcerpt.ts"
 import { updateBadge } from "./badge.ts"
-import { deleteRecord, drainRecords, kvGet, kvPutAndAppend, kvSet, kvWriteAndClear, OUTBOX_STORE } from "./db.ts"
+import { deleteRecord, drainRecords, kvDeleteIf, kvGet, kvPutAndAppend, kvSet, kvWriteAndClear, OUTBOX_STORE } from "./db.ts"
 import { logEvent } from "./events.ts"
 import { clearRelevance } from "./relevance.ts"
 import {
@@ -101,9 +101,14 @@ export function resetState(): Promise<void> {
   // the gauge state, drift clock, staged Writer message, and queued effects in ONE
   // transaction — a half-applied reset could otherwise revive stale state or effects.
   return enqueue(async () => {
+    // Preserve the monotonic Tier-2 request counter across the reset so a requestId is never
+    // REUSED: an in-flight (zombie) job from before the reset would otherwise collide with a
+    // fresh request that got the same id and wrongly cancel/apply to it.
+    const prev = await loadState()
+    const fresh = { ...initGaugeState(), tier2ReqSeq: prev.tier2ReqSeq }
     await kvWriteAndClear(
       [
-        { key: STATE_KEY, value: initGaugeState() },
+        { key: STATE_KEY, value: fresh },
         { key: DRIFT_SINCE_KEY, value: null },
       ],
       [PENDING_WRITER_KEY],
@@ -179,7 +184,9 @@ async function runEvent(event: GaugeEvent, goal: SessionGoal | null, state: Gaug
       writerMessage = await readWriterFor(effect.pageKey)
       if (writerMessage != null) kvDeletes.push(PENDING_WRITER_KEY)
     }
-    const requestId = effect.type === "request_tier2" ? transition.state.pendingTier2?.requestId : undefined
+    // Read the id off the EFFECT, not final state: a promotion+s_zero in one reduce leaves
+    // pendingTier2 as the s_zero's slot, so final state would mis-tag the promotion record.
+    const requestId = effect.type === "request_tier2" ? effect.requestId : undefined
     entries.push({ effect, goal, ts: event.ts, writerMessage, requestId })
   }
   await persistStateAndOutbox(transition.state, entries, kvDeletes)
@@ -273,6 +280,15 @@ function dispatchTier2(
     }
     if (flow === "drift" && message) await setPendingWriter(token.pageKey, message)
     await runEvent({ type: "tier2_result", flow, pageKey: token.pageKey, ts: Date.now() }, goal, state)
+    // Drop the staged text if no nag consumed it this tick (promotion-drift escalates without
+    // nagging; a snoozed page emits none) so it can't attach to a later/different nag.
+    if (flow === "drift" && message) {
+      await kvDeleteIf(
+        PENDING_WRITER_KEY,
+        (v) => (v as { pageKey?: string; message?: string })?.pageKey === token.pageKey &&
+          (v as { message?: string })?.message === message,
+      )
+    }
   })
 }
 

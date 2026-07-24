@@ -14,11 +14,10 @@
 const DB_NAME = "kibitzer"
 const DB_VERSION = 3
 const KV_STORE = "kv"
-// Runtime kv keys reset by the v3 migration (owned by gaugeRuntime/background; listed here
-// because a versionchange transaction can't import them). Pre-closure code could leave a
-// Tier-2 request wedged in pendingTier2 with no serviceable outbox record; a clean reset is
-// safe pre-release (no user data to preserve).
-const RUNTIME_KV_KEYS = ["gauge-state", "drift-since", "active-page", "pending-writer", "pending-dwell"]
+// Runtime kv keys the v3 migration touches (owned by gaugeRuntime; named here because a
+// versionchange transaction can't import them).
+const GAUGE_STATE_KEY = "gauge-state"
+const PENDING_WRITER_KEY = "pending-writer"
 export const OBS_STORE = "observations"
 export const EVENT_STORE = "events"
 export const OUTBOX_STORE = "outbox"
@@ -38,14 +37,31 @@ function open(): Promise<IDBDatabase> {
           store.createIndex("ts", "ts", { unique: false })
         }
       }
-      // v3: drop any legacy runtime state + queued effects (see RUNTIME_KV_KEYS) so a
-      // pre-closure wedged pendingTier2 can't survive the upgrade. Skipped on fresh installs.
+      // v3: pre-closure code (early-ACK) could leave a Tier-2 request wedged in
+      // pendingTier2 with no serviceable outbox record — permanently stalling promotion.
+      // Surgically release the wedge (null pendingTier2, ensure the new tier2ReqSeq counter
+      // is numeric) and drop the incompatible legacy outbox + staged Writer text, but PRESERVE
+      // the user's gauge progress (S/m/accelTier/drift/active page). Skipped on fresh installs.
       const upgradeTx = request.transaction
       if (event.oldVersion >= 1 && event.oldVersion < 3 && upgradeTx) {
         upgradeTx.objectStore(OUTBOX_STORE).clear()
         const kv = upgradeTx.objectStore(KV_STORE)
-        for (const key of RUNTIME_KV_KEYS) kv.delete(key)
+        kv.delete(PENDING_WRITER_KEY)
+        const getState = kv.get(GAUGE_STATE_KEY)
+        getState.onsuccess = () => {
+          const state = getState.result as Record<string, unknown> | undefined
+          if (state && typeof state === "object") {
+            state.pendingTier2 = null
+            if (typeof state.tier2ReqSeq !== "number") state.tier2ReqSeq = 0
+            kv.put(state, GAUGE_STATE_KEY) // same still-active versionchange transaction
+          }
+        }
       }
+    }
+    request.onblocked = () => {
+      // Another open connection is holding the old version. db.ts connections self-close via
+      // onversionchange below, so this resolves; log for the rare foreign-connection case.
+      console.warn("[kibitzer] IndexedDB upgrade blocked by another open connection")
     }
     request.onsuccess = () => {
       const db = request.result
