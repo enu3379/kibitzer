@@ -173,3 +173,52 @@ test("E2E: a sensitive page is dropped — never judged, no drain, no nag (P0-1 
     mock.timers.reset()
   }
 })
+
+test("E2E: drifting, then navigating to a new page freezes S — no drain on the page just left", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    // Fresh session on a clearly off-goal page (a distinct goal → resetState wipes scenario 2).
+    activeTab = { id: 3, url: "https://video.test/watch?v=cat", title: "귀여운 고양이 영상 몰아보기", active: true }
+    await send({ type: "set-goal", goal: "파이썬 알고리즘 문제 풀이", minutes: null })
+    await settle(50)
+
+    // Judge the off-goal page → DRIFT (advance the clock past the dwell, reconcile does the judge).
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+
+    // Drain a while on the drifting page — stop well before 0 so the freeze below is non-trivial
+    // and can't be confused with S already bottoming out.
+    let drained = 100
+    for (let i = 0; i < 60 && drained > 50; i += 1) {
+      mock.timers.tick(60_000)
+      await fireHeartbeat()
+      await settle(0)
+      drained = (await send({ type: "get-state" })).s as number
+    }
+    assert.ok(drained > 0 && drained < 100, `the drift drained S off full but not to 0 (S=${drained})`)
+
+    // Navigate to a NEW page. observe() enters NEUTRAL immediately; its dwell is a real 5s timer
+    // that is never advanced or reconciled here, so the page stays UNjudged — and the gauge must
+    // HOLD, not keep draining on the off-goal page's now-stale DRIFT (the pre-fix bug).
+    activeTab = { id: 3, url: "https://docs.python.org/3/tutorial/", title: "파이썬 알고리즘 문제 풀이 튜토리얼", active: true }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(3, { status: "complete" }, activeTab)
+    await settle(50)
+    const atNav = (await send({ type: "get-state" })).s as number
+
+    // Fifteen minutes of heartbeats while the new page is still in its dwell — S is frozen.
+    for (let i = 0; i < 15; i += 1) {
+      mock.timers.tick(60_000)
+      await fireHeartbeat()
+      await settle(0)
+    }
+    const held = (await send({ type: "get-state" })).s as number
+    assert.equal(held, atNav, "S is held steady while the new page is judged — no drain on the stale verdict")
+    assert.ok(held > 0, "the stale DRIFT did NOT drain S to 0 during the neutral hold")
+    assert.equal(toasts.length + notifications.length, 0, "no nag fires during the neutral hold")
+  } finally {
+    mock.timers.reset()
+  }
+})
