@@ -10,7 +10,7 @@ import { getGoal, setGoal, type SessionGoal } from "./lib/session.ts"
 import { embedText, embedTexts, judgeTier0 } from "./lib/tier0.ts"
 import { addExemplar, admissionEligible, admitAnchor, loadRefs, setDerived } from "./lib/relevance.ts"
 import { filterDerivedPhrases, MAX_PHRASES } from "./lib/goalEnrichment.ts"
-import { currentState, dispatch, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
+import { currentState, dispatch, flushOutbox, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
 import { enrichGoal, getOllamaConfig, ollamaEnabled, setOllamaConfig, testOllama, tier1Rescue } from "./lib/tier12.ts"
 import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
 import { getProviderHealth } from "./lib/providerHealth.ts"
@@ -178,6 +178,12 @@ chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
 
 chrome.runtime.onInstalled.addListener(ensureHeartbeat)
 chrome.runtime.onStartup.addListener(ensureHeartbeat)
+
+// On every service-worker spin-up (wake or browser start), deliver any effects a prior
+// lifetime persisted but was torn down before delivering. Complements the atomic outbox in
+// gaugeRuntime: the write is durable, this drains it.
+void flushOutbox()
+chrome.runtime.onStartup.addListener(() => void flushOutbox())
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== HEARTBEAT_ALARM) return

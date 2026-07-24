@@ -7,12 +7,16 @@
 //   kv           — small live state, keyed by name (gauge checkpoint, drift-since, …)
 //   observations — durable per-page observation log (P3: analytics / exemplar learning)
 //   events       — structured, append-only event log (P2-2)
+//   outbox       — durable pending gauge effects (nag/celebrate/request_tier2). Written
+//                  atomically with the gauge checkpoint so an effect is never lost when
+//                  the service worker is torn down between state save and delivery.
 
 const DB_NAME = "kibitzer"
-const DB_VERSION = 1
+const DB_VERSION = 2
 const KV_STORE = "kv"
 export const OBS_STORE = "observations"
 export const EVENT_STORE = "events"
+export const OUTBOX_STORE = "outbox"
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
@@ -23,7 +27,7 @@ function open(): Promise<IDBDatabase> {
     request.onupgradeneeded = () => {
       const db = request.result
       if (!db.objectStoreNames.contains(KV_STORE)) db.createObjectStore(KV_STORE)
-      for (const name of [OBS_STORE, EVENT_STORE]) {
+      for (const name of [OBS_STORE, EVENT_STORE, OUTBOX_STORE]) {
         if (!db.objectStoreNames.contains(name)) {
           const store = db.createObjectStore(name, { keyPath: "id", autoIncrement: true })
           store.createIndex("ts", "ts", { unique: false })
@@ -86,6 +90,23 @@ export async function kvDelete(key: string): Promise<void> {
   await txDone(tx)
 }
 
+/** Atomically put kv entries AND append records to `store` in a single transaction, so
+ *  both commit together or not at all. Used to checkpoint the gauge state and enqueue its
+ *  effects durably in one step. */
+export async function kvPutAndAppend(
+  kv: Array<{ key: string; value: unknown }>,
+  store: string,
+  records: object[],
+): Promise<void> {
+  const db = await open()
+  const tx = db.transaction([KV_STORE, store], "readwrite")
+  const kvOs = tx.objectStore(KV_STORE)
+  for (const { key, value } of kv) kvOs.put(value, key)
+  const recOs = tx.objectStore(store)
+  for (const record of records) recOs.add(record)
+  await txDone(tx)
+}
+
 // --- append-only record stores (observations / events) ---------------------------
 
 /** Append a record (auto-id, stamped ts). Trims the store to `cap` newest by id. */
@@ -126,4 +147,30 @@ export async function clearStore(store: string): Promise<void> {
   const tx = db.transaction(store, "readwrite")
   tx.objectStore(store).clear()
   await txDone(tx)
+}
+
+/** Delete a single record by primary key. */
+export async function deleteRecord(store: string, id: number): Promise<void> {
+  const db = await open()
+  const tx = db.transaction(store, "readwrite")
+  tx.objectStore(store).delete(id)
+  await txDone(tx)
+}
+
+/** Deliver each record (oldest id first) via `handler`, deleting those the handler
+ *  resolves for. A handler that throws leaves its record in place for a later drain — so
+ *  delivery is at-least-once: an effect survives a service-worker teardown mid-drain. */
+export async function drainRecords<T extends { id: number }>(
+  store: string,
+  handler: (record: T) => Promise<void>,
+): Promise<void> {
+  const records = await getAllRecords<T>(store)
+  for (const record of records) {
+    try {
+      await handler(record)
+    } catch {
+      continue // leave undelivered; a later drain retries
+    }
+    await deleteRecord(store, record.id)
+  }
 }

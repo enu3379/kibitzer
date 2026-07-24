@@ -17,7 +17,7 @@ import { getSettings, inQuietHours } from "./settings.ts"
 import { pageKeyOf } from "./url.ts"
 import { extractPageExcerpt } from "../content/pageExcerpt.ts"
 import { updateBadge } from "./badge.ts"
-import { kvGet, kvSet } from "./db.ts"
+import { clearStore, drainRecords, kvGet, kvPutAndAppend, kvSet, OUTBOX_STORE } from "./db.ts"
 import { logEvent } from "./events.ts"
 import { clearRelevance } from "./relevance.ts"
 import {
@@ -42,6 +42,18 @@ export interface ActivePage {
   urlHost: string
   score: number
 }
+
+// A gauge effect queued for durable delivery. Persisted atomically with the gauge
+// checkpoint (see dispatch) so it survives a service-worker teardown before delivery.
+// `writerMessage` snapshots the Tier-2 Writer's nag text at enqueue time — it used to
+// live in an in-memory global that was lost across teardown.
+interface OutboxEntry {
+  effect: GaugeEffect
+  goal: SessionGoal | null
+  ts: number
+  writerMessage: string | null
+}
+type OutboxRecord = OutboxEntry & { id: number }
 
 /** Remember the active page's details so the async Tier 2 gate can judge it. */
 export async function setActivePage(page: ActivePage): Promise<void> {
@@ -83,6 +95,8 @@ export async function currentState(): Promise<GaugeState> {
 export async function resetState(): Promise<void> {
   await kvSet(STATE_KEY, initGaugeState())
   await kvSet(DRIFT_SINCE_KEY, null)
+  await clearStore(OUTBOX_STORE) // drop effects queued under the old goal
+  pendingNagMessage = null
   await clearHistory() // a new goal starts a fresh nag/visit context
   await clearRelevance() // …and fresh Tier-0 exemplars/anchor/derived vectors
 }
@@ -116,7 +130,10 @@ function configFor(goal: SessionGoal | null): GaugeConfig {
 
 let queue: Promise<void> = Promise.resolve()
 
-/** Apply one gauge event (serialized), persist the state, and deliver any effects. */
+/** Apply one gauge event (serialized): reduce, persist the new state AND its effects in one
+ *  atomic write, then drain the durable outbox. Because the effects are committed together
+ *  with the state, a teardown between save and delivery can lose neither — the next drain
+ *  (this one or a startup flush) delivers whatever is still queued. */
 export function dispatch(event: GaugeEvent, goal: SessionGoal | null): Promise<void> {
   const task = async (): Promise<void> => {
     const state = await loadState()
@@ -133,29 +150,74 @@ export function dispatch(event: GaugeEvent, goal: SessionGoal | null): Promise<v
           (eff ? ` !! ${eff}` : ""),
       )
     }
-    await saveState(transition.state)
+    // Snapshot the Writer nag text (if any) onto the effect NOW, so it is durable rather
+    // than riding an in-memory global that teardown would drop.
+    const entries: OutboxEntry[] = transition.effects.map((effect) => ({
+      effect,
+      goal,
+      ts: event.ts,
+      writerMessage: effect.type === "nag" ? consumePendingNag() : null,
+    }))
+    await persistStateAndOutbox(transition.state, entries)
     updateBadge(transition.state, goal, event.ts) // reflect live status on the toolbar
     // Mark when a drift episode began, so the celebration can say how long they were away.
     if (state.activeVerdict !== "DRIFT" && transition.state.activeVerdict === "DRIFT") {
       await setDriftSince(event.ts)
     }
-    for (const effect of transition.effects) {
-      await deliver(effect, goal, event.ts)
-    }
+    await drainOutbox()
   }
   const run = queue.then(task, task)
   queue = run.catch(() => undefined)
   return run
 }
 
+/** Persist the gauge checkpoint and enqueue its effects. When there are effects, both land
+ *  in one transaction (atomic); with none, it is a plain state save. */
+async function persistStateAndOutbox(state: GaugeState, entries: OutboxEntry[]): Promise<void> {
+  if (entries.length === 0) {
+    await saveState(state)
+    return
+  }
+  await kvPutAndAppend([{ key: STATE_KEY, value: state }], OUTBOX_STORE, entries)
+}
+
+/** Deliver every queued effect (oldest first), removing each on success. Serialized with
+ *  dispatch through `queue`, so drains never overlap. */
+async function drainOutbox(): Promise<void> {
+  await drainRecords<OutboxRecord>(OUTBOX_STORE, (record) =>
+    deliver(record.effect, record.goal, record.ts, record.writerMessage),
+  )
+}
+
+/** Deliver any effects left in the outbox by a prior service-worker lifetime. Routed
+ *  through the dispatch queue so it can't race a live dispatch. Call on SW startup/wake. */
+export function flushOutbox(): Promise<void> {
+  const run = queue.then(drainOutbox, drainOutbox)
+  queue = run.catch(() => undefined)
+  return run
+}
+
 /** Fire a nag notification immediately, for manual testing (goal = "알림보기"). */
 export async function testNag(goal: SessionGoal | null): Promise<void> {
-  await deliver({ type: "nag", pageKey: "test" }, goal, Date.now())
+  await deliver({ type: "nag", pageKey: "test" }, goal, Date.now(), null)
 }
 
 let pendingNagMessage: string | null = null
 
-async function deliver(effect: GaugeEffect, goal: SessionGoal | null, ts: number): Promise<void> {
+/** Read and clear the Writer's pending nag message (set by serviceTier2 before it
+ *  dispatches the drift result). Consumed at enqueue time so it is snapshotted durably. */
+function consumePendingNag(): string | null {
+  const message = pendingNagMessage
+  pendingNagMessage = null
+  return message
+}
+
+async function deliver(
+  effect: GaugeEffect,
+  goal: SessionGoal | null,
+  ts: number,
+  writerMessage: string | null,
+): Promise<void> {
   const goalText = goal?.text ?? "목표"
   if (effect.type === "request_tier2") {
     // Service the Tier 2 gate off the dispatch queue (Ollama is slow); it dispatches
@@ -167,7 +229,6 @@ async function deliver(effect: GaugeEffect, goal: SessionGoal | null, ts: number
     const settings = await getSettings()
     // Do-not-disturb: within quiet hours, drop the nudge (the drift is still logged).
     if (inQuietHours(settings.quietHours, ts)) {
-      pendingNagMessage = null
       klog(`nag suppressed (quiet hours)`)
       logEvent("nag", { pageKey: effect.pageKey, suppressed: "quiet_hours" })
       return
@@ -177,9 +238,8 @@ async function deliver(effect: GaugeEffect, goal: SessionGoal | null, ts: number
     // gate), otherwise the persona's fallback template. This covers degraded mode,
     // renags, cached-drift nags, and the "알림보기" test — all were showing the plain
     // line before. The generic sentence is only a last resort (no persona templates).
-    const fromWriter = pendingNagMessage != null
-    let message = pendingNagMessage
-    pendingNagMessage = null
+    const fromWriter = writerMessage != null
+    let message = writerMessage
     if (!message) {
       const persona = await activePersona()
       const nagCount = (await nagCountToday(ts)) + 1
