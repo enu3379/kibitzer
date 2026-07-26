@@ -2,7 +2,7 @@
 // the judge (decideTier2) is persona-independent; the writer's system prompt is the base
 // Writer contract + the selected persona's style layer. Templates are the offline fallback.
 
-import { TIER2_WRITER_SYSTEM_PROMPT } from "../providers/prompts.ts"
+import { SESSION_SUMMARY_WRITER_SYSTEM_PROMPT, TIER2_WRITER_SYSTEM_PROMPT } from "../providers/prompts.ts"
 import { resolveJosa } from "./josa.ts"
 import { PERSONA_DEFAULT, PERSONA_ORDER, PERSONAS, type PersonaData } from "./personas.data.ts"
 
@@ -37,16 +37,25 @@ export function personaChoices(): Array<{ key: string; name: string }> {
   return PERSONA_ORDER.map((key) => ({ key, name: PERSONAS[key]?.name ?? key }))
 }
 
-/** Base Writer contract + persona style layer. Matches the server's
- *  compose_tier2_writer_system_prompt (voice/tone/forbidden expressions live here). */
-export function composeWriterPrompt(persona: PersonaData | null): string {
+/** Base contract + persona style layer — the same composition for every persona-voiced
+ *  writer (nag / session recap). Matches the server's compose_tier2_writer_system_prompt
+ *  (voice/tone/forbidden expressions live in the style layer). */
+function composeWithPersona(base: string, persona: PersonaData | null): string {
   const style = persona?.stylePrompt.trim()
-  if (!style) return TIER2_WRITER_SYSTEM_PROMPT
+  if (!style) return base
   return (
-    `${TIER2_WRITER_SYSTEM_PROMPT}\n\n` +
+    `${base}\n\n` +
     "The persona style layer below owns voice, tone, and forbidden expressions.\n" +
     `Persona style layer:\n${style}`
   )
+}
+
+export function composeWriterPrompt(persona: PersonaData | null): string {
+  return composeWithPersona(TIER2_WRITER_SYSTEM_PROMPT, persona)
+}
+
+export function composeSummaryPrompt(persona: PersonaData | null): string {
+  return composeWithPersona(SESSION_SUMMARY_WRITER_SYSTEM_PROMPT, persona)
 }
 
 /** Default nag length cap when a persona sets no override (server delivery.max_sentences). */

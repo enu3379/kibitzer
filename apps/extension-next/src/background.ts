@@ -19,6 +19,9 @@ import { getSettings, setSettings, type Settings } from "./lib/settings.ts"
 import { clearStore, kvGet, kvSet, OBS_STORE } from "./lib/db.ts"
 import { DwellScheduler } from "./lib/dwellScheduler.ts"
 import { markNagActed, recentTitles, recordObservation } from "./lib/history.ts"
+import { clearVisits, noteHeartbeat, noteInactive, noteJudged, noteObserve, noteVerdict } from "./lib/visits.ts"
+import { clearSessionSummary, dismissSessionSummary, finalizeSession, generateSummaryComment, getSessionSummary } from "./lib/sessionSummary.ts"
+import { clearSessionHistory } from "./lib/sessionHistory.ts"
 import { clearLog, exportLog, klog, logText } from "./lib/klog.ts"
 import { shouldDropUrl } from "./lib/domainFilter.ts"
 import { hostOf, pageKeyOf } from "./lib/url.ts"
@@ -68,6 +71,11 @@ async function observe(url: string | undefined, title: string | undefined): Prom
     await enterNeutral(internalPageKey, goal)
     return
   }
+  // Visit tracking must see every observation trigger — including a presence-resume on the
+  // same page, which the lastObservedKey debounce below hides. The reducer only reopens an
+  // interval for already-judged pages, so this can't credit unjudged/sensitive pages (internal
+  // pages returned above, before this point).
+  void noteObserve(pageKey, Date.now(), goal.epoch)
   // Debounce on pageKey+title, not pageKey alone: an SPA route change that keeps the
   // path but swaps the title (YouTube video → video) still re-judges, while an update
   // storm on the identical page is collapsed (the old S 0↔30 yo-yo guard).
@@ -145,6 +153,7 @@ async function judgeAndDispatch(url: string, title: string, obsKey: string): Pro
   const now = Date.now()
   await setActivePage({ pageKey, title, urlHost, score })
   await recordObservation({ title, urlHost, verdict, ts: now }) // recent_titles / repeat context
+  await noteJudged(pageKey, title, urlHost, verdict, now, epoch) // session-summary dwell/verdict
   await dispatch(
     { type: "nav", pageKey, verdict, r0: score, tauOk, degraded: !enabled, ts: now },
     goal,
@@ -263,7 +272,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     // Only drain while Chrome is focused and the user is active; otherwise pause.
     const present = await browserPresent()
     await notePresence(present) // record presence transitions off the same signal the gauge uses
-    await dispatch({ type: present ? "heartbeat" : "inactive", ts: Date.now() }, goal)
+    const now = Date.now()
+    // Once-a-minute durable checkpoint for the visit tracker (bounds teardown loss).
+    void (present ? noteHeartbeat(now, goal.epoch) : noteInactive(now, goal.epoch))
+    await dispatch({ type: present ? "heartbeat" : "inactive", ts: now }, goal)
   })
 })
 
@@ -275,6 +287,7 @@ chrome.idle.onStateChanged.addListener((state) => {
     // Left the machine: a page glanced at for 1s must not judge 5s later — drop the dwell,
     // not just pause the gauge (sustained-attention requirement).
     await dwell.cancel()
+    void noteInactive(Date.now(), goal.epoch)
     await dispatch({ type: "inactive", ts: Date.now() }, goal)
   })
 })
@@ -287,6 +300,7 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
     if (!goal) return
     if (lostFocus) {
       await dwell.cancel() // focus lost mid-dwell: the glance never earned a judgement
+      void noteInactive(Date.now(), goal.epoch)
       await dispatch({ type: "inactive", ts: Date.now() }, goal)
       return
     }
@@ -380,12 +394,16 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     return await setSettings(message.settings ?? {})
   }
   if (message?.type === "delete-all-data") {
-    // Wipe activity data (gauge, history, learned vectors, events, observations, log);
-    // keep the goal, Ollama config, persona, and settings.
+    // Wipe activity data (gauge, history, learned vectors, events, observations, log,
+    // visit tracker, cached session summary); keep the goal, Ollama config, persona,
+    // and settings.
     await resetState()
     await clearEvents()
     await clearStore(OBS_STORE)
     await clearLog()
+    await clearVisits()
+    await clearSessionSummary()
+    await clearSessionHistory()
     return { ok: true }
   }
   if (message?.type === "test-ollama") {
@@ -405,6 +423,39 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     })
     return { ollama }
   }
+  if (message?.type === "end-session") {
+    const goal = await getGoal()
+    const now = Date.now()
+    // No active session (double-click, stale popup): just hand back the cached summary.
+    if (!goal) return { summary: await getSessionSummary(now) }
+    await dwell.cancel() // a pending judge must not race the snapshot
+    // Snapshot BEFORE the reset below — resetState's clearHistory wipes the nag log and
+    // the tracker is cleared with it. The recap generator captured the stats by value and
+    // writes back under an epoch+pending guard, so the reset can't corrupt it either.
+    const summary = await finalizeSession(goal, now)
+    void generateSummaryComment(summary)
+    await setGoal("", null)
+    await resetState()
+    await clearVisits()
+    lastObservedKey = null
+    clearBadge()
+    logEvent("goal", { text: null, minutes: null, revision: null })
+    logEvent("session-end", {
+      epoch: summary.epoch,
+      pages_total: summary.stats.pagesTotal,
+      pages_ok: summary.stats.pagesOk,
+      valid_ms: summary.stats.validMs,
+    })
+    void ensureHeartbeat()
+    return { summary }
+  }
+  if (message?.type === "get-session-summary") {
+    return { summary: await getSessionSummary(Date.now()) }
+  }
+  if (message?.type === "dismiss-session-summary") {
+    await dismissSessionSummary()
+    return { ok: true }
+  }
   if (message?.type === "set-goal") {
     const previous = await getGoal()
     const goal: SessionGoal | null = await setGoal(
@@ -414,7 +465,13 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     )
     // Restart the gauge when the goal actually changes (text OR minutes → new revision)
     // or is cleared.
-    if (!goal || previous?.epoch !== goal.epoch) await resetState()
+    if (!goal || previous?.epoch !== goal.epoch) {
+      await resetState()
+      await clearVisits() // stale dwell aggregates must not bleed into the next session
+      // A fresh session supersedes the previous session's cached summary; a plain clear
+      // (goal null) keeps it so the summary survives until a new goal starts.
+      if (goal) await clearSessionSummary()
+    }
     logEvent("goal", { text: goal?.text ?? null, minutes: goal?.availableMinutes ?? null, revision: goal?.revision ?? null })
     void ensureHeartbeat()
     await dwell.cancel() // a pending dwell from the old goal must not judge under the new one
@@ -452,6 +509,8 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
         if (pageKey) {
           klog(`related → OK recover ${pageKey}`)
           await dispatch({ type: "nav", pageKey, verdict: "OK", ts: now }, goal)
+          // The user override also flips the page in the session-summary tracker.
+          void noteVerdict(pageKey, tab?.title ?? "", tab?.url ? hostOf(tab.url) : "", "OK", now, goal.epoch)
           // Learn: add this page's embedding as a goal exemplar so this class of page
           // stops drifting at Tier-0 (the user-taught relevance loop).
           if (tab?.title && tab.url && !shouldDropUrl(tab.url)) {

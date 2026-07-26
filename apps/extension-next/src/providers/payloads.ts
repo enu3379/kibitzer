@@ -140,6 +140,65 @@ export function buildTier2MessagePayload(
   return payload
 }
 
+export interface SessionSummaryStatsPayload {
+  goalText: string
+  sessionMinutes: number
+  pagesTotal: number
+  pagesOk: number
+  okRatio: number | null
+  validMinutes: number
+  nagCount: number
+  topPages: ReadonlyArray<{
+    title: string | null
+    host: string | null
+    minutes: number
+    verdict: string | null
+  }>
+}
+
+export interface SessionSummaryDice {
+  focus: string
+  closing: string
+  bonus: boolean
+}
+
+export interface TopDriftHost {
+  label: string // friendly host label ("📷 인스타그램" or the bare host)
+  visits: number
+}
+
+/** Payload for the end-of-session recap writer. Aggregates only — no excerpts, no page
+ *  keys; titles/hosts are limited to the top 5 pages by dwell. The dice fields are the
+ *  style randomness rolled by the extension (the model cannot roll its own). `topDriftHost`
+ *  lets the persona name the biggest time-sink ("인스타 다섯 번"). */
+export function buildSessionSummaryPayload(
+  stats: SessionSummaryStatsPayload,
+  dice: SessionSummaryDice,
+  specialEvent: string | null,
+  topDriftHost: TopDriftHost | null = null,
+): Record<string, unknown> {
+  return {
+    goal: stats.goalText,
+    session_minutes: stats.sessionMinutes,
+    pages_total: stats.pagesTotal,
+    pages_ok: stats.pagesOk,
+    ok_ratio: stats.okRatio != null ? Number(stats.okRatio.toFixed(2)) : null,
+    valid_minutes: stats.validMinutes,
+    nag_count: stats.nagCount,
+    top_pages: stats.topPages.slice(0, 5).map((page) => ({
+      title: page.title ?? null,
+      host: page.host ?? null,
+      minutes: page.minutes,
+      verdict: page.verdict ?? null,
+    })),
+    top_drift_host: topDriftHost ? { label: topDriftHost.label, visits: topDriftHost.visits } : null,
+    focus_hint: dice.focus,
+    closing_style: dice.closing,
+    bonus_allowed: dice.bonus,
+    special_event: specialEvent,
+  }
+}
+
 export function compressRecentTitles(
   recent: readonly RecentTitle[],
 ): Array<Record<string, unknown>> {
