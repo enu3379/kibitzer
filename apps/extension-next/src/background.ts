@@ -363,11 +363,23 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
       goal,
       s: Math.round(state.s),
       accelTier: state.accelTier,
+      snoozedUntil: state.snoozedUntil ?? null,
       ollama,
       persona,
       personas: personaChoices(),
       health,
     }
+  }
+  // Pause = 30-min quiet (same as the "30분 조용히" toast); resume = clear the snooze by
+  // setting its expiry to now. Both reuse the gauge's snooze action; no-op with no goal.
+  if (message?.type === "pause" || message?.type === "resume") {
+    const goal = await getGoal()
+    if (goal) {
+      const now = Date.now()
+      const until = message.type === "pause" ? now + 30 * 60_000 : now
+      await dispatch({ type: "snooze", until, ts: now }, goal)
+    }
+    return { ok: Boolean(goal) }
   }
   if (message?.type === "set-persona") {
     return { persona: await setPersonaKey(message.persona ?? "") }
