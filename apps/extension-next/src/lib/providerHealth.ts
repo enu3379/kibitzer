@@ -45,3 +45,9 @@ export async function getProviderHealth(): Promise<ProviderHealth | null> {
   const value = stored[KEY]
   return value && typeof value.ok === "boolean" ? (value as ProviderHealth) : null
 }
+
+/** Forget the last error — called when provider settings change, so the toolbar's
+ *  alert mark doesn't keep accusing a config the user just fixed. */
+export async function clearProviderHealth(): Promise<void> {
+  await chrome.storage.local.remove(KEY)
+}

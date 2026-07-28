@@ -118,11 +118,11 @@ test("unknown provider in stored routes coerces back to defaults", async () => {
   reset()
   store["kibitzer:providers:v1"] = {
     accounts: { bogus: { keys: [] } },
-    routes: { tier1: { provider: "bogus", model: "x" }, tier2: { provider: "zai", model: "glm-4.7" } },
+    routes: { tier1: { provider: "bogus", model: "x" }, tier2: { provider: "deepseek", model: "deepseek-v4-pro" } },
   }
   const settings = await getJudgeSettings()
   assert.deepEqual(settings.routes.tier1, { provider: "ollama", model: "nemotron-3-super" })
-  assert.deepEqual(settings.routes.tier2, { provider: "zai", model: "glm-4.7" })
+  assert.deepEqual(settings.routes.tier2, { provider: "deepseek", model: "deepseek-v4-pro" })
   assert.ok(!("bogus" in settings.accounts))
 })
 

@@ -120,8 +120,8 @@ test("rotates to the next key on 429 and succeeds", async () => {
 test("writer trims, refuses empty output, and skips json plumbing", async () => {
   const calls: RecordedCall[] = []
   const provider = new OpenAIChatJudgeProvider({
-    chatUrl: "https://api.z.ai/api/paas/v4/chat/completions",
-    model: "glm-4.7",
+    chatUrl: "https://api.deepseek.com/v1/chat/completions",
+    model: "deepseek-v4-flash",
     apiKeys: ["k"],
     writerMaxOutputTokens: 2048,
     fetch: recordingFetch([jsonResponse(chatCompletion("  훈수 한 줄  "))], calls),

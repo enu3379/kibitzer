@@ -498,11 +498,42 @@ async function serviceTier2(
   })
   klog(`tier2 gate (${effect.reason}) on ${effect.pageKey} excerpt=${excerpt?.length ?? 0}c -> ${outcome.flow}`)
   logEvent("tier2", { pageKey: effect.pageKey, reason: effect.reason, flow: outcome.flow, excerpt: excerpt?.length ?? 0 })
+  // The judge itself broke (fail-open ate a would-be nag) — tell the user once in a
+  // while; the toolbar "!" mark carries the ambient state between alerts.
+  if (outcome.providerError) void notifyProviderProblem(outcome.providerError)
   // Apply guarded: dispatchTier2 re-checks (serialized) that the pending slot, goal revision,
   // and active page still match before applying — else it releases the slot (tier2_cancel)
   // with no side effect on whatever page the user is on now. The Writer message is staged
   // durably and bound to the nag effect inside runEvent.
   await dispatchTier2(token, outcome.flow, outcome.flow === "drift" ? outcome.message : null, goal)
+}
+
+/** Clicking the alert opens the options page (wired in background's onClicked). */
+export const PROVIDER_ALERT_ID = "kibitzer-provider-alert"
+const PROVIDER_ALERT_TS_KEY = "kibitzer:provider-alert-ts"
+const PROVIDER_ALERT_THROTTLE_MS = 6 * 60 * 60_000
+
+/** OS notification for "the LLM judge is broken, so a nag was swallowed" — throttled
+ *  hard (6h) so a dead key doesn't turn into a notification storm, and gated on
+ *  presence like every other nudge (never pop over another app). The id deliberately
+ *  does NOT start with "kbz-" so the nag feedback handlers ignore it. */
+async function notifyProviderProblem(message: string): Promise<void> {
+  if (!(await browserPresent())) return
+  const stored = await chrome.storage.local.get(PROVIDER_ALERT_TS_KEY)
+  const last = typeof stored[PROVIDER_ALERT_TS_KEY] === "number" ? stored[PROVIDER_ALERT_TS_KEY] : 0
+  const now = Date.now()
+  if (now - last < PROVIDER_ALERT_THROTTLE_MS) return
+  await chrome.storage.local.set({ [PROVIDER_ALERT_TS_KEY]: now })
+  try {
+    chrome.notifications.create(PROVIDER_ALERT_ID, {
+      type: "basic",
+      iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+      title: "Kibitzer — AI 판정 오류",
+      message: `${message} · 지금은 제목 유사도만으로 판정합니다. 알림을 누르면 설정이 열립니다.`,
+    })
+  } catch {
+    // No notifications permission / platform limit — the toolbar mark still shows.
+  }
 }
 
 const TOAST_TOKEN_KEY = "toast-token"

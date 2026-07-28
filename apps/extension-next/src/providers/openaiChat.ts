@@ -1,12 +1,12 @@
 // OpenAI chat.completions adapter — one wire format covers Gemini (compat layer),
-// OpenRouter, Z.ai, DeepSeek, OpenAI itself, Kimi, and (if ever unified) Ollama's
+// OpenRouter, DeepSeek, OpenAI itself, Kimi, and (if ever unified) Ollama's
 // /v1 endpoint. Same judge surface and key-pool rotation as ollamaChat.ts.
 //
 // Deliberately NOT sent (YAGNI, verified 2026-07-28):
 // - response_format: judgeParsing.loadJsonObject already extracts the JSON object from
 //   surrounding prose, and json_object support varies across compat providers.
-// - provider-specific thinking toggles (DeepSeek v4 thinks by default, Z.ai/Kimi use
-//   non-standard fields): a thinking Tier-1 call is slower but correct — revisit only
+// - provider-specific thinking toggles (DeepSeek v4 thinks by default, Kimi uses a
+//   non-standard field): a thinking Tier-1 call is slower but correct — revisit only
 //   if latency data says so.
 
 import {

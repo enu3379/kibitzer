@@ -2,7 +2,7 @@
 // kibitzer:providers:v1 (Ollama Cloud stays the default — planning-notes D3); the
 // per-provider key pool rotates on 401/403/429 exactly like the old Ollama-only path.
 // Wire formats: Ollama native /api/chat, one OpenAI chat.completions adapter for the
-// six compat providers, and the Anthropic messages adapter.
+// compat providers, and the Anthropic messages adapter.
 
 import { ClaudeChatJudgeProvider } from "../providers/claudeChat.ts"
 import { OllamaChatJudgeProvider } from "../providers/ollamaChat.ts"
@@ -36,7 +36,7 @@ import {
 import { detectSpecial, type SessionStats } from "./sessionStats.ts"
 import type { SummaryDice } from "./summaryDice.ts"
 import { klog } from "./klog.ts"
-import { recordProviderError, recordProviderOk } from "./providerHealth.ts"
+import { classifyProviderError, recordProviderError, recordProviderOk } from "./providerHealth.ts"
 import { buildEnrichmentPrompt, ENRICH_TIMEOUT_MS, MAX_PHRASES, parseEnrichmentResponse } from "./goalEnrichment.ts"
 
 /** History-derived context for the Tier-2 writer (built by gaugeRuntime from the nag /
@@ -137,6 +137,11 @@ export async function tier1Rescue(
 export interface Tier2Outcome {
   flow: "drift" | "ok"
   message: string | null
+  /** Set when the judge call itself failed (nag suppressed by fail-open) — lets the
+   *  caller tell the user why judging went quiet. Not set for a mere writer failure
+   *  (a fallback-template nag still fires) or when the route has no keys (deliberate
+   *  Tier-0 mode, not an error). */
+  providerError?: string
 }
 
 export interface RouteTestResult {
@@ -252,7 +257,7 @@ export async function tier2Confirm(
   } catch (error) {
     void recordProviderError(error)
     klog(`tier2 judge error (fail-open to ok, no nag): ${String(error)}`)
-    return { flow: "ok", message: null }
+    return { flow: "ok", message: null, providerError: classifyProviderError(error).message }
   }
   klog(`tier2 judge: ${decision.decision} (${decision.reasonCode}, basis=${decision.basis})`)
   if (decision.decision !== "notify") return { flow: "ok", message: null }
