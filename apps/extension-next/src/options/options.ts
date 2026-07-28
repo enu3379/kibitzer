@@ -2,6 +2,7 @@
 // controls. All state lives in the service worker; this page just reads/writes via
 // messages — key values travel INTO the worker only, responses carry masked keys.
 
+import { sampleLinesFor } from "../lib/personaSampleLines.ts"
 import { PROVIDER_PROFILES, type ProviderId, type TierName } from "../lib/providers.ts"
 
 import {
@@ -50,6 +51,9 @@ const quietStart = $<HTMLInputElement>("quietStart")
 const quietEnd = $<HTMLInputElement>("quietEnd")
 const ttsSw = $<HTMLButtonElement>("ttsSw")
 const pgrid = $<HTMLElement>("pgrid")
+const pquote = $<HTMLElement>("pquote")
+const pquoteTag = $<HTMLElement>("pquoteTag")
+const pquoteTxt = $<HTMLElement>("pquoteTxt")
 const ajProviders = $<HTMLElement>("ajProviders")
 const ajConnect = $<HTMLElement>("ajConnect")
 const ajUsage = $<HTMLElement>("ajUsage")
@@ -93,25 +97,87 @@ async function init(): Promise<void> {
 
   const state = (await send({ type: "get-state" })) as StateResponse
   if (state?.personas) {
-    pgrid.innerHTML = ""
-    for (const p of state.personas) {
-      const b = document.createElement("button")
-      b.className = "pcard"
-      b.setAttribute("aria-pressed", String(p.key === state.persona))
-      b.dataset.key = p.key
-      b.innerHTML = `<span class="pn">${p.name}</span>`
-      b.addEventListener("click", async () => {
-        await send({ type: "set-persona", persona: p.key })
-        pgrid.querySelectorAll<HTMLElement>(".pcard").forEach((c) =>
-          c.setAttribute("aria-pressed", String(c === b)),
-        )
-      })
-      pgrid.appendChild(b)
-    }
+    renderPersonas(state.personas, state.persona)
   }
   applyJudge((await send({ type: "get-judge-settings" })) as JudgeView)
   await loadUsage()
 }
+
+// --- persona picker ----------------------------------------------------------------
+
+// The quote strip does double duty: hovering or focusing a card previews that voice,
+// leaving the card restores whatever is actually selected. Selecting commits the
+// persona's "accepting the job" line and flashes the strip so the click lands.
+let selectedPersona: { key: string; name: string } | null = null
+
+// Bumped on every click so a slow set-persona round trip can't repaint the strip after a
+// later click already did. Without it, clicking A then B repaints whichever reply lands
+// last, which is not necessarily B.
+let clickToken = 0
+
+function paintQuote(key: string, name: string, preview: boolean): void {
+  // personaSampleLines.ts is hand-maintained while personas.data.ts is generated, so a new
+  // persona can reach the picker before its copy does. Paint the name regardless — bailing
+  // out would leave the previous persona's line sitting under a different hovered card.
+  const lines = sampleLinesFor(key)
+  pquote.classList.toggle("preview", preview)
+  pquoteTag.textContent = `${preview ? "미리듣기" : "선택됨"} · ${name}`
+  pquoteTxt.textContent = lines ? `“${preview ? lines.hover : lines.picked}”` : ""
+  pquoteTxt.classList.remove("swap")
+  void pquoteTxt.offsetWidth // restart the fade
+  pquoteTxt.classList.add("swap")
+}
+
+function restoreQuote(): void {
+  if (selectedPersona) paintQuote(selectedPersona.key, selectedPersona.name, false)
+}
+
+function flashQuote(): void {
+  pquote.classList.remove("fire")
+  void pquote.offsetWidth
+  pquote.classList.add("fire")
+}
+
+function renderPersonas(personas: Array<{ key: string; name: string }>, current?: string): void {
+  pgrid.innerHTML = ""
+  for (const p of personas) {
+    const b = document.createElement("button")
+    b.className = "pcard"
+    b.setAttribute("aria-pressed", String(p.key === current))
+    b.dataset.key = p.key
+    b.innerHTML = `<span class="pn">${p.name}</span>`
+    if (p.key === current) selectedPersona = { key: p.key, name: p.name }
+
+    const preview = (): void => paintQuote(p.key, p.name, true)
+    b.addEventListener("mouseenter", preview)
+    b.addEventListener("focus", preview)
+    b.addEventListener("mouseleave", restoreQuote)
+    b.addEventListener("blur", restoreQuote)
+
+    b.addEventListener("click", async () => {
+      const token = ++clickToken
+      await send({ type: "set-persona", persona: p.key })
+      if (token !== clickToken) return // a later click already owns the strip
+      selectedPersona = { key: p.key, name: p.name }
+      pgrid.querySelectorAll<HTMLElement>(".pcard").forEach((c) =>
+        c.setAttribute("aria-pressed", String(c === b)),
+      )
+      paintQuote(p.key, p.name, false)
+      flashQuote()
+    })
+    pgrid.appendChild(b)
+  }
+  // Fall back to the first persona so the strip is never blank on first paint.
+  if (!selectedPersona && personas[0]) {
+    selectedPersona = { key: personas[0].key, name: personas[0].name }
+  }
+  restoreQuote()
+}
+
+// animationend bubbles: the .pqtxt fade would otherwise cancel the flash 180ms in.
+pquote.addEventListener("animationend", (e) => {
+  if (e.target === pquote && e.animationName === "pqflash") pquote.classList.remove("fire")
+})
 
 // --- tabs ------------------------------------------------------------------------
 
