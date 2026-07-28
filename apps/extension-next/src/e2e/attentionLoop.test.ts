@@ -122,7 +122,19 @@ test("E2E: goal → drift on an off-goal page → S drains to 0 → nag delivere
     // wake-time reconcile do the judgement (avoids a real 5s wait).
     mock.timers.tick(6000)
     await fireStartup()
-    await settle(1200) // real time for the KoEn-E5 WASM embedding to finish
+    // The KoEn-E5 embed finishes on a REAL timer; a fixed settle() flaked on loaded CI when the
+    // judgement landed mid-drain and corrupted the mocked-Date timeline (S bottomed out via a
+    // chaotic path that fired celebrations instead of the S=0 nag). Block instead — in real time,
+    // nudging the mocked clock only enough to integrate — until the off-goal page has actually
+    // been judged DRIFT and S has begun to drain, so the drain loop below starts deterministically.
+    let drifting = false
+    for (let i = 0; i < 80 && !drifting; i += 1) {
+      await settle(100) // real time: let the WASM embed make progress
+      mock.timers.tick(5000) // mocked time: only drains once the DRIFT verdict is live
+      const s = (await send({ type: "get-state" })).s as number
+      drifting = s < 100 || toasts.some((t) => t.kind === "intervention") || notifications.length > 0
+    }
+    assert.ok(drifting, "the off-goal page was judged DRIFT and S began to drain")
 
     // A verdict for the off-goal page should now be live and drifting.
     const mid = await send({ type: "get-state" })
