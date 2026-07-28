@@ -140,8 +140,41 @@ function showSetup(): void {
     goalInput.value = current.goal.text
     minutesInput.value = current.goal.availableMinutes != null ? String(current.goal.availableMinutes) : ""
   }
+  void maybeShowGoalHint()
   goalInput.focus()
 }
+
+// --- first-run goal hint (shown until the first goal is ever declared) --------------
+
+const GOAL_DECLARED_KEY = "kibitzer:goal-ever-declared:v1"
+const goalHintEl = document.getElementById("goalHint") as HTMLElement
+const goalChipsEl = document.getElementById("goalChips") as HTMLElement
+
+async function maybeShowGoalHint(): Promise<void> {
+  try {
+    const stored = await chrome.storage.local.get(GOAL_DECLARED_KEY)
+    goalHintEl.hidden = goalChipsEl.hidden = Boolean(stored[GOAL_DECLARED_KEY])
+  } catch {
+    // Storage unavailable (standalone render) — keep the hint hidden.
+  }
+}
+
+function retireGoalHint(): void {
+  goalHintEl.hidden = goalChipsEl.hidden = true
+  try {
+    void chrome.storage.local.set({ [GOAL_DECLARED_KEY]: Date.now() })
+  } catch {
+    // Standalone render — nothing to persist.
+  }
+}
+
+goalChipsEl.querySelectorAll<HTMLButtonElement>(".chip").forEach((chip) =>
+  chip.addEventListener("click", () => {
+    goalInput.value = chip.textContent ?? ""
+    goalInput.focus()
+  }),
+)
+document.getElementById("goalHintClose")?.addEventListener("click", retireGoalHint)
 
 function isPaused(state: StateResponse | null): boolean {
   return state?.snoozedUntil != null && state.snoozedUntil > Date.now()
@@ -655,6 +688,7 @@ startButton.addEventListener("click", async () => {
     // Only a positive budget is meaningful; a 0/negative would poison the gauge config.
     minutes: minutes != null && Number.isFinite(minutes) && minutes > 0 ? minutes : null,
   })
+  if (goalInput.value.trim()) retireGoalHint() // first goal ever declared → hint retires for good
   view = "setup" // leaving the summary implicitly once a new goal starts
   render(await getState())
 })
