@@ -58,6 +58,17 @@
       .ghost { background: transparent; color: #888; border: 1px solid #8884; padding: 7px; font-weight: 500; margin-top: 8px; }
       .ghost.danger { color: #d1495b; border-color: #d1495b44; }
       .row button { flex: 1; }
+      /* First-run goal hint: judging accuracy tracks goal specificity, so until the first
+         goal is ever declared the setup view leads with examples (부록 A). */
+      .fr-hint { display: flex; gap: 7px; align-items: baseline; border-radius: 8px; padding: 8px 10px;
+        font-size: 11px; line-height: 1.5; margin-bottom: 10px;
+        background: color-mix(in srgb, #1e7a4c 9%, transparent); color: light-dark(#175f3b, #8fdcb4); }
+      .fr-hint .hx { width: auto; border: 0; background: none; color: inherit; font: inherit;
+        font-size: 11px; padding: 0 2px; margin-left: auto; font-weight: 400; }
+      .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
+      .chip { width: auto; background: transparent; color: #888; border: 1px solid #8884;
+        font-size: 11px; font-weight: 500; padding: 3px 10px; border-radius: 999px; }
+      .chip:hover { border-color: #1e7a4c; color: light-dark(#1e7a4c, #4cc585); }
       /* --- session summary view --- */
       .sumlabel { font-size: 11px; color: #999; }
       .sumgoal { font-size: 17px; font-weight: 650; line-height: 1.3; margin: 1px 0 14px; letter-spacing: -.01em; }
@@ -188,6 +199,16 @@
     </div>
 
     <div id="setup" hidden>
+      <div class="fr-hint" id="goalHint" hidden>
+        <span aria-hidden="true">🎯</span>
+        <span><b>구체적일수록 판정이 정확해요.</b><br />"공부"보다는 "선형대수 3장 문제풀이". 예시를 눌러 시작해도 좋아요.</span>
+        <button class="hx" id="goalHintClose" title="다시 보지 않기">✕</button>
+      </div>
+      <div class="chips" id="goalChips" hidden>
+        <button class="chip">졸업논문 관련연구 정리</button>
+        <button class="chip">이력서 포트폴리오 섹션 쓰기</button>
+        <button class="chip">선형대수 3장 문제풀이</button>
+      </div>
       <div class="row">
         <label>목표<input id="goal" placeholder="예: 논문 정리" /></label>
         <label class="mins">시간(분)<input id="minutes" type="number" min="1" placeholder="60" /></label>
