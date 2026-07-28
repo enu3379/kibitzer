@@ -1181,3 +1181,29 @@ the extension badge.
   (all folded in above) — and D11/D12/D13 statuses were refreshed. Red-team harness preservation pending as draft
   #106. Untracked WIP kept local: `apps/extension/src/assets/characters/`
   (tsundere toast art exploration).
+- 2026-07-24: Delivery invariant added — nudges (in-page toast, its
+  OS-notification fallback, and the chime) never deliver while Chrome is
+  unfocused or the user is idle. The OS-notification fallback for
+  non-injectable pages (chrome://, web store, PDF) REMAINS, but only while
+  Chrome is the focused app — so a nag can never pop over another application.
+  Enforced at delivery time in `gaugeRuntime.showToast` via a shared
+  `lib/presence.ts` (`browserPresent` = Chrome window focused AND idle-active),
+  extracted from `background.ts` so the gauge heartbeat and the delivery gate
+  use the exact same signal. Two related gauge fixes shipped alongside:
+  new-tab/internal pages (no page key: chrome://newtab, about:blank, …) now
+  hold the gauge NEUTRAL like sensitive pages instead of leaving the
+  page-just-left's stale verdict draining S; and the popup `get-state`
+  heartbeat is now presence-gated identically to the 1-min alarm (it was
+  integrating the whole away-gap at full DRIFT drain on the first poll after a
+  return).
+- 2026-07-25: Fourth root cause from the same incident fixed — observation is
+  now scoped to the FOCUSED window's active tab (`isFocusedWindow` in
+  `lib/presence.ts`, gating all three observation listeners). `Tab.active` is
+  per-window, so with two Chrome windows a title-churning page in the unfocused
+  side window (SPA, live news, a localhost dev page) kept firing `observe()`,
+  each hit replacing the single dwell checkpoint — starving the focused page's
+  judgement while its own was dropped by the lastFocusedWindow-scoped
+  `stillJudging`, wedging the gauge in a NEUTRAL hold (S frozen, no drift
+  detection). Side-window title churn no longer steals the dwell or freezes
+  the gauge. When Chrome is entirely unfocused observations drop too — safe:
+  `windows.onFocusChanged` re-observes the active tab on focus regain.

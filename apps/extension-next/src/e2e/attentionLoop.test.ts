@@ -32,9 +32,13 @@ const evt = (name: string) => {
   return { addListener: (fn: (...a: unknown[]) => unknown) => listeners[name].push(fn), removeListener() {} }
 }
 const store = new Map<string, unknown>() // backs chrome.storage.local
-let activeTab: { id: number; url: string; title: string; active: boolean } | null = null
+let activeTab: { id: number; url: string; title: string; active: boolean; windowId: number } | null = null
 const toasts: Array<Record<string, unknown>> = [] // captured injected toast payloads
 const notifications: Array<{ id: string; opts: Record<string, unknown> }> = []
+// Presence knobs (browserPresent = Chrome focused AND idle-active). Default present, so the
+// existing scenarios are unaffected; the presence-gate scenario flips these and restores them.
+let winFocused = true
+let idleActive = true
 
 const chrome = {
   tabs: {
@@ -56,8 +60,10 @@ const chrome = {
     sendMessage: async () => {},
   },
   alarms: { onAlarm: evt("alarms.onAlarm"), create: async () => {}, get: async () => undefined, clear: async () => {} },
-  idle: { onStateChanged: evt("idle"), setDetectionInterval() {}, queryState: async () => "active" },
-  windows: { onFocusChanged: evt("win"), getLastFocused: async () => ({ focused: true }), WINDOW_ID_NONE: -1 },
+  idle: { onStateChanged: evt("idle"), setDetectionInterval() {}, queryState: async () => (idleActive ? "active" : "idle") },
+  // The focused window is always id 1 in these scenarios; tabs of a second (unfocused) side
+  // window carry windowId 2 and must be ignored by the observation surface (Fix 4).
+  windows: { onFocusChanged: evt("win"), getLastFocused: async () => ({ focused: winFocused, id: 1 }), WINDOW_ID_NONE: -1 },
   notifications: {
     onButtonClicked: evt("nb"),
     onClicked: evt("nc"),
@@ -107,7 +113,7 @@ test("E2E: goal → drift on an off-goal page → S drains to 0 → nag delivere
   mock.timers.enable({ apis: ["Date"] }) // advanceable Date; real setTimeout for WASM + dwell
   try {
     // The user is on a clearly off-goal page and declares a coding goal.
-    activeTab = { id: 1, url: "https://video.test/watch?v=cat", title: "귀여운 고양이 영상 몰아보기", active: true }
+    activeTab = { id: 1, url: "https://video.test/watch?v=cat", title: "귀여운 고양이 영상 몰아보기", active: true, windowId: 1 }
     const setRes = await send({ type: "set-goal", goal: "파이썬 알고리즘 문제 풀이", minutes: null })
     assert.ok((setRes.goal as { text?: string })?.text, "goal was declared")
     await settle(50) // let the fire-and-forget observeActiveTab schedule the dwell
@@ -146,12 +152,12 @@ test("E2E: a sensitive page is dropped — never judged, no drain, no nag (P0-1 
     toasts.length = 0
     notifications.length = 0
     // Fresh session on a neutral page (a distinct goal → resetState wipes the prior scenario).
-    activeTab = { id: 2, url: "https://example.test/neutral", title: "중립 페이지", active: true }
+    activeTab = { id: 2, url: "https://example.test/neutral", title: "중립 페이지", active: true, windowId: 1 }
     await send({ type: "set-goal", goal: "분기 보고서 작성", minutes: null })
     await settle(50)
 
     // Navigate to a SENSITIVE page (a bank). observe() must drop it before any judging.
-    activeTab = { id: 2, url: "https://chase.com/account/summary", title: "Account Summary", active: true }
+    activeTab = { id: 2, url: "https://chase.com/account/summary", title: "Account Summary", active: true, windowId: 1 }
     for (const fn of listeners["tabs.onUpdated"]) await fn(2, { status: "complete" }, activeTab)
     await settle(50)
 
@@ -180,7 +186,7 @@ test("E2E: drifting, then navigating to a new page freezes S — no drain on the
     toasts.length = 0
     notifications.length = 0
     // Fresh session on a clearly off-goal page (a distinct goal → resetState wipes scenario 2).
-    activeTab = { id: 3, url: "https://video.test/watch?v=cat", title: "귀여운 고양이 영상 몰아보기", active: true }
+    activeTab = { id: 3, url: "https://video.test/watch?v=cat", title: "귀여운 고양이 영상 몰아보기", active: true, windowId: 1 }
     await send({ type: "set-goal", goal: "파이썬 알고리즘 문제 풀이", minutes: null })
     await settle(50)
 
@@ -203,7 +209,7 @@ test("E2E: drifting, then navigating to a new page freezes S — no drain on the
     // Navigate to a NEW page. observe() enters NEUTRAL immediately; its dwell is a real 5s timer
     // that is never advanced or reconciled here, so the page stays UNjudged — and the gauge must
     // HOLD, not keep draining on the off-goal page's now-stale DRIFT (the pre-fix bug).
-    activeTab = { id: 3, url: "https://docs.python.org/3/tutorial/", title: "파이썬 알고리즘 문제 풀이 튜토리얼", active: true }
+    activeTab = { id: 3, url: "https://docs.python.org/3/tutorial/", title: "파이썬 알고리즘 문제 풀이 튜토리얼", active: true, windowId: 1 }
     for (const fn of listeners["tabs.onUpdated"]) await fn(3, { status: "complete" }, activeTab)
     await settle(50)
     const atNav = (await send({ type: "get-state" })).s as number
@@ -218,6 +224,129 @@ test("E2E: drifting, then navigating to a new page freezes S — no drain on the
     assert.equal(held, atNav, "S is held steady while the new page is judged — no drain on the stale verdict")
     assert.ok(held > 0, "the stale DRIFT did NOT drain S to 0 during the neutral hold")
     assert.equal(toasts.length + notifications.length, 0, "no nag fires during the neutral hold")
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: opening an internal page (chrome://newtab) holds S — no drain on the page just left (Fix 1)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    // Fresh session on a clearly off-goal page (a distinct goal → resetState wipes the prior scenario).
+    activeTab = { id: 5, url: "https://video.test/watch?v=dog", title: "귀여운 강아지 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "리액트 컴포넌트 리팩터링", minutes: null })
+    await settle(50)
+
+    // Judge the off-goal page → DRIFT (advance past the dwell, reconcile does the judge).
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+
+    // Drain a while, stopping well before 0 so the freeze below is unambiguous.
+    let drained = 100
+    for (let i = 0; i < 60 && drained > 50; i += 1) {
+      mock.timers.tick(60_000)
+      await fireHeartbeat()
+      await settle(0)
+      drained = (await send({ type: "get-state" })).s as number
+    }
+    assert.ok(drained > 0 && drained < 100, `the drift drained S off full but not to 0 (S=${drained})`)
+
+    // Open a new tab: an internal chrome:// page with NO page key. Pre-fix, observe() returned at
+    // `if (!pageKey) return` BEFORE the neutral hold, so heartbeats kept draining the off-goal
+    // page's now-stale DRIFT while the user sat on a blank tab. Post-fix it holds NEUTRAL.
+    activeTab = { id: 5, url: "chrome://newtab/", title: "New Tab", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(5, { status: "complete" }, activeTab)
+    await settle(50)
+    const atNav = (await send({ type: "get-state" })).s as number
+
+    // Fifteen minutes of heartbeats while sitting on the new tab — S must be frozen.
+    for (let i = 0; i < 15; i += 1) {
+      mock.timers.tick(60_000)
+      await fireHeartbeat()
+      await settle(0)
+    }
+    const held = (await send({ type: "get-state" })).s as number
+    assert.equal(held, atNav, "the internal page holds the gauge NEUTRAL — no drain on the stale verdict")
+    assert.ok(held > 0, "the stale DRIFT did NOT drain S to 0 while on the new tab")
+    assert.equal(toasts.length + notifications.length, 0, "no nag fires while holding on the internal page")
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: a nag is never surfaced while Chrome is unfocused, but delivers once focused (Fix 3)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 6, url: "https://example.test/article", title: "예시 문서", active: true, windowId: 1 }
+
+    // Chrome is NOT the focused app. The test-goal "알림보기" fires a nag immediately (testNag),
+    // but the delivery invariant in showToast must drop it — no toast, no OS notification.
+    winFocused = false
+    await send({ type: "set-goal", goal: "알림보기", minutes: null })
+    await settle(50)
+    assert.equal(toasts.length + notifications.length, 0, "no nudge surfaces while Chrome is unfocused")
+
+    // The user is at the keyboard but Chrome is still not focused (idle system-wide is "active"):
+    // presence still requires window focus, so the nudge stays suppressed.
+    idleActive = true
+    await send({ type: "set-goal", goal: "알림보기", minutes: null })
+    await settle(50)
+    assert.equal(toasts.length + notifications.length, 0, "focus, not just idle-active, gates delivery")
+
+    // Chrome regains focus: the OS-fallback/toast is only presence-gated, not disabled, so the
+    // same path now delivers.
+    winFocused = true
+    await send({ type: "set-goal", goal: "알림보기", minutes: null })
+    await settle(50)
+    assert.ok(toasts.length + notifications.length > 0, "the nudge delivers once Chrome is focused again")
+  } finally {
+    winFocused = true
+    idleActive = true
+    mock.timers.reset()
+  }
+})
+
+test("E2E: title churn in an UNFOCUSED window's active tab cannot steal the focused page's dwell (Fix 4)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    // Focused window (id 1): a clearly off-goal page; set-goal schedules its 5s dwell.
+    activeTab = { id: 7, url: "https://video.test/watch?v=fox", title: "귀여운 여우 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "통계학 회귀분석 과제 풀이", minutes: null })
+    await settle(50)
+
+    // A SECOND window's active tab storms title updates during that dwell. Tab.active is
+    // per-window, so it reports active:true even though its window (id 2) is NOT focused.
+    // Pre-fix each update passed the `tab.active` check and REPLACED the single dwell
+    // checkpoint, so the focused page was never judged (and the side page's own judgement was
+    // then dropped by the lastFocusedWindow-scoped stillJudging) — the gauge froze in a
+    // NEUTRAL hold. Post-fix the isFocusedWindow gate ignores it entirely.
+    for (let i = 0; i < 5; i += 1) {
+      const sideTab = { id: 9, url: "https://news.test/live", title: `속보 라이브 #${i}`, active: true, windowId: 2 }
+      for (const fn of listeners["tabs.onUpdated"]) await fn(9, { title: sideTab.title }, sideTab)
+      mock.timers.tick(1000) // churn spread across the focused page's dwell window
+      await settle(0)
+    }
+
+    // Advance past the dwell and reconcile: the checkpoint must still hold the FOCUSED page.
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+
+    // The focused off-goal page got its judgement → DRIFT → heartbeats drain S below 100.
+    for (let i = 0; i < 5; i += 1) {
+      mock.timers.tick(60_000)
+      await fireHeartbeat()
+      await settle(0)
+    }
+    const s = (await send({ type: "get-state" })).s as number
+    assert.ok(s < 100, `the focused page's judgement landed and S drains (S=${s}) — the side window did not steal the dwell`)
   } finally {
     mock.timers.reset()
   }
