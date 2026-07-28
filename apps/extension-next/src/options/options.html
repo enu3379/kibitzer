@@ -58,13 +58,16 @@
       .times { display: flex; gap: 6px; align-items: center; color: var(--page-ink-3); }
       .times input { width: 82px; font-variant-numeric: tabular-nums; }
 
-      /* range */
-      .range { display: flex; flex-direction: column; gap: 4px; padding: 12px 0; border-top: 1px solid var(--line-soft); }
-      .range .top { display: flex; align-items: baseline; }
-      .range .top b { font-size: 13px; font-weight: 650; flex: 1; }
-      .range .top .v { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--accent); }
-      input[type="range"] { width: 100%; accent-color: var(--accent); }
-      .range small { color: var(--page-ink-3); font-size: 11.5px; }
+      /* sensitivity presets */
+      .seg-block { display: flex; flex-direction: column; gap: 7px; padding: 12px 0; }
+      .seg-block > b { font-size: 13px; font-weight: 650; }
+      .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+      .segbtn { all: unset; box-sizing: border-box; cursor: pointer; text-align: center; padding: 8px 0;
+        border-radius: 9px; background: var(--surface-2); border: 1px solid var(--line-soft);
+        font-size: 12.5px; font-weight: 700; }
+      .segbtn[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+      .segbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .seg-block small { color: var(--page-ink-3); font-size: 11.5px; }
 
       /* persona grid */
       .pgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px 0; }
@@ -111,10 +114,14 @@
       <!-- 판정 감도 -->
       <div class="card">
         <h3>판정 감도</h3>
-        <div class="range">
-          <div class="top"><b>목표 이탈 민감도</b><span class="v" id="tauVal">0.59</span></div>
-          <input type="range" id="tau" min="0.40" max="0.80" step="0.01" value="0.59" />
-          <small>높일수록 엄격 — 조금만 벗어나도 이탈로 봅니다. 낮추면 관대. (기본 0.59)</small>
+        <div class="seg-block">
+          <b>목표 이탈 민감도</b>
+          <div class="seg" id="sens" role="radiogroup" aria-label="목표 이탈 민감도">
+            <button class="segbtn" data-level="lenient" role="radio" aria-checked="false">관대</button>
+            <button class="segbtn" data-level="standard" role="radio" aria-checked="true">중간</button>
+            <button class="segbtn" data-level="strict" role="radio" aria-checked="false">엄격</button>
+          </div>
+          <small id="sensHint">권장 기본값 — 벤치마크로 맞춘 균형점입니다.</small>
         </div>
       </div>
 
