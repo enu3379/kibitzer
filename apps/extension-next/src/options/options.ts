@@ -95,9 +95,10 @@ function selectTab(key: string, focus = false): void {
 tabButtons.forEach((b, i) => {
   b.addEventListener("click", () => selectTab(b.dataset.tab ?? ""))
   b.addEventListener("keydown", (e) => {
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return
+    const fwd = e.key === "ArrowDown" || e.key === "ArrowRight"
+    if (!fwd && e.key !== "ArrowUp" && e.key !== "ArrowLeft") return
     e.preventDefault()
-    const step = e.key === "ArrowRight" ? 1 : tabButtons.length - 1
+    const step = fwd ? 1 : tabButtons.length - 1
     const next = tabButtons[(i + step) % tabButtons.length]
     selectTab(next.dataset.tab ?? "", true)
   })

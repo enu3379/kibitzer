@@ -8,7 +8,7 @@
       :root {
         color-scheme: light dark;
         --page: #f2f5f3; --page-ink: #1c2420; --page-ink-2: #57635c; --page-ink-3: #8a958f;
-        --surface: #ffffff; --surface-2: #eef3f0; --surface-3: #ffffff;
+        --surface: #ffffff; --surface-2: #eef3f0;
         --line: #dce4df; --line-soft: #e7ede9;
         --accent: #1e7a4c; --accent-ink: #ffffff; --accent-soft: #e2f1e8;
         --ok-fg: #175f3b; --err: #bf4540; --err-soft: #f7e2e0; --err-fg: #8f322c;
@@ -16,7 +16,7 @@
       @media (prefers-color-scheme: dark) {
         :root {
           --page: #161b18; --page-ink: #e9efeb; --page-ink-2: #a8b4ad; --page-ink-3: #79857e;
-          --surface: #232a26; --surface-2: #2e3733; --surface-3: #37413c;
+          --surface: #232a26; --surface-2: #2e3733;
           --line: #3c463f; --line-soft: #333d37;
           --accent: #4cc585; --accent-ink: #0c1f14; --accent-soft: #2a4536;
           --ok-fg: #8fdcb4; --err: #e07a72; --err-soft: #4a2a27; --err-fg: #f0a8a1;
@@ -28,20 +28,27 @@
         font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Apple SD Gothic Neo", "Pretendard", "Malgun Gothic", system-ui, sans-serif;
         -webkit-font-smoothing: antialiased; line-height: 1.5;
       }
-      .frame { max-width: 640px; margin: 0 auto; padding: 40px 24px 72px; }
+      .frame { max-width: 880px; margin: 0 auto; padding: 40px 24px 72px; }
       .head { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
       .head .name { font-size: 22px; font-weight: 800; letter-spacing: -.02em; }
       .lede { color: var(--page-ink-2); font-size: 13.5px; margin: 0 0 20px; }
 
-      /* tab bar */
-      .tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; padding: 2px; margin-bottom: 14px;
-        background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 9px; }
-      .tabs button { all: unset; text-align: center; font-size: 12.5px; font-weight: 600; padding: 6px 0;
-        border-radius: 7px; color: var(--page-ink-2); cursor: pointer; }
-      .tabs button[aria-selected="true"] { background: var(--surface-3); color: var(--page-ink); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+      /* left tab rail */
+      .layout { display: flex; gap: 28px; align-items: flex-start; }
+      .tabs { flex: none; width: 160px; display: flex; flex-direction: column; gap: 2px; position: sticky; top: 28px; }
+      .tabs button { all: unset; box-sizing: border-box; width: 100%; cursor: pointer; font-size: 13px; font-weight: 600;
+        color: var(--page-ink-2); padding: 8px 12px; border-radius: 8px; }
+      .tabs button:hover { background: var(--surface-2); color: var(--page-ink); }
+      .tabs button[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
       .tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      .panes { flex: 1; min-width: 0; }
       .pane { display: none; }
       .pane.on { display: block; }
+      @media (max-width: 720px) {
+        .layout { flex-direction: column; }
+        .tabs { position: static; width: 100%; flex-direction: row; flex-wrap: wrap; }
+        .tabs button { width: auto; flex: 1 1 auto; text-align: center; }
+      }
 
       .card { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 12px; padding: 6px 16px; margin-bottom: 14px; }
       .card > h3 { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--page-ink-3); text-transform: uppercase; margin: 14px 0 4px; }
@@ -119,12 +126,14 @@
       </div>
       <p class="lede">판정 감도·알림·말투·AI 판정·데이터를 여기서 관리합니다. 목표 선언과 훈수 응답은 툴바 팝업에서.</p>
 
-      <div class="tabs" role="tablist" aria-label="설정 분류">
-        <button role="tab" id="tab-general" aria-controls="pane-general" aria-selected="true" data-tab="general">일반</button>
-        <button role="tab" id="tab-persona" aria-controls="pane-persona" aria-selected="false" tabindex="-1" data-tab="persona">말투</button>
-        <button role="tab" id="tab-ai" aria-controls="pane-ai" aria-selected="false" tabindex="-1" data-tab="ai">AI 판정</button>
-        <button role="tab" id="tab-data" aria-controls="pane-data" aria-selected="false" tabindex="-1" data-tab="data">데이터</button>
-      </div>
+      <div class="layout">
+        <nav class="tabs" role="tablist" aria-label="설정 분류" aria-orientation="vertical">
+          <button role="tab" id="tab-general" aria-controls="pane-general" aria-selected="true" data-tab="general">일반</button>
+          <button role="tab" id="tab-persona" aria-controls="pane-persona" aria-selected="false" tabindex="-1" data-tab="persona">말투</button>
+          <button role="tab" id="tab-ai" aria-controls="pane-ai" aria-selected="false" tabindex="-1" data-tab="ai">AI 판정</button>
+          <button role="tab" id="tab-data" aria-controls="pane-data" aria-selected="false" tabindex="-1" data-tab="data">데이터</button>
+        </nav>
+        <div class="panes">
 
       <!-- 일반: 판정 감도 + 알림 -->
       <section class="pane on" id="pane-general" role="tabpanel" aria-labelledby="tab-general" data-pane="general">
@@ -201,6 +210,8 @@
           </div>
         </div>
       </section>
+        </div>
+      </div>
     </div>
     <script type="module" src="options.js"></script>
   </body>
