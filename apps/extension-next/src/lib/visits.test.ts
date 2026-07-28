@@ -32,6 +32,22 @@ test("judged opens an interval and creates the entry at 0ms", () => {
   assert.deepEqual(v.open, { pageKey: "a", since: 1000 })
 })
 
+test("judged while not present records the entry/verdict but opens no interval", () => {
+  const v = run([{ type: "judged", pageKey: "a", title: "T", host: "a.test", verdict: "OK", present: false, ts: 1000 }])
+  assert.equal(v.entries.a.ms, 0, "entry recorded")
+  assert.equal(v.entries.a.verdict, "OK")
+  assert.equal(v.open, null, "no interval opened while the user is away")
+})
+
+test("a late verdict while away does not accrue bogus dwell before the next close", () => {
+  const v = run([
+    { type: "judged", pageKey: "a", title: "T", host: "a.test", verdict: "DRIFT", present: false, ts: 1000 },
+    { type: "inactive", ts: 91_000 }, // 90s later, still nothing open → no time credited
+  ])
+  assert.equal(v.entries.a.ms, 0)
+  assert.equal(v.open, null)
+})
+
 test("inactive closes and credits the elapsed time", () => {
   const v = run([judged("a", 1000), { type: "inactive", ts: 31_000 }])
   assert.equal(v.entries.a.ms, 30_000)

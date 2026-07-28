@@ -34,16 +34,18 @@ const KNOWN: Record<string, FriendlyHost> = {
   "musinsa.com": { emoji: "🛒", name: "무신사" },
 }
 
-/** Strip a leading www./m. label so "www.instagram.com" and the bare domain agree. */
+/** Strip a trailing FQDN dot and a leading www./m. label so "www.instagram.com." and the
+ *  bare domain agree. */
 function stripCommonSub(host: string): string {
-  return host.replace(/^(www|m|mobile)\./i, "")
+  return host.replace(/\.$/, "").replace(/^(www|m|mobile)\./i, "")
 }
 
 export function friendlyHost(host: string | null | undefined): FriendlyHost {
   const clean = stripCommonSub((host ?? "").trim().toLowerCase())
   if (!clean) return { emoji: "", name: "알 수 없는 사이트" }
   for (const domain of Object.keys(KNOWN)) {
-    if (clean === domain || clean.endsWith(`.${domain}`)) return KNOWN[domain]
+    // Return a copy — callers must never mutate the shared KNOWN entry.
+    if (clean === domain || clean.endsWith(`.${domain}`)) return { ...KNOWN[domain] }
   }
   return { emoji: "", name: clean }
 }

@@ -39,8 +39,8 @@ export interface SessionVisits {
 
 export type VisitAction =
   | { type: "observe"; pageKey: string; ts: number }
-  | { type: "judged"; pageKey: string; title: string; host: string; verdict: JudgeVerdict; ts: number }
-  | { type: "verdict"; pageKey: string; title: string; host: string; verdict: JudgeVerdict; ts: number }
+  | { type: "judged"; pageKey: string; title: string; host: string; verdict: JudgeVerdict; present?: boolean; ts: number }
+  | { type: "verdict"; pageKey: string; title: string; host: string; verdict: JudgeVerdict; present?: boolean; ts: number }
   | { type: "inactive"; ts: number }
   | { type: "heartbeat"; ts: number }
 
@@ -111,10 +111,14 @@ export function reduceVisits(
       const entry: VisitEntry = prev
         ? { ...prev, title: action.title || prev.title, host: action.host || prev.host, verdict: action.verdict, lastSeen: action.ts }
         : { pageKey: action.pageKey, title: action.title, host: action.host, verdict: action.verdict, ms: 0, lastSeen: action.ts }
+      // Record the entry/verdict, but open a timed interval ONLY when the user is present. A
+      // judgement (or "관련 있어요" feedback) can land while Chrome is unfocused/idle; reopening
+      // then would accrue up to MAX_OPEN_MS of bogus valid dwell until the next close. A later
+      // observe (presence-resume) reopens it correctly.
       return evictOverCap({
         ...v,
         entries: { ...v.entries, [action.pageKey]: entry },
-        open: { pageKey: action.pageKey, since: action.ts },
+        open: action.present === false ? null : { pageKey: action.pageKey, since: action.ts },
       })
     }
     case "inactive":
@@ -151,8 +155,9 @@ export function noteJudged(
   verdict: JudgeVerdict,
   ts: number,
   epoch: number,
+  present = true,
 ): Promise<void> {
-  return note({ type: "judged", pageKey, title, host, verdict, ts }, epoch)
+  return note({ type: "judged", pageKey, title, host, verdict, present, ts }, epoch)
 }
 
 /** User feedback ("목표와 관련 있어요") flips a page's verdict without a re-judge. */
@@ -163,8 +168,9 @@ export function noteVerdict(
   verdict: JudgeVerdict,
   ts: number,
   epoch: number,
+  present = true,
 ): Promise<void> {
-  return note({ type: "verdict", pageKey, title, host, verdict, ts }, epoch)
+  return note({ type: "verdict", pageKey, title, host, verdict, present, ts }, epoch)
 }
 
 export function noteInactive(ts: number, epoch: number): Promise<void> {

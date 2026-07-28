@@ -153,7 +153,9 @@ async function judgeAndDispatch(url: string, title: string, obsKey: string): Pro
   const now = Date.now()
   await setActivePage({ pageKey, title, urlHost, score })
   await recordObservation({ title, urlHost, verdict, ts: now }) // recent_titles / repeat context
-  await noteJudged(pageKey, title, urlHost, verdict, now, epoch) // session-summary dwell/verdict
+  // Only open a timed visit interval if the user is present now — this verdict may have landed
+  // after the dwell/embed while Chrome sits unfocused/idle on the same page.
+  await noteJudged(pageKey, title, urlHost, verdict, now, epoch, await browserPresent()) // session-summary dwell/verdict
   await dispatch(
     { type: "nav", pageKey, verdict, r0: score, tauOk, degraded: !enabled, ts: now },
     goal,
@@ -509,8 +511,10 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
         if (pageKey) {
           klog(`related → OK recover ${pageKey}`)
           await dispatch({ type: "nav", pageKey, verdict: "OK", ts: now }, goal)
-          // The user override also flips the page in the session-summary tracker.
-          void noteVerdict(pageKey, tab?.title ?? "", tab?.url ? hostOf(tab.url) : "", "OK", now, goal.epoch)
+          // The user override also flips the page in the session-summary tracker (open a timed
+          // interval only if present — a notification-button click can arrive with Chrome unfocused).
+          const present = await browserPresent()
+          void noteVerdict(pageKey, tab?.title ?? "", tab?.url ? hostOf(tab.url) : "", "OK", now, goal.epoch, present)
           // Learn: add this page's embedding as a goal exemplar so this class of page
           // stops drifting at Tier-0 (the user-taught relevance loop).
           if (tab?.title && tab.url && !shouldDropUrl(tab.url)) {

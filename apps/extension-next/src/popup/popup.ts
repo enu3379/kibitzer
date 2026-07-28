@@ -469,7 +469,7 @@ function renderCard(id: CardId, summary: SessionSummary): HTMLElement | null {
     }
     case "goalcard": {
       const goal =
-        r.goalMinutes != null
+        r.goalMinutes != null && r.goalMinutes > 0
           ? metric(
               "목표 대비",
               `${Math.round((r.activeMinutes / r.goalMinutes) * 100)}%`,
