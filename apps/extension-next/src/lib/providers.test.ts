@@ -38,7 +38,7 @@ function reset(): void {
 test("fresh install defaults to Ollama routes with the preset defaults", async () => {
   reset()
   const settings = await getJudgeSettings()
-  assert.deepEqual(settings.routes.tier1, { provider: "ollama", model: "nemotron-3-super" })
+  assert.deepEqual(settings.routes.tier1, { provider: "ollama", model: "nemotron-3-nano:30b" })
   assert.deepEqual(settings.routes.tier2, { provider: "ollama", model: "minimax-m3" })
   assert.deepEqual(settings.accounts.ollama, { keys: [] })
   // migrated result is persisted
@@ -121,7 +121,7 @@ test("unknown provider in stored routes coerces back to defaults", async () => {
     routes: { tier1: { provider: "bogus", model: "x" }, tier2: { provider: "deepseek", model: "deepseek-v4-pro" } },
   }
   const settings = await getJudgeSettings()
-  assert.deepEqual(settings.routes.tier1, { provider: "ollama", model: "nemotron-3-super" })
+  assert.deepEqual(settings.routes.tier1, { provider: "ollama", model: "nemotron-3-nano:30b" })
   assert.deepEqual(settings.routes.tier2, { provider: "deepseek", model: "deepseek-v4-pro" })
   assert.ok(!("bogus" in settings.accounts))
 })
