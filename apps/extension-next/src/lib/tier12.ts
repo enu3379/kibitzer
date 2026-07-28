@@ -6,19 +6,24 @@
 
 import { OllamaChatJudgeProvider } from "../providers/ollamaChat.ts"
 import {
+  buildSessionSummaryPayload,
   buildTier1Payload,
   buildTier2MessagePayload,
   buildTier2ReviewPayload,
   type RecentTitle,
+  type TopDriftHost,
 } from "../providers/payloads.ts"
 import type { JudgeVerdict } from "../providers/types.ts"
 import {
   activePersona,
   clampSentences,
+  composeSummaryPrompt,
   composeWriterPrompt,
   DEFAULT_MAX_SENTENCES,
   pickFallback,
 } from "./personas.ts"
+import { detectSpecial, type SessionStats } from "./sessionStats.ts"
+import type { SummaryDice } from "./summaryDice.ts"
 import { klog } from "./klog.ts"
 import { recordProviderError, recordProviderOk } from "./providerHealth.ts"
 import { buildEnrichmentPrompt, ENRICH_TIMEOUT_MS, MAX_PHRASES, parseEnrichmentResponse } from "./goalEnrichment.ts"
@@ -267,5 +272,55 @@ export async function tier2Confirm(
       host: page.urlHost || "현재 페이지",
     })
     return { flow: "drift", message: message ? clampSentences(message, maxSentences) : message }
+  }
+}
+
+// The recap is a retrospective, not a judge call: temperature is raised for this call only
+// so repeated summaries vary in wording (the dice vary the framing). Judges stay at 0.
+const SUMMARY_TEMPERATURE = 0.8
+const SUMMARY_MAX_SENTENCES = 3
+
+/** Persona-voiced end-of-session recap via the Tier-2 writer. Null when Ollama is off or
+ *  the call fails — the caller shows a static fallback line (fail-open, like tier2Confirm). */
+export async function writeSessionSummary(
+  stats: SessionStats,
+  dice: SummaryDice,
+  topDriftHost: TopDriftHost | null = null,
+): Promise<string | null> {
+  const p = await providers()
+  if (!p) return null
+  try {
+    const persona = await activePersona()
+    const payload = buildSessionSummaryPayload(
+      {
+        goalText: stats.goalText,
+        // "session minutes" for the recap = active browsing time, not wall-clock (a goal left
+        // open overnight must not read as an all-nighter).
+        sessionMinutes: Math.round(stats.activeMs / 60_000),
+        pagesTotal: stats.pagesTotal,
+        pagesOk: stats.pagesOk,
+        okRatio: stats.okRatio,
+        validMinutes: Math.round(stats.validMs / 60_000),
+        nagCount: stats.nagCount,
+        topPages: stats.topPages.map((page) => ({
+          title: page.title,
+          host: page.host,
+          minutes: Math.round(page.ms / 60_000),
+          verdict: page.verdict,
+        })),
+      },
+      dice,
+      detectSpecial(stats),
+      topDriftHost,
+    )
+    const message = await p.tier2.writeTier2Message(payload, composeSummaryPrompt(persona), {
+      temperature: SUMMARY_TEMPERATURE,
+    })
+    void recordProviderOk()
+    return clampSentences(message, dice.bonus ? SUMMARY_MAX_SENTENCES + 1 : SUMMARY_MAX_SENTENCES)
+  } catch (error) {
+    void recordProviderError(error)
+    klog(`session summary writer error (static fallback): ${String(error)}`)
+    return null
   }
 }

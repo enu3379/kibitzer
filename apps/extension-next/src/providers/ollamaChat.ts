@@ -34,7 +34,7 @@ interface OllamaChatRequest {
   messages: OllamaMessage[]
   stream: false
   options: {
-    temperature: 0
+    temperature: number // 0 for every judge call; raised only for the session recap writer
     num_predict: number
   }
   format?: "json"
@@ -151,6 +151,7 @@ export class OllamaChatJudgeProvider implements JudgeProvider {
   async writeTier2Message(
     payload: Record<string, unknown>,
     systemPrompt: string,
+    opts: { temperature?: number } = {},
   ): Promise<string> {
     const response = await this.postChat(
       [
@@ -161,6 +162,7 @@ export class OllamaChatJudgeProvider implements JudgeProvider {
         think: false,
         numPredict: this.writerMaxOutputTokens,
         jsonMode: false,
+        temperature: opts.temperature,
       },
     )
     const content = messageContent(response).trim()
@@ -183,6 +185,7 @@ export class OllamaChatJudgeProvider implements JudgeProvider {
       think?: boolean
       numPredict?: number
       jsonMode?: boolean
+      temperature?: number
     } = {},
   ): Promise<Record<string, unknown>> {
     const requestBody: OllamaChatRequest = {
@@ -190,7 +193,7 @@ export class OllamaChatJudgeProvider implements JudgeProvider {
       messages,
       stream: false,
       options: {
-        temperature: 0,
+        temperature: options.temperature ?? 0,
         num_predict: options.numPredict ?? this.maxOutputTokens,
       },
     }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  buildSessionSummaryPayload,
   buildTier1Payload,
   buildTier2MessagePayload,
   buildTier2ReviewPayload,
@@ -117,4 +118,64 @@ test("Tier 2 message payload maps the TypeScript decision to wire keys", () => {
       nagging_context: { nag_count_today: 1 },
     },
   )
+})
+
+test("session summary payload carries aggregates, the dice, and at most five pages", () => {
+  const topPages = [1, 2, 3, 4, 5, 6].map((i) => ({
+    title: `T${i}`,
+    host: `h${i}.test`,
+    minutes: i,
+    verdict: i % 2 ? "OK" : "DRIFT",
+  }))
+  const payload = buildSessionSummaryPayload(
+    {
+      goalText: "논문 정리",
+      sessionMinutes: 87,
+      pagesTotal: 12,
+      pagesOk: 8,
+      okRatio: 8 / 12,
+      validMinutes: 54,
+      nagCount: 3,
+      topPages,
+    },
+    { focus: "top_page", closing: "question", bonus: true },
+    "no_nag",
+    { label: "📷 인스타그램", visits: 5 },
+  )
+  assert.deepEqual(payload, {
+    goal: "논문 정리",
+    session_minutes: 87,
+    pages_total: 12,
+    pages_ok: 8,
+    ok_ratio: 0.67,
+    valid_minutes: 54,
+    nag_count: 3,
+    top_pages: topPages.slice(0, 5),
+    top_drift_host: { label: "📷 인스타그램", visits: 5 },
+    focus_hint: "top_page",
+    closing_style: "question",
+    bonus_allowed: true,
+    special_event: "no_nag",
+  })
+})
+
+test("session summary payload nulls the optional fields without inventing values", () => {
+  const payload = buildSessionSummaryPayload(
+    {
+      goalText: "g",
+      sessionMinutes: 1,
+      pagesTotal: 0,
+      pagesOk: 0,
+      okRatio: null,
+      validMinutes: 0,
+      nagCount: 0,
+      topPages: [{ title: null, host: null, minutes: 0, verdict: null }],
+    },
+    { focus: "ratio", closing: "verdict", bonus: false },
+    null,
+  )
+  assert.equal(payload.ok_ratio, null)
+  assert.equal(payload.special_event, null)
+  assert.equal(payload.top_drift_host, null) // omitted → null, never invented
+  assert.deepEqual(payload.top_pages, [{ title: null, host: null, minutes: 0, verdict: null }])
 })

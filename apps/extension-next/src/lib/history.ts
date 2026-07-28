@@ -90,6 +90,13 @@ export async function nagCountToday(now: number): Promise<number> {
   return (await readNags()).filter((n) => n.ts >= midnight).length
 }
 
+/** Nags delivered this session (ts ≥ the goal's startedAt) and how many the user acted on —
+ *  the end-of-session reaction stat. Read at finalize, before resetState clears the log. */
+export async function sessionNagStats(startedAt: number): Promise<{ count: number; acted: number }> {
+  const nags = (await readNags()).filter((n) => n.ts >= startedAt)
+  return { count: nags.length, acted: nags.filter((n) => n.acted).length }
+}
+
 /** True when the previous nag drew no explicit response (server's last_nag_ignored). */
 export async function lastNagIgnored(): Promise<boolean> {
   const last = (await readNags()).at(-1)
