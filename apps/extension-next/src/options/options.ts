@@ -121,7 +121,7 @@ function paintQuote(key: string, name: string, preview: boolean): void {
   // out would leave the previous persona's line sitting under a different hovered card.
   const lines = sampleLinesFor(key)
   pquote.classList.toggle("preview", preview)
-  pquoteTag.textContent = `${preview ? "미리듣기" : "선택됨"} · ${name}`
+  pquoteTag.textContent = `${preview ? "미리보기" : "선택됨"} · ${name}`
   pquoteTxt.textContent = lines ? `“${preview ? lines.hover : lines.picked}”` : ""
   pquoteTxt.classList.remove("swap")
   void pquoteTxt.offsetWidth // restart the fade

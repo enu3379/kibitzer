@@ -63,7 +63,7 @@
   .tip::before{content:"";position:absolute;top:-4px;left:16px;width:8px;height:8px;background:var(--page-ink);transform:rotate(45deg)}
 
   /* ---- D: 선택 시 테두리 플래시 — 실제 구현(options.html의 @keyframes pqflash)과 동일한 값 ---- */
-  .qstrip.fire{animation:ringflash 1000ms ease-out 50ms}
+  .qstrip.fire{animation:ringflash 850ms ease-out 50ms}
   @keyframes ringflash{
     0%   {box-shadow:0 0 0 0 var(--accent);border-left-width:3px}
     30%  {box-shadow:0 0 0 3px var(--accent);border-left-width:7px}
@@ -92,10 +92,10 @@
   <!-- ============ A ============ -->
   <div class="lane">
     <h2>A. 고정 인용 스트립</h2>
-    <p class="why">그리드 아래 고정 슬롯 하나. 호버하면 그 페르소나를 <b>미리듣기</b>, 커서가 벗어나면 선택된 페르소나로 복귀. 클릭하면 선택 전용 문장으로 교체.</p>
+    <p class="why">그리드 아래 고정 슬롯 하나. 호버하면 그 페르소나를 <b>미리보기</b>, 커서가 벗어나면 선택된 페르소나로 복귀. 클릭하면 선택 전용 문장으로 교체.</p>
     <div class="card">
       <h3>훈수 말투</h3>
-      <p class="cap">고르면 아래에서 목소리를 미리 들어볼 수 있어요.</p>
+      <p class="cap">고르면 아래에서 말투를 미리 볼 수 있어요.</p>
       <div class="pgrid" id="gridA"></div>
       <div class="qstrip" id="qA">
         <span class="qtag" id="qtagA">선택됨 · 영국 집사</span>
@@ -113,7 +113,7 @@
       <h3>훈수 말투</h3>
       <p class="cap">&nbsp;</p>
       <div class="pgrid b" id="gridB"></div>
-      <p class="note">호버 미리듣기 불가 · 선택할 때마다 아래 카드들이 밀림(레이아웃 점프)</p>
+      <p class="note">호버 미리보기 불가 · 선택할 때마다 아래 카드들이 밀림(레이아웃 점프)</p>
     </div>
   </div>
 
@@ -141,7 +141,7 @@
         <span class="qtag" id="qtagD"></span>
         <span class="qtxt" id="qtxtD"></span>
       </div>
-      <p class="note">1000ms · ease-out · 50ms 딜레이 · <code>box-shadow</code>와 테두리 두께만 변형 → 리플로우 없음</p>
+      <p class="note">850ms · ease-out · 50ms 딜레이 · <code>box-shadow</code>와 테두리 두께만 변형 → 리플로우 없음</p>
     </div>
   </div>
 </div>
@@ -154,7 +154,7 @@
     <li><b>키보드</b> — <span class="kbd">Tab</span>으로 카드에 포커스가 가면 호버와 동일하게 미리듣기가 뜨도록 <code>focus</code>도 같이 바인딩. C안이 못 하는 부분입니다.</li>
     <li><b>문장 개수</b> — 호버(이 말투가 뭔지 보여주는 대표 잔소리) 1개 + 선택 직후(고용을 수락하는 인사) 1개, 총 2개. 클릭에 반응이 있어야 "골랐다"는 감각이 생기고, 잔소리만 두 번 보여주면 지겹습니다.</li>
     <li><b>문구 저장 위치</b> — <code>personas.data.ts</code>는 <code>scripts/gen-personas.py</code>가 YAML에서 생성하는 파일이라 손으로 못 고칩니다. 이 20개 문장은 프롬프트로 나가지 않는 순수 UI 카피라 별도 모듈 <code>src/lib/personaSampleLines.ts</code>에 뒀습니다.</li>
-    <li><b>구현 중 잡은 버그</b> — <code>animationend</code>는 버블링됩니다. 문장 교체용 0.18초 fade가 스트립까지 올라와 플래시를 중간에 끊어버려서, 1000ms로 맞춰도 실제로는 180ms만 보였습니다. 이벤트 타깃과 <code>animationName</code>을 확인하도록 고쳤습니다.</li>
+    <li><b>구현 중 잡은 버그</b> — <code>animationend</code>는 버블링됩니다. 문장 교체용 0.18초 fade가 스트립까지 올라와 플래시를 중간에 끊어버려서, 850ms로 맞춰도 실제로는 180ms만 보였습니다. 이벤트 타깃과 <code>animationName</code>을 확인하도록 고쳤습니다.</li>
   </ul>
 </div>
 
