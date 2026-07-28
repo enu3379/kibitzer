@@ -41,5 +41,6 @@ export interface JudgeProvider {
   writeTier2Message(
     payload: Record<string, unknown>,
     systemPrompt: string,
+    opts?: { temperature?: number },
   ): Promise<string>
 }

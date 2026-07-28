@@ -13,7 +13,7 @@ interface StateResponse {
   s: number
   accelTier: number
   snoozedUntil?: number | null
-  ollama?: { apiKeys: string[]; tier1Model: string; tier2Model: string }
+  judgeEnabled?: boolean
   persona?: string
   personas?: Array<{ key: string; name: string }>
   health?: { ok: boolean; kind: string; message: string; ts: number } | null
@@ -111,7 +111,7 @@ async function getSummary(): Promise<SessionSummary | null> {
 }
 
 function renderMode(state: StateResponse): void {
-  const on = Boolean(state.ollama?.apiKeys?.length)
+  const on = Boolean(state.judgeEnabled)
   modeEl.textContent = on ? "● AI 판정 활성화" : "○ AI 판정 꺼짐 (제목 유사도만)"
   modeEl.classList.toggle("on", on)
 }
@@ -122,9 +122,9 @@ function personaName(state: StateResponse | null): string {
 }
 
 function renderProviderWarn(state: StateResponse): void {
-  const ollamaOn = Boolean(state.ollama?.apiKeys?.length)
+  const judgeOn = Boolean(state.judgeEnabled)
   const health = state.health
-  if (ollamaOn && health && !health.ok) {
+  if (judgeOn && health && !health.ok) {
     providerWarnEl.textContent = `⚠ LLM 오류: ${health.message} · Tier-0(제목 유사도)만 동작 중`
     providerWarnEl.hidden = false
   } else {

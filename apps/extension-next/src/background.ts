@@ -9,10 +9,23 @@ import { getGoal, setGoal, type SessionGoal } from "./lib/session.ts"
 import { embedText, embedTexts, judgeTier0 } from "./lib/tier0.ts"
 import { addExemplar, admissionEligible, admitAnchor, loadRefs, setDerived } from "./lib/relevance.ts"
 import { filterDerivedPhrases, MAX_PHRASES } from "./lib/goalEnrichment.ts"
-import { currentState, dispatch, enterNeutral, flushOutbox, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
-import { enrichGoal, getOllamaConfig, ollamaEnabled, setOllamaConfig, testOllama, tier1Rescue } from "./lib/tier12.ts"
+import { currentState, dispatch, enterNeutral, flushOutbox, PROVIDER_ALERT_ID, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
+import { enrichGoal, judgeEnabled, testRoute, tier1Rescue } from "./lib/tier12.ts"
+import {
+  addProviderKey,
+  connectProvider,
+  disconnectProvider,
+  getJudgeSettings,
+  removeProviderKey,
+  setRoutes,
+  toPublicSettings,
+  type ProviderId,
+  type TierName,
+  type TierRoute,
+} from "./lib/providers.ts"
+import { getUsage } from "./lib/usage.ts"
 import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
-import { getProviderHealth } from "./lib/providerHealth.ts"
+import { clearProviderHealth, getProviderHealth } from "./lib/providerHealth.ts"
 import { clearBadge } from "./lib/badge.ts"
 import { clearEvents, exportEvents, logEvent } from "./lib/events.ts"
 import { getSettings, setSettings, type Settings } from "./lib/settings.ts"
@@ -124,7 +137,7 @@ async function judgeAndDispatch(url: string, title: string, obsKey: string): Pro
   const tauOk = (await getSettings()).tauOk
   const refs = await loadRefs()
   const { score, verdict: tier0Verdict, vector: titleVec, parts } = await judgeTier0(goal.text, title, tauOk, refs)
-  const enabled = await ollamaEnabled()
+  const enabled = await judgeEnabled()
   let verdict = tier0Verdict
   let tierReached = 0
   if (verdict === "DRIFT" && enabled) {
@@ -170,7 +183,7 @@ async function observeActiveTab(): Promise<void> {
 /** Expand the goal into cross-lingual derived exemplars (Tier 1 → embed → dedup → store).
  *  Fire-and-forget on goal change; dropped if the goal moves on while enriching. */
 async function enrichGoalDerived(goal: SessionGoal): Promise<void> {
-  if (!(await ollamaEnabled())) return
+  if (!(await judgeEnabled())) return
   try {
     const phrases = await enrichGoal(goal.text)
     if (phrases.length === 0) return
@@ -341,6 +354,11 @@ chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) =
   void chrome.notifications.clear(notificationId)
 })
 chrome.notifications.onClicked.addListener((notificationId) => {
+  if (notificationId === PROVIDER_ALERT_ID) {
+    void chrome.runtime.openOptionsPage()
+    void chrome.notifications.clear(notificationId)
+    return
+  }
   if (notificationId.startsWith("kbz-")) void chrome.notifications.clear(notificationId)
 })
 
@@ -351,13 +369,18 @@ interface PopupMessage {
   goal?: string
   minutes?: number | null
   kind?: string
-  apiUrl?: string
-  apiKeys?: string[]
-  tier1Model?: string
-  tier2Model?: string
   persona?: string
   displayToken?: number
   settings?: Partial<Settings>
+  // provider settings (options AI 판정 pane)
+  provider?: ProviderId
+  tier?: TierName
+  model?: string
+  name?: string
+  value?: string
+  keyId?: string
+  routes?: Partial<Record<TierName, Partial<TierRoute>>>
+  days?: number
 }
 
 async function handleMessage(message: PopupMessage): Promise<unknown> {
@@ -370,9 +393,9 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     // rebases the reducer clock without integrating. (No notePresence here — per the alarm's
     // comment, only the alarm heartbeat logs presence transitions.)
     if (goal) await dispatch({ type: (await browserPresent()) ? "heartbeat" : "inactive", ts: Date.now() }, goal)
-    const [state, ollama, persona, health] = await Promise.all([
+    const [state, enabled, persona, health] = await Promise.all([
       currentState(),
-      getOllamaConfig(),
+      judgeEnabled(),
       getPersonaKey(),
       getProviderHealth(),
     ])
@@ -381,7 +404,7 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
       s: Math.round(state.s),
       accelTier: state.accelTier,
       snoozedUntil: state.snoozedUntil ?? null,
-      ollama,
+      judgeEnabled: enabled,
       persona,
       personas: personaChoices(),
       health,
@@ -437,22 +460,40 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     await clearSessionHistory()
     return { ok: true }
   }
-  if (message?.type === "test-ollama") {
-    return await testOllama({
-      apiUrl: message.apiUrl,
-      apiKeys: message.apiKeys,
-      tier1Model: message.tier1Model,
-      tier2Model: message.tier2Model,
-    })
+  // Provider settings (options AI 판정 pane). Key values only ever travel INTO the
+  // worker; responses carry masked keys via toPublicSettings. tier12 picks up every
+  // change on its next call through the settings fingerprint — no cache reset needed.
+  // Mutations also clear the recorded provider error: the toolbar "!" mark must not
+  // keep accusing a config the user just changed.
+  if (message?.type === "get-judge-settings") {
+    return toPublicSettings(await getJudgeSettings())
   }
-  if (message?.type === "set-ollama") {
-    const ollama = await setOllamaConfig({
-      apiUrl: message.apiUrl,
-      apiKeys: message.apiKeys,
-      tier1Model: message.tier1Model,
-      tier2Model: message.tier2Model,
-    })
-    return { ollama }
+  if (message?.type === "connect-provider" && message.provider) {
+    return toPublicSettings(await connectProvider(message.provider))
+  }
+  if (message?.type === "disconnect-provider" && message.provider) {
+    await clearProviderHealth()
+    return toPublicSettings(await disconnectProvider(message.provider))
+  }
+  if (message?.type === "add-provider-key" && message.provider) {
+    await clearProviderHealth()
+    return toPublicSettings(
+      await addProviderKey(message.provider, message.name ?? "", message.value ?? ""),
+    )
+  }
+  if (message?.type === "remove-provider-key" && message.provider && message.keyId) {
+    await clearProviderHealth()
+    return toPublicSettings(await removeProviderKey(message.provider, message.keyId))
+  }
+  if (message?.type === "set-routes") {
+    await clearProviderHealth()
+    return toPublicSettings(await setRoutes(message.routes ?? {}))
+  }
+  if (message?.type === "test-route" && message.tier && message.provider) {
+    return await testRoute(message.tier, message.provider, message.model ?? "")
+  }
+  if (message?.type === "get-usage") {
+    return { rows: await getUsage(message.days ?? 1) }
   }
   if (message?.type === "end-session") {
     const goal = await getGoal()
