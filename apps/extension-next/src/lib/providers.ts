@@ -47,8 +47,13 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
     format: "ollama",
     keyHint: "ollama.com API 키",
     note: "무료 계정 키만으로 충분 — 키가 여러 개면 자동 로테이션으로 무료 한도를 넓게 씁니다.",
-    tier1Presets: ["nemotron-3-super", "nemotron-3-nano:30b", "gpt-oss:20b"],
-    tier2Presets: ["minimax-m3", "qwen3.5:397b", "gemma4:31b"],
+    // 2026-07-28 judge study: nano matches nemotron-3-super's 100% accuracy (case F
+    // incl.) at ~40% lower latency and a Low GPU-usage tier — super was T1 overkill.
+    // T2 stays minimax-m3 (best Korean tone tested); gemma4:31b is the Low-tier
+    // fallback when free GPU-time runs tight. deepseek-v4-flash/minimax-m2.7 are
+    // catalog-listed but 403 on free keys — do not preset.
+    tier1Presets: ["nemotron-3-nano:30b", "gpt-oss:20b", "nemotron-3-super"],
+    tier2Presets: ["minimax-m3", "gemma4:31b", "qwen3.5:397b"],
   },
   {
     id: "gemini",
@@ -69,15 +74,19 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
     format: "openai",
     keyHint: "sk-or-v1-…",
     note: "한 키로 300+ 모델 — 업체/모델 형식. :free 모델은 무료(기본 50회/일, $10 충전 시 1,000회/일).",
+    // 2026-07-28 judge study: solar-pro-3 (previous T2 default) confirmed drift on an
+    // on-goal lecture (case F) and scored 33% — false-nag risk, dropped along with
+    // ling-2.6-flash (same failure). nemotron-3-super-120b passed everything with
+    // natural Korean at $0.085/$0.40; qwen3.7-flash matches at $0.03/$0.13 (~6s slower).
     tier1Presets: [
       "nvidia/nemotron-3-nano-30b-a3b:free",
       "openai/gpt-oss-20b:free",
-      "inclusionai/ling-2.6-flash",
+      "inclusionai/ling-3.0-flash:free",
     ],
     tier2Presets: [
-      "upstage/solar-pro-3",
+      "nvidia/nemotron-3-super-120b-a12b",
+      "qwen/qwen3.7-flash",
       "google/gemma-4-31b-it:free",
-      "minimax/minimax-m3",
     ],
   },
   {

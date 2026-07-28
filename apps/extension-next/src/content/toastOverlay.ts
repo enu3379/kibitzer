@@ -8,6 +8,9 @@ export interface ToastPayload {
   // Practice toast (onboarding wizard): full render + interactions, but never report
   // feedback to the service worker — a demo click must not touch nag history/learning.
   demo?: boolean
+  // The first-ever intervention toast: renders with a one-time explainer for the
+  // response buttons (incl. the otherwise undiscoverable bubble-click = "잘 잡았어요").
+  firstRun?: boolean
 }
 
 // Injected into the drifting tab via chrome.scripting.executeScript, so it must
@@ -54,6 +57,9 @@ export function showKibitzerToast(payload: ToastPayload): void {
       .row { display: flex; gap: 6px; }
       .btn { font-size: 11.5px; padding: 5px 10px; border: 1px solid ${buttonBorder}; border-radius: 7px; background: none; color: ${textPrimary}; cursor: pointer; }
       .btn:hover { border-color: ${accent}; }
+      .fbadge { font-size: 9px; font-weight: 700; color: ${accent}; background: rgba(16,185,129,.14); padding: 1px 6px; border-radius: 5px; margin-left: 6px; }
+      .explain { border: 1px dashed ${buttonBorder}; border-radius: 8px; padding: 8px 10px; margin: 0 0 10px; font-size: 10.5px; color: ${textMuted}; line-height: 1.75; }
+      .explain b { color: ${textPrimary}; font-weight: 700; }
     </style>
     <div class="wrap${celebration ? " cel" : ""}">
       <svg class="peek" viewBox="0 0 64 30" aria-hidden="true">
@@ -72,9 +78,18 @@ export function showKibitzerToast(payload: ToastPayload): void {
           <rect x="6" y="4" width="11" height="8" rx="4" fill="${ink}"/>
           <rect x="47" y="4" width="11" height="8" rx="4" fill="${ink}"/>
         </svg>
-        <div class="top"><span class="brand">Kibitzer</span><button class="close" title="닫기">✕</button></div>
+        <div class="top"><span class="brand">Kibitzer${
+          payload.firstRun && !celebration ? '<span class="fbadge">첫 훈수</span>' : ""
+        }</span><button class="close" title="닫기">✕</button></div>
         <p class="msg"></p>
         <p class="ctx" hidden></p>
+        ${
+          payload.firstRun && !celebration
+            ? `<div class="explain">답해 주시면 다음 판정이 더 똑똑해져요.<br />
+          <b>말풍선 클릭</b> = 잘 잡았어요 · <b>관련 있어요</b> = 오판 신고<br />
+          <b>5분만</b> = 잠깐 쉬기 · <b>30분 조용히</b> = 당분간 침묵</div>`
+            : ""
+        }
         ${
           celebration
             ? "" // Celebrations carry no feedback buttons — the moment should not ask for work.
