@@ -281,8 +281,10 @@ chrome.runtime.onInstalled.addListener((details) => {
   void (async () => {
     const stored = await chrome.storage.local.get(ONBOARDING_SHOWN_KEY)
     if (stored[ONBOARDING_SHOWN_KEY]) return
-    await chrome.storage.local.set({ [ONBOARDING_SHOWN_KEY]: Date.now() })
+    // Flag only after the tab actually opened — if tabs.create fails, the next
+    // install still gets the wizard.
     await chrome.tabs.create({ url: chrome.runtime.getURL("onboarding/onboarding.html") })
+    await chrome.storage.local.set({ [ONBOARDING_SHOWN_KEY]: Date.now() })
   })()
 })
 
