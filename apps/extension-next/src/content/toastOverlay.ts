@@ -5,6 +5,9 @@ export interface ToastPayload {
   contextLabel: string | null
   autoDismissMs: number
   kind?: "intervention" | "celebration"
+  // Practice toast (onboarding wizard): full render + interactions, but never report
+  // feedback to the service worker — a demo click must not touch nag history/learning.
+  demo?: boolean
   // The first-ever intervention toast: renders with a one-time explainer for the
   // response buttons (incl. the otherwise undiscoverable bubble-click = "잘 잡았어요").
   firstRun?: boolean
@@ -113,15 +116,17 @@ export function showKibitzerToast(payload: ToastPayload): void {
     if (settled) return
     settled = true
     window.clearTimeout(timer)
-    try {
-      void chrome.runtime.sendMessage({
-        type: "kibitzer:toast-feedback",
-        notificationId: payload.notificationId,
-        displayToken: payload.displayToken,
-        kind,
-      })
-    } catch {
-      // Extension reloaded underneath us — nothing to report to.
+    if (!payload.demo) {
+      try {
+        void chrome.runtime.sendMessage({
+          type: "kibitzer:toast-feedback",
+          notificationId: payload.notificationId,
+          displayToken: payload.displayToken,
+          kind,
+        })
+      } catch {
+        // Extension reloaded underneath us — nothing to report to.
+      }
     }
     wrap.classList.add("out")
     window.setTimeout(() => host.remove(), 260)
