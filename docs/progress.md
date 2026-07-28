@@ -1,5 +1,33 @@
 # Progress
 
+## 2026-07-28 UX merge batch: options tabs, multi-provider judge, onboarding
+
+Completed:
+
+- Merged the eight-PR batch into `dev`, in order: simplified persona display
+  names (#156), first-run goal hint chips in the popup (#160), one-time
+  first-nag explainer toast (#161), tabbed options layout (#155),
+  multi-provider AI judge with provider accounts/tier routing/usage ledger
+  (#158), first-run onboarding wizard (#159), drift-sensitivity presets
+  replacing the slider (#153), and the overtime sundial moon (#157).
+- Unwound the #155 ← #158 ← #159 stack against squash-merged `dev`: rebased
+  #158 onto `dev` (dropping the #155 commits) and merged `dev` into #159,
+  keeping the #161 `firstRun` and #159 `demo` toast-payload fields side by
+  side.
+- Applied CodeRabbit's #159 finding: the onboarding "shown" flag is stored
+  only after the wizard tab actually opens, so a failed `tabs.create` no
+  longer retires the wizard forever.
+- Re-seated #153's preset radiogroup inside the 일반 tab of the new options
+  layout and refreshed its as-is/to-be screenshot over the tabbed UI.
+- Ported #157's night rendering (moon, stars, dimmed beam/shadow) into
+  `lib/sundial.ts` after #159 extracted `sundialSVG()` out of the popup.
+
+Verified:
+
+- CI (macOS + Windows, Node 22) green on every PR at merge time.
+- Post-batch `apps/extension-next` `npm run build` on `dev`: 221/221 tests,
+  both typechecks, and the bundle pass.
+
 ## 2026-07-24 Serverless cutover
 
 Completed:
