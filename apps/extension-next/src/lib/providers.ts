@@ -56,7 +56,9 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
     format: "openai",
     keyHint: "AIza…",
     note: "Google AI Studio 키 · Flash급 무료 쿼터(일 ~1,000회 수준, 변동) · 비한국계 중 한국어 최상급.",
-    tier1Presets: ["gemini-2.5-flash-lite", "gemini-3.1-flash-lite"],
+    // gemini-2.5-flash-lite is still listed by /models but 404s on the compat chat
+    // endpoint (live-verified 2026-07-28) — 3.1-flash-lite is the servable lite tier.
+    tier1Presets: ["gemini-3.1-flash-lite"],
     tier2Presets: ["gemini-3.6-flash", "gemini-3.1-flash-lite"],
   },
   {
