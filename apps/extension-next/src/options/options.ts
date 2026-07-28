@@ -4,11 +4,13 @@
 
 import { PROVIDER_PROFILES, type ProviderId, type TierName } from "../lib/providers.ts"
 
-interface Settings {
-  tauOk: number
-  quietHours: { enabled: boolean; start: string; end: string }
-  ttsEnabled: boolean
-}
+import {
+  SENSITIVITY_PRESETS,
+  sensitivityLevelFor,
+  type SensitivityLevel,
+  type Settings,
+} from "../lib/settings.ts"
+
 interface StateResponse {
   persona?: string
   personas?: Array<{ key: string; name: string }>
@@ -41,8 +43,8 @@ interface UsageRow {
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
 
-const tau = $<HTMLInputElement>("tau")
-const tauVal = $<HTMLElement>("tauVal")
+const sens = $<HTMLElement>("sens")
+const sensHint = $<HTMLElement>("sensHint")
 const quietSw = $<HTMLButtonElement>("quietSw")
 const quietStart = $<HTMLInputElement>("quietStart")
 const quietEnd = $<HTMLInputElement>("quietEnd")
@@ -65,12 +67,24 @@ async function saveSettings(patch: Partial<Settings>): Promise<void> {
   await send({ type: "set-settings", settings: patch })
 }
 
+const SENS_HINTS: Record<SensitivityLevel, string> = {
+  lenient: "확실히 벗어났을 때만 이탈로 봅니다. 훈수가 줄어듭니다.",
+  standard: "권장 기본값 — 벤치마크로 맞춘 균형점입니다.",
+  strict: "조금만 벗어나도 이탈로 봅니다. 훈수가 잦아질 수 있습니다.",
+}
+
+function renderSensitivity(level: SensitivityLevel): void {
+  sens.querySelectorAll<HTMLElement>(".segbtn").forEach((b) =>
+    b.setAttribute("aria-checked", String(b.dataset.level === level)),
+  )
+  sensHint.textContent = SENS_HINTS[level]
+}
+
 // --- init ------------------------------------------------------------------------
 
 async function init(): Promise<void> {
   const settings = (await send({ type: "get-settings" })) as Settings
-  tau.value = String(settings.tauOk)
-  tauVal.textContent = settings.tauOk.toFixed(2)
+  renderSensitivity(sensitivityLevelFor(settings.tauOk))
   setChecked(quietSw, settings.quietHours.enabled)
   quietStart.value = settings.quietHours.start
   quietEnd.value = settings.quietHours.end
@@ -132,12 +146,13 @@ if (tabButtons.some((b) => b.dataset.tab === initialTab)) selectTab(initialTab)
 
 // --- wiring ----------------------------------------------------------------------
 
-tau.addEventListener("input", () => {
-  tauVal.textContent = Number(tau.value).toFixed(2)
-})
-tau.addEventListener("change", () => {
-  void saveSettings({ tauOk: Number(tau.value) })
-})
+sens.querySelectorAll<HTMLButtonElement>(".segbtn").forEach((b) =>
+  b.addEventListener("click", () => {
+    const level = b.dataset.level as SensitivityLevel
+    renderSensitivity(level)
+    void saveSettings({ tauOk: SENSITIVITY_PRESETS[level] })
+  }),
+)
 
 quietSw.addEventListener("click", () => {
   const on = !isChecked(quietSw)
