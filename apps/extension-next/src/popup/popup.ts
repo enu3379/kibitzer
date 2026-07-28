@@ -661,7 +661,11 @@ startButton.addEventListener("click", async () => {
 
 editButton.addEventListener("click", showSetup)
 pauseButton.addEventListener("click", async () => {
-  await chrome.runtime.sendMessage({ type: isPaused(current) ? "resume" : "pause" })
+  try {
+    await chrome.runtime.sendMessage({ type: isPaused(current) ? "resume" : "pause" })
+  } catch {
+    // SW not ready / no receiver — fall through and re-render from the current state.
+  }
   render(await getState())
 })
 endButton.addEventListener("click", async () => {
