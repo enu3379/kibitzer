@@ -28,10 +28,28 @@
         font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Apple SD Gothic Neo", "Pretendard", "Malgun Gothic", system-ui, sans-serif;
         -webkit-font-smoothing: antialiased; line-height: 1.5;
       }
-      .frame { max-width: 640px; margin: 0 auto; padding: 40px 24px 72px; }
+      .frame { max-width: 880px; margin: 0 auto; padding: 40px 24px 72px; }
       .head { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
       .head .name { font-size: 22px; font-weight: 800; letter-spacing: -.02em; }
-      .lede { color: var(--page-ink-2); font-size: 13.5px; margin: 0 0 28px; }
+      .lede { color: var(--page-ink-2); font-size: 13.5px; margin: 0 0 20px; }
+
+      /* left tab rail */
+      .layout { display: flex; gap: 28px; align-items: flex-start; }
+      .tabs { flex: none; width: 160px; display: flex; flex-direction: column; gap: 2px; position: sticky; top: 28px; }
+      .tabs button { all: unset; box-sizing: border-box; width: 100%; cursor: pointer; font-size: 13px; font-weight: 600;
+        color: var(--page-ink-2); padding: 8px 12px; border-radius: 8px; }
+      .tabs button:hover { background: var(--surface-2); color: var(--page-ink); }
+      .tabs button[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+      .tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      .panes { flex: 1; min-width: 0; }
+      .pane { display: none; }
+      .pane.on { display: block; }
+      @media (max-width: 720px) {
+        .layout { flex-direction: column; }
+        .tabs { position: static; width: 100%; flex-direction: row; flex-wrap: wrap; }
+        .tabs button { width: auto; flex: 1 1 auto; text-align: center; }
+      }
+
       .card { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 12px; padding: 6px 16px; margin-bottom: 14px; }
       .card > h3 { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--page-ink-3); text-transform: uppercase; margin: 14px 0 4px; }
       .row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line-soft); }
@@ -108,73 +126,90 @@
       </div>
       <p class="lede">판정 감도·알림·말투·AI 판정·데이터를 여기서 관리합니다. 목표 선언과 훈수 응답은 툴바 팝업에서.</p>
 
-      <!-- 판정 감도 -->
-      <div class="card">
-        <h3>판정 감도</h3>
-        <div class="range">
-          <div class="top"><b>목표 이탈 민감도</b><span class="v" id="tauVal">0.59</span></div>
-          <input type="range" id="tau" min="0.40" max="0.80" step="0.01" value="0.59" />
-          <small>높일수록 엄격 — 조금만 벗어나도 이탈로 봅니다. 낮추면 관대. (기본 0.59)</small>
-        </div>
-      </div>
+      <div class="layout">
+        <nav class="tabs" role="tablist" aria-label="설정 분류" aria-orientation="vertical">
+          <button role="tab" id="tab-general" aria-controls="pane-general" aria-selected="true" data-tab="general">일반</button>
+          <button role="tab" id="tab-persona" aria-controls="pane-persona" aria-selected="false" tabindex="-1" data-tab="persona">말투</button>
+          <button role="tab" id="tab-ai" aria-controls="pane-ai" aria-selected="false" tabindex="-1" data-tab="ai">AI 판정</button>
+          <button role="tab" id="tab-data" aria-controls="pane-data" aria-selected="false" tabindex="-1" data-tab="data">데이터</button>
+        </nav>
+        <div class="panes">
 
-      <!-- 알림 -->
-      <div class="card">
-        <h3>알림</h3>
-        <div class="row">
-          <span class="lab"><b>방해 금지 시간</b><small>이 시간대엔 훈수를 조용히</small></span>
-          <span class="times"><input type="time" id="quietStart" value="22:00" /><span>–</span><input type="time" id="quietEnd" value="08:00" /></span>
-          <button class="switch" id="quietSw" role="switch" aria-checked="false" aria-label="방해 금지 시간"></button>
+      <!-- 일반: 판정 감도 + 알림 -->
+      <section class="pane on" id="pane-general" role="tabpanel" aria-labelledby="tab-general" data-pane="general">
+        <div class="card">
+          <h3>판정 감도</h3>
+          <div class="range">
+            <div class="top"><b>목표 이탈 민감도</b><span class="v" id="tauVal">0.59</span></div>
+            <input type="range" id="tau" min="0.40" max="0.80" step="0.01" value="0.59" />
+            <small>높일수록 엄격 — 조금만 벗어나도 이탈로 봅니다. 낮추면 관대. (기본 0.59)</small>
+          </div>
         </div>
-        <div class="row">
-          <span class="lab"><b>음성으로 읽기</b><small>훈수를 소리 내어 읽어줍니다 (Web Speech)</small></span>
-          <button class="switch" id="ttsSw" role="switch" aria-checked="false" aria-label="음성 알림"></button>
+        <div class="card">
+          <h3>알림</h3>
+          <div class="row">
+            <span class="lab"><b>방해 금지 시간</b><small>이 시간대엔 훈수를 조용히</small></span>
+            <span class="times"><input type="time" id="quietStart" value="22:00" /><span>–</span><input type="time" id="quietEnd" value="08:00" /></span>
+            <button class="switch" id="quietSw" role="switch" aria-checked="false" aria-label="방해 금지 시간"></button>
+          </div>
+          <div class="row">
+            <span class="lab"><b>음성으로 읽기</b><small>훈수를 소리 내어 읽어줍니다 (Web Speech)</small></span>
+            <button class="switch" id="ttsSw" role="switch" aria-checked="false" aria-label="음성 알림"></button>
+          </div>
         </div>
-      </div>
+      </section>
 
       <!-- 말투 -->
-      <div class="card">
-        <h3>훈수 말투</h3>
-        <div class="pgrid" id="pgrid"></div>
-      </div>
+      <section class="pane" id="pane-persona" role="tabpanel" aria-labelledby="tab-persona" data-pane="persona">
+        <div class="card">
+          <h3>훈수 말투</h3>
+          <div class="pgrid" id="pgrid"></div>
+        </div>
+      </section>
 
       <!-- AI 판정 -->
-      <div class="card">
-        <h3>AI 판정 · Ollama Cloud</h3>
-        <p class="hint">
-          켜면 목표, 현재 제목·호스트, 최대 3,000자의 현재 페이지 요약,
-          최근 페이지 제목·판정, 시간·훈수 횟수 맥락이 Ollama Cloud로 전송될 수 있습니다.
-          원본 URL, 저장된 벡터, 전체 이벤트 로그는 전송하지 않습니다.
-        </p>
-        <label class="field">
-          <span>API 키 · 한 줄에 하나, 여러 개면 자동 로테이션</span>
-          <textarea id="keys" rows="3" placeholder="ollama.com API 키 (여러 개면 줄바꿈)&#10;비우면 제목 유사도만 (Tier-0)"></textarea>
-        </label>
-        <label class="field">
-          <span>모델</span>
-          <span class="two">
-            <input type="text" id="tier1" placeholder="Tier 1: nemotron-3-super" />
-            <input type="text" id="tier2" placeholder="Tier 2: minimax-m3" />
-          </span>
-        </label>
-        <div class="btnrow">
-          <button class="btn" id="test">연결 테스트</button>
-          <button class="btn primary" id="saveOllama">저장</button>
+      <section class="pane" id="pane-ai" role="tabpanel" aria-labelledby="tab-ai" data-pane="ai">
+        <div class="card">
+          <h3>AI 판정 · Ollama Cloud</h3>
+          <p class="hint">
+            켜면 목표, 현재 제목·호스트, 최대 3,000자의 현재 페이지 요약,
+            최근 페이지 제목·판정, 시간·훈수 횟수 맥락이 Ollama Cloud로 전송될 수 있습니다.
+            원본 URL, 저장된 벡터, 전체 이벤트 로그는 전송하지 않습니다.
+          </p>
+          <label class="field">
+            <span>API 키 · 한 줄에 하나, 여러 개면 자동 로테이션</span>
+            <textarea id="keys" rows="3" placeholder="ollama.com API 키 (여러 개면 줄바꿈)&#10;비우면 제목 유사도만 (Tier-0)"></textarea>
+          </label>
+          <label class="field">
+            <span>모델</span>
+            <span class="two">
+              <input type="text" id="tier1" placeholder="Tier 1: nemotron-3-super" />
+              <input type="text" id="tier2" placeholder="Tier 2: minimax-m3" />
+            </span>
+          </label>
+          <div class="btnrow">
+            <button class="btn" id="test">연결 테스트</button>
+            <button class="btn primary" id="saveOllama">저장</button>
+          </div>
+          <div class="hint" id="ollamaResult"></div>
         </div>
-        <div class="hint" id="ollamaResult"></div>
-      </div>
+      </section>
 
       <!-- 데이터 -->
-      <div class="card">
-        <h3>데이터 · 로컬에만 저장됨</h3>
-        <div class="btnrow">
-          <button class="btn" id="exportLog">디버그 로그 파일</button>
-          <button class="btn" id="exportEvents">이벤트 JSON</button>
-          <button class="btn" id="openReplay">리플레이 열기</button>
+      <section class="pane" id="pane-data" role="tabpanel" aria-labelledby="tab-data" data-pane="data">
+        <div class="card">
+          <h3>데이터 · 로컬에만 저장됨</h3>
+          <div class="btnrow">
+            <button class="btn" id="exportLog">디버그 로그 파일</button>
+            <button class="btn" id="exportEvents">이벤트 JSON</button>
+            <button class="btn" id="openReplay">리플레이 열기</button>
+          </div>
+          <div class="row">
+            <span class="lab"><b>모든 활동 데이터 삭제</b><small>게이지·이력·학습·이벤트·나깅 기록을 전부 지웁니다 (목표·키·말투는 유지)</small></span>
+            <button class="btn danger" id="wipe">삭제</button>
+          </div>
         </div>
-        <div class="row">
-          <span class="lab"><b>모든 활동 데이터 삭제</b><small>게이지·이력·학습·이벤트·나깅 기록을 전부 지웁니다 (목표·키·말투는 유지)</small></span>
-          <button class="btn danger" id="wipe">삭제</button>
+      </section>
         </div>
       </div>
     </div>

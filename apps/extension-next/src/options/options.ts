@@ -76,6 +76,37 @@ async function init(): Promise<void> {
   }
 }
 
+// --- tabs ------------------------------------------------------------------------
+
+const tabButtons = Array.from(document.querySelectorAll<HTMLButtonElement>(".tabs button"))
+const panes = Array.from(document.querySelectorAll<HTMLElement>(".pane"))
+
+function selectTab(key: string, focus = false): void {
+  for (const b of tabButtons) {
+    const on = b.dataset.tab === key
+    b.setAttribute("aria-selected", String(on))
+    b.tabIndex = on ? 0 : -1
+    if (on && focus) b.focus()
+  }
+  for (const p of panes) p.classList.toggle("on", p.dataset.pane === key)
+  history.replaceState(null, "", `#${key}`)
+}
+
+tabButtons.forEach((b, i) => {
+  b.addEventListener("click", () => selectTab(b.dataset.tab ?? ""))
+  b.addEventListener("keydown", (e) => {
+    const fwd = e.key === "ArrowDown" || e.key === "ArrowRight"
+    if (!fwd && e.key !== "ArrowUp" && e.key !== "ArrowLeft") return
+    e.preventDefault()
+    const step = fwd ? 1 : tabButtons.length - 1
+    const next = tabButtons[(i + step) % tabButtons.length]
+    selectTab(next.dataset.tab ?? "", true)
+  })
+})
+
+const initialTab = location.hash.slice(1)
+if (tabButtons.some((b) => b.dataset.tab === initialTab)) selectTab(initialTab)
+
 // --- wiring ----------------------------------------------------------------------
 
 tau.addEventListener("input", () => {
