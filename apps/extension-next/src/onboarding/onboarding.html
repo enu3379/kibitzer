@@ -420,24 +420,18 @@
             <div class="aistatus" id="aiStatus"><span id="aiStatusText">지금은 제목 판정만 동작 중 (Tier-0)</span></div>
             <ol class="keysteps">
               <li><a class="ext" href="https://ollama.com/settings/keys" target="_blank" rel="noreferrer">ollama.com에서 키 발급 →</a> <small>계정이 없으면 로그인 화면에서 가입까지 1분이면 됩니다.</small></li>
-              <li>발급된 키를 아래에 붙여넣고 <b>연결 테스트</b> — 성공하면 바로 저장됩니다.</li>
+              <li>발급된 키를 아래에 붙여넣고 <b>연결 테스트</b> — 키는 즉시 저장되고, 두 판정 모델을 실제로 호출해 확인합니다.</li>
             </ol>
             <label class="field">
-              <span>Ollama Cloud API 키 — 한 줄에 하나, 여러 개면 자동 로테이션</span>
-              <textarea id="keys" rows="2" placeholder="ollama.com API 키"></textarea>
-            </label>
-            <label class="field">
-              <span>모델 (비워 두면 기본값)</span>
-              <span class="two">
-                <input type="text" id="tier1" placeholder="Tier 1: nemotron-3-super" />
-                <input type="text" id="tier2" placeholder="Tier 2: minimax-m3" />
-              </span>
+              <span>Ollama Cloud API 키</span>
+              <input type="password" id="key" placeholder="ollama.com API 키" autocomplete="off" />
             </label>
             <div class="btnrow">
               <button class="btn primary" id="testKeys">연결 테스트</button>
             </div>
             <p class="result" id="keysResult"></p>
             <span class="skip" id="skip" role="button" tabindex="0">나중에 할게요 — 우선 제목 판정만으로 시작 →</span>
+            <p class="footnote">여러 키 로테이션, Claude·OpenAI 등 다른 제공자, 판정 모델 변경은 <span class="skip" id="openSettingsAi" role="button" tabindex="0">설정 → AI 판정</span>에서.</p>
             <p class="privacy">키를 연결하면: 목표, 페이지 제목·호스트, 페이지 요약(최대 3,000자)이 판정을 위해 전송될 수 있습니다. 원본 URL과 저장된 기록 전체는 전송하지 않습니다. 설정에서 언제든 바꿀 수 있습니다.</p>
           </section>
 

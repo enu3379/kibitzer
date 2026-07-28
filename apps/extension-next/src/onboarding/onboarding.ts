@@ -11,14 +11,18 @@ import { PERSONAS, PERSONA_ORDER, PERSONA_DEFAULT } from "../lib/personas.data.t
 interface WizardState {
   persona?: string
   judgeEnabled?: boolean
-  ollama?: { apiKeys?: string[]; tier1Model?: string; tier2Model?: string }
 }
 
-interface OllamaTestResult {
+interface JudgeView {
+  routes?: {
+    tier1?: { provider?: string; model?: string }
+    tier2?: { provider?: string; model?: string }
+  }
+}
+
+interface RouteTestResult {
   ok: boolean
-  tier1?: string
-  tier2?: string
-  error?: string
+  detail: string
 }
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
@@ -55,7 +59,7 @@ for (let i = 0; i < 5; i++) {
 function go(i: number): void {
   const leaving = cur
   cur = Math.max(0, Math.min(steps.length - 1, i))
-  if (leaving === 3 && cur !== 3) void saveKeysIfEdited() // pasted a key, hit 다음 — keep it
+  if (leaving === 3 && cur !== 3) void saveEnteredKey() // pasted a key, hit 다음 — keep it
   steps.forEach((s, j) => (s.hidden = j !== cur))
   ;[...dots.children].forEach((d, j) =>
     j === cur ? d.setAttribute("aria-current", "step") : d.removeAttribute("aria-current"),
@@ -166,48 +170,40 @@ $("tryToast").addEventListener("click", () =>
   firePracticeToast("연습 훈수입니다. 진짜 훈수도 정확히 이 자리에, 이렇게 옵니다.", "답하거나, 닫거나, 그냥 두면 사라집니다"),
 )
 
-// --- step 4: Ollama Cloud connect (the options page's pane, inlined) ---------------
+// --- step 4: Ollama Cloud connect (PR #158 provider API, inlined) ------------------
 
 const aiStatus = $("aiStatus")
 const aiStatusText = $("aiStatusText")
-const keysInput = $<HTMLTextAreaElement>("keys")
-const tier1Input = $<HTMLInputElement>("tier1")
-const tier2Input = $<HTMLInputElement>("tier2")
+const keyInput = $<HTMLInputElement>("key")
 const testKeys = $<HTMLButtonElement>("testKeys")
 const keysResult = $("keysResult")
-let savedSnapshot = "" // last state written via set-ollama, to skip no-op saves
-
-const enteredKeys = (): string[] =>
-  keysInput.value.split("\n").map((k) => k.trim()).filter(Boolean)
-const keysSnapshot = (): string => JSON.stringify([enteredKeys(), tier1Input.value, tier2Input.value])
+const addedKeys = new Set<string>() // key values already saved this session (no double-add)
 
 async function refreshAiStatus(): Promise<void> {
   const st = await send<WizardState>({ type: "get-state" })
   if (!st) return
-  const on = Boolean(st.judgeEnabled ?? st.ollama?.apiKeys?.length)
+  const on = Boolean(st.judgeEnabled)
   aiStatus.classList.toggle("on", on)
   aiStatusText.textContent = on
     ? "AI 판정 연결됨 ✓ — 페이지 내용까지 읽고 판정합니다"
     : "지금은 제목 판정만 동작 중 (Tier-0)"
 }
 
-async function saveKeys(): Promise<void> {
-  await send({
-    type: "set-ollama",
-    apiKeys: enteredKeys(),
-    tier1Model: tier1Input.value,
-    tier2Model: tier2Input.value,
-  })
-  savedSnapshot = keysSnapshot()
-  void refreshAiStatus()
-}
-
-async function saveKeysIfEdited(): Promise<void> {
-  if (enteredKeys().length && keysSnapshot() !== savedSnapshot) await saveKeys()
+// add-provider-key persists immediately (options-page semantics); rotation/extra
+// providers stay in the options UI. Returns false when there is nothing to save.
+async function saveEnteredKey(): Promise<boolean> {
+  const value = keyInput.value.trim()
+  if (!value) return false
+  if (!addedKeys.has(value)) {
+    await send({ type: "add-provider-key", provider: "ollama", name: "", value })
+    addedKeys.add(value)
+    void refreshAiStatus()
+  }
+  return true
 }
 
 testKeys.addEventListener("click", async () => {
-  if (!enteredKeys().length) {
+  if (!(await saveEnteredKey())) {
     keysResult.className = "result err"
     keysResult.textContent = "키가 비어 있어요. 위 링크에서 발급한 키를 붙여넣어 주세요."
     return
@@ -215,21 +211,35 @@ testKeys.addEventListener("click", async () => {
   keysResult.className = "result"
   keysResult.textContent = "테스트 중… (첫 호출은 느릴 수 있어요)"
   testKeys.disabled = true
-  const r = await send<OllamaTestResult>({
-    type: "test-ollama",
-    apiKeys: enteredKeys(),
-    tier1Model: tier1Input.value,
-    tier2Model: tier2Input.value,
-  })
+  // Exercise the ACTUAL routes (provider+model per tier) the pipeline will use.
+  const judge = await send<JudgeView>({ type: "get-judge-settings" })
+  const tiers = [
+    { tier: "tier1", route: judge?.routes?.tier1 },
+    { tier: "tier2", route: judge?.routes?.tier2 },
+  ]
+  const [r1, r2] = await Promise.all(
+    tiers.map(({ tier, route }) =>
+      send<RouteTestResult>({
+        type: "test-route",
+        tier,
+        provider: route?.provider ?? "ollama",
+        model: route?.model ?? "",
+      }),
+    ),
+  )
   testKeys.disabled = false
-  if (r?.ok) {
-    await saveKeys()
+  if (r1?.ok && r2?.ok) {
     keysResult.className = "result ok"
-    keysResult.textContent = `연결 OK · ${r.tier1} · ${r.tier2} — 저장됐습니다 ✓`
+    keysResult.textContent = `연결 OK — Tier 1 ${r1.detail} · Tier 2 ${r2.detail}`
   } else {
+    const failures = [r1?.ok ? null : `Tier 1: ${r1?.detail ?? "응답 없음"}`, r2?.ok ? null : `Tier 2: ${r2?.detail ?? "응답 없음"}`]
     keysResult.className = "result err"
-    keysResult.textContent = `실패: ${r?.error ?? "응답 없음"}`
+    keysResult.textContent = `실패 — ${failures.filter(Boolean).join(" · ")}`
   }
+})
+
+$("openSettingsAi").addEventListener("click", () => {
+  if (extension) void chrome.runtime.openOptionsPage()
 })
 
 const skip = $("skip")
@@ -346,12 +356,6 @@ window.addEventListener("focus", () => {
 void (async () => {
   const st = await send<WizardState>({ type: "get-state" })
   if (st?.persona && PERSONAS[st.persona]) currentPersona = st.persona
-  if (st?.ollama) {
-    keysInput.value = (st.ollama.apiKeys ?? []).join("\n")
-    tier1Input.value = st.ollama.tier1Model ?? ""
-    tier2Input.value = st.ollama.tier2Model ?? ""
-    savedSnapshot = keysSnapshot()
-  }
   renderPersonas()
   $("miniToastMsg").textContent = demoNagMessage()
 })()
