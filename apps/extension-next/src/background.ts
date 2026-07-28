@@ -9,7 +9,7 @@ import { getGoal, setGoal, type SessionGoal } from "./lib/session.ts"
 import { embedText, embedTexts, judgeTier0 } from "./lib/tier0.ts"
 import { addExemplar, admissionEligible, admitAnchor, loadRefs, setDerived } from "./lib/relevance.ts"
 import { filterDerivedPhrases, MAX_PHRASES } from "./lib/goalEnrichment.ts"
-import { currentState, dispatch, enterNeutral, flushOutbox, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
+import { currentState, dispatch, enterNeutral, flushOutbox, PROVIDER_ALERT_ID, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
 import { enrichGoal, judgeEnabled, testRoute, tier1Rescue } from "./lib/tier12.ts"
 import {
   addProviderKey,
@@ -25,7 +25,7 @@ import {
 } from "./lib/providers.ts"
 import { getUsage } from "./lib/usage.ts"
 import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
-import { getProviderHealth } from "./lib/providerHealth.ts"
+import { clearProviderHealth, getProviderHealth } from "./lib/providerHealth.ts"
 import { clearBadge } from "./lib/badge.ts"
 import { clearEvents, exportEvents, logEvent } from "./lib/events.ts"
 import { getSettings, setSettings, type Settings } from "./lib/settings.ts"
@@ -337,6 +337,11 @@ chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) =
   void chrome.notifications.clear(notificationId)
 })
 chrome.notifications.onClicked.addListener((notificationId) => {
+  if (notificationId === PROVIDER_ALERT_ID) {
+    void chrome.runtime.openOptionsPage()
+    void chrome.notifications.clear(notificationId)
+    return
+  }
   if (notificationId.startsWith("kbz-")) void chrome.notifications.clear(notificationId)
 })
 
@@ -441,6 +446,8 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
   // Provider settings (options AI 판정 pane). Key values only ever travel INTO the
   // worker; responses carry masked keys via toPublicSettings. tier12 picks up every
   // change on its next call through the settings fingerprint — no cache reset needed.
+  // Mutations also clear the recorded provider error: the toolbar "!" mark must not
+  // keep accusing a config the user just changed.
   if (message?.type === "get-judge-settings") {
     return toPublicSettings(await getJudgeSettings())
   }
@@ -448,17 +455,21 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     return toPublicSettings(await connectProvider(message.provider))
   }
   if (message?.type === "disconnect-provider" && message.provider) {
+    await clearProviderHealth()
     return toPublicSettings(await disconnectProvider(message.provider))
   }
   if (message?.type === "add-provider-key" && message.provider) {
+    await clearProviderHealth()
     return toPublicSettings(
       await addProviderKey(message.provider, message.name ?? "", message.value ?? ""),
     )
   }
   if (message?.type === "remove-provider-key" && message.provider && message.keyId) {
+    await clearProviderHealth()
     return toPublicSettings(await removeProviderKey(message.provider, message.keyId))
   }
   if (message?.type === "set-routes") {
+    await clearProviderHealth()
     return toPublicSettings(await setRoutes(message.routes ?? {}))
   }
   if (message?.type === "test-route" && message.tier && message.provider) {

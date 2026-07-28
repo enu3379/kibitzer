@@ -5,15 +5,16 @@
 // record is left in place so a rollback build keeps working.
 //
 // Model presets were verified 2026-07-28 — OpenRouter/Ollama Cloud against their live
-// catalog APIs, the rest against vendor docs. Every non-Claude provider speaks the
-// OpenAI chat.completions format, so the wire adapters stay at two (openai + claude);
-// Ollama keeps its already-tested native /api/chat path.
+// catalog APIs, the rest against vendor docs (Gemini/OpenRouter additionally live-called).
+// Every non-Claude provider speaks the OpenAI chat.completions format, so the wire
+// adapters stay at two (openai + claude); Ollama keeps its tested native /api/chat path.
+// Z.ai GLM was dropped after live testing: its free lane throws 1305 "overloaded" 429s
+// erratically and the edge blocks non-browser UAs — not dependable as a preset.
 
 export type ProviderId =
   | "ollama"
   | "gemini"
   | "openrouter"
-  | "zai"
   | "deepseek"
   | "claude"
   | "openai"
@@ -78,16 +79,6 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
       "google/gemma-4-31b-it:free",
       "minimax/minimax-m3",
     ],
-  },
-  {
-    id: "zai",
-    label: "Z.ai GLM",
-    chatUrl: "https://api.z.ai/api/paas/v4/chat/completions",
-    format: "openai",
-    keyHint: "Z.ai API 키",
-    note: "Zhipu GLM · glm-4.7-flash는 영구 무료(일 ~1,000회 수준) · OpenAI 호환.",
-    tier1Presets: ["glm-4.7-flash", "glm-4.7-flashx"],
-    tier2Presets: ["glm-4.7", "glm-5"],
   },
   {
     id: "deepseek",

@@ -77,7 +77,7 @@ test("buckets older than 30 days are pruned on write", async () => {
 test("concurrent records do not drop updates", async () => {
   reset()
   await Promise.all(
-    Array.from({ length: 10 }, () => recordUsage("zai", "glm-4.7-flash", 100, 10, NOW)),
+    Array.from({ length: 10 }, () => recordUsage("deepseek", "deepseek-v4-flash", 100, 10, NOW)),
   )
   const rows = await getUsage(1, NOW)
   assert.equal(rows[0].calls, 10)
