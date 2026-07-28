@@ -3,7 +3,8 @@
 // Pure SVG-string renderer (frac ∈ [0, 1] = elapsed share of the session budget), shared
 // by the popup (live) and the onboarding wizard (illustration). Colours come from the
 // host page's --sd-* custom properties.
-export function sundialSVG(frac: number): string {
+// Past the budget the sun is done and the moon takes the same dome (night: dimmer light, stars).
+export function sundialSVG(frac: number, night = false): string {
   const cx = 62, gy = 62, rx = 48, ry = 46, n = 48
   const pts: Array<[number, number]> = []
   for (let i = 0; i <= n; i++) {
@@ -32,20 +33,31 @@ export function sundialSVG(frac: number): string {
   const elev = Math.atan2(gy - sy, Math.abs(sx - cx) + 0.5)
   const L = Math.min(44, objH / Math.tan(elev) + 4)
   let rays = ""
-  for (let a = 0; a < 8; a++) {
-    const q = (a * Math.PI) / 4
-    rays += `<line x1="${(sx + 7 * Math.cos(q)).toFixed(1)}" y1="${(sy + 7 * Math.sin(q)).toFixed(1)}" x2="${(sx + 9.5 * Math.cos(q)).toFixed(1)}" y2="${(sy + 9.5 * Math.sin(q)).toFixed(1)}" stroke="var(--sd-ink)" stroke-width="1.2" stroke-linecap="round"/>`
-  }
-  return `<svg width="124" height="78" viewBox="0 0 124 78" role="img" aria-label="시간 경과">
+  if (!night)
+    for (let a = 0; a < 8; a++) {
+      const q = (a * Math.PI) / 4
+      rays += `<line x1="${(sx + 7 * Math.cos(q)).toFixed(1)}" y1="${(sy + 7 * Math.sin(q)).toFixed(1)}" x2="${(sx + 9.5 * Math.cos(q)).toFixed(1)}" y2="${(sy + 9.5 * Math.sin(q)).toFixed(1)}" stroke="var(--sd-ink)" stroke-width="1.2" stroke-linecap="round"/>`
+    }
+  const stars = night
+    ? `<circle cx="24" cy="14" r="1.1" fill="var(--sd-ink3)" opacity="0.7"/>
+    <circle cx="44" cy="10" r="1.1" fill="var(--sd-ink3)" opacity="0.7"/>
+    <path d="M96,9 L96,15 M93,12 L99,12" stroke="var(--sd-ink3)" stroke-width="1" stroke-linecap="round" opacity="0.7"/>`
+    : ""
+  const orb = night
+    ? `<mask id="kbzmoon"><rect x="0" y="0" width="124" height="78" fill="#fff"/><circle cx="${(sx + 3.2).toFixed(1)}" cy="${(sy - 1.6).toFixed(1)}" r="4.4" fill="#000"/></mask>` +
+      `<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="5" fill="var(--sd-ink)" mask="url(#kbzmoon)"/>`
+    : `<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="5" fill="var(--sd-ink)"/>`
+  const beamMid = night ? 0.1 : 0.19, shadowOp = night ? 0.15 : 0.26
+  return `<svg width="124" height="78" viewBox="0 0 124 78" role="img" aria-label="${night ? "시간 경과 (목표 시간 초과)" : "시간 경과"}">
     <defs><radialGradient id="kbzbeam" gradientUnits="userSpaceOnUse" cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="${r.toFixed(1)}">
       <stop offset="0.12" stop-color="var(--sd-ink)" stop-opacity="0.03"/>
-      <stop offset="0.6" stop-color="var(--sd-ink)" stop-opacity="0.19"/>
+      <stop offset="0.6" stop-color="var(--sd-ink)" stop-opacity="${beamMid}"/>
       <stop offset="1" stop-color="var(--sd-ink)" stop-opacity="0"/></radialGradient></defs>
     <polyline points="${pts.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ")}" fill="none" stroke="var(--sd-line)" stroke-width="1.5" stroke-dasharray="1 4" stroke-linecap="round"/>
     <line x1="8" y1="${gy}" x2="116" y2="${gy}" stroke="var(--sd-line)" stroke-width="1"/>
-    <ellipse cx="${(cx + dir * L * 0.42).toFixed(1)}" cy="${(gy + 1.5).toFixed(1)}" rx="${(L * 0.48 + 5).toFixed(1)}" ry="4.8" fill="var(--sd-ink3)" opacity="0.26"/>
+    <ellipse cx="${(cx + dir * L * 0.42).toFixed(1)}" cy="${(gy + 1.5).toFixed(1)}" rx="${(L * 0.48 + 5).toFixed(1)}" ry="4.8" fill="var(--sd-ink3)" opacity="${shadowOp}"/>
     <path d="M${sx.toFixed(1)},${sy.toFixed(1)} L${b1x.toFixed(1)},${b1y.toFixed(1)} A${r.toFixed(1)},${r.toFixed(1)} 0 0 1 ${b2x.toFixed(1)},${b2y.toFixed(1)} Z" fill="url(#kbzbeam)"/>
-    ${sprout}
-    ${rays}<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="5" fill="var(--sd-ink)"/>
+    ${stars}${sprout}
+    ${rays}${orb}
   </svg>`
 }

@@ -181,13 +181,16 @@ function isPaused(state: StateResponse | null): boolean {
   return state?.snoozedUntil != null && state.snoozedUntil > Date.now()
 }
 
-// Elapsed fraction of the time budget (0..1), or null when the goal has no minutes.
-function elapsedFrac(goal: NonNullable<StateResponse["goal"]>): number | null {
+// Elapsed time over the budget as a ratio (0..∞, >1 = overtime), or null when the goal has no minutes.
+function elapsedRatio(goal: NonNullable<StateResponse["goal"]>): number | null {
   if (goal.availableMinutes == null) return null
   const total = goal.availableMinutes * 60_000
   if (total <= 0) return null
-  return Math.max(0, Math.min(1, (Date.now() - goal.startedAt) / total))
+  return Math.max(0, (Date.now() - goal.startedAt) / total)
 }
+
+// Overtime: the moon crosses the dome at 1/4 of the sun's pace (one traversal = 4× the budget).
+const MOON_SLOWDOWN = 4
 
 // Immersion band → active-gauge class + Korean state word (paused overrides the band).
 function activeBand(s: number, paused: boolean): { cls: string; word: string } {
@@ -203,13 +206,15 @@ function renderActive(state: StateResponse): void {
   if (!goal) return
   goalTextEl.textContent = goal.text
 
-  const frac = elapsedFrac(goal)
-  if (frac == null) {
+  const ratio = elapsedRatio(goal)
+  if (ratio == null) {
     timeVisEl.hidden = true
     timeVisEl.innerHTML = ""
   } else {
+    const night = ratio > 1
+    const frac = night ? Math.min(1, (ratio - 1) / MOON_SLOWDOWN) : ratio
     timeVisEl.hidden = false
-    timeVisEl.innerHTML = sundialSVG(frac)
+    timeVisEl.innerHTML = sundialSVG(frac, night)
   }
 
   const paused = isPaused(state)
