@@ -20,8 +20,11 @@
   .lane > h2{font-size:13px;margin:0 0 2px;letter-spacing:.01em}
   .lane > .why{font-size:11.5px;color:var(--page-ink-3);margin:0 0 10px;min-height:32px}
   .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px 16px}
+  .card.picked{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
   .card h3{font-size:13.5px;margin:0 0 2px}
   .card .cap{font-size:11.5px;color:var(--page-ink-3);margin:0}
+  .badge{font-size:10.5px;font-weight:700;color:var(--accent-ink);background:var(--accent);
+    border-radius:20px;padding:1px 8px;margin-left:6px;vertical-align:1px}
   .pgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px 0}
   .pcard{all:unset;box-sizing:border-box;cursor:pointer;padding:9px 11px;border-radius:9px;
     background:var(--surface-2);border:1px solid var(--line-soft);display:block;
@@ -30,13 +33,16 @@
   .pcard:hover{border-color:var(--accent)}
   .pcard[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
   .pcard[aria-pressed="true"] .pn{color:var(--accent)}
+  .pcard:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
-  /* ---- A: 고정 인용 스트립 ---- */
+  /* ---- 인용 스트립 (A안 / D안 공용) ---- */
   .qstrip{border-left:3px solid var(--accent);background:var(--surface-2);border-radius:0 9px 9px 0;
-    padding:11px 13px;min-height:62px;display:flex;flex-direction:column;justify-content:center;gap:5px}
-  .qstrip .qtag{font-size:10.5px;font-weight:700;letter-spacing:.04em;color:var(--accent);text-transform:uppercase}
+    padding:11px 13px;display:flex;flex-direction:column;justify-content:center;gap:5px}
+  .qstrip .qtag{font-size:10.5px;font-weight:700;letter-spacing:.04em;color:var(--accent)}
   .qstrip .qtag.prev{color:var(--page-ink-3)}
-  .qstrip .qtxt{font-size:13px;line-height:1.5;color:var(--page-ink)}
+  /* 텍스트 블록을 정확히 2줄 높이로 고정 — 한 줄짜리든 두 줄짜리든 스트립 총 높이가 같다. */
+  .qstrip .qtxt{font-size:13px;line-height:1.5;color:var(--page-ink);height:39px;
+    display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
   .qstrip.preview{border-left-color:var(--page-ink-3);border-left-style:dashed}
   .qstrip .qtxt.fade{animation:fade .18s ease}
   @keyframes fade{from{opacity:0;transform:translateY(2px)}to{opacity:1;transform:none}}
@@ -56,45 +62,17 @@
   .pwrap:hover .tip{opacity:1}
   .tip::before{content:"";position:absolute;top:-4px;left:16px;width:8px;height:8px;background:var(--page-ink);transform:rotate(45deg)}
 
-  /* ---- D: 선택 임팩트 3종 (① 테두리 플래시가 채택안) ---- */
-  .impactbar{display:flex;gap:6px;margin:0 0 10px;flex-wrap:wrap}
-  .impactbar button{all:unset;cursor:pointer;font-size:11.5px;font-weight:650;padding:5px 10px;
-    border-radius:7px;background:var(--surface-2);border:1px solid var(--line-soft);color:var(--page-ink-2)}
-  .impactbar button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
-
-  /* E1 — 굵은 테두리 플래시 (크기는 --fx1-* 커스텀 프로퍼티, 듀레이션/딜레이/이징/피크위치는 JS가 인라인 주입)
-     주의: 키프레임 스톱(0%/30%/100%)은 CSS 표준상 var()를 못 받는다 — "피크가 언제 오는가"는
-     JS가 이 keyframes 블록 자체를 <style id="fx1kf"> 텍스트로 다시 써서 조정한다(아래 스크립트 참고). */
-  :root{ --fx1-ring:3px; --fx1-border:7px; }
-  .qstrip.fx1.fire{animation-name:ringflash}
+  /* ---- D: 선택 시 테두리 플래시 — 실제 구현(options.html의 @keyframes pqflash)과 동일한 값 ---- */
+  .qstrip.fire{animation:ringflash 1000ms ease-out 50ms}
   @keyframes ringflash{
-    0%{box-shadow:0 0 0 0 var(--accent);border-left-width:3px}
-    30%{box-shadow:0 0 0 var(--fx1-ring) var(--accent);border-left-width:var(--fx1-border)}
-    100%{box-shadow:0 0 0 0 transparent;border-left-width:3px}
+    0%   {box-shadow:0 0 0 0 var(--accent);border-left-width:3px}
+    30%  {box-shadow:0 0 0 3px var(--accent);border-left-width:7px}
+    100% {box-shadow:0 0 0 0 transparent;border-left-width:3px}
   }
-  /* E2 — 그라데이션 스윕 */
-  :root{ --fx2-angle:105deg; --fx2-band:9%; --fx2-fade:14%; --fx2-opacity:1; }
-  .qstrip.fx2{position:relative;overflow:hidden}
-  .qstrip.fx2::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:0;
-    background:linear-gradient(var(--fx2-angle),
-      transparent 0%,
-      transparent calc(50% - var(--fx2-band) - var(--fx2-fade)),
-      var(--accent-soft) calc(50% - var(--fx2-band)),
-      color-mix(in srgb, var(--accent) 28%, transparent) calc(50% + (var(--fx2-band) * 0.6)),
-      transparent calc(50% + var(--fx2-band) + var(--fx2-fade)),
-      transparent 100%);
-    transform:translateX(-100%)}
-  .qstrip.fx2.fire::after{opacity:var(--fx2-opacity);animation-name:sweep}
-  @keyframes sweep{to{transform:translateX(100%)}}
-  /* E3 — accent 배경 채웠다 빠짐 */
-  .qstrip.fx3.fire{animation:fillout .6s ease-out}
-  @keyframes fillout{
-    0%{background:var(--accent);border-left-color:var(--accent)}
-    18%{background:var(--accent)}
-    100%{background:var(--surface-2)}
+  @media (prefers-reduced-motion: reduce){
+    .qstrip.fire{animation:none}
+    .qstrip .qtxt.fade{animation:none}
   }
-  .qstrip.fx3.fire .qtxt,.qstrip.fx3.fire .qtag{animation:inkout .6s ease-out}
-  @keyframes inkout{0%,18%{color:var(--accent-ink)}100%{color:inherit}}
 
   .note{font-size:11.5px;color:var(--page-ink-3);margin-top:10px;padding-left:2px}
   .kbd{font:11px ui-monospace,Menlo,monospace;background:var(--surface-2);border:1px solid var(--line);
@@ -104,21 +82,6 @@
   .verdict h2{font-size:14px;margin:0 0 8px}
   .verdict ul{margin:0;padding-left:18px;font-size:12.5px;color:var(--page-ink-2);line-height:1.75}
   .verdict b{color:var(--page-ink)}
-
-  /* ---- 튜닝 랙 (D안 전용) ---- */
-  .rack{background:var(--surface-2);border:1px solid var(--line-soft);border-radius:10px;
-    padding:10px 12px 4px;margin:10px 0 4px}
-  .rack .rtitle{font-size:11.5px;font-weight:700;color:var(--page-ink-2);margin-bottom:6px}
-  .rrow{display:grid;grid-template-columns:96px 1fr 46px;align-items:center;gap:8px;margin-bottom:8px}
-  .rrow label{font-size:11.5px;color:var(--page-ink-2)}
-  .rrow input[type=range]{width:100%;accent-color:var(--accent)}
-  .rrow .rval{font:11px ui-monospace,Menlo,monospace;color:var(--page-ink-3);text-align:right}
-  .rrow select{font-size:11px;padding:3px 5px;border-radius:6px;border:1px solid var(--line);
-    background:var(--surface);color:var(--page-ink)}
-  .rackbtns{display:flex;gap:6px;margin:2px 0 10px}
-  .rackbtns button{all:unset;cursor:pointer;font-size:11.5px;font-weight:650;padding:5px 10px;
-    border-radius:7px;background:var(--surface);border:1px solid var(--line);color:var(--page-ink-2)}
-  .rackbtns button:hover{border-color:var(--accent);color:var(--accent)}
 </style>
 
 <h1>설정 › 말투 — 대표 문장 표출 시안</h1>
@@ -128,7 +91,7 @@
 
   <!-- ============ A ============ -->
   <div class="lane">
-    <h2>A. 고정 인용 스트립 (추천)</h2>
+    <h2>A. 고정 인용 스트립</h2>
     <p class="why">그리드 아래 고정 슬롯 하나. 호버하면 그 페르소나를 <b>미리듣기</b>, 커서가 벗어나면 선택된 페르소나로 복귀. 클릭하면 선택 전용 문장으로 교체.</p>
     <div class="card">
       <h3>훈수 말투</h3>
@@ -165,77 +128,31 @@
       <p class="note">접근성 취약(<span class="kbd">Tab</span> 포커스·모바일) · 툴팁이 아래 카드를 가림</p>
     </div>
   </div>
-</div>
-
-<div class="lanes" style="margin-top:26px">
 
   <!-- ============ D (채택안) ============ -->
   <div class="lane">
-    <h2>D. A안 + 선택 임팩트 — <b>채택</b></h2>
-    <p class="why">A안 구조 그대로 두되, 클릭 순간 스트립에 짧은 연출을 넣습니다. <b>① 테두리 플래시</b>가 확정안이고, 아래 슬라이더는 확정값이 적용된 상태입니다. ②·③은 비교용으로 남겨 뒀습니다.</p>
-    <div class="card">
+    <h2>D. A안 + 선택 시 테두리 플래시<span class="badge">채택</span></h2>
+    <p class="why">A안 구조 그대로 두고, 클릭 순간 스트립 테두리가 한 번 굵어졌다 빠집니다. 클릭에 반응이 생기면서도 A안의 "높이 고정, 재배치 없음"을 그대로 유지합니다.</p>
+    <div class="card picked">
       <h3>훈수 말투</h3>
-      <div class="impactbar" id="fxbar">
-        <button data-fx="fx1" aria-pressed="true">① 테두리 플래시</button>
-        <button data-fx="fx2" aria-pressed="false">② 그라데이션 스윕</button>
-        <button data-fx="fx3" aria-pressed="false">③ 배경 채움 (튜닝 없음)</button>
+      <p class="cap">고르면 아래에서 목소리를 미리 들어볼 수 있어요.</p>
+      <div class="pgrid" id="gridD"></div>
+      <div class="qstrip" id="qD">
+        <span class="qtag" id="qtagD"></span>
+        <span class="qtxt" id="qtxtD"></span>
       </div>
-
-      <div class="rack" id="rack1">
-        <div class="rtitle">① 테두리 플래시 — 세부값 <span style="font-weight:400;color:var(--accent)">(확정값 적용됨)</span></div>
-        <div class="rrow"><label>지속시간</label><input type="range" id="r1-dur" min="100" max="1500" step="10" value="1000"><span class="rval" id="v1-dur">1000ms</span></div>
-        <div class="rrow"><label>시작 딜레이</label><input type="range" id="r1-delay" min="0" max="500" step="10" value="50"><span class="rval" id="v1-delay">50ms</span></div>
-        <div class="rrow"><label>피크 위치</label><input type="range" id="r1-peak" min="10" max="90" step="1" value="30"><span class="rval" id="v1-peak">30%</span></div>
-        <div class="rrow"><label>링 확산</label><input type="range" id="r1-ring" min="0" max="20" step="1" value="3"><span class="rval" id="v1-ring">3px</span></div>
-        <div class="rrow"><label>테두리 두께</label><input type="range" id="r1-border" min="3" max="16" step="1" value="7"><span class="rval" id="v1-border">7px</span></div>
-        <div class="rrow"><label>이징</label>
-          <select id="r1-ease">
-            <option value="ease-out" selected>ease-out (확정)</option>
-            <option value="cubic-bezier(.2,1,.3,1)">overshoot</option>
-            <option value="ease-in-out">ease-in-out</option>
-            <option value="linear">linear</option>
-          </select><span></span>
-        </div>
-        <div class="rackbtns"><button id="r1-reset">기본값으로</button><button id="r1-play">▶ 미리 재생</button></div>
-      </div>
-
-      <div class="rack" id="rack2" style="display:none">
-        <div class="rtitle">② 그라데이션 스윕 — 세부값</div>
-        <div class="rrow"><label>지속시간</label><input type="range" id="r2-dur" min="200" max="2000" step="10" value="620"><span class="rval" id="v2-dur">620ms</span></div>
-        <div class="rrow"><label>시작 딜레이</label><input type="range" id="r2-delay" min="0" max="500" step="10" value="0"><span class="rval" id="v2-delay">0ms</span></div>
-        <div class="rrow"><label>밝기</label><input type="range" id="r2-opacity" min="20" max="100" step="5" value="100"><span class="rval" id="v2-opacity">100%</span></div>
-        <div class="rrow"><label>밴드 폭</label><input type="range" id="r2-band" min="4" max="30" step="1" value="9"><span class="rval" id="v2-band">9%</span></div>
-        <div class="rrow"><label>번짐 폭</label><input type="range" id="r2-fade" min="4" max="30" step="1" value="14"><span class="rval" id="v2-fade">14%</span></div>
-        <div class="rrow"><label>각도</label><input type="range" id="r2-angle" min="30" max="150" step="1" value="105"><span class="rval" id="v2-angle">105°</span></div>
-        <div class="rrow"><label>이징</label>
-          <select id="r2-ease">
-            <option value="cubic-bezier(.3,.7,.3,1)" selected>decel (기본)</option>
-            <option value="ease-out">ease-out</option>
-            <option value="ease-in-out">ease-in-out</option>
-            <option value="linear">linear</option>
-          </select><span></span>
-        </div>
-        <div class="rackbtns"><button id="r2-reset">기본값으로</button><button id="r2-play">▶ 미리 재생</button></div>
-      </div>
-
-      <div class="pgrid" id="gridE"></div>
-      <div class="qstrip fx1" id="qE">
-        <span class="qtag" id="qtagE"></span>
-        <span class="qtxt" id="qtxtE"></span>
-      </div>
-      <p class="note">카드를 클릭하면 위에서 조정한 값 그대로 재생됩니다 · 레이아웃에 영향 없음</p>
+      <p class="note">1000ms · ease-out · 50ms 딜레이 · <code>box-shadow</code>와 테두리 두께만 변형 → 리플로우 없음</p>
     </div>
   </div>
 </div>
 
 <div class="verdict">
-  <h2>정리 — <b>D안 채택 (A안 + ① 테두리 플래시)</b></h2>
+  <h2>정리 — <b>D안 채택</b></h2>
   <ul>
-    <li><b>확정된 애니메이션 값</b> — 지속시간 <span class="kbd">1000ms</span> · 시작 딜레이 <span class="kbd">50ms</span> · 피크 위치 <span class="kbd">30%</span> · 링 확산 <span class="kbd">3px</span> · 테두리 두께 <span class="kbd">7px</span> · 이징 <span class="kbd">ease-out</span>. 실제 구현은 <code>options.html</code>의 <code>@keyframes pqflash</code>에 이 값 그대로 들어가 있습니다.</li>
     <li><b>A안 기반인 이유.</b> 온보딩 5단계가 이미 똑같은 인용 박스를 쓰고 있어서, 설정에서도 같은 자리·같은 모양이면 "아, 그거"가 됩니다. 호버 미리듣기 + 선택 유지를 한 슬롯이 다 처리하고 높이가 고정이라 레이아웃도 안 흔들립니다.</li>
     <li><b>호버/선택 상태 구분</b> — 미리듣기일 땐 좌측 바가 점선·회색이고 라벨이 <span class="kbd">미리듣기 · 얀데레</span>, 선택 상태면 실선·초록에 <span class="kbd">선택됨 · 얀데레</span>. 같은 자리를 두 용도로 써도 헷갈리지 않습니다.</li>
     <li><b>키보드</b> — <span class="kbd">Tab</span>으로 카드에 포커스가 가면 호버와 동일하게 미리듣기가 뜨도록 <code>focus</code>도 같이 바인딩. C안이 못 하는 부분입니다.</li>
-    <li><b>문장 개수</b> — 호버(이 말투가 뭔지 보여주는 대표 잔소리) 1개 + 선택 직후(고용을 수락하는 인사) 1개, 총 2개를 권합니다. 클릭에 반응이 있어야 "골랐다"는 감각이 생기고, 잔소리만 두 번 보여주면 지겹습니다.</li>
+    <li><b>문장 개수</b> — 호버(이 말투가 뭔지 보여주는 대표 잔소리) 1개 + 선택 직후(고용을 수락하는 인사) 1개, 총 2개. 클릭에 반응이 있어야 "골랐다"는 감각이 생기고, 잔소리만 두 번 보여주면 지겹습니다.</li>
     <li><b>문구 저장 위치</b> — <code>personas.data.ts</code>는 <code>scripts/gen-personas.py</code>가 YAML에서 생성하는 파일이라 손으로 못 고칩니다. 이 20개 문장은 프롬프트로 나가지 않는 순수 UI 카피라 별도 모듈 <code>src/lib/personaSampleLines.ts</code>에 뒀습니다.</li>
     <li><b>구현 중 잡은 버그</b> — <code>animationend</code>는 버블링됩니다. 문장 교체용 0.18초 fade가 스트립까지 올라와 플래시를 중간에 끊어버려서, 1000ms로 맞춰도 실제로는 180ms만 보였습니다. 이벤트 타깃과 <code>animationName</code>을 확인하도록 고쳤습니다.</li>
   </ul>
@@ -310,134 +227,40 @@ P.forEach((p,i)=>{
   w.appendChild(b);w.appendChild(t);gC.appendChild(w);
 });
 
-// ---------- D: A + 선택 임팩트 (채택안, 튜닝 가능) ----------
-const gE=document.getElementById("gridE"),qE=document.getElementById("qE"),
-      tagE=document.getElementById("qtagE"),txtE=document.getElementById("qtxtE"),
-      fxbar=document.getElementById("fxbar"),
-      rack1=document.getElementById("rack1"),rack2=document.getElementById("rack2");
-let selE=0,fx="fx1";
-const reduce=matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-// fx1 키프레임은 "피크가 몇 %에서 오는가"를 바꿔야 하는데, CSS 키프레임의 스톱(0%/30%/100%)은
-// var()를 받을 수 없는 값이라 슬라이더로 못 돌린다 — 그래서 <style> 태그를 통째로 다시 써서
-// 같은 이름의 @keyframes로 덮어쓴다(나중에 선언된 규칙이 이긴다).
-const fx1kf=document.createElement("style");document.head.appendChild(fx1kf);
-function writeFx1Keyframes(peakPct){
-  fx1kf.textContent = `@keyframes ringflash{
-    0%{box-shadow:0 0 0 0 var(--accent);border-left-width:3px}
-    ${peakPct}%{box-shadow:0 0 0 var(--fx1-ring) var(--accent);border-left-width:var(--fx1-border)}
-    100%{box-shadow:0 0 0 0 transparent;border-left-width:3px}
-  }`;
-}
-writeFx1Keyframes(30);
-
-const root=document.documentElement.style;
-// 확정값 — 실제 구현(options.html의 @keyframes pqflash)에 그대로 반영돼 있다.
-const FX1_DEFAULTS={dur:1000,delay:50,peak:30,ring:3,border:7,ease:"ease-out"};
-const fx1={...FX1_DEFAULTS};
-const fx2={dur:620,delay:0,opacity:100,band:9,fade:14,angle:105,ease:"cubic-bezier(.3,.7,.3,1)"};
-
-function bindRange(id,onchange,unit,decorate){
-  const el=document.getElementById(id),out=document.getElementById(id.replace("r","v"));
-  el.addEventListener("input",()=>{
-    const v=decorate?decorate(el.value):el.value;
-    out.textContent=v+unit;
-    onchange(Number(el.value));
-  });
-}
-bindRange("r1-dur",v=>fx1.dur=v,"ms");
-bindRange("r1-delay",v=>fx1.delay=v,"ms");
-bindRange("r1-peak",v=>{fx1.peak=v;writeFx1Keyframes(v);},"%");
-bindRange("r1-ring",v=>{fx1.ring=v;root.setProperty("--fx1-ring",v+"px");},"px");
-bindRange("r1-border",v=>{fx1.border=v;root.setProperty("--fx1-border",v+"px");},"px");
-document.getElementById("r1-ease").addEventListener("change",e=>fx1.ease=e.target.value);
-
-bindRange("r2-dur",v=>fx2.dur=v,"ms");
-bindRange("r2-delay",v=>fx2.delay=v,"ms");
-bindRange("r2-opacity",v=>{fx2.opacity=v;root.setProperty("--fx2-opacity",v/100);},"%");
-bindRange("r2-band",v=>{fx2.band=v;root.setProperty("--fx2-band",v+"%");},"%");
-bindRange("r2-fade",v=>{fx2.fade=v;root.setProperty("--fx2-fade",v+"%");},"%");
-bindRange("r2-angle",v=>{fx2.angle=v;root.setProperty("--fx2-angle",v+"deg");},"°");
-document.getElementById("r2-ease").addEventListener("change",e=>fx2.ease=e.target.value);
-
-document.getElementById("r1-reset").addEventListener("click",()=>{
-  const d=FX1_DEFAULTS;
-  Object.assign(fx1,d);
-  document.getElementById("r1-dur").value=d.dur; document.getElementById("v1-dur").textContent=d.dur+"ms";
-  document.getElementById("r1-delay").value=d.delay; document.getElementById("v1-delay").textContent=d.delay+"ms";
-  document.getElementById("r1-peak").value=d.peak; document.getElementById("v1-peak").textContent=d.peak+"%";
-  document.getElementById("r1-ring").value=d.ring; document.getElementById("v1-ring").textContent=d.ring+"px";
-  document.getElementById("r1-border").value=d.border; document.getElementById("v1-border").textContent=d.border+"px";
-  document.getElementById("r1-ease").value=d.ease;
-  root.setProperty("--fx1-ring",d.ring+"px");root.setProperty("--fx1-border",d.border+"px");
-  writeFx1Keyframes(d.peak);
-});
-document.getElementById("r2-reset").addEventListener("click",()=>{
-  const d={dur:620,delay:0,opacity:100,band:9,fade:14,angle:105,ease:"cubic-bezier(.3,.7,.3,1)"};
-  Object.assign(fx2,d);
-  document.getElementById("r2-dur").value=d.dur; document.getElementById("v2-dur").textContent=d.dur+"ms";
-  document.getElementById("r2-delay").value=d.delay; document.getElementById("v2-delay").textContent=d.delay+"ms";
-  document.getElementById("r2-opacity").value=d.opacity; document.getElementById("v2-opacity").textContent=d.opacity+"%";
-  document.getElementById("r2-band").value=d.band; document.getElementById("v2-band").textContent=d.band+"%";
-  document.getElementById("r2-fade").value=d.fade; document.getElementById("v2-fade").textContent=d.fade+"%";
-  document.getElementById("r2-angle").value=d.angle; document.getElementById("v2-angle").textContent=d.angle+"°";
-  document.getElementById("r2-ease").value=d.ease;
-  root.setProperty("--fx2-opacity",d.opacity/100);root.setProperty("--fx2-band",d.band+"%");
-  root.setProperty("--fx2-fade",d.fade+"%");root.setProperty("--fx2-angle",d.angle+"deg");
-});
-document.getElementById("r1-play").addEventListener("click",()=>{if(fx==="fx1")fireE();});
-document.getElementById("r2-play").addEventListener("click",()=>{if(fx==="fx2")fireE();});
-
-function paintE(i,preview){
+// ---------- D: A + 선택 시 테두리 플래시 (채택안) ----------
+const gD=document.getElementById("gridD"),qD=document.getElementById("qD"),
+      tagD=document.getElementById("qtagD"),txtD=document.getElementById("qtxtD");
+let selD=0;
+function paintD(i,preview){
   const p=P[i];
-  qE.classList.toggle("preview",preview);
-  tagE.classList.toggle("prev",preview);
-  tagE.textContent=(preview?"미리듣기 · ":"선택됨 · ")+p[1];
-  txtE.textContent="“"+fill(preview?p[2]:p[3])+"”";
-  txtE.classList.remove("fade");void txtE.offsetWidth;txtE.classList.add("fade");
+  qD.classList.toggle("preview",preview);
+  tagD.classList.toggle("prev",preview);
+  tagD.textContent=(preview?"미리듣기 · ":"선택됨 · ")+p[1];
+  txtD.textContent="“"+fill(preview?p[2]:p[3])+"”";
+  txtD.classList.remove("fade");void txtD.offsetWidth;txtD.classList.add("fade");
 }
-function fireE(){
-  if(reduce)return;                       // 모션 민감 사용자에겐 문구 교체만
-  qE.classList.remove("fire");void qE.offsetWidth;
-  if(fx==="fx1"){
-    qE.style.animationDuration=fx1.dur+"ms";
-    qE.style.animationDelay=fx1.delay+"ms";
-    qE.style.animationTimingFunction=fx1.ease;
-  } else if(fx==="fx2"){
-    qE.style.animationDuration=fx2.dur+"ms";
-    qE.style.animationDelay=fx2.delay+"ms";
-    qE.style.animationTimingFunction=fx2.ease;
-  } else {
-    qE.style.animationDuration="";qE.style.animationDelay="";qE.style.animationTimingFunction="";
-  }
-  qE.classList.add("fire");
+function flashD(){
+  qD.classList.remove("fire");void qD.offsetWidth;qD.classList.add("fire");
 }
-fxbar.addEventListener("click",e=>{
-  const b=e.target.closest("button");if(!b)return;
-  fx=b.dataset.fx;
-  [...fxbar.children].forEach(c=>c.setAttribute("aria-pressed",String(c===b)));
-  qE.className="qstrip "+fx;
-  rack1.style.display=fx==="fx1"?"block":"none";
-  rack2.style.display=fx==="fx2"?"block":"none";
-  paintE(selE,false);fireE();
-});
 P.forEach((p,i)=>{
   const b=document.createElement("button");
-  b.className="pcard";b.setAttribute("aria-pressed",String(i===selE));
+  b.className="pcard";b.setAttribute("aria-pressed",String(i===selD));
   b.innerHTML='<span class="pn">'+p[1]+'</span>';
-  const prev=()=>{if(!qE.classList.contains("fire"))paintE(i,true)};
+  const prev=()=>paintD(i,true);
   b.addEventListener("mouseenter",prev);
   b.addEventListener("focus",prev);
-  const back=()=>paintE(selE,false);
+  const back=()=>paintD(selD,false);
   b.addEventListener("mouseleave",back);
   b.addEventListener("blur",back);
-  b.addEventListener("click",()=>{selE=i;
-    [...gE.children].forEach((c,j)=>c.setAttribute("aria-pressed",String(j===i)));
-    paintE(i,false);fireE();});
-  gE.appendChild(b);
+  b.addEventListener("click",()=>{selD=i;
+    [...gD.children].forEach((c,j)=>c.setAttribute("aria-pressed",String(j===i)));
+    paintD(i,false);flashD();});
+  gD.appendChild(b);
 });
 // animationend는 버블링된다 — .qtxt의 0.18초 fade가 올라와서 플래시를 중간에 끊어버리므로
-// 스트립 자신에게서 난 이벤트만 받는다.
-qE.addEventListener("animationend",e=>{if(e.target===qE)qE.classList.remove("fire");});
-paintE(selE,false);
+// 스트립 자신에게서 난 ringflash만 받는다.
+qD.addEventListener("animationend",e=>{
+  if(e.target===qD&&e.animationName==="ringflash")qD.classList.remove("fire");
+});
+paintD(selD,false);
 </script>
