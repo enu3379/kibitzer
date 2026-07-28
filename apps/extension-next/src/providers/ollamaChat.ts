@@ -51,6 +51,7 @@ export interface OllamaChatJudgeOptions {
   maxOutputTokens?: number
   writerMaxOutputTokens?: number
   fetch?: typeof fetch
+  onUsage?: (tokensIn: number, tokensOut: number) => void
 }
 
 export class OllamaChatJudgeProvider implements JudgeProvider {
@@ -63,6 +64,7 @@ export class OllamaChatJudgeProvider implements JudgeProvider {
   private readonly maxOutputTokens: number
   private readonly writerMaxOutputTokens: number
   private readonly fetchFn: typeof fetch
+  private readonly onUsage?: (tokensIn: number, tokensOut: number) => void
   private rotation = 0
 
   constructor(options: OllamaChatJudgeOptions) {
@@ -79,6 +81,7 @@ export class OllamaChatJudgeProvider implements JudgeProvider {
     // Bind to the global scope: this.fetchFn(...) would otherwise call fetch with
     // `this` = the provider, which throws "Illegal invocation" in a service worker.
     this.fetchFn = options.fetch ?? globalThis.fetch.bind(globalThis)
+    this.onUsage = options.onUsage
   }
 
   async classifyTier1(payload: Record<string, unknown>): Promise<Tier1Result> {
@@ -231,7 +234,13 @@ export class OllamaChatJudgeProvider implements JudgeProvider {
         // Read the body INSIDE the abort window: a server that sends headers then stalls the
         // body would otherwise hang forever (clearTimeout used to run before this), and with
         // serialized judging that froze the whole pipeline.
-        return await responseJson(response)
+        const data = await responseJson(response)
+        if (this.onUsage) {
+          const num = (v: unknown): number =>
+            typeof v === "number" && Number.isFinite(v) ? v : 0
+          this.onUsage(num(data.prompt_eval_count), num(data.eval_count))
+        }
+        return data
       } finally {
         clearTimeout(timeout)
       }
