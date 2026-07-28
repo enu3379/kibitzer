@@ -506,6 +506,7 @@ async function serviceTier2(
 }
 
 const TOAST_TOKEN_KEY = "toast-token"
+const FIRST_NAG_KEY = "first-nag-count" // lifetime intervention-toast counter (첫 훈수 변형)
 
 /** A durable, strictly-increasing display token. In-memory (`let toastToken = 0`) reset to 0
  *  on every service-worker restart, so a post-restart nag reused an id an earlier nag's
@@ -543,6 +544,14 @@ async function showToast(
   void playChime(kind) // audible cue via the offscreen document (works off-screen)
   const token = await nextToastToken()
   if (tab?.id) {
+    // The first-ever intervention toast renders as a one-time explainer variant (the
+    // response buttons and the bubble-click="잘 잡았어요" are not self-evident). Same
+    // atomic-kv pattern as the display token; counted at injection so an OS-notification
+    // fallback (which has no room to explain) doesn't normally consume the slot — only
+    // an injection FAILURE below can, which we accept for one-shot simplicity.
+    const firstRun =
+      kind === "intervention" &&
+      (await kvUpdate<number>(FIRST_NAG_KEY, (c) => (typeof c === "number" ? c : 0) + 1)) === 1
     const payload: ToastPayload = {
       notificationId: `kbz-${token}`,
       displayToken: token,
@@ -550,6 +559,7 @@ async function showToast(
       contextLabel,
       autoDismissMs: 12_000,
       kind,
+      firstRun,
     }
     try {
       await chrome.scripting.executeScript({

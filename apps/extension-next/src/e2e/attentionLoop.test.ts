@@ -174,6 +174,12 @@ test("E2E: goal → drift on an off-goal page → S drains to 0 → nag delivere
     const final = await send({ type: "get-state" })
     assert.ok(nagged, `a nag was delivered once S drained (final S=${final.s}, toasts=${toasts.length})`)
     assert.equal(final.s, 0, "S bottomed out at 0")
+    // The lifetime-first intervention toast carries the one-time explainer variant.
+    assert.equal(
+      (toasts[0] as { firstRun?: boolean } | undefined)?.firstRun,
+      true,
+      "the first-ever intervention toast is the explainer variant",
+    )
   } finally {
     mock.timers.reset()
   }
@@ -331,6 +337,11 @@ test("E2E: a nag is never surfaced while Chrome is unfocused, but delivers once 
     await send({ type: "set-goal", goal: "알림보기", minutes: null })
     await settle(50)
     assert.ok(toasts.length + notifications.length > 0, "the nudge delivers once Chrome is focused again")
+    // The first-run explainer slot was consumed by the suite's first nag (the drain
+    // scenario above) — every later toast must render the normal compact variant.
+    for (const t of toasts) {
+      assert.ok(!(t as { firstRun?: boolean }).firstRun, "later nags render the normal toast")
+    }
   } finally {
     winFocused = true
     idleActive = true
