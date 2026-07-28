@@ -109,45 +109,62 @@ const fireHeartbeat = async () => {
 }
 const settle = (ms = 0) => new Promise((r) => setTimeout(r, ms)) // real timer (only Date is mocked)
 
+// A heartbeat's alarm listener is fire-and-forget (`void getGoal().then(async () => … dispatch)`),
+// so `await fireHeartbeat()` returns BEFORE the work it triggers finishes: dispatch → outbox drain
+// → showToast → executeScript all run async afterwards. Reading toasts/state after a single
+// `settle(0)` therefore RACES that delivery on a loaded runner — the S=0-nag flake was exactly this
+// (the nag WAS delivered; the assert read `toasts` one macrotask too early, so `nagged` was false
+// with the interventions landing right after). Advance one synthetic minute, fire the beat, then
+// yield REAL time until the delivery has landed: poll `until` (early-out) when there is a positive
+// signal to wait on, else drain a fixed budget so an absence assertion can't pass before a stray
+// delivery would have surfaced. Only Date is mocked, so `settle` here is a real timer.
+const BEAT_SETTLE_STEPS = 60 // ~120ms of real time — ample for the delivery chain under CI load
+async function beat(until?: () => boolean): Promise<void> {
+  mock.timers.tick(60_000)
+  await fireHeartbeat()
+  for (let i = 0; i < BEAT_SETTLE_STEPS; i += 1) {
+    await settle(2)
+    if (until && until()) return
+  }
+}
+const nagDelivered = (): boolean => toasts.some((t) => t.kind === "intervention") || notifications.length > 0
+
 test("E2E: goal → drift on an off-goal page → S drains to 0 → nag delivered", async () => {
-  mock.timers.enable({ apis: ["Date"] }) // advanceable Date; real setTimeout for WASM + dwell
+  // PHASE 1 — REAL time. Let the real (threaded) WASM pipeline judge the off-goal page DRIFT with
+  // NO mocked timers in play, so no fake clock is advanced while an embed is in flight. The verdict
+  // is deterministic (title vs goal cosine ≈ 0.22, well under τ=0.59), and this keeps the two clocks
+  // from overlapping during judging — separating the concern from the drain phase below.
+  activeTab = { id: 1, url: "https://video.test/watch?v=cat", title: "귀여운 고양이 영상 몰아보기", active: true, windowId: 1 }
+  const setRes = await send({ type: "set-goal", goal: "파이썬 알고리즘 문제 풀이", minutes: null })
+  assert.ok((setRes.goal as { text?: string })?.text, "goal was declared")
+
+  // The dwell is a real 5s timer; wait (real time) for it plus the embed to land the DRIFT verdict.
+  // reconcile is single-flight, so polling fireStartup can't double-judge.
+  let judged = false
+  for (let i = 0; i < 200 && !judged; i += 1) {
+    await settle(100)
+    await fireStartup() // reconcile judges once the real dwell deadline has actually passed
+    judged = /final=DRIFT/.test((await send({ type: "get-log" })).text as string)
+  }
+  assert.ok(judged, "the off-goal page was judged DRIFT in real time")
+  await settle(200) // let the nav dispatch + any threaded-WASM callbacks fully settle
+
+  // PHASE 2 — MOCKED time. No real async is pending now, and heartbeats never re-judge, so the
+  // active verdict stays DRIFT and S drains monotonically (proved in core/gauge/sZeroNag.test.ts).
+  // The drain is therefore deterministic: S reaches 0 and the degraded S=0 gate nags exactly once —
+  // a celebration is impossible without a verdict flip, which nothing here produces.
+  mock.timers.enable({ apis: ["Date"], now: Date.now() }) // start the fake clock at "now" (>= updatedAt)
   try {
-    // The user is on a clearly off-goal page and declares a coding goal.
-    activeTab = { id: 1, url: "https://video.test/watch?v=cat", title: "귀여운 고양이 영상 몰아보기", active: true, windowId: 1 }
-    const setRes = await send({ type: "set-goal", goal: "파이썬 알고리즘 문제 풀이", minutes: null })
-    assert.ok((setRes.goal as { text?: string })?.text, "goal was declared")
-    await settle(50) // let the fire-and-forget observeActiveTab schedule the dwell
-
-    // The dwell hasn't elapsed in real time; advance the mocked clock past it and let the
-    // wake-time reconcile do the judgement (avoids a real 5s wait).
-    mock.timers.tick(6000)
-    await fireStartup()
-    // The KoEn-E5 embed finishes on a REAL timer; a fixed settle() flaked on loaded CI when the
-    // judgement landed mid-drain and corrupted the mocked-Date timeline (S bottomed out via a
-    // chaotic path that fired celebrations instead of the S=0 nag). Block instead — in real time,
-    // nudging the mocked clock only enough to integrate — until the off-goal page has actually
-    // been judged DRIFT and S has begun to drain, so the drain loop below starts deterministically.
-    let drifting = false
-    for (let i = 0; i < 80 && !drifting; i += 1) {
-      await settle(100) // real time: let the WASM embed make progress
-      mock.timers.tick(5000) // mocked time: only drains once the DRIFT verdict is live
-      const s = (await send({ type: "get-state" })).s as number
-      drifting = s < 100 || toasts.some((t) => t.kind === "intervention") || notifications.length > 0
-    }
-    assert.ok(drifting, "the off-goal page was judged DRIFT and S began to drain")
-
-    // A verdict for the off-goal page should now be live and drifting.
     const mid = await send({ type: "get-state" })
     assert.equal((mid.goal as { text?: string })?.text, "파이썬 알고리즘 문제 풀이")
     assert.ok(typeof mid.s === "number" && (mid.s as number) <= 100, `S present: ${mid.s}`)
 
-    // Drive heartbeats (synthetic 1-min steps) until the gauge bottoms out and nags.
+    // Drive heartbeats (synthetic 1-min steps) until the gauge bottoms out and the nag lands.
+    // beat() waits for the fire-and-forget delivery, so `nagged` can't be read before the toast does.
     let nagged = false
-    for (let i = 0; i < 120 && !nagged; i += 1) {
-      mock.timers.tick(60_000)
-      await fireHeartbeat()
-      await settle(0)
-      nagged = toasts.some((t) => t.kind === "intervention") || notifications.length > 0
+    for (let i = 0; i < 200 && !nagged; i += 1) {
+      await beat(nagDelivered)
+      nagged = nagDelivered()
     }
 
     const final = await send({ type: "get-state" })
@@ -178,11 +195,9 @@ test("E2E: a sensitive page is dropped — never judged, no drain, no nag (P0-1 
     mock.timers.tick(6000)
     await fireStartup()
     await settle(300)
-    for (let i = 0; i < 10; i += 1) {
-      mock.timers.tick(60_000)
-      await fireHeartbeat()
-      await settle(0)
-    }
+    // beat() drains its full budget with no predicate, so a stray nag would surface (and fail the
+    // absence assertion below) rather than being missed by reading one macrotask too early.
+    for (let i = 0; i < 10; i += 1) await beat()
 
     const st = await send({ type: "get-state" })
     assert.equal(st.s, 100, "a sensitive page pauses the gauge — S must not drain")
@@ -211,9 +226,7 @@ test("E2E: drifting, then navigating to a new page freezes S — no drain on the
     // and can't be confused with S already bottoming out.
     let drained = 100
     for (let i = 0; i < 60 && drained > 50; i += 1) {
-      mock.timers.tick(60_000)
-      await fireHeartbeat()
-      await settle(0)
+      await beat() // wait out the heartbeat's dispatch so get-state reads the settled S, not a stale one
       drained = (await send({ type: "get-state" })).s as number
     }
     assert.ok(drained > 0 && drained < 100, `the drift drained S off full but not to 0 (S=${drained})`)
@@ -227,11 +240,7 @@ test("E2E: drifting, then navigating to a new page freezes S — no drain on the
     const atNav = (await send({ type: "get-state" })).s as number
 
     // Fifteen minutes of heartbeats while the new page is still in its dwell — S is frozen.
-    for (let i = 0; i < 15; i += 1) {
-      mock.timers.tick(60_000)
-      await fireHeartbeat()
-      await settle(0)
-    }
+    for (let i = 0; i < 15; i += 1) await beat()
     const held = (await send({ type: "get-state" })).s as number
     assert.equal(held, atNav, "S is held steady while the new page is judged — no drain on the stale verdict")
     assert.ok(held > 0, "the stale DRIFT did NOT drain S to 0 during the neutral hold")
