@@ -28,10 +28,28 @@
         font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Apple SD Gothic Neo", "Pretendard", "Malgun Gothic", system-ui, sans-serif;
         -webkit-font-smoothing: antialiased; line-height: 1.5;
       }
-      .frame { max-width: 640px; margin: 0 auto; padding: 40px 24px 72px; }
+      .frame { max-width: 880px; margin: 0 auto; padding: 40px 24px 72px; }
       .head { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
       .head .name { font-size: 22px; font-weight: 800; letter-spacing: -.02em; }
-      .lede { color: var(--page-ink-2); font-size: 13.5px; margin: 0 0 28px; }
+      .lede { color: var(--page-ink-2); font-size: 13.5px; margin: 0 0 20px; }
+
+      /* left tab rail */
+      .layout { display: flex; gap: 28px; align-items: flex-start; }
+      .tabs { flex: none; width: 160px; display: flex; flex-direction: column; gap: 2px; position: sticky; top: 28px; }
+      .tabs button { all: unset; box-sizing: border-box; width: 100%; cursor: pointer; font-size: 13px; font-weight: 600;
+        color: var(--page-ink-2); padding: 8px 12px; border-radius: 8px; }
+      .tabs button:hover { background: var(--surface-2); color: var(--page-ink); }
+      .tabs button[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+      .tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      .panes { flex: 1; min-width: 0; }
+      .pane { display: none; }
+      .pane.on { display: block; }
+      @media (max-width: 720px) {
+        .layout { flex-direction: column; }
+        .tabs { position: static; width: 100%; flex-direction: row; flex-wrap: wrap; }
+        .tabs button { width: auto; flex: 1 1 auto; text-align: center; }
+      }
+
       .card { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 12px; padding: 6px 16px; margin-bottom: 14px; }
       .card > h3 { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--page-ink-3); text-transform: uppercase; margin: 14px 0 4px; }
       .row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line-soft); }
@@ -78,12 +96,6 @@
       .pcard[aria-pressed="true"] .pn { color: var(--accent); }
       .pcard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-      textarea { width: 100%; resize: vertical; min-height: 52px; }
-      .field { display: block; padding: 10px 0; border-top: 1px solid var(--line-soft); }
-      .field > span { display: block; font-size: 12px; color: var(--page-ink-2); margin-bottom: 5px; }
-      .field .two { display: flex; gap: 8px; }
-      .field .two input { flex: 1; }
-
       button.btn { all: unset; cursor: pointer; font-size: 12.5px; font-weight: 650; padding: 7px 14px; border-radius: 8px;
         background: var(--surface-2); color: var(--page-ink); border: 1px solid var(--line); text-align: center; }
       button.btn:hover { border-color: var(--accent); }
@@ -94,6 +106,101 @@
       .btnrow { display: flex; gap: 8px; padding: 12px 0; flex-wrap: wrap; }
       .hint { font-size: 11.5px; color: var(--page-ink-3); margin: 4px 0 12px; word-break: break-word; }
       .hint.ok { color: var(--ok-fg); } .hint.err { color: var(--err-fg); }
+      .hidden { display: none !important; }
+
+      /* AI 판정: 연결된 제공자 블록 */
+      .psec { padding: 10px 0 12px; }
+      .seclabel { display: block; font-size: 12px; color: var(--page-ink-2); margin-bottom: 7px; }
+      .pblock { border: 1px solid var(--line-soft); border-radius: 10px; padding: 9px 12px 10px; margin-bottom: 8px; }
+      .phead { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+      .phead .pname { font-size: 13px; font-weight: 700; }
+      .phead .pbadge { font-size: 10.5px; font-weight: 700; color: var(--accent); background: var(--accent-soft);
+        border-radius: 20px; padding: 1px 8px; }
+      .phead .grow { flex: 1; }
+      .punlink { all: unset; cursor: pointer; font-size: 11.5px; color: var(--page-ink-3); padding: 2px 7px; border-radius: 6px; }
+      .punlink:hover { background: var(--err-soft); color: var(--err); }
+      .punlink:focus-visible { outline: 2px solid var(--accent); }
+      .pnote { font-size: 11.5px; color: var(--page-ink-3); margin: 0 0 7px; }
+
+      .krow { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 1px solid var(--line-soft);
+        border-radius: 9px; background: var(--surface-2); margin-bottom: 6px; }
+      .kmeta { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+      .kmeta .kn { font-size: 12.5px; font-weight: 700; }
+      .kmeta .kv { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; color: var(--page-ink-3); }
+      .kdate { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums;
+        font-size: 11px; color: var(--page-ink-3); flex: none; }
+      .kdel { all: unset; cursor: pointer; flex: none; width: 22px; height: 22px; border-radius: 6px; text-align: center;
+        line-height: 22px; font-size: 12px; color: var(--page-ink-3); }
+      .kdel:hover { background: var(--err-soft); color: var(--err); }
+      .kdel:focus-visible { outline: 2px solid var(--accent); }
+      .kempty { border: 1.5px dashed var(--line); border-radius: 9px; padding: 10px; text-align: center;
+        font-size: 12px; color: var(--page-ink-3); margin-bottom: 6px; }
+      .kadd { all: unset; box-sizing: border-box; cursor: pointer; display: block; width: 100%; text-align: center;
+        padding: 6px 0; border: 1.5px dashed var(--line); border-radius: 9px; font-size: 12px; font-weight: 650;
+        color: var(--page-ink-2); }
+      .kadd:hover { border-color: var(--accent); color: var(--accent); }
+      .kadd:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .kform { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+      .kform input { font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--line);
+        border-radius: 7px; padding: 6px 9px; font-size: 12.5px; }
+      .kform input.f-name { flex: 1 1 130px; }
+      .kform input.f-key { flex: 2 1 190px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+      .kform .btn { padding: 6px 12px; }
+      .krot { font-size: 11px; color: var(--page-ink-3); margin: 2px 0 0; }
+      .connectbtn { all: unset; box-sizing: border-box; cursor: pointer; display: block; width: 100%; text-align: center;
+        padding: 8px 0; border: 1.5px dashed var(--line); border-radius: 10px; font-size: 12.5px; font-weight: 650;
+        color: var(--page-ink-2); }
+      .connectbtn:hover { border-color: var(--accent); color: var(--accent); }
+      .connectbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .connectrow { display: flex; gap: 6px; flex-wrap: wrap; }
+      .connectrow select { flex: 1 1 180px; font-size: 12.5px; }
+      .connectrow .btn { padding: 6px 12px; }
+
+      /* AI 판정: 판정 라우팅 (상태 칩 = 테스트 버튼) */
+      .msec { border-top: 1px solid var(--line-soft); padding: 10px 0 12px; }
+      .mrow { display: flex; align-items: center; gap: 10px; padding: 5px 0; flex-wrap: wrap; }
+      .mlab { flex: 1 1 150px; min-width: 0; }
+      .mlab .mtitle { display: flex; align-items: center; gap: 7px; min-width: 0; }
+      .mlab b { font-size: 13px; font-weight: 650; }
+      .mlab small { display: block; color: var(--page-ink-3); font-size: 11px; }
+      .stchip { all: unset; box-sizing: border-box; cursor: pointer; flex: none; font-size: 10.5px; font-weight: 700;
+        padding: 1px 8px; border-radius: 20px; white-space: nowrap;
+        background: var(--surface-2); color: var(--page-ink-3); border: 1px solid var(--line-soft); }
+      .stchip.ok { background: var(--accent-soft); color: var(--ok-fg); border-color: transparent; }
+      .stchip.err { background: var(--err-soft); color: var(--err-fg); border-color: transparent; }
+      .stchip:hover { border-color: var(--accent); }
+      .stchip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .mctl { flex: 2 1 300px; display: flex; gap: 6px; min-width: 0; }
+      .mctl select.prov { flex: 0 1 128px; min-width: 0; font-size: 12.5px; }
+      .mctl select.model { flex: 1; min-width: 0; font-size: 12.5px; }
+      .mctl input { flex: 1; min-width: 0; font-size: 12.5px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+      .mctl .backbtn { flex: none; padding: 6px 10px; font-size: 12px; }
+
+      /* AI 판정: 사용량 */
+      .usec { border-top: 1px solid var(--line-soft); padding: 10px 0 4px; }
+      .uhead { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+      .uhead .seclabel { margin: 0; flex: 1; }
+      .useg { display: flex; gap: 4px; }
+      .ubtn { all: unset; box-sizing: border-box; cursor: pointer; font-size: 11px; font-weight: 650; padding: 2px 9px;
+        border-radius: 6px; background: var(--surface-2); color: var(--page-ink-2); border: 1px solid var(--line-soft); }
+      .ubtn[aria-checked="true"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+      .ubtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .utable { width: 100%; border-collapse: collapse; font-size: 12px; }
+      .utable th { text-align: right; font-size: 10.5px; font-weight: 700; letter-spacing: .05em; color: var(--page-ink-3);
+        padding: 3px 0 5px; }
+      .utable td { text-align: right; padding: 5px 0; border-top: 1px solid var(--line-soft);
+        font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums; font-size: 11.5px; }
+      .utable th:first-child, .utable td:first-child { text-align: left; }
+      .utable td:first-child .sub { display: block; font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", sans-serif;
+        color: var(--page-ink-3); font-size: 10.5px; }
+      .uempty { font-size: 11.5px; color: var(--page-ink-3); padding: 6px 0; }
+
+      details.privacy { border-top: 1px solid var(--line-soft); margin-top: 2px; }
+      details.privacy summary { cursor: pointer; font-size: 12px; font-weight: 650; color: var(--page-ink-2);
+        padding: 10px 0; list-style-position: inside; }
+      details.privacy summary:hover { color: var(--accent); }
+      details.privacy summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      details.privacy p { margin: 0 0 10px; }
     </style>
   </head>
   <body>
@@ -111,77 +218,141 @@
       </div>
       <p class="lede">판정 감도·알림·말투·AI 판정·데이터를 여기서 관리합니다. 목표 선언과 훈수 응답은 툴바 팝업에서.</p>
 
-      <!-- 판정 감도 -->
-      <div class="card">
-        <h3>판정 감도</h3>
-        <div class="seg-block">
-          <b>목표 이탈 민감도</b>
-          <div class="seg" id="sens" role="radiogroup" aria-label="목표 이탈 민감도">
-            <button class="segbtn" data-level="lenient" role="radio" aria-checked="false">관대</button>
-            <button class="segbtn" data-level="standard" role="radio" aria-checked="true">중간</button>
-            <button class="segbtn" data-level="strict" role="radio" aria-checked="false">엄격</button>
-          </div>
-          <small id="sensHint">권장 기본값 — 벤치마크로 맞춘 균형점입니다.</small>
-        </div>
-      </div>
+      <div class="layout">
+        <nav class="tabs" role="tablist" aria-label="설정 분류" aria-orientation="vertical">
+          <button role="tab" id="tab-general" aria-controls="pane-general" aria-selected="true" data-tab="general">일반</button>
+          <button role="tab" id="tab-persona" aria-controls="pane-persona" aria-selected="false" tabindex="-1" data-tab="persona">말투</button>
+          <button role="tab" id="tab-ai" aria-controls="pane-ai" aria-selected="false" tabindex="-1" data-tab="ai">AI 판정</button>
+          <button role="tab" id="tab-data" aria-controls="pane-data" aria-selected="false" tabindex="-1" data-tab="data">데이터</button>
+        </nav>
+        <div class="panes">
 
-      <!-- 알림 -->
-      <div class="card">
-        <h3>알림</h3>
-        <div class="row">
-          <span class="lab"><b>방해 금지 시간</b><small>이 시간대엔 훈수를 조용히</small></span>
-          <span class="times"><input type="time" id="quietStart" value="22:00" /><span>–</span><input type="time" id="quietEnd" value="08:00" /></span>
-          <button class="switch" id="quietSw" role="switch" aria-checked="false" aria-label="방해 금지 시간"></button>
+      <!-- 일반: 판정 감도 + 알림 -->
+      <section class="pane on" id="pane-general" role="tabpanel" aria-labelledby="tab-general" data-pane="general">
+        <div class="card">
+          <h3>판정 감도</h3>
+          <div class="seg-block">
+            <b>목표 이탈 민감도</b>
+            <div class="seg" id="sens" role="radiogroup" aria-label="목표 이탈 민감도">
+              <button class="segbtn" data-level="lenient" role="radio" aria-checked="false">관대</button>
+              <button class="segbtn" data-level="standard" role="radio" aria-checked="true">중간</button>
+              <button class="segbtn" data-level="strict" role="radio" aria-checked="false">엄격</button>
+            </div>
+            <small id="sensHint">권장 기본값 — 벤치마크로 맞춘 균형점입니다.</small>
+          </div>
         </div>
-        <div class="row">
-          <span class="lab"><b>음성으로 읽기</b><small>훈수를 소리 내어 읽어줍니다 (Web Speech)</small></span>
-          <button class="switch" id="ttsSw" role="switch" aria-checked="false" aria-label="음성 알림"></button>
+        <div class="card">
+          <h3>알림</h3>
+          <div class="row">
+            <span class="lab"><b>방해 금지 시간</b><small>이 시간대엔 훈수를 조용히</small></span>
+            <span class="times"><input type="time" id="quietStart" value="22:00" /><span>–</span><input type="time" id="quietEnd" value="08:00" /></span>
+            <button class="switch" id="quietSw" role="switch" aria-checked="false" aria-label="방해 금지 시간"></button>
+          </div>
+          <div class="row">
+            <span class="lab"><b>음성으로 읽기</b><small>훈수를 소리 내어 읽어줍니다 (Web Speech)</small></span>
+            <button class="switch" id="ttsSw" role="switch" aria-checked="false" aria-label="음성 알림"></button>
+          </div>
         </div>
-      </div>
+      </section>
 
       <!-- 말투 -->
-      <div class="card">
-        <h3>훈수 말투</h3>
-        <div class="pgrid" id="pgrid"></div>
-      </div>
+      <section class="pane" id="pane-persona" role="tabpanel" aria-labelledby="tab-persona" data-pane="persona">
+        <div class="card">
+          <h3>훈수 말투</h3>
+          <div class="pgrid" id="pgrid"></div>
+        </div>
+      </section>
 
       <!-- AI 판정 -->
-      <div class="card">
-        <h3>AI 판정 · Ollama Cloud</h3>
-        <p class="hint">
-          켜면 목표, 현재 제목·호스트, 최대 3,000자의 현재 페이지 요약,
-          최근 페이지 제목·판정, 시간·훈수 횟수 맥락이 Ollama Cloud로 전송될 수 있습니다.
-          원본 URL, 저장된 벡터, 전체 이벤트 로그는 전송하지 않습니다.
-        </p>
-        <label class="field">
-          <span>API 키 · 한 줄에 하나, 여러 개면 자동 로테이션</span>
-          <textarea id="keys" rows="3" placeholder="ollama.com API 키 (여러 개면 줄바꿈)&#10;비우면 제목 유사도만 (Tier-0)"></textarea>
-        </label>
-        <label class="field">
-          <span>모델</span>
-          <span class="two">
-            <input type="text" id="tier1" placeholder="Tier 1: nemotron-3-super" />
-            <input type="text" id="tier2" placeholder="Tier 2: minimax-m3" />
-          </span>
-        </label>
-        <div class="btnrow">
-          <button class="btn" id="test">연결 테스트</button>
-          <button class="btn primary" id="saveOllama">저장</button>
+      <section class="pane" id="pane-ai" role="tabpanel" aria-labelledby="tab-ai" data-pane="ai">
+        <div class="card">
+          <h3>AI 판정</h3>
+
+          <div class="psec">
+            <span class="seclabel">연결된 제공자</span>
+            <div id="ajProviders"></div>
+            <div id="ajConnect"></div>
+          </div>
+
+          <div class="msec">
+            <span class="seclabel">판정 라우팅</span>
+            <div class="mrow">
+              <span class="mlab">
+                <span class="mtitle"><b>Tier 1 · 재확인</b><button class="stchip" data-tier="tier1" type="button">– 테스트</button></span>
+                <small>이탈 의심을 빠르게 다시 보는 저비용 모델</small>
+              </span>
+              <span class="mctl" data-tier="tier1">
+                <select class="prov" aria-label="Tier 1 제공자"></select>
+                <select class="model" aria-label="Tier 1 모델"></select>
+                <input type="text" class="modelinput hidden" aria-label="Tier 1 모델 직접 입력" placeholder="정확한 API 모델명" />
+                <button class="btn backbtn hidden" type="button" title="추천 목록으로">목록</button>
+              </span>
+            </div>
+            <div class="mrow">
+              <span class="mlab">
+                <span class="mtitle"><b>Tier 2 · 판정·훈수</b><button class="stchip" data-tier="tier2" type="button">– 테스트</button></span>
+                <small>판정을 확정하고 한국어 훈수를 쓰는 모델</small>
+              </span>
+              <span class="mctl" data-tier="tier2">
+                <select class="prov" aria-label="Tier 2 제공자"></select>
+                <select class="model" aria-label="Tier 2 모델"></select>
+                <input type="text" class="modelinput hidden" aria-label="Tier 2 모델 직접 입력" placeholder="정확한 API 모델명" />
+                <button class="btn backbtn hidden" type="button" title="추천 목록으로">목록</button>
+              </span>
+            </div>
+            <p class="hint" style="margin-top: 6px">
+              기본값: 두 Tier 모두 Ollama Cloud — 무료 계정으로 충분합니다.
+              라우팅된 제공자에 키가 없으면 해당 Tier는 건너뛰고 제목 유사도(Tier-0)만 사용합니다.
+            </p>
+          </div>
+
+          <div class="usec">
+            <div class="uhead">
+              <span class="seclabel">사용량</span>
+              <span class="useg" role="radiogroup" aria-label="사용량 기간">
+                <button class="ubtn" data-days="1" role="radio" aria-checked="true" type="button">오늘</button>
+                <button class="ubtn" data-days="7" role="radio" aria-checked="false" type="button">7일</button>
+                <button class="ubtn" data-days="30" role="radio" aria-checked="false" type="button">30일</button>
+              </span>
+            </div>
+            <table class="utable">
+              <thead><tr><th>모델</th><th>호출</th><th>입력 토큰</th><th>출력 토큰</th></tr></thead>
+              <tbody id="ajUsage"></tbody>
+            </table>
+            <p class="hint" style="margin-bottom: 4px">제공자 응답의 usage 필드 기준 · 로컬에만 저장됩니다.</p>
+          </div>
+
+          <div class="btnrow">
+            <button class="btn primary" id="ajSave">저장</button>
+          </div>
+          <div class="hint" id="ajResult"></div>
+
+          <details class="privacy">
+            <summary>어떤 데이터가 전송되나요?</summary>
+            <p class="hint">
+              목표, 현재 제목·호스트, 최대 3,000자의 현재 페이지 요약, 최근 페이지 제목·판정,
+              시간·훈수 횟수 맥락이 라우팅된 제공자로 전송될 수 있습니다.
+              원본 URL, 저장된 벡터, 전체 이벤트 로그는 전송하지 않습니다.
+            </p>
+          </details>
         </div>
-        <div class="hint" id="ollamaResult"></div>
-      </div>
+      </section>
 
       <!-- 데이터 -->
-      <div class="card">
-        <h3>데이터 · 로컬에만 저장됨</h3>
-        <div class="btnrow">
-          <button class="btn" id="exportLog">디버그 로그 파일</button>
-          <button class="btn" id="exportEvents">이벤트 JSON</button>
-          <button class="btn" id="openReplay">리플레이 열기</button>
+      <section class="pane" id="pane-data" role="tabpanel" aria-labelledby="tab-data" data-pane="data">
+        <div class="card">
+          <h3>데이터 · 로컬에만 저장됨</h3>
+          <div class="btnrow">
+            <button class="btn" id="exportLog">디버그 로그 파일</button>
+            <button class="btn" id="exportEvents">이벤트 JSON</button>
+            <button class="btn" id="openReplay">리플레이 열기</button>
+          </div>
+          <div class="row">
+            <span class="lab"><b>모든 활동 데이터 삭제</b><small>게이지·이력·학습·이벤트·나깅 기록을 전부 지웁니다 (목표·키·말투는 유지)</small></span>
+            <button class="btn danger" id="wipe">삭제</button>
+          </div>
         </div>
-        <div class="row">
-          <span class="lab"><b>모든 활동 데이터 삭제</b><small>게이지·이력·학습·이벤트·나깅 기록을 전부 지웁니다 (목표·키·말투는 유지)</small></span>
-          <button class="btn danger" id="wipe">삭제</button>
+      </section>
         </div>
       </div>
     </div>

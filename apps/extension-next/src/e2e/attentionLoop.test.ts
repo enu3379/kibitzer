@@ -32,6 +32,7 @@ const evt = (name: string) => {
   return { addListener: (fn: (...a: unknown[]) => unknown) => listeners[name].push(fn), removeListener() {} }
 }
 const store = new Map<string, unknown>() // backs chrome.storage.local
+const createdTabs: string[] = [] // URLs opened via chrome.tabs.create (onboarding assertions)
 let activeTab: { id: number; url: string; title: string; active: boolean; windowId: number } | null = null
 const toasts: Array<Record<string, unknown>> = [] // captured injected toast payloads
 const notifications: Array<{ id: string; opts: Record<string, unknown> }> = []
@@ -46,7 +47,10 @@ const chrome = {
     onActivated: evt("tabs.onActivated"),
     query: async () => (activeTab ? [activeTab] : []),
     get: async () => activeTab,
-    create: async () => ({}),
+    create: async (opts: { url?: string } = {}) => {
+      createdTabs.push(opts.url ?? "")
+      return {}
+    },
   },
   webNavigation: { onHistoryStateUpdated: evt("wn") },
   runtime: {
@@ -174,6 +178,12 @@ test("E2E: goal → drift on an off-goal page → S drains to 0 → nag delivere
     const final = await send({ type: "get-state" })
     assert.ok(nagged, `a nag was delivered once S drained (final S=${final.s}, toasts=${toasts.length})`)
     assert.equal(final.s, 0, "S bottomed out at 0")
+    // The lifetime-first intervention toast carries the one-time explainer variant.
+    assert.equal(
+      (toasts[0] as { firstRun?: boolean } | undefined)?.firstRun,
+      true,
+      "the first-ever intervention toast is the explainer variant",
+    )
   } finally {
     mock.timers.reset()
   }
@@ -331,6 +341,11 @@ test("E2E: a nag is never surfaced while Chrome is unfocused, but delivers once 
     await send({ type: "set-goal", goal: "알림보기", minutes: null })
     await settle(50)
     assert.ok(toasts.length + notifications.length > 0, "the nudge delivers once Chrome is focused again")
+    // The first-run explainer slot was consumed by the suite's first nag (the drain
+    // scenario above) — every later toast must render the normal compact variant.
+    for (const t of toasts) {
+      assert.ok(!(t as { firstRun?: boolean }).firstRun, "later nags render the normal toast")
+    }
   } finally {
     winFocused = true
     idleActive = true
@@ -377,4 +392,21 @@ test("E2E: title churn in an UNFOCUSED window's active tab cannot steal the focu
   } finally {
     mock.timers.reset()
   }
+})
+
+test("E2E: first install opens the onboarding tab once — updates and re-fires never re-open it", async () => {
+  createdTabs.length = 0
+  const fireInstalled = async (details?: { reason: string }) => {
+    for (const fn of listeners["runtime.onInstalled"]) await fn(details)
+    await settle(20) // the listener's storage check + tabs.create are async
+  }
+  const opened = () => createdTabs.filter((u) => u.includes("onboarding/onboarding.html")).length
+
+  await fireInstalled({ reason: "install" })
+  assert.equal(opened(), 1, "a true first install opens the wizard tab")
+
+  await fireInstalled({ reason: "install" }) // duplicate install event → storage flag blocks it
+  await fireInstalled({ reason: "update" }) // extension update (incl. unpacked reloads)
+  await fireInstalled() // defensive: event fired with no details
+  assert.equal(opened(), 1, "the wizard never opens a second time")
 })

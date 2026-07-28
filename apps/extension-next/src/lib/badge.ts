@@ -7,11 +7,13 @@
 
 import type { GaugeState } from "../core/gauge/types.ts"
 import type { SessionGoal } from "./session.ts"
+import { getProviderHealth } from "./providerHealth.ts"
 
 const GREEN = "#1f9d6b" // focused
 const AMBER = "#e0a100" // slipping
 const RED = "#d1495b" // drifting
 const GREY = "#8a8a90" // snoozed
+const ALERT_RED = "#d1495b" // provider-error mark (top-left, opposite the status dot)
 
 const ICON_SIZES = [16, 32] as const
 
@@ -36,11 +38,30 @@ function drawStatusDot(ctx: OffscreenCanvasRenderingContext2D, size: number, col
   ctx.fill()
 }
 
+/** Small "!" in a red disc at the TOP-LEFT corner (the status dot owns the top-right):
+ *  the LLM provider is failing and judging fell back to Tier-0. Drawn geometrically —
+ *  text glyphs smear at 16px. */
+function drawProviderAlert(ctx: OffscreenCanvasRenderingContext2D, size: number): void {
+  const r = Math.max(3.5, size * 0.22)
+  const cx = r
+  const cy = r
+  ctx.beginPath()
+  ctx.arc(cx, cy, r, 0, Math.PI * 2)
+  ctx.fillStyle = ALERT_RED
+  ctx.fill()
+  ctx.fillStyle = "#ffffff"
+  const w = Math.max(1, r * 0.32)
+  ctx.fillRect(cx - w / 2, cy - r * 0.62, w, r * 0.9)
+  ctx.beginPath()
+  ctx.arc(cx, cy + r * 0.55, w * 0.62, 0, Math.PI * 2)
+  ctx.fill()
+}
+
 // Draws are async while callers are fire-and-forget, so a slow older draw must not
 // clobber a newer one: only the call holding the latest token gets to setIcon.
 let drawToken = 0
 
-async function applyStatusIcon(color: string | null): Promise<void> {
+async function applyStatusIcon(color: string | null, alert: boolean): Promise<void> {
   const token = ++drawToken
   const bases = await loadBaseIcons()
   const imageData: Record<number, ImageData> = {}
@@ -51,6 +72,7 @@ async function applyStatusIcon(color: string | null): Promise<void> {
     const base = bases.get(size)
     if (base) ctx.drawImage(base, 0, 0, size, size)
     if (color) drawStatusDot(ctx, size, color)
+    if (alert) drawProviderAlert(ctx, size)
     imageData[size] = ctx.getImageData(0, 0, size, size)
   }
   if (token !== drawToken) return
@@ -58,18 +80,20 @@ async function applyStatusIcon(color: string | null): Promise<void> {
   await chrome.action.setBadgeText({ text: "" }) // keep the native badge box off
 }
 
-function renderNativeBadge(color: string | null): void {
+function renderNativeBadge(color: string | null, alert: boolean): void {
   try {
-    void chrome.action.setBadgeText({ text: color ? "●" : "" })
-    if (color) void chrome.action.setBadgeBackgroundColor({ color })
+    // The native fallback has one slot — the error mark outranks the status dot.
+    void chrome.action.setBadgeText({ text: alert ? "!" : color ? "●" : "" })
+    const badgeColor = alert ? ALERT_RED : color
+    if (badgeColor) void chrome.action.setBadgeBackgroundColor({ color: badgeColor })
   } catch {
     // action API unavailable — nothing to do.
   }
 }
 
-function render(color: string | null): void {
-  if (typeof OffscreenCanvas === "undefined") return renderNativeBadge(color)
-  void applyStatusIcon(color).catch(() => renderNativeBadge(color))
+function render(color: string | null, alert: boolean): void {
+  if (typeof OffscreenCanvas === "undefined") return renderNativeBadge(color, alert)
+  void applyStatusIcon(color, alert).catch(() => renderNativeBadge(color, alert))
 }
 
 export function updateBadge(state: GaugeState, goal: SessionGoal | null, now: number): void {
@@ -78,9 +102,12 @@ export function updateBadge(state: GaugeState, goal: SessionGoal | null, now: nu
   if (state.snoozedUntil && state.snoozedUntil > now) color = GREY
   else if (state.s < 33) color = RED
   else if (state.s < 66) color = AMBER
-  render(color)
+  // Provider errors ride along as a "!" mark until a call succeeds or settings change.
+  void getProviderHealth()
+    .then((health) => render(color, health != null && !health.ok))
+    .catch(() => render(color, false))
 }
 
 export function clearBadge(): void {
-  render(null)
+  render(null, false)
 }
