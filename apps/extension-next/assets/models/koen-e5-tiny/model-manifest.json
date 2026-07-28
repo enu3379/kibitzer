@@ -1,0 +1,30 @@
+{
+  "source_repository": "exp-models/dragonkue-KoEn-E5-Tiny",
+  "source_revision": "961b7a2790353075d1819ad74852be9562550a2f",
+  "license": "Apache-2.0",
+  "runtime": {
+    "provider": "onnxruntime-web/wasm",
+    "dimensions": 384,
+    "max_length": 128,
+    "prefix": "query: "
+  },
+  "files": [
+    {
+      "relative_path": "model.onnx",
+      "source_path": "onnx/model_O4.onnx",
+      "url": "https://github.com/enu3379/kibitzer/releases/download/model-koen-e5-tiny-o4/model.onnx",
+      "sha256": "8dd4551db5435efc2c3c724578569a8d6596df8f32447d1d109574c55b578234",
+      "size": 74893112
+    },
+    {
+      "relative_path": "tokenizer.json",
+      "sha256": "a6dd38d692ac1caa6d5dbc195d92f1f978b5c74ec60e02ed15fdf04404742fe3",
+      "size": 2931715
+    },
+    {
+      "relative_path": "tokenizer_config.json",
+      "sha256": "a31cce3039d1c0610730707190f378fa2160f051c9172639fde71a41d2aaacf8",
+      "size": 1397
+    }
+  ]
+}

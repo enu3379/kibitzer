@@ -106,6 +106,10 @@ scores against them.
   handoff covers only the endpoint, table, and label→exemplar wiring.
 - Guardrail: the card is pull-only. Nothing may ever prompt the user to label.
 
+Update (D7, 2026-07-14): the stored detector verdict still supports the confusion
+matrix described above, but a page label now overrides the product's effective
+verdict and related state. See `planning-notes.md` and `data-model.md`.
+
 ## Boundaries
 
 Same ownership table as the roadmap: server plumbing + `background.ts` mechanics

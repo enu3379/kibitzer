@@ -1,5 +1,375 @@
 # Progress
 
+## 2026-07-24 Serverless cutover
+
+Completed:
+
+- Squash-merged PR #138 into `dev` as `59307a0`; its tree exactly matches the
+  pre-squash `dev-migrate` head.
+- Preserved the old runtime at `dev-legacy` and
+  `pre-serverless-cutover-2026-07-24` (`f8be749`), the full migration history at
+  `serverless-migration-head-2026-07-24` (`4303e1e`), and the original deletion
+  commit at `pr139-before-rebuild-2026-07-24`.
+- Rebuilt PR #139 on the squashed `dev` so its active diff contains the
+  cutover/removal work rather than the 92 migration commits.
+- Removed the Python server, relay extension, menubar/tray, packaging, and
+  platform launch stack from the active tree.
+- Corrected the Ollama privacy disclosure to cover recent-title/verdict and
+  compact time/nag context, including an in-product notice next to the API key.
+- Retired the unused LLM Wiki integration, generated `raw/`/`wiki/` snapshots,
+  project schema, and sync/search helpers. Canonical docs remain under `docs/`.
+- Recorded the accepted post-cutover parity work in D14 and issues #135, #136,
+  and #141.
+
+Verified:
+
+- `apps/extension-next` `npm run build`: 109/109 tests, source/test
+  typechecks, model/WASM hash verification, and bundle passed.
+- `git diff --check` passed.
+
+## 2026-07-23 TypeScript Tier 0 and Ollama providers
+
+Completed:
+
+- Ported the embedding and Judge provider interfaces, minimized Tier 1/Tier 2
+  payload builders, strict response parsers, canonical trust-boundary prompts,
+  Ollama `/api/chat` calls, timeout/output-budget behavior, and API-key
+  fallback/rotation into the extension.
+- Packaged KoEn E5 Tiny's 74.9 MB O4 ONNX export, original tokenizer files, and
+  the pinned ONNX Runtime WASM binary. Runtime inference is CPU-only and makes
+  no network request.
+- Rejected the prior qint8 export after direct testing showed different
+  integer-kernel output under WASM. The selected O4 export matches Python
+  `CPUExecutionProvider` vector components and cosine within `2e-4`.
+- Added a serialized, non-authoritative Tier 0 provider shadow after the server
+  verdict. It records only the last session diagnostic; stale queued
+  navigation checks are dropped.
+- Added developer-popup diagnostics for the goal-title score, TS verdict, and
+  server verdict. Ollama calls remain explicit opt-in and no provider result
+  reaches the gauge or notification path.
+- Added MV3 `wasm-unsafe-eval` CSP and deterministic build copying for the
+  packaged model, tokenizer, and exact dependency-matched WASM artifact.
+
+Verified:
+
+- `apps/extension` `npm run build`: 87 tests, source/test typechecks, port
+  contract check, WASM inference, and bundle passed.
+- Packaged extension size is approximately 88 MB: 74.9 MB model, 13 MB WASM,
+  tokenizer/static assets, and a 284 KB background bundle.
+
+## 2026-07-23 IndexedDB gauge SSOT and effect outbox
+
+Completed:
+
+- Replaced the Phase 2 `chrome.storage.session` snapshot with an IndexedDB
+  checkpoint store and pending-effect outbox.
+- Commit each reducer checkpoint and all effects emitted by that transition in
+  one read-write transaction. The controller updates its memory cache only
+  after the transaction succeeds.
+- Added one-time, idempotent migration of the Phase 2 session snapshot and its
+  bounded effect history into IndexedDB.
+- Retained the full current-session outbox while exposing only its latest 50
+  entries as popup diagnostics; effect delivery remains disconnected.
+- Reset state and outbox on goal replacement, and clear both on session end or
+  explicit activity deletion.
+- Added IndexedDB tests for worker-restart restoration, atomic rollback,
+  idempotent legacy migration, reset/clear lifecycle, and controller cache
+  rollback after a failed commit.
+
+Verified:
+
+- `apps/extension` `npm run build`: 68 tests, source/test typechecks, port
+  contract check, and bundle passed.
+- `python -m pytest apps/server/tests -q`: 319 passed, 1 skipped, 56
+  subtests (run with the project virtual environment).
+
+## 2026-07-23 TypeScript gauge shadow mode
+
+Completed:
+
+- Connected server Tier 0/1 verdicts and the extension's local presence
+  heartbeat to the pure TypeScript gauge reducer.
+- Serialized transitions and persisted a per-session diagnostic snapshot in
+  `chrome.storage.session`, including bounded effect history, so MV3 worker
+  restarts do not reset the shadow.
+- Rebased the gauge clock on inactive and active presence transitions to
+  exclude inactive wall time; new goals reset the shadow and session end clears
+  it.
+- Added a developer-only popup card for S, inertia, acceleration tier, event
+  count, and the latest recorded effect. Effects remain diagnostics only and
+  cannot reach the notification path.
+- Added controller tests for restart recovery, same-session goal reset,
+  inactive-gap handling, and bounded non-delivery of effects.
+
+Verified:
+
+- `apps/extension` `npm run build`: 62 tests, source/test typechecks, port
+  contract check, and bundle passed.
+- `python -m pytest apps/server/tests -q`: 319 passed, 1 skipped, 56
+  subtests (run with the project virtual environment).
+
+## 2026-07-20 Worktree reconciliation and docs backfill
+
+Completed:
+
+- Audited the local pre-split working tree against `dev`: the uncommitted
+  Tier-2 guard-prompt hardening and persona v4 fragments were confirmed
+  superseded by the Context Judge / Message Writer split (`331a0ba`) and the
+  persona v5 lineup, and archived on `archive/security-hardening-20260720`
+  instead of rebased. Three local 07-10 Windows tray commits turned out to be
+  already squash-merged as PR #24 (the tray was later reworked by #105); the
+  local branch was dropped.
+- Ran a six-agent audit of all local branches/worktrees: 42 branches verified
+  squash-merged (or content-superseded with the original preserved on
+  `origin`) and deleted together with their clean worktrees; local
+  `dev`/`main` fast-forwarded. Kept as genuinely unmerged work:
+  `fix/security-audit-hardening` (closed #71's complete per-install
+  auth/pairing implementation — `auth.py` LoopbackAuthenticator, body-size
+  middleware, extension `auth.ts`, pairing-reset scripts — exists nowhere
+  else), `feature/judgment-review` ⊇ `feature/tier0-audit-routing` (Tier-0 OK
+  audit routing + title-quality gate + local judgment-review dashboard,
+  2026-07-10, never PRed), `feature/tier0-benchmark-v2` (unlanded HTML
+  analysis report), and remote `origin/codex/d7-structure-review` (495-line
+  D7 architecture review not on `dev`). A dirty 2026-07-10 WIP worktree was
+  archived wholesale as `archive/local-wip-split-20260710`.
+- Merged the three divergent copies of `docs/planning-notes.md`: the local
+  copy carried D9–D13 (packaging, app/extension role split, pre-distribution
+  audit, red-team, security review) and the persona-revamp working rounds;
+  the `dev` copy carried D3/D7/D8 design detail including the 2026-07-16
+  Tier-2 rework design; the never-PRed `chore/predist-audit-docs` branch
+  (2026-07-15) carried the audit reconciliation (14 actionable findings +
+  errata), the user-confirmed post-audit product calls (port candidate pool,
+  per-install token, C6 retention window, M6 deletion), and the
+  channel-staging decisions (ad-hoc signing requirement, Homebrew cask
+  deferred per the 2026-09-01 Gatekeeper policy). Statuses refreshed for the
+  #69/#71/#74 closures, `331a0ba`, and draft #106.
+- Landed previously local-only records: `docs/security-review-2026-07-15.md`,
+  `docs/handoff-refactor-predist.md` (the corrected 2026-07-15 reconciled
+  work order from `chore/predist-audit-docs`, superseding the unreconciled
+  draft), `docs/persona-voice-revamp.md`, and the
+  `docs/benchmarks/persona-voice-v4/` evidence (the v5 benchmark already on
+  `dev` references v4 as its baseline).
+
+## 2026-07-18 Tier 2 red-team artifact preservation
+
+Completed:
+
+- Preserved PR #74's prompt-extraction and behavioral-injection threat model,
+  historical MiniMax M3 results, residual-risk analysis, and reproduction guide.
+- Forward-ported the live harness from the old combined Tier-2 call to the
+  production Context Judge / Message Writer split.
+- Kept all 27 historical Judge attacks and routed only reachable goal/title
+  attacks to the Writer; excerpts and recent history remain excluded from the
+  persona-bearing call.
+- Made the harness distinguish raw-only disclosure from delivered disclosure,
+  simulate Writer fallback/clamping, and treat targeted Judge parse/provider
+  failures as effective suppression under the current defer-on-failure policy.
+- Added dry-run routing validation and optional external `.env` /
+  `models.local.yaml` paths for safe use from an isolated worktree.
+
+Verified:
+
+- harness dry run: 27 Judge jobs, 4 Writer jobs for one persona, and 40 Writer
+  jobs across all 10 personas;
+- `python -m pytest apps/server/tests -q`: 275 passed, 1 skipped, 39 subtests;
+- `apps/extension` `npm run build`: 45 tests, typecheck, and bundle passed.
+- The live cloud-model baseline was deliberately left pending separate
+  authorization; retained result tables are labeled as historical.
+
+## 2026-07-16 Tier 2 Context Judge / Message Writer split
+
+Completed:
+
+- Confirmed that the complete D7 time-budget work landed through PR #49 and
+  based the follow-up on current `dev` rather than the deleted feature branch.
+- Replaced D7's parallel title/content judgments with one combined Context
+  Judge and a conditional plain-text persona Writer.
+- Expanded recent title context from five to 30 with consecutive duplicate
+  compression; kept bounded recent excerpts and D7 time clocks in the Judge.
+- Removed persona/nagging context from judgment and kept excerpts out of the
+  Writer, preserving both decision independence and the over-the-shoulder
+  persona privacy boundary.
+- Set the code-default Judge/Writer output budgets to 4096/1024 with
+  backward-compatible experiment-model settings and kept API-key rotation per
+  HTTP call. The local MiniMax M3 profile uses Writer 2048 after the v5 audit.
+- Changed Judge failure to conservative defer, Writer failure to local persona
+  fallback, and provider health to one logical outcome per review so a later
+  successful review clears an older error.
+- Added one canonical prompt-injection trust boundary shared by the Judge,
+  Writer, and legacy provider fallbacks; browser/user payload values cannot
+  change the task or extract the system/persona layers.
+- Treat output-budget saturation as Writer failure (`eval_count` for Ollama,
+  `finish_reason=length` for OpenAI-compatible responses), and fixed sentence
+  clamping for punctuation without following whitespace while preserving
+  domains and decimals.
+- Added threshold-ahead D7 orchestration: the server returns a targeted
+  `threshold - 30 s` scheduling hint, runs Judge/Writer with clock inputs
+  projected to the threshold in a detached server task, persists the result,
+  and commits it only on a threshold presence after revalidating page, goal,
+  verdict, and eligibility. Slow generation is polled without holding the MV3
+  request open.
+- Added restart-safe one-shot extension alarms with short in-memory timers for
+  sub-30-second precision; the existing minute heartbeat remains the fallback.
+
+Verified after rebasing onto latest `dev`:
+
+- `python -m pytest apps/server/tests -q`: 238 passed, 1 skipped, 35 subtests.
+- `apps/extension` `npm run build`: 37 unit tests, typecheck, and bundle passed.
+
+## 2026-07-15 D7 time-budget drift review fixes
+
+Completed:
+
+- Made verified `active` presence, rather than navigation ingestion, the sole
+  D7 clock activation/recovery path. Focused-window and Chrome idle/lock gates
+  now stop presence assertions; returning to a tab reclaims the server clock.
+- Decoupled elapsed-time review eligibility from streak/alignment trigger bits
+  while preserving coldstart, snooze, and cooldown. Same-page dwell now
+  survives tab flips using host + path-hash identity, while streak-mode OK
+  resets only the continuous review boundary.
+- Added title-only review when content is unavailable, persona fallback when
+  judges are unavailable, dual-payload nagging context, retry-safe review locks
+  with stale-lock expiry, and infra-failure retry without consuming a review
+  boundary.
+- Preserved controller/snooze state on goal re-declaration, preserved clocks
+  for identical goals, aligned replay with the deferred D7 pipeline, and
+  pruned excerpt/presence rows on both session-end paths.
+
+Verified:
+
+- `python -m pytest apps/server/tests -q`: 154 passed, 1 skipped, 8 subtests.
+- `apps/extension` `npm run build`: TypeScript and esbuild green.
+
+## 2026-07-14 Page labels override the current product verdict
+
+Completed:
+
+- Kept each detector-produced `observations.verdict` immutable for Replay CLI
+  audit, while treating an observation's page label as its effective product
+  verdict (`related` → `OK`, `drift` → `DRIFT`).
+- Wired effective verdicts through the current-page card, session/daily reports,
+  recent Tier 1/2 context, drift timing, and anchor selection. Explicit related
+  labels may enter the anchor even when the detector originally rejected them.
+- A false-DRIFT → related correction now resets the streak controller; the
+  alignment controller replaces the current observation's relevance with the
+  Tier 1 OK value `0.85` and recomputes `A_t`. Both paths clear attachment drift
+  state and resolve unhandled interventions for the corrected observation
+  without generating a new nag.
+- The extension synchronizes the matching exploration-history light to the
+  page label's effective verdict.
+- Added page-label API coverage for both override directions, preserved raw
+  detector verdicts, streak/alignment recovery, stats/reports, pending
+  intervention cleanup, and anchor/recent-context behavior.
+
+## 2026-07-13 D3 revalidated under the ONNX Tier 0 (PR #26 refresh)
+
+Completed:
+
+- Measured that derived phrases still pay for themselves on top of PR #29's
+  KoEn-E5-Tiny provider: over the 200-pair Tier 0 benchmark at `tau_ok=0.6`,
+  recall 23.8% → 86.2%, AUC 0.7221 → 0.9214, cross-lingual recall 31.7% →
+  92.7%, FPR 11.7% → 17.5% — the two PRs compose instead of competing.
+  Reproducible via `scripts/simulate_goal_enrichment_tier0.py` +
+  `scripts/fixtures/goal_enrichment_sim_phrases.json` (40 hand-drafted,
+  goal-text-only phrase sets); caveats recorded in the handoff addendum.
+- Updated the enrichment prompt framing (semantic matcher, not lexical),
+  documented that `derived_tau` is verdict-inert under `tau_ok=0.6` (it
+  survives as a diagnostics noise floor), and flagged that the hash-era
+  audit-band and private-corpus regression thresholds need ONNX-scale
+  recalibration (`docs/handoff-goal-enrichment.md` addendum 2026-07-13).
+
+## 2026-07-13 Tier 0 benchmark v2 (real-corpus findings encoded)
+
+Completed:
+
+- Replayed the labeled real corpus (260 obs, 5 real sessions — Step-0's 231
+  plus the newly double-labeled "7월 제철 해산물" session, 93.1% labeler
+  agreement, 2 rows adjudicated) under the ONNX provider. Findings: v1's
+  composition rules (no lexical-overlap OKs, ≥30 English-OK groups) made it
+  overstate operating recall (v1 said 23.8% at tau 0.6; real corpus: 9.9%),
+  it had zero same-frame traps (real false-OKs at tau 0.6 were all frame
+  siblings), and its canonical titles hid the score depression from real
+  title noise. Real-corpus operating point: tau≈0.42-0.45 (FPR≤10%), where
+  goal-enrichment lifts recall 74%→80-87% pooled.
+- Shipped `tier0_embedding_benchmark_dataset_v2.json` (200 pairs, 40 groups,
+  5 slices: lexical-overlap OKs, same-frame traps, realistic cross-lingual,
+  clickbait OKs, polysemous short anchors) + `goal_enrichment_sim_phrases_v2.json`
+  + version-aware dataset validation (`_validate_v2_dataset`, composition
+  quotas) + guidelines v2 section (incl. "rank with v2, calibrate tau on the
+  real corpus" scope note). Generated agent-first, then independently
+  adversarially audited (11 findings, all fixed: 2 label, 5 tag, 3 realism,
+  1 replaced trap); zero verbatim overlap with private corpus titles.
+- v2 results (committed under docs/benchmarks/tier0-embedding-v2/):
+  hash AUC 0.6169 (v1's 0.368 below-random artifact gone), onnx 0.7066,
+  onnx+enrichment 0.8862 with recall 31.2%→81.2% at tau 0.6 and FPR
+  8.3%→14.2% — and the new English-drift traps expose enrichment's real
+  cross-lingual FPR cost (0%→30.8%) that v1 could not measure.
+
+Verified:
+
+- `python -m pytest apps/server/tests -q` green (new v2 contract tests
+  included); v1 dataset still validates through the v1 path unchanged.
+- Benchmark harness run on v2 for hash+onnx; enrichment scored with the
+  goal-enrichment PR's simulator against the same pairs.
+
+## 2026-07-09 D3 Goal Enrichment
+
+Completed:
+
+- Added async goal enrichment after `POST /sessions/current/goal`: the goal
+  response stays non-blocking, while the Tier-1 provider stack derives short
+  cross-lingual/title-like phrases from the goal text only.
+- Persisted derived exemplars in a separate `goal_derived_exemplars` table and
+  lifecycle: goal re-declaration clears them, success records `goal.enriched`,
+  and failures record `goal.enrichment_failed` without changing goal flow.
+- Threaded derived exemplars through Tier 0 with a separate
+  `goal_enrichment.derived_tau` gate (`0.25` default), persisted
+  `derived_score`, and allowed above-threshold derived matches into anchor
+  admission.
+- Added `goal.derived_phrases` to Tier-1 payloads and updated both Tier-1 judge
+  prompts so derived aspects count as goal-related even with no raw-goal word
+  overlap.
+- Extended replay with `goal.enriched` events, `--derived-phrases` injection
+  (including unique session-prefix fixture keys), `derived_score_replay`, and
+  `goal_enrichment.derived_tau` override support.
+
+Verified:
+
+- `python -m pytest apps/server/tests -q` -> `113 passed, 1 private-corpus test skipped`.
+- Replay CLI smoke:
+  `.venv/bin/python -m apps.server.app.replay --db data/kibitzer.sqlite3 --session sess_9f6d171e --derived-phrases $KIBITZER_AUDIT_CORPUS/derived-phrases-eval.json --override goal_enrichment.derived_tau=0.25`.
+- Optional Step-0 corpus regression reads the private path in `KIBITZER_AUDIT_CORPUS` and asserts
+  fixed derived phrases reduce false-DRIFT under the D3 acceptance bar while new
+  false-OKs stay in the planned audit band.
+
+Claude verification + live hardening (2026-07-09, same day):
+
+- Spec-vs-code review clean (verbatim prompt, post-filters, derived_tau gating
+  + anchor admission, separate table with goal-redeclare lifecycle, stale-goal
+  guard on async completion, Tier-1 payload rider, replay injection).
+- Full-simulation corpus numbers (replay `--derived-phrases`, tier0 view):
+  false-DRIFT 80 -> 31, false-OK 9 -> 7 — the two collateral false-OKs
+  (0.302/0.287) sit inside the 0.35 audit band, and two OLD anchor-ride
+  false-OKs disappear because derived-lifted OKs rebuild a healthier anchor.
+  (The optional private-corpus regression uses the static overlay method -> 28; the
+  delta is anchor-state evolution, visible only in full re-simulation.)
+- Live cloud smoke (isolated temp-DB server, real Ollama Cloud keys) caught
+  two blockers offline tests cannot see, both fixed:
+  1. `parse_goal_enrichment_response` used bare `json.loads` -> live thinking
+     preambles/fences fail; now mirrors the judges' lenient brace-window
+     extraction (`_load_json_object` pattern) + tests updated.
+  2. `OllamaChatJudgeProvider.complete_goal_enrichment` shared tier1's
+     `num_predict` (320): nemotron-3-super spent it all on thinking and
+     returned EMPTY content. Enrichment now sends `think: false` with its own
+     512-token budget, falling back to a 2048 thinking budget for models that
+     reject the think flag. Tier-1/2 call paths untouched.
+- Post-fix live smoke end-to-end: `goal.enriched` in 5.8s (goal POST stays
+  3ms), 8 mixed KR/EN phrases; English Create-mod title -> derived 0.236
+  (under derived_tau) -> Tier 1 rescued OK via `goal.derived_phrases`
+  (feature 2 working live); 호날두 drift title -> derived 0.154 ignored,
+  DRIFT kept. The private corpus regression remains reproducible without publishing browsing-history fixtures.
+
+
 ## 2026-07-08 Audit Step 0: Labeled Replay Corpus (Claude)
 
 Completed:
@@ -11,9 +381,9 @@ Completed:
   adjudicator for disagreements — 226/231 inter-labeler agreement, 5
   adjudicated, 0 human escalations.
 - Joined labels with deterministic replay scores (current code, default
-  config) and published the corpus + analysis to `docs/audit/step0/`
-  (labeled CSVs, confusion matrices, r0 histograms, τ/audit-band trade-off
-  curves, Tier-1 call-rate-over-time, full false-OK/false-DRIFT lists).
+  config). The raw corpus and analysis remain local because they contain real
+  page titles, hosts, timestamps, and session identifiers; only aggregate
+  findings are recorded here.
 - Key findings: Tier-0 false-DRIFT dominates (80/142 related pages under τ,
   56%) driven by the cross-lingual Korean-goal ↔ English-title gap and
   sub-topic vocabulary (related-r0 mass at 0.00); false-OK is 9/89 from
@@ -27,7 +397,7 @@ Completed:
 Verified:
 
 - Workflow: 17 agents, 0 errors; labels cover 231/231 rows exactly once.
-- Analysis reproducible from `docs/audit/step0/README.md` regenerate note.
+- Analysis is reproducible from the private corpus runbook.
 
 ## 2026-07-08 P1 Attachment Loop Plumbing
 
@@ -704,3 +1074,48 @@ Verified:
   unknown reason, and reinjection replays Kibitzer's entrance animation whenever
   the user switches back and forth while a toast is pending. Both are accepted
   for now.
+
+## 2026-07-11 Tier 0 KoEn E5 ONNX experiment
+
+- Replaced the default hash embedding with local KoEn E5 Tiny qint8 ONNX while
+  retaining `hash_cpu` as a deterministic baseline.
+- Added pinned, SHA-256-verified model setup to the Windows and macOS setup
+  scripts. Runtime inference stays CPU-only and offline.
+- Added a model-independent 200-pair Korean/English benchmark with all 32 prior
+  smoke pairs, no cross-validation, and operating points at FPR budgets 5%, 10%,
+  15%, 20%, 30%, 40%, and 50%.
+- On the fixed dataset, ONNX reached ROC AUC 0.7199 versus hash 0.3680 and
+  recalled 13.75% versus 1.25% of obvious OK pairs at the <=5% FPR operating
+  point. The runtime default was subsequently rounded to `tau_ok=0.6`. Full pair
+  scores and all operating-point thresholds are committed under
+  `docs/benchmarks/tier0-embedding/`.
+
+## 2026-07-15 Popup: Goal-ready Resume and Judgment Progress
+
+- Goal creation now runs in the extension service worker and, after the goal
+  embedding is stored, immediately reschedules the active page with its
+  original dwell start. A page that already passed `observation_seconds`
+  therefore enters Tier 0 without a reload or tab switch; a shorter dwell keeps
+  only the remaining observation delay.
+- Popup goal submission no longer carries a cached session-exists flag. The
+  server atomically creates a session when needed and stores the goal while
+  preserving any active session that already exists.
+- Browser navigation intake no longer persists an unjudged observation while
+  the active session has no goal. This removes the goal/session timing race that
+  produced a permanent goal-less current-page result.
+- Added `GET /observations/page-state` plus minimized transient Tier 0/Tier 1
+  processing state. The popup combines that server state with the extension's
+  persisted observation dwell so it can distinguish Tier 0 and Tier 1 work
+  from a genuinely unobserved page.
+- Updated the current-page and goal-preparation Korean copy and added explicit
+  Tier 0 and Tier 1 processing messages.
+- Session replacement and end paths now remove transient page-processing rows
+  alongside the existing excerpt and dwell cleanup.
+
+Verified:
+
+- `.venv\\Scripts\\python.exe -m pytest apps/server/tests -q` passes (229
+  tests, 1 skipped, 35 subtests).
+- `npm.cmd run build` in `apps/extension` passes (41 tests, type-check, bundle).
+- Direct async transition tests observe `tier0` during embedding and `tier1`
+  during provider classification, then verify cleanup after completion.

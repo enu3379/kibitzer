@@ -1,0 +1,49 @@
+{
+  "name": "recovery-inertia-accelerates",
+  "kind": "golden",
+  "description": "One 60s heartbeat on an OK page at full return inertia (m=-1). Recovery boost min(exp(3*1),6) caps at F_max=6, so gain = rRecover*((1-(-1))/2.45)*6*60 = 29.3877551 and S rises 50 -> 79.3877551 (issue #122 'F'). m stays -1 (d=-1=m), tier unchanged.",
+  "config": {
+    "rDrain": 0.1,
+    "rRecover": 0.1,
+    "accel": [1.0, 1.5, 2.5],
+    "tauM": 300,
+    "tUp": [0.5, 0.8],
+    "tDown": [0.2, 0.5],
+    "kRecover": 2.45,
+    "recoverGamma": 3.0,
+    "recoverFMax": 6.0,
+    "gapCap": 90,
+    "rRenag": 40,
+    "bBackoff": 2.0,
+    "rRenagMax": 320,
+    "cArm": 20,
+    "cCelebrate": 80,
+    "rDismiss": 30,
+    "bRefund": 10,
+    "freshWindow": 600,
+    "degradedP": 3,
+    "degradedM": 0.25
+  },
+  "initial_state": {
+    "s": 50,
+    "m": -1,
+    "accelTier": 0,
+    "updatedAt": 0,
+    "activePageKey": "goal/docs",
+    "activeVerdict": "OK",
+    "degraded": false
+  },
+  "events": [
+    { "type": "heartbeat", "ts": 60000 }
+  ],
+  "tolerance": 1e-6,
+  "expected": {
+    "final_state": {
+      "s": 79.38775510204081,
+      "m": -1.0,
+      "accelTier": 0,
+      "updatedAt": 60000
+    },
+    "effects_contain": []
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "name": "scattered-short-skims-barely-move",
+  "kind": "property",
+  "description": "Ten DRIFT pages skimmed ~3s each (nav advances the prior page's dwell, then swaps active). Total drift time ~30s, so S barely drops. P2: the gauge is dwell-time sensitive, not observation-count sensitive — 10 quick skims must not approach a nag.",
+  "config": {
+    "rDrain": 0.1,
+    "rRecover": 0.1,
+    "accel": [1.0, 1.5, 2.5],
+    "tauM": 300,
+    "tUp": [0.5, 0.8],
+    "tDown": [0.2, 0.5],
+    "kRecover": 2,
+    "gapCap": 90,
+    "rRenag": 40,
+    "bBackoff": 2.0,
+    "rRenagMax": 320,
+    "cArm": 20,
+    "cCelebrate": 80,
+    "rDismiss": 30,
+    "bRefund": 10,
+    "freshWindow": 600,
+    "degradedP": 3,
+    "degradedM": 0.25
+  },
+  "initial_state": {
+    "s": 100,
+    "m": 0,
+    "accelTier": 0,
+    "updatedAt": 0,
+    "activePageKey": null,
+    "activeVerdict": null,
+    "degraded": false
+  },
+  "events": [
+    { "type": "nav", "pageKey": "a.com/1", "verdict": "DRIFT", "ts": 0 },
+    { "type": "nav", "pageKey": "b.com/2", "verdict": "DRIFT", "ts": 3000 },
+    { "type": "nav", "pageKey": "c.com/3", "verdict": "DRIFT", "ts": 6000 },
+    { "type": "nav", "pageKey": "d.com/4", "verdict": "DRIFT", "ts": 9000 },
+    { "type": "nav", "pageKey": "e.com/5", "verdict": "DRIFT", "ts": 12000 },
+    { "type": "nav", "pageKey": "f.com/6", "verdict": "DRIFT", "ts": 15000 },
+    { "type": "nav", "pageKey": "g.com/7", "verdict": "DRIFT", "ts": 18000 },
+    { "type": "nav", "pageKey": "h.com/8", "verdict": "DRIFT", "ts": 21000 },
+    { "type": "nav", "pageKey": "i.com/9", "verdict": "DRIFT", "ts": 24000 },
+    { "type": "nav", "pageKey": "j.com/10", "verdict": "DRIFT", "ts": 27000 },
+    { "type": "heartbeat", "ts": 30000 }
+  ],
+  "tolerance": 1e-6,
+  "expected": {
+    "assert": [
+      { "field": "s", "op": ">=", "value": 95 },
+      { "field": "accelTier", "op": "==", "value": 0 }
+    ],
+    "effects_contain": []
+  }
+}

@@ -1,118 +1,57 @@
-# ML Providers
+# ML providers
 
-## Provider Policy
+## Tier 0: local embedding
 
-Embedding must be local CPU-only in Stage 0. CUDA, Metal, DirectML, and GPU-specific dependencies are not part of the default path.
+Tier 0 runs entirely in the extension with KoEn-E5 Tiny O4 ONNX through
+`onnxruntime-web` WASM. The model and tokenizer metadata are pinned under
+`apps/extension-next/assets/models/koen-e5-tiny/`; `npm run build` downloads
+the uncommitted model binary and verifies its size and SHA-256.
 
-Tier 1 and Tier 2 both support OpenAI-compatible chat completions, Ollama `/api/chat`
-providers, and the `experiment` models-file indirection. A tier that is enabled but
-cannot resolve credentials degrades to the lower tier's verdict and records a
-`provider.degraded` event when the runtime first activates. A per-call Tier 1 failure keeps the Tier 0
-verdict and records `tier1.provider_error`; it never fails the observation request.
+The browser tokenizer and WASM vectors are regression-tested against the
+Python reference evidence. The shipped operating point is `tauOk=0.59`.
+Trajectory anchoring is disabled by default (`ANCHOR_WINDOW=0`).
 
-## Stage 0 Defaults
+## Tier 1 and Tier 2: opt-in Ollama Cloud
 
-```yaml
-embedding:
-  provider: hash_cpu
-  model: token-hash-v2   # Hangul character bigrams + whole tokens, title-only input
-  device: cpu
-  forbid_gpu: true
+The options page stores an API-key pool, API URL, and model names in Chrome
+local storage. With no keys, Kibitzer remains in local Tier-0 mode.
 
-tier1:
-  provider: experiment
-  experiment_models_file: configs/models.local.yaml
-  experiment_model_key: tier1_fast   # Ollama Cloud nemotron-3-super — 2-3s hot-path classifier
-  timeout_seconds: 10            # hot path: caps the models-file timeout
-
-tier2:
-  provider: experiment
-  experiment_models_file: configs/models.local.yaml
-  experiment_model_key: tier2_judge   # Ollama Cloud minimax-m3 judge + Korean copywriter
-  model: minimax-m3
-```
-
-## Where model settings and keys live
-
-Two gitignored files, set up once:
-
-- `configs/models.local.yaml` — endpoints and model names per tier. Template:
-  `configs/experiment-models.example.yaml` (Ollama Cloud by default; swap
-  `ollama_model` for anything in https://ollama.com/library).
-- `.env` — API keys only (`ollama1=` / `ollama2=`). Template: `.env.example`.
-  `load_dotenv` runs at config load, so every start mode — terminal, macOS
-  LaunchAgent, Windows tray — picks keys up with no per-run setup.
-
-Key resolution order per tier: environment variable named by `api_key_env`
-(from `.env` or the shell) → `api_key:` field in the models file → for
-`localhost`/`127.0.0.1` URLs a placeholder is injected (self-hosted Ollama
-ignores auth, so purely local setups need no key at all).
-
-If a tier cannot resolve, it degrades to the tier below, `/health` reports
-`tiers: {tierN: degraded}`, and the extension popup shows a
-"판정 축소 모드" warning — degradation is loud, not silent.
-
-## Tier 0
-
-Tier 0 uses embeddings and cosine similarity:
+Defaults:
 
 ```text
-r0 = max(max cosine to goal exemplars, beta * cosine to anchor)
+API URL  https://ollama.com/api/chat
+Tier 1   nemotron-3-super
+Tier 2   minimax-m3
 ```
 
-If `r0 >= tau_ok`, the observation is OK.
+Tier 1 can rescue a Tier-0 DRIFT after seeing the goal, current title/host, and
+recent title/verdict context. Tier 2 reviews a potential intervention with the
+same context plus Tier-0 diagnostics, a bounded current-page excerpt, and
+compact time information. A separate persona writer creates the Korean nudge
+after a `notify` decision.
 
-## Tier 1
+The exact privacy boundary is in `docs/privacy.md` and is disclosed beside the
+API-key field.
 
-Tier 1 classifies ambiguous observations. It receives:
+## Reliability behavior
 
-- goal text
-- recent title/verdict pairs
-- current title
-- current URL host
+- Keys rotate on authentication, authorization, and rate-limit responses.
+- Tier 1 failure keeps DRIFT and records a coarse provider-health error.
+- Tier 2 judge failure fails open without a nudge.
+- Tier 2 writer failure uses the selected persona's local fallback template.
+- Raw provider responses, keys, and request bodies are not persisted in the
+  activity log.
 
-It does not receive:
+## Implementation
 
-- page body
-- query string
-- complete browsing history
-- sensitive domains
+- `apps/extension-next/src/providers/ollamaChat.ts` — HTTP client and key
+  rotation.
+- `apps/extension-next/src/providers/payloads.ts` — minimized request shapes.
+- `apps/extension-next/src/providers/prompts.ts` — classifier and trust-boundary
+  prompts.
+- `apps/extension-next/src/providers/judgeParsing.ts` — strict response parsing.
+- `apps/extension-next/src/providers/tier0Wasm.ts` — tokenizer/ONNX inference.
+- `apps/extension-next/src/lib/tier12.ts` — live Tier-1/Tier-2 wiring.
 
-Required output:
-
-```json
-{"verdict":"ok","reason":"normal subtopic"}
-```
-
-The OpenAI-compatible client calls `/chat/completions` and requests JSON object output. If Tier 1 is not configured in local development, Stage 0 keeps the Tier 0 verdict.
-
-## Tier 2
-
-Tier 2 runs only after the controller decides an intervention may be needed. It receives:
-
-- goal text
-- recent title/verdict pairs
-- current title, URL host, Tier 0 score, and verdict
-- current page excerpt with char limit
-
-It returns:
-
-```json
-{
-  "confirm_drift": true,
-  "message": "..."
-}
-```
-
-If Tier 2 cancels, no notification is shown.
-
-The default config reads the Ollama Cloud API URL and model name from
-`configs/models.local.yaml` and the API keys from `.env` (see "Where model
-settings and keys live" above). Kibitzer never commits keys to this repository.
-
-Useful checks:
-
-```bash
-.venv/bin/python scripts/smoke_tier2_provider_config.py
-.venv/bin/python scripts/smoke_tier2_provider_config.py --call
-```
+Run `npm run build` from `apps/extension-next` for provider tests, WASM parity,
+type checks, and bundling.

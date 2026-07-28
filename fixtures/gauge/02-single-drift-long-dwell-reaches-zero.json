@@ -1,0 +1,63 @@
+{
+  "name": "single-drift-long-dwell-reaches-zero",
+  "kind": "property",
+  "description": "Continuous DRIFT dwell (heartbeat every 60s). No Tier2 confirm, so accelTier stays 0 and drain is rDrain*accel[0]=0.1/s. S reaches 0 by ~1020s and a Tier2 s_zero request is emitted. P8/finding-1 scenario: a single long-dwell page still reaches nag candidacy.",
+  "config": {
+    "rDrain": 0.1,
+    "rRecover": 0.1,
+    "accel": [1.0, 1.5, 2.5],
+    "tauM": 300,
+    "tUp": [0.5, 0.8],
+    "tDown": [0.2, 0.5],
+    "kRecover": 2,
+    "gapCap": 90,
+    "rRenag": 40,
+    "bBackoff": 2.0,
+    "rRenagMax": 320,
+    "cArm": 20,
+    "cCelebrate": 80,
+    "rDismiss": 30,
+    "bRefund": 10,
+    "freshWindow": 600,
+    "degradedP": 3,
+    "degradedM": 0.25
+  },
+  "initial_state": {
+    "s": 100,
+    "m": 0,
+    "accelTier": 0,
+    "updatedAt": 0,
+    "activePageKey": "example.com/drift",
+    "activeVerdict": "DRIFT",
+    "degraded": false
+  },
+  "events": [
+    { "type": "heartbeat", "ts": 60000 },
+    { "type": "heartbeat", "ts": 120000 },
+    { "type": "heartbeat", "ts": 180000 },
+    { "type": "heartbeat", "ts": 240000 },
+    { "type": "heartbeat", "ts": 300000 },
+    { "type": "heartbeat", "ts": 360000 },
+    { "type": "heartbeat", "ts": 420000 },
+    { "type": "heartbeat", "ts": 480000 },
+    { "type": "heartbeat", "ts": 540000 },
+    { "type": "heartbeat", "ts": 600000 },
+    { "type": "heartbeat", "ts": 660000 },
+    { "type": "heartbeat", "ts": 720000 },
+    { "type": "heartbeat", "ts": 780000 },
+    { "type": "heartbeat", "ts": 840000 },
+    { "type": "heartbeat", "ts": 900000 },
+    { "type": "heartbeat", "ts": 960000 },
+    { "type": "heartbeat", "ts": 1020000 },
+    { "type": "heartbeat", "ts": 1080000 }
+  ],
+  "tolerance": 1e-6,
+  "expected": {
+    "assert": [
+      { "field": "s", "op": "==", "value": 0 }
+    ],
+    "effects_contain": [
+      { "type": "request_tier2", "reason": "s_zero" }
+    ]
+  }
+}

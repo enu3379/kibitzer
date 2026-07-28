@@ -1,0 +1,343 @@
+{
+ "version": 2,
+ "description": "Goal-only derived phrase sets for the v2 benchmark goals (enrichment simulation).",
+ "phrases": {
+  "v2g01-dog-walk-training": [
+   "강아지 리드줄 당김 교정",
+   "강아지 산책 거부 이유",
+   "강아지 배변 훈련 시기",
+   "강아지 하네스 착용법",
+   "산책 중 짖음 교정",
+   "강아지 사회화 시기",
+   "초보 견주 산책 요령"
+  ],
+  "v2g02-studio-interior": [
+   "원룸 인테리어 셀프",
+   "자취방 좁은 공간 활용",
+   "원룸 조명 추천",
+   "자취방 가구 배치",
+   "반지하 자취방 꾸미기",
+   "원룸 커튼 추천",
+   "자취방 수납 아이디어"
+  ],
+  "v2g03-coffee-beans": [
+   "원두 로스팅 정도 차이",
+   "산미 없는 원두 추천",
+   "홈카페 원두 보관법",
+   "핸드드립 원두 추천",
+   "원두 신선도 확인법",
+   "스페셜티 원두 추천",
+   "best coffee beans pour over"
+  ],
+  "v2g04-honeymoon-prep": [
+   "신혼여행지 추천 몰디브",
+   "허니문 예산 짜기",
+   "신혼여행 캐리어 준비물",
+   "신혼여행 여행자보험",
+   "발리 신혼여행 코스",
+   "신혼여행 환전 팁",
+   "허니문 사진 스냅"
+  ],
+  "v2g05-car-maintenance": [
+   "엔진오일 교체 주기",
+   "자동차 정기검사 예약",
+   "타이어 마모 확인법",
+   "브레이크패드 교체 시기",
+   "자동차 배터리 점검",
+   "정기검사 과태료 기준",
+   "자동차 소모품 교체 주기"
+  ],
+  "v2g06-laptop-battery": [
+   "배터리 충전 80% 유지",
+   "맥북 배터리 사이클 확인",
+   "노트북 배터리 최적화 설정",
+   "배터리 완전방전 괜찮나",
+   "윈도우 배터리 절약 모드",
+   "노트북 배터리 교체 시기",
+   "laptop battery health check"
+  ],
+  "v2g07-camping-gear": [
+   "캠핑 텐트 추천 4인용",
+   "캠핑 침낭 계절별 선택",
+   "초보 캠핑 장비 리스트",
+   "캠핑 랜턴 추천",
+   "차박 캠핑 매트 추천",
+   "캠핑 화로대 추천",
+   "캠핑 의자 접이식 추천"
+  ],
+  "v2g08-yoga-mat": [
+   "요가매트 두께 추천",
+   "TPE PVC 요가매트 차이",
+   "요가매트 냄새 안 나는 제품",
+   "필라테스 매트 요가매트 차이",
+   "요가매트 미끄럼방지 제품",
+   "요가매트 세척 방법",
+   "두꺼운 요가매트 추천"
+  ],
+  "v2g09-fall-seafood": [
+   "가을 제철 생선 종류",
+   "전어 제철 시기",
+   "가을 수산물 요리법",
+   "과메기 굴 제철 정보",
+   "가을 수산시장 추천",
+   "제철 해산물 고르는 법"
+  ],
+  "v2g10-gold-price": [
+   "국제 금값 동향",
+   "금 투자 방법",
+   "금 시세 그래프",
+   "골드바 매입가",
+   "금값 상승 이유",
+   "금 ETF 추천"
+  ],
+  "v2g11-jeju-itinerary": [
+   "제주도 3박4일 코스",
+   "제주 렌터카 예약",
+   "제주 여행 준비물",
+   "제주도 맛집 추천",
+   "제주 날씨 확인",
+   "제주 관광지 순서"
+  ],
+  "v2g12-laptop-gpu-compare": [
+   "RTX 4060 4070 노트북 성능",
+   "게이밍 노트북 추천 2024",
+   "노트북 GPU 벤치마크",
+   "노트북 발열 소음 비교",
+   "그래픽카드 성능표",
+   "노트북 vs 데스크탑 게이밍",
+   "laptop GPU benchmark 2024"
+  ],
+  "v2g13-disc-exercise": [
+   "허리디스크 스트레칭 방법",
+   "디스크 초기증상",
+   "허리 통증 완화 운동",
+   "코어근육 강화 운동",
+   "맥켄지 운동법",
+   "허리디스크 재활 필라테스 동작"
+  ],
+  "v2g14-passport-reissue": [
+   "여권 재발급 준비서류",
+   "여권 발급 신청 방법",
+   "구청 여권과 방문예약",
+   "여권 사진 규격",
+   "여권 재발급 수수료",
+   "전자여권 발급 기간"
+  ],
+  "v2g15-iphone-upgrade-timing": [
+   "아이폰 배터리 성능 저하",
+   "아이폰 새제품 출시일",
+   "아이폰 중고 시세",
+   "아이폰 배터리 교체 비용",
+   "아이폰 다음 모델 루머",
+   "아이폰 업그레이드 신호",
+   "iPhone battery health replace"
+  ],
+  "v2g16-savings-rate-compare": [
+   "적금 금리 높은 은행",
+   "예금 적금 차이",
+   "저축은행 금리비교",
+   "청년적금 추천",
+   "정기예금 이자 계산",
+   "적금 금리 비교 사이트 추천"
+  ],
+  "v2g17-ts-generics": [
+   "typescript generic constraints",
+   "제네릭 타입 추론",
+   "conditional types typescript",
+   "extends keyof 제네릭",
+   "generic function overload",
+   "타입 파라미터 기본값",
+   "typescript utility types",
+   "제네릭 클래스 예제"
+  ],
+  "v2g18-elden-ring-mods": [
+   "elden ring mod engine",
+   "seamless coop 설치법",
+   "elden ring nexus mods",
+   "모드엔진 크래시 오류",
+   "elden ring convergence mod",
+   "모드 설치 후 튕김",
+   "elden ring reforged install guide"
+  ],
+  "v2g19-paper-implementation": [
+   "arxiv paper pytorch implementation",
+   "논문 코드 재현 안됨",
+   "official pytorch implementation github",
+   "논문 리뷰 스터디",
+   "reproduce paper results pytorch",
+   "self-attention 구현 코드",
+   "구현 코드 있는 논문 찾기"
+  ],
+  "v2g20-gpu-temp": [
+   "gpu idle temp normal",
+   "그래픽카드 온도 커브 설정",
+   "gpu temp too high reddit",
+   "hwinfo 온도 모니터링",
+   "rtx 4070 temps normal",
+   "써멀 재도포 시기",
+   "gpu hotspot temp difference"
+  ],
+  "v2g21-portugal-travel": [
+   "portugal itinerary 10 days",
+   "포르투갈 리스본 포르투 동선",
+   "portugal train pass worth it",
+   "포르투갈 여행 유심",
+   "best time to visit portugal",
+   "리스본 관광지 추천",
+   "portugal safety solo travel reddit",
+   "포르투갈 환전 팁"
+  ],
+  "v2g22-boardgame-rules": [
+   "board game rulebook translation",
+   "글룸헤이븐 한글 룰북",
+   "bgg rules clarification thread",
+   "보드게임 카드 텍스트 번역기",
+   "wingspan rulebook pdf english",
+   "룰 오역 논란",
+   "board game geek forum rules faq"
+  ],
+  "v2g23-git-rebase": [
+   "git rebase conflict resolve",
+   "리베이스 충돌 해결법",
+   "git rebase abort continue",
+   "인터랙티브 리베이스 충돌",
+   "깃 충돌 파일 표시",
+   "git rebase vs merge conflict",
+   "rebase conflict same file every commit"
+  ],
+  "v2g24-minecraft-modpack": [
+   "minecraft modpack curseforge install",
+   "마인크래프트 포지 버전 안맞음",
+   "all the mods 9 설치",
+   "minecraft forge vs fabric modpack",
+   "모드팩 렉걸림 최적화",
+   "curseforge modpack won't launch",
+   "마인크래프트 자바 버전 오류"
+  ],
+  "v2g25-galbijjim": [
+   "갈비찜 레시피",
+   "압력솥 갈비찜 시간",
+   "소갈비 핏물 빼기",
+   "갈비찜 양념 비율",
+   "갈비 잡내 제거",
+   "korean braised short ribs recipe"
+  ],
+  "v2g26-beginner-running": [
+   "초보 러닝 호흡법",
+   "러닝화 고르는 법",
+   "무릎 안 아프게 뛰는 법",
+   "5km 완주 훈련",
+   "존2 심박수 달리기",
+   "러닝 전 스트레칭",
+   "beginner 5k training plan"
+  ],
+  "v2g27-cat-food": [
+   "고양이 사료 성분표 보는 법",
+   "습식 건식 사료 비교",
+   "자묘 성묘 사료 차이",
+   "고양이 사료 단백질 함량",
+   "그레인프리 사료 장단점",
+   "고양이 알러지 사료 추천"
+  ],
+  "v2g28-balcony-lettuce": [
+   "상추 모종 심는 시기",
+   "베란다 텃밭 만들기",
+   "상추 웃자람 방지",
+   "상추 물주기 간격",
+   "베란다 채소 화분 흙 배합",
+   "상추 수확 방법"
+  ],
+  "v2g29-diy-oil-change": [
+   "엔진오일 교환 주기",
+   "엔진오일 점도 5w30 뜻",
+   "오일필터 교체 방법",
+   "합성유 광유 차이",
+   "폐엔진오일 처리 방법",
+   "engine oil change diy"
+  ],
+  "v2g30-parking-account": [
+   "파킹통장 금리 순위",
+   "수시입출금 고금리 통장",
+   "CMA 파킹통장 차이",
+   "저축은행 파킹통장 안전성",
+   "예금자보호 한도 5천만원",
+   "비상금 통장 나누기"
+  ],
+  "v2g31-it-cert-selfstudy": [
+   "정보처리기사 필기 공부법",
+   "정처기 실기 기출 정리",
+   "비전공자 정처기 합격 후기",
+   "정보처리기사 접수 일정",
+   "실기 프로그래밍 문제 유형",
+   "정처기 요약 노트"
+  ],
+  "v2g32-maesil-syrup": [
+   "매실청 설탕 비율",
+   "청매실 황매실 차이",
+   "매실 꼭지 따는 법",
+   "매실청 100일 숙성",
+   "매실청 곰팡이 방지",
+   "유리병 열탕 소독"
+  ],
+  "v2g33-hwangeup": [
+   "미환급금 통합조회",
+   "숨은 환급금 찾기",
+   "국세청 환급금 조회",
+   "카드포인트 환급 신청",
+   "통신비 미환급액 조회",
+   "국민연금 반환일시금"
+  ],
+  "v2g34-isa": [
+   "포장이사 견적 비교",
+   "이사 전입신고 방법",
+   "이사 체크리스트",
+   "사다리차 비용",
+   "이삿날 확정일자",
+   "반포장이사 vs 포장이사"
+  ],
+  "v2g35-baeksin": [
+   "예방접종 도우미 조회",
+   "영유아 백신 스케줄",
+   "독감 백신 부작용",
+   "국가예방접종 지원 종류",
+   "백신 접종 후 주의사항"
+  ],
+  "v2g36-visa": [
+   "미국 비자 인터뷰 예약",
+   "베트남 전자비자 신청",
+   "비자 발급 필요서류",
+   "무비자 입국 가능국가",
+   "워킹홀리데이 비자 조건",
+   "대사관 비자 신청센터"
+  ],
+  "v2g37-multtae": [
+   "서해안 오늘 물때",
+   "갯벌 조개잡이 물때",
+   "낚시 물때 사리 조금",
+   "물때표 보는법",
+   "바다타임 조석예보"
+  ],
+  "v2g38-deunggi": [
+   "등기번호 배송조회",
+   "우체국 등기 조회",
+   "등기 배달 예정일",
+   "내용증명 등기 발송",
+   "등기우편 요금 조회"
+  ],
+  "v2g39-iwol": [
+   "연차 이월 가능여부",
+   "미사용 연차수당 이월",
+   "연차 소멸 기준",
+   "이월 연차 사용기한",
+   "연차 이월 근로기준법"
+  ],
+  "v2g40-yeonmaljeongsan": [
+   "연말정산 간소화서비스",
+   "연말정산 환급금 조회",
+   "연말정산 소득공제 항목",
+   "부양가족 등록 연말정산",
+   "월세 세액공제 연말정산",
+   "13월의 월급 계산"
+  ]
+ }
+}

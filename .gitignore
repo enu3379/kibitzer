@@ -1,11 +1,15 @@
 data/
+.DS_Store
+docs/audit/step0/
 .env
 .env.*
 !.env.example
 configs/models.local.yaml
 .claude/
+.claude-worktrees/
+.codex-worktrees/
 .agents/
-.llm-wiki/runs/
+tmp/
 __pycache__/
 .pytest_cache/
 .venv/
@@ -15,3 +19,7 @@ dist/
 build/
 *.sqlite3
 *.db
+
+# Large ML model binaries are fetched at build/test time (download-on-build),
+# not committed. See apps/extension-next/scripts/checkProviderAssets.mjs + model-manifest.json.
+apps/*/assets/models/**/*.onnx

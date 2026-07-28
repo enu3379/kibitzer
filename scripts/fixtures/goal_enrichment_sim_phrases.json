@@ -1,0 +1,277 @@
+{
+  "version": 1,
+  "description": "Hand-drafted derived-phrase sets for the 40 goals of scripts/fixtures/tier0_embedding_benchmark_dataset.json. Drafted 2026-07-13 from each goal text alone (dataset page titles unseen), following GOAL_ENRICHMENT_PROMPT rules, as an LLM-quality proxy for scripts/simulate_goal_enrichment_tier0.py. g01-legacy reuses the prompt's own in-context example verbatim.",
+  "phrases": {
+    "g01-legacy": [
+      "국내 여행지 추천 코스",
+      "제주 부산 강릉 여행",
+      "국내 숙소 예약 비교",
+      "당일치기 근교 여행",
+      "domestic Korea travel itinerary"
+    ],
+    "g02-legacy": [
+      "한국 여행 명소 추천",
+      "국내 뚜벅이 여행 코스",
+      "한국 지역 축제 일정",
+      "Korea travel destinations guide",
+      "가족 여행 국내 명소"
+    ],
+    "g03-legacy": [
+      "pandas dataframe tutorial",
+      "python data analysis",
+      "데이터 전처리 파이썬 코드",
+      "numpy 배열 연산",
+      "주피터 노트북 시각화"
+    ],
+    "g04-legacy": [
+      "chrome extension development",
+      "manifest v3 background service worker",
+      "크롬 확장앱 만들기",
+      "browser extension api tutorial",
+      "content script 권한 설정"
+    ],
+    "g05-legacy": [
+      "강아지 예방접종 시기",
+      "반려견 사료 영양 관리",
+      "dog health care tips",
+      "강아지 동물병원 검진",
+      "반려견 산책 운동량"
+    ],
+    "g06-legacy": [
+      "machine learning model training",
+      "신경망 학습 데이터셋 준비",
+      "하이퍼파라미터 튜닝 방법",
+      "pytorch 모델 훈련 코드",
+      "과적합 방지 정규화"
+    ],
+    "g07-legacy": [
+      "서울 주간 날씨 예보",
+      "오늘 서울 기온 미세먼지",
+      "Seoul weather forecast",
+      "서울 비 소식 강수확률"
+    ],
+    "g08-legacy": [
+      "text embedding research paper",
+      "sentence embedding benchmark",
+      "임베딩 모델 논문 리뷰",
+      "semantic similarity model arxiv",
+      "multilingual embedding evaluation"
+    ],
+    "g09-generated": [
+      "오늘의 주요 뉴스 헤드라인",
+      "속보 정치 경제 뉴스",
+      "국제 뉴스 이슈 정리",
+      "today breaking news headlines"
+    ],
+    "g10-generated": [
+      "노트북 데스크탑 가격 비교",
+      "조립 PC 견적",
+      "컴퓨터 부품 구매 추천",
+      "laptop deals comparison",
+      "그래픽카드 CPU 시세"
+    ],
+    "g11-generated": [
+      "등기부등본 인터넷 발급",
+      "부동산 등기 열람 방법",
+      "대법원 인터넷등기소 발급",
+      "등기사항전부증명서 보는 법"
+    ],
+    "g12-generated": [
+      "코스피 지수 시황",
+      "국내 증시 마감 시세",
+      "코스피 종목 주가 전망",
+      "KOSPI index today"
+    ],
+    "g13-generated": [
+      "여권 재발급 신청 방법",
+      "여권 갱신 준비물 사진",
+      "온라인 여권 신청 정부24",
+      "passport renewal Korea",
+      "여권 발급 수수료 기간"
+    ],
+    "g14-generated": [
+      "전기요금 온라인 납부",
+      "한전 전기세 조회",
+      "전기요금 계산기 누진세",
+      "electricity bill payment Korea"
+    ],
+    "g15-generated": [
+      "부가가치세 신고 기간",
+      "홈택스 부가세 신고 방법",
+      "간이과세자 부가세 계산",
+      "VAT filing Korea",
+      "부가세 매입세액 공제"
+    ],
+    "g16-generated": [
+      "아파트 청약 일정 공고",
+      "청약홈 청약 신청 방법",
+      "청약 가점 계산",
+      "무순위 줍줍 청약",
+      "apartment subscription Korea"
+    ],
+    "g17-generated": [
+      "원달러 환율 전망",
+      "오늘의 환율 시세",
+      "환전 수수료 우대",
+      "exchange rate USD KRW"
+    ],
+    "g18-generated": [
+      "기준금리 인상 발표",
+      "한국은행 금리 결정",
+      "미국 연준 금리 전망",
+      "interest rate news Fed"
+    ],
+    "g19-generated": [
+      "typescript handbook documentation",
+      "typescript type inference guide",
+      "타입스크립트 제네릭 문법",
+      "tsconfig compiler options",
+      "타입 좁히기 유니온 타입"
+    ],
+    "g20-generated": [
+      "fastapi pytest testing",
+      "fastapi testclient example",
+      "비동기 API 테스트 코드",
+      "fastapi dependency override test",
+      "파이썬 백엔드 테스트 작성"
+    ],
+    "g21-generated": [
+      "react router tutorial",
+      "react router nested routes",
+      "리액트 라우팅 설정",
+      "useNavigate useParams example",
+      "SPA 페이지 이동 구현"
+    ],
+    "g22-generated": [
+      "학술 논문 검색 사이트",
+      "논문 초록 읽는 법",
+      "research paper search",
+      "학위논문 원문 보기",
+      "선행연구 문헌 조사"
+    ],
+    "g23-generated": [
+      "영어 회화 표현 정리",
+      "영어 단어 암기법",
+      "English grammar practice",
+      "영어 리스닝 공부법",
+      "토익 토플 시험 준비"
+    ],
+    "g24-generated": [
+      "일본 여행 코스 추천",
+      "도쿄 오사카 여행 일정",
+      "일본 교통패스 구매",
+      "Japan travel itinerary",
+      "일본 료칸 온천 예약"
+    ],
+    "g25-generated": [
+      "제주 맛집 추천 리스트",
+      "제주 흑돼지 고기국수",
+      "제주 카페 오션뷰",
+      "Jeju restaurant guide",
+      "제주 현지인 맛집"
+    ],
+    "g26-generated": [
+      "고혈압 낮추는 방법",
+      "혈압 정상 수치 범위",
+      "저염식 식단 관리",
+      "blood pressure management",
+      "가정용 혈압계 측정법"
+    ],
+    "g27-generated": [
+      "고양이 사료 추천 등급",
+      "습식 건식 사료 비교",
+      "cat food nutrition",
+      "고양이 나이별 사료",
+      "그레인프리 사료 성분"
+    ],
+    "g28-generated": [
+      "프리미어리그 경기 일정",
+      "국가대표 축구 중계",
+      "챔피언스리그 일정 결과",
+      "football match schedule",
+      "K리그 경기 시간"
+    ],
+    "g29-generated": [
+      "영화 예매 할인 방법",
+      "영화관 상영시간표 조회",
+      "movie ticket booking",
+      "개봉 예정 영화 순위"
+    ],
+    "g30-generated": [
+      "드럼 통돌이 세탁기 비교",
+      "세탁기 용량 추천",
+      "washing machine comparison",
+      "세탁기 건조기 세트 가격",
+      "세탁기 브랜드 후기"
+    ],
+    "g31-generated": [
+      "무선 이어폰 추천 순위",
+      "노이즈캔슬링 이어폰 비교",
+      "wireless earbuds review",
+      "블루투스 이어폰 음질",
+      "코드리스 이어폰 배터리"
+    ],
+    "g32-generated": [
+      "커피 원두 추천 산미",
+      "원두 로스팅 단계",
+      "coffee beans single origin",
+      "홈카페 원두 그라인더",
+      "스페셜티 원두 구매"
+    ],
+    "g33-generated": [
+      "포장이사 견적 비교",
+      "이사 업체 추천 후기",
+      "원룸 이사 비용",
+      "moving company quote",
+      "이사 날짜 손없는날"
+    ],
+    "g34-generated": [
+      "택배 배송 조회",
+      "운송장 번호 추적",
+      "택배 배송 지연 문의",
+      "package tracking Korea"
+    ],
+    "g35-generated": [
+      "독감 예방접종 시기",
+      "영유아 필수 예방접종 일정",
+      "vaccination schedule",
+      "예방접종 부작용 발열",
+      "보건소 접종 예약"
+    ],
+    "g36-generated": [
+      "중고차 시세 조회",
+      "중고차 허위매물 구별",
+      "used car price Korea",
+      "중고차 감가 계산",
+      "중고차 성능점검 기록부"
+    ],
+    "g37-generated": [
+      "캠핑 장비 리스트 초보",
+      "텐트 타프 추천",
+      "camping gear checklist",
+      "캠핑 의자 테이블 화로대",
+      "동계 캠핑 준비물"
+    ],
+    "g38-generated": [
+      "사진 보정 어플 추천",
+      "라이트룸 색감 보정",
+      "photo editing tutorial",
+      "인물 사진 리터칭",
+      "raw 파일 보정법"
+    ],
+    "g39-generated": [
+      "개인정보 보호 설정 방법",
+      "계정 프라이버시 설정",
+      "privacy settings guide",
+      "위치 추적 권한 끄기",
+      "쿠키 광고 차단 설정"
+    ],
+    "g40-generated": [
+      "자전거 체인 교체",
+      "자전거 브레이크 조정",
+      "bicycle maintenance guide",
+      "자전거 펑크 수리",
+      "구동계 세팅 방법"
+    ]
+  }
+}

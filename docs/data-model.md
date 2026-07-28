@@ -1,103 +1,131 @@
-# Data Model
+# Data model
 
-## Observation
+Status: serverless runtime after the 2026-07-24 cutover.
 
-```text
-id
-ts
-session_id
-source
-payload
-features
-verdict
-```
+## Storage boundaries
 
-For `browser_nav`, payload contains:
+Kibitzer uses two browser-local stores:
 
-```json
-{
-  "url": "https://example.com/path",
-  "title": "Example Title",
-  "tab_id": 123
-}
-```
+| Store | Durable data |
+|---|---|
+| `chrome.storage.local` | declared goal + epoch, user settings, persona, Ollama configuration, provider health, compact diagnostic log |
+| IndexedDB `kibitzer` v3 | live runtime state, observations, structured events, and the durable effect outbox |
 
-The server persists minimized URL metadata:
-
-- host
-- path hash
-- no query string
-- no fragment
+There is no SQLite database or server-side copy.
 
 ## Goal
 
 ```text
-raw_text
-keywords
-exemplars
-provenance
+text
+availableMinutes | null
+startedAt
+revision
+epoch
 ```
 
-Stage 0 supports only `provenance = "declared"`.
+`revision` changes within a goal's life. `epoch` is monotonic across
+clear-and-redeclare cycles, so asynchronous Tier-2 work cannot mistake a new
+goal for an older session with the same revision.
 
-## SessionState
+## Page identity
+
+Runtime records do not persist a raw URL. For HTTP(S) pages, `pageKey` is:
 
 ```text
-goal
-anchor
-controller
-obs_count
+host + "#" + cyrb53(pathname + query)
 ```
 
-The anchor is the average of the latest OK observation embeddings. DRIFT observations are never admitted.
+Keeping the host supports repeat-host context. Hashing the path and query keeps
+raw path data out of storage while distinguishing query-addressed pages such
+as separate video IDs. This compact hash is a privacy minimization mechanism,
+not a cryptographic commitment.
 
-## SQLite Tables
+Titles may be retained in bounded recent context and event records. Sensitive
+domains are rejected before observation.
 
-```text
-sessions
-goals
-goal_exemplars
-observations
-controller_states
-interventions
-feedback
-event_log
-```
+## IndexedDB stores
 
-## Interventions and Feedback
+### `kv`
 
-An intervention is created only after Tier 2 confirms drift:
+Named runtime values, including:
+
+- immersion-gauge checkpoint and Tier-2 request sequence;
+- durable dwell candidate/checkpoint;
+- pending Writer message and active-page state;
+- learned exemplars, recency anchor, and derived goal phrases;
+- bounded recent observation and nag context;
+- presence/replay bookkeeping.
+
+Reset operations update/delete related keys and clear record stores in one
+transaction where atomicity matters.
+
+### `outbox`
+
+Auto-incremented effect records:
 
 ```text
 id
-session_id
-observation_id
 ts
-message
-status
+effect: request_tier2 | nag | celebrate
 ```
 
-Feedback is keyed by intervention and kind. The server treats repeated feedback for the same intervention/kind as a duplicate and does not repeat side effects.
+Gauge state and newly emitted effects commit atomically. Draining is
+at-least-once: acknowledged effects are deleted; transient failures stay for a
+later retry. Tier-2 work additionally carries a request ID, page key, and goal
+epoch so superseded results are cancelled safely.
+
+### `events`
+
+Bounded structured audit/replay records:
 
 ```text
 id
-session_id
-intervention_id
-observation_id
-kind
 ts
+type
+data
 ```
 
-Supported kinds:
+Examples include goal changes, observation scores and verdicts, presence,
+Tier-2 outcomes, delivery, feedback, and learned exemplars. The options page
+can export these records as JSONL or clear them.
 
-- `related`: add the observation embedding to session goal exemplars, then mark the intervention `related`.
-- `accepted`: mark the intervention `accepted`.
-- `snooze`: set controller `snoozed_until`, then mark the intervention `snoozed`.
+### `observations`
 
-Goal exemplar cap enforcement preserves the declared-goal exemplar when possible and removes older feedback exemplars first.
+A bounded durable record store reserved for per-page observation/analysis
+records. Current recent-title/nag context is kept in bounded `kv` entries.
 
-## Raw Data Retention
+## Gauge checkpoint
 
-Page excerpts are transient. They are used for Tier 2 and then discarded.
+The checkpoint serializes the pure reducer state: `S`, momentum, acceleration
+tier, active page/verdict, degraded margin, pending Tier-2 token, nag debt,
+celebration state, snooze state, and update time. It is the source of truth for
+recovery after MV3 service-worker teardown.
 
-Keystrokes are out of scope for Stage 0. If added later, raw keystroke text must never be written to disk.
+The trajectory anchor is disabled by default (`ANCHOR_WINDOW=0`), but learned
+exemplars and guarded relevance state still live locally and are deleted by
+the activity-data reset.
+
+## Ollama payloads
+
+Ollama is opt-in. Payload builders produce minimized, bounded shapes:
+
+- Tier 1: goal, current title/host, and bounded recent titles/verdicts.
+- Tier 2 Context Judge: goal, current title/host/verdict/score, bounded current
+  excerpt, compressed recent titles, and compact time context.
+- Tier 2 Message Writer: goal, title/host, the Judge decision, and compact
+  time/nag context.
+
+Raw URLs, IndexedDB rows, stored vectors, and the full event log are not
+provider payloads.
+
+## Delete and retention behavior
+
+“Delete activity data” clears gauge/dwell/outbox state, observations, events,
+logs, recent context, and learned vectors. It intentionally keeps the current
+goal, Ollama configuration/key, persona, and user settings; the options UI
+labels that distinction. Clearing or replacing a goal also resets the
+goal-scoped runtime state.
+
+The record stores are capped and recent context is bounded. Exact caps are
+implementation constants in `apps/extension-next/src/lib/db.ts`,
+`events.ts`, `history.ts`, and `klog.ts`.

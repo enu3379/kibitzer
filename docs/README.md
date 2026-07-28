@@ -1,41 +1,61 @@
-# Kibitzer Docs
+# Kibitzer docs
 
-Read these in order when starting work:
+## Current runtime
 
-1. [Kibitzer Implementation Guideline](kibitzer-implementation-guideline.md)
-2. [2026-07-07 Alignment/Dwell Handoff](handoff-2026-07-07-alignment-dwell.md)
-3. [Implementation Plan](implementation-plan.md)
-4. [Architecture](architecture.md)
-5. [Data Model](data-model.md)
-6. [ML Providers](ml-providers.md)
-7. [Privacy](privacy.md)
-8. [Progress](progress.md)
-9. [Replay Harness](replay-harness.md)
-10. [LLM Wiki Integration](llm-wiki-integration.md)
-11. [Judgment Audit Plan](judgment-audit-plan.md)
-12. [Idle Daemon Plan](idle-daemon-plan.md)
-13. [macOS Menu Bar Plan](macos-menu-bar-plan.md)
-14. [Windows Idle Tray Plan](windows-idle-tray-plan.md)
-15. [Platforms](platforms.md)
-16. [Fun-Layer Roadmap](roadmap-fun-layer.md)
-17. [Planning Notes (living decision log)](planning-notes.md)
+Read these first:
 
-Handoffs (delegated work specs):
+1. [Architecture](architecture.md)
+2. [Data model](data-model.md)
+3. [Privacy](privacy.md)
+4. [ML providers](ml-providers.md)
+5. [Platforms](platforms.md)
+6. [TypeScript/serverless migration record](ts-migration-plan.md)
+7. [Migration gap audit](migration-gap-analysis.md)
+8. [Progress log](progress.md)
+9. [Planning notes](planning-notes.md)
 
-- [P0 Persona Engine](handoff-p0-persona-engine.md)
-- [P1 Attachment Loop](handoff-p1-attachment-loop.md)
-- [P1 Claude Design Follow-up](handoff-p1-claude-design.md)
-- [P2 Distribution](handoff-p2-distribution.md)
-- [Extension Bundling](handoff-extension-bundling.md)
+The active product is `apps/extension-next/`: one Chrome MV3 extension with no
+local server. The directory name is retained for repository continuity; it is
+not a second or experimental runtime.
 
-## Stage Boundaries
+## Runtime contracts and operations
 
-Stage 0 implements browser navigation only. Keystrokes, agent prompts, inferred goals, dashboards, and permanent learning are intentionally out of scope.
+- [Gauge contract](gauge/contract.md)
+- [Tier-0 O4 model and WASM parity](extension-onnx-model.md)
+- [Replay harness](replay-harness.md)
+- [Judgment audit plan](judgment-audit-plan.md)
+- [Persona voice revamp](persona-voice-revamp.md)
+- [Security review](security-review-2026-07-15.md)
+- [Tier-2 prompt-injection red team](security-redteam-prompt-extraction.md)
 
-## Decision Rule
+## Follow-up product work
+
+The cutover does not claim complete UX/analysis parity:
+
+- #135 — judgment-review dashboard and verdict correction.
+- #136 — Tier-0 OK audit routing.
+- #141 — session pause/end, reports/history, current-page verdict UI, and end
+  summary.
+
+The disposition and remaining B7/B8 tails are recorded in
+[the migration gap audit](migration-gap-analysis.md) and D14 in
+[planning notes](planning-notes.md).
+
+## Historical plans and handoffs
+
+Implementation plans, platform-daemon plans, pre-cutover analysis, and
+`handoff-*.md` files are historical evidence unless a current issue explicitly
+reactivates them. Their paths may refer to the retired Python server and relay
+extension.
+
+The complete legacy runtime is preserved on `dev-legacy` and
+`pre-serverless-cutover-2026-07-24`; the full pre-squash migration history is
+preserved by `serverless-migration-head-2026-07-24`.
+
+## Decision rule
 
 When a design choice is ambiguous, prefer:
 
-1. Fewer false positives.
-2. Less raw data retention.
-3. A replaceable interface over premature feature breadth.
+1. fewer false positives;
+2. less raw-data retention;
+3. a replaceable interface over premature feature breadth.

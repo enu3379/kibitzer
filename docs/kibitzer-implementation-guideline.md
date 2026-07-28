@@ -69,7 +69,6 @@ Observation
 
 Goal
   raw_text      : 사용자가 선언한 문장
-  keywords      : [string]           # 선택
   exemplars     : [vec]              # "목적을 만족한다" 임베딩 집합. 시작은 raw_text 1개.
                                      # cap 20, 초과 시 FIFO. 피드백으로만 성장 (§7)
   provenance    : "declared"         # Stage n에서 "inferred" 추가 — 지금은 슬롯만 존재
@@ -148,7 +147,6 @@ Controller  (교체 가능 인터페이스 — B안/A안/PH가 모두 이것을 
   update(verdict, r)
   should_intervene(now) -> bool
   on_intervened(now)
-  on_feedback(kind)
 ```
 
 ### 4.4 업그레이드 경로 — A안: 누적 정렬도 + 히스테리시스
