@@ -256,6 +256,23 @@ chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
 chrome.runtime.onInstalled.addListener(ensureHeartbeat)
 chrome.runtime.onStartup.addListener(ensureHeartbeat)
 
+// --- first-run onboarding --------------------------------------------------------
+
+// Open the onboarding wizard exactly once per profile. onInstalled also fires for
+// extension/Chrome updates (and unpacked reloads report "update"), so gate on the
+// "install" reason AND a storage flag — the flag survives dev reinstalls and can be
+// cleared later by a "튜토리얼 다시 보기" control.
+const ONBOARDING_SHOWN_KEY = "kibitzer:onboarding-shown:v1"
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details?.reason !== "install") return
+  void (async () => {
+    const stored = await chrome.storage.local.get(ONBOARDING_SHOWN_KEY)
+    if (stored[ONBOARDING_SHOWN_KEY]) return
+    await chrome.storage.local.set({ [ONBOARDING_SHOWN_KEY]: Date.now() })
+    await chrome.tabs.create({ url: chrome.runtime.getURL("onboarding/onboarding.html") })
+  })()
+})
+
 // On every service-worker spin-up (wake or browser start), recover work a prior lifetime
 // checkpointed but was torn down before finishing: deliver any queued gauge effects
 // (atomic outbox, B1) and resume a dwell that was mid-flight (B3). The 1-min heartbeat
