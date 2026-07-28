@@ -1,10 +1,12 @@
-// Tier 1 / Tier 2 via **Ollama Cloud** (https://ollama.com) — the project default
-// (configs/experiment-models.example.yaml, docs/ml-providers.md, planning-notes D3).
-// Provider/prompts/payloads/parsing were ported in Phase 4; this is the wiring. The
-// provider already rotates a key **pool** on 401/403/429, so a whole set of keys is
-// passed through (matching the server's api_key_pool_envs).
+// Tier 1 / Tier 2 judge wiring. Each tier routes to a provider+model pair from
+// kibitzer:providers:v1 (Ollama Cloud stays the default — planning-notes D3); the
+// per-provider key pool rotates on 401/403/429 exactly like the old Ollama-only path.
+// Wire formats: Ollama native /api/chat, one OpenAI chat.completions adapter for the
+// six compat providers, and the Anthropic messages adapter.
 
+import { ClaudeChatJudgeProvider } from "../providers/claudeChat.ts"
 import { OllamaChatJudgeProvider } from "../providers/ollamaChat.ts"
+import { OpenAIChatJudgeProvider } from "../providers/openaiChat.ts"
 import {
   buildSessionSummaryPayload,
   buildTier1Payload,
@@ -13,7 +15,16 @@ import {
   type RecentTitle,
   type TopDriftHost,
 } from "../providers/payloads.ts"
-import type { JudgeVerdict } from "../providers/types.ts"
+import type { JudgeProvider, JudgeVerdict } from "../providers/types.ts"
+import {
+  getJudgeSettings,
+  profileFor,
+  routeKeys,
+  type JudgeSettings,
+  type ProviderId,
+  type TierName,
+} from "./providers.ts"
+import { recordUsage } from "./usage.ts"
 import {
   activePersona,
   clampSentences,
@@ -39,80 +50,66 @@ export interface Tier2Context {
   timeContext: Record<string, unknown> | null
 }
 
-const OLLAMA_KEY = "kibitzer:ollama:v2"
+// These Cloud models reason before answering; a small budget exhausts before the
+// JSON verdict (output_exhausted). Match the server's Judge budget.
+const JUDGE_BUDGETS = { timeoutMs: 60_000, maxOutputTokens: 4096, writerMaxOutputTokens: 2048 } as const
 
-const DEFAULTS = {
-  apiUrl: "https://ollama.com/api/chat",
-  tier1Model: "nemotron-3-super", // Ollama Cloud fast classifier (Tier 1)
-  tier2Model: "minimax-m3", // Ollama Cloud judge + Korean writer (Tier 2)
-} as const
-
-export interface OllamaConfig {
-  apiUrl: string
-  apiKeys: string[] // rotated automatically by the provider on 401/403/429
-  tier1Model: string
-  tier2Model: string
-}
-
-function str(value: unknown): string {
-  return typeof value === "string" ? value.trim() : ""
-}
-
-function keyList(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value.map((v) => (typeof v === "string" ? v.trim() : "")).filter(Boolean)
-}
-
-/** Full config, defaults merged. Empty `apiKeys` means Cloud is off (Tier-0 only). */
-export async function getOllamaConfig(): Promise<OllamaConfig> {
-  const stored = await chrome.storage.local.get(OLLAMA_KEY)
-  const value = (stored[OLLAMA_KEY] ?? {}) as Partial<OllamaConfig>
-  return {
-    apiUrl: str(value.apiUrl) || DEFAULTS.apiUrl,
-    apiKeys: keyList(value.apiKeys),
-    tier1Model: str(value.tier1Model) || DEFAULTS.tier1Model,
-    tier2Model: str(value.tier2Model) || DEFAULTS.tier2Model,
+function buildJudgeProvider(
+  provider: ProviderId,
+  model: string,
+  keys: readonly string[],
+): JudgeProvider {
+  const profile = profileFor(provider)
+  const onUsage = (tokensIn: number, tokensOut: number): void => {
+    void recordUsage(provider, model, tokensIn, tokensOut)
   }
-}
-
-export async function setOllamaConfig(input: Partial<OllamaConfig>): Promise<OllamaConfig> {
-  const merged: OllamaConfig = {
-    apiUrl: str(input.apiUrl) || DEFAULTS.apiUrl,
-    apiKeys: keyList(input.apiKeys),
-    tier1Model: str(input.tier1Model) || DEFAULTS.tier1Model,
-    tier2Model: str(input.tier2Model) || DEFAULTS.tier2Model,
+  if (profile.format === "ollama") {
+    return new OllamaChatJudgeProvider({
+      apiUrl: profile.chatUrl, model, apiKeys: keys, ...JUDGE_BUDGETS, onUsage,
+    })
   }
-  await chrome.storage.local.set({ [OLLAMA_KEY]: merged })
-  tier1Provider = tier2Provider = null
-  fingerprint = null
-  return merged
+  if (profile.format === "claude") {
+    return new ClaudeChatJudgeProvider({
+      chatUrl: profile.chatUrl, model, apiKeys: keys, ...JUDGE_BUDGETS, onUsage,
+    })
+  }
+  return new OpenAIChatJudgeProvider({
+    chatUrl: profile.chatUrl, model, apiKeys: keys, ...JUDGE_BUDGETS, ...(profile.wire ?? {}), onUsage,
+  })
 }
 
-export async function ollamaEnabled(): Promise<boolean> {
-  return (await getOllamaConfig()).apiKeys.length > 0
+interface TierProviders {
+  tier1: JudgeProvider | null // null = route has no keys → Tier-0 only for that tier
+  tier2: JudgeProvider | null
 }
 
-let tier1Provider: OllamaChatJudgeProvider | null = null
-let tier2Provider: OllamaChatJudgeProvider | null = null
+let cache: TierProviders = { tier1: null, tier2: null }
 let fingerprint: string | null = null
 
-async function providers(): Promise<{ tier1: OllamaChatJudgeProvider; tier2: OllamaChatJudgeProvider } | null> {
-  const config = await getOllamaConfig()
-  if (config.apiKeys.length === 0) {
-    tier1Provider = tier2Provider = null
-    fingerprint = null
-    return null
-  }
-  const fp = JSON.stringify(config)
-  if (!tier1Provider || !tier2Provider || fingerprint !== fp) {
-    // These Cloud models reason before answering; a small budget exhausts before the
-    // JSON verdict (output_exhausted). Match the server's Judge budget.
-    const base = { apiUrl: config.apiUrl, apiKeys: config.apiKeys, timeoutMs: 60_000, maxOutputTokens: 4096, writerMaxOutputTokens: 2048 }
-    tier1Provider = new OllamaChatJudgeProvider({ ...base, model: config.tier1Model })
-    tier2Provider = new OllamaChatJudgeProvider({ ...base, model: config.tier2Model })
+function makeTier(settings: JudgeSettings, tier: TierName): JudgeProvider | null {
+  const keys = routeKeys(settings, tier)
+  if (keys.length === 0) return null
+  const route = settings.routes[tier]
+  return buildJudgeProvider(route.provider, route.model, keys)
+}
+
+/** Per-tier judge providers for the saved routes. Settings changes are picked up on the
+ *  next call via the fingerprint — no explicit cache invalidation needed. */
+async function providers(): Promise<TierProviders> {
+  const settings = await getJudgeSettings()
+  const fp = JSON.stringify(settings)
+  if (fingerprint !== fp) {
+    cache = { tier1: makeTier(settings, "tier1"), tier2: makeTier(settings, "tier2") }
     fingerprint = fp
   }
-  return { tier1: tier1Provider, tier2: tier2Provider }
+  return cache
+}
+
+/** True when at least one tier can reach an LLM (drives the popup's on/off line and
+ *  the pipeline's degraded-mode logging). */
+export async function judgeEnabled(): Promise<boolean> {
+  const p = await providers()
+  return p.tier1 !== null || p.tier2 !== null
 }
 
 /** Let Tier 1 rescue a Tier-0 DRIFT (may return OK) or confirm it. Failure keeps DRIFT. */
@@ -123,7 +120,7 @@ export async function tier1Rescue(
   recentTitles: readonly RecentTitle[] = [],
 ): Promise<JudgeVerdict> {
   const p = await providers()
-  if (!p) return "DRIFT"
+  if (!p.tier1) return "DRIFT"
   try {
     const result = await p.tier1.classifyTier1(
       buildTier1Payload({ rawText: goalText }, { title, urlHost }, recentTitles),
@@ -142,11 +139,9 @@ export interface Tier2Outcome {
   message: string | null
 }
 
-export interface OllamaTestResult {
+export interface RouteTestResult {
   ok: boolean
-  tier1?: string
-  tier2?: string
-  error?: string
+  detail: string
 }
 
 function errorText(error: unknown): string {
@@ -158,22 +153,34 @@ function errorText(error: unknown): string {
   return String(error)
 }
 
-/** One real round-trip to Ollama Cloud with the given config (both models). Reports
- *  success or a readable error, without saving — for the popup's connection test. */
-export async function testOllama(input: Partial<OllamaConfig>): Promise<OllamaTestResult> {
-  const apiUrl = str(input.apiUrl) || DEFAULTS.apiUrl
-  const apiKeys = keyList(input.apiKeys)
-  const tier1Model = str(input.tier1Model) || DEFAULTS.tier1Model
-  const tier2Model = str(input.tier2Model) || DEFAULTS.tier2Model
-  if (apiKeys.length === 0) return { ok: false, error: "API 키를 먼저 입력하세요" }
-  const base = { apiUrl, apiKeys, timeoutMs: 60_000, maxOutputTokens: 4096, writerMaxOutputTokens: 2048 }
+function elapsed(startedAt: number): string {
+  const ms = Date.now() - startedAt
+  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
+}
+
+/** One real round-trip for one tier's route, using the provider's SAVED key pool and the
+ *  given (possibly not-yet-saved) model. Reports success or a readable error, without
+ *  saving — drives the options page's per-tier status chips. */
+export async function testRoute(
+  tier: TierName,
+  provider: ProviderId,
+  model: string,
+): Promise<RouteTestResult> {
+  const settings = await getJudgeSettings()
+  const keys = (settings.accounts[provider]?.keys ?? []).map((k) => k.value)
+  if (keys.length === 0) return { ok: false, detail: "키 없음 — 먼저 키를 추가하세요" }
+  const trimmed = model.trim()
+  if (!trimmed) return { ok: false, detail: "모델명이 비어 있어요" }
+  const judge = buildJudgeProvider(provider, trimmed, keys)
+  const startedAt = Date.now()
   try {
-    const t1 = new OllamaChatJudgeProvider({ ...base, model: tier1Model })
-    const r1 = await t1.classifyTier1(
-      buildTier1Payload({ rawText: "테스트" }, { title: "예시 페이지", urlHost: "example.com" }, []),
-    )
-    const t2 = new OllamaChatJudgeProvider({ ...base, model: tier2Model })
-    await t2.confirmTier2(
+    if (tier === "tier1") {
+      const r1 = await judge.classifyTier1(
+        buildTier1Payload({ rawText: "테스트" }, { title: "예시 페이지", urlHost: "example.com" }, []),
+      )
+      return { ok: true, detail: `${trimmed} ✓ (${r1.verdict}) · ${elapsed(startedAt)}` }
+    }
+    await judge.confirmTier2(
       buildTier2ReviewPayload(
         { rawText: "테스트" },
         { title: "예시 페이지", urlHost: "example.com", verdict: "DRIFT", tierReached: 0, tier0Score: 0.3 },
@@ -183,9 +190,9 @@ export async function testOllama(input: Partial<OllamaConfig>): Promise<OllamaTe
         null,
       ),
     )
-    return { ok: true, tier1: `${tier1Model} ✓ (${r1.verdict})`, tier2: `${tier2Model} ✓` }
+    return { ok: true, detail: `${trimmed} ✓ · ${elapsed(startedAt)}` }
   } catch (error) {
-    return { ok: false, error: errorText(error) }
+    return { ok: false, detail: errorText(error) }
   }
 }
 
@@ -193,7 +200,7 @@ export async function testOllama(input: Partial<OllamaConfig>): Promise<OllamaTe
  *  matching the server). Empty array if Ollama is off or the call fails. */
 export async function enrichGoal(goalText: string): Promise<string[]> {
   const p = await providers()
-  if (!p) return []
+  if (!p.tier1) return []
   const prompt = buildEnrichmentPrompt(goalText, MAX_PHRASES)
   let lastError: unknown = null
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -220,7 +227,7 @@ export async function tier2Confirm(
   ctx: Tier2Context = { nagCount: 1, naggingContext: {}, recentTitles: [], excerpt: null, timeContext: null },
 ): Promise<Tier2Outcome> {
   const p = await providers()
-  if (!p) return { flow: "ok", message: null }
+  if (!p.tier2) return { flow: "ok", message: null }
   const observation = {
     title: page.title,
     urlHost: page.urlHost,
@@ -288,7 +295,7 @@ export async function writeSessionSummary(
   topDriftHost: TopDriftHost | null = null,
 ): Promise<string | null> {
   const p = await providers()
-  if (!p) return null
+  if (!p.tier2) return null
   try {
     const persona = await activePersona()
     const payload = buildSessionSummaryPayload(
