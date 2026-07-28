@@ -111,20 +111,24 @@ const settle = (ms = 0) => new Promise((r) => setTimeout(r, ms)) // real timer (
 
 // A heartbeat's alarm listener is fire-and-forget (`void getGoal().then(async () => … dispatch)`),
 // so `await fireHeartbeat()` returns BEFORE the work it triggers finishes: dispatch → outbox drain
-// → showToast → executeScript all run async afterwards. Reading toasts/state after a single
-// `settle(0)` therefore RACES that delivery on a loaded runner — the S=0-nag flake was exactly this
-// (the nag WAS delivered; the assert read `toasts` one macrotask too early, so `nagged` was false
-// with the interventions landing right after). Advance one synthetic minute, fire the beat, then
-// yield REAL time until the delivery has landed: poll `until` (early-out) when there is a positive
-// signal to wait on, else drain a fixed budget so an absence assertion can't pass before a stray
-// delivery would have surfaced. Only Date is mocked, so `settle` here is a real timer.
-const BEAT_SETTLE_STEPS = 60 // ~120ms of real time — ample for the delivery chain under CI load
+// → showToast → executeScript all run async afterwards. When a beat is expected to DELIVER something
+// (the S=0 nag), reading `toasts` after a single `settle(0)` races that delivery on a loaded runner —
+// the nag lands one macrotask after the check, so `nagged` reads false (the original flake). Pass
+// `until` there to poll REAL time until the delivery lands (early-out the moment it does).
+//
+// With NO `until`, keep the beat as short as possible: a drain/hold/absence beat has nothing to wait
+// for, and burning real time here would let real timers a test relies on NOT firing elapse — e.g. an
+// unjudged page's 5s dwell would fire mid-hold and recover S, breaking the freeze test. Only Date is
+// mocked, so `settle` is a real timer; a bare `settle(0)` yields one macrotask, matching the old fast
+// beats those loops were proven against.
+const BEAT_SETTLE_STEPS = 60 // ~120ms real-time cap for a delivery wait — ample under CI load
 async function beat(until?: () => boolean): Promise<void> {
   mock.timers.tick(60_000)
   await fireHeartbeat()
+  if (!until) return void (await settle(0)) // fast beat: nothing to await, don't elapse real timers
   for (let i = 0; i < BEAT_SETTLE_STEPS; i += 1) {
     await settle(2)
-    if (until && until()) return
+    if (until()) return
   }
 }
 const nagDelivered = (): boolean => toasts.some((t) => t.kind === "intervention") || notifications.length > 0
@@ -195,8 +199,8 @@ test("E2E: a sensitive page is dropped — never judged, no drain, no nag (P0-1 
     mock.timers.tick(6000)
     await fireStartup()
     await settle(300)
-    // beat() drains its full budget with no predicate, so a stray nag would surface (and fail the
-    // absence assertion below) rather than being missed by reading one macrotask too early.
+    // The sensitive page is dropped before any dwell/judge, so no verdict, drain, or nag is ever
+    // queued — the absence below is structural. Fast beats (no delivery to await) suffice.
     for (let i = 0; i < 10; i += 1) await beat()
 
     const st = await send({ type: "get-state" })
@@ -226,7 +230,9 @@ test("E2E: drifting, then navigating to a new page freezes S — no drain on the
     // and can't be confused with S already bottoming out.
     let drained = 100
     for (let i = 0; i < 60 && drained > 50; i += 1) {
-      await beat() // wait out the heartbeat's dispatch so get-state reads the settled S, not a stale one
+      // Fast beats (no delivery to await, and the real dwell below must not elapse). A one-beat lag
+      // in the read just costs an extra iteration — the loop stops the first time S is seen ≤ 50.
+      await beat()
       drained = (await send({ type: "get-state" })).s as number
     }
     assert.ok(drained > 0 && drained < 100, `the drift drained S off full but not to 0 (S=${drained})`)
