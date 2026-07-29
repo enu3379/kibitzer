@@ -14,7 +14,7 @@ import {
 
 interface StateResponse {
   persona?: string
-  personas?: Array<{ key: string; name: string }>
+  personas?: Array<{ key: string; name: string; tier?: "default" | "lab" }>
 }
 interface PublicKeyInfo {
   id: string
@@ -60,6 +60,7 @@ const blockCount = $<HTMLElement>("blockCount")
 const allowCount = $<HTMLElement>("allowCount")
 const siteResult = $<HTMLElement>("siteResult")
 const pgrid = $<HTMLElement>("pgrid")
+const pgridLab = $<HTMLElement>("pgridLab")
 const pquote = $<HTMLElement>("pquote")
 const pquoteTag = $<HTMLElement>("pquoteTag")
 const pquoteTxt = $<HTMLElement>("pquoteTxt")
@@ -148,8 +149,14 @@ function flashQuote(): void {
   pquote.classList.add("fire")
 }
 
-function renderPersonas(personas: Array<{ key: string; name: string }>, current?: string): void {
+function renderPersonas(
+  personas: Array<{ key: string; name: string; tier?: "default" | "lab" }>,
+  current?: string,
+): void {
   pgrid.innerHTML = ""
+  pgridLab.innerHTML = ""
+  // One shared card list across both grids, so selecting in one tier deselects the other.
+  const cards: HTMLButtonElement[] = []
   for (const p of personas) {
     const b = document.createElement("button")
     b.className = "pcard"
@@ -169,13 +176,12 @@ function renderPersonas(personas: Array<{ key: string; name: string }>, current?
       await send({ type: "set-persona", persona: p.key })
       if (token !== clickToken) return // a later click already owns the strip
       selectedPersona = { key: p.key, name: p.name }
-      pgrid.querySelectorAll<HTMLElement>(".pcard").forEach((c) =>
-        c.setAttribute("aria-pressed", String(c === b)),
-      )
+      cards.forEach((c) => c.setAttribute("aria-pressed", String(c === b)))
       paintQuote(p.key, p.name, false)
       flashQuote()
     })
-    pgrid.appendChild(b)
+    cards.push(b)
+    ;(p.tier === "lab" ? pgridLab : pgrid).appendChild(b)
   }
   // Fall back to the first persona so the strip is never blank on first paint.
   if (!selectedPersona && personas[0]) {
