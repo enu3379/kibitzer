@@ -45,15 +45,5 @@
   "host_permissions": [
     "http://*/*",
     "https://*/*"
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "assets/*"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
-    }
   ]
 }
