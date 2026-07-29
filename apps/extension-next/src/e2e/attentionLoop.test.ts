@@ -216,6 +216,11 @@ test("E2E: a sensitive page is dropped — never judged, no drain, no nag (P0-1 
     const st = await send({ type: "get-state" })
     assert.equal(st.s, 100, "a sensitive page pauses the gauge — S must not drain")
     assert.equal(toasts.length + notifications.length, 0, "no nag is ever surfaced for a sensitive page")
+    // The exportable debug log must never NAME the sensitive page: neither the drop line nor
+    // the gauge trace (which echoes the neutral hold's activePageKey) may carry its host.
+    const log = (await send({ type: "get-log" })).text as string
+    assert.ok(!log.includes("chase.com"), "the sensitive host never appears in the exportable log")
+    assert.ok(/drop \(sensitive\)/.test(log), "the drop itself is still traced (category only)")
   } finally {
     mock.timers.reset()
   }

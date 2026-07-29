@@ -106,10 +106,13 @@ async function observe(url: string | undefined, title: string | undefined): Prom
   if (shouldDropUrl(url)) {
     await dwell.cancel() // drop any prior page's pending dwell; this page never counts
     lastObservedKey = obsKey
-    klog(`drop (sensitive) ${pageKey}`)
-    // NEUTRAL, not just a one-tick pause: we won't judge this page, so the previous page's
-    // verdict must not keep draining/recovering S across the heartbeats spent here.
-    await enterNeutral(pageKey, goal)
+    // The page must never be NAMED anywhere durable — not in this log line, and not as the
+    // neutral hold's activePageKey (the gauge trace klog and the exportable `tick` events both
+    // echo activePageKey, so passing the real host#hash here would leak the sensitive host
+    // into ~/Downloads exports). An opaque constant mirrors the internal-page path above;
+    // distinct sensitive pages don't need distinct holds (once neutral, enterNeutral no-ops).
+    klog("drop (sensitive)")
+    await enterNeutral("sensitive#drop", goal)
     return
   }
   // Stop integrating the page just left the moment a new page is observed: hold the gauge
