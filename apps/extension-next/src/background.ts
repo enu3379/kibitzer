@@ -36,7 +36,8 @@ import { clearVisits, noteHeartbeat, noteInactive, noteJudged, noteObserve, note
 import { clearSessionSummary, dismissSessionSummary, finalizeSession, generateSummaryComment, getSessionSummary } from "./lib/sessionSummary.ts"
 import { clearSessionHistory } from "./lib/sessionHistory.ts"
 import { clearLog, exportLog, klog, logText } from "./lib/klog.ts"
-import { shouldDropUrl } from "./lib/domainFilter.ts"
+import { isUserAllowedUrl, isUserBlockedUrl, shouldDropUrl } from "./lib/domainFilter.ts"
+import { getDomainLists, initDomainLists, setDomainLists } from "./lib/domainLists.ts"
 import { truncateCodePoints } from "./providers/judgeParsing.ts"
 import { hostOf, pageKeyOf } from "./lib/url.ts"
 import { browserPresent, isFocusedWindow } from "./lib/presence.ts"
@@ -103,16 +104,25 @@ async function observe(url: string | undefined, title: string | undefined): Prom
   const obsKey = `${pageKey}\n${title}`
   if (obsKey === lastObservedKey) return
   // Privacy gate: sensitive pages pause the gauge immediately — no dwell, no judging.
+  // The user lists load once per worker lifetime; awaiting the memoized init here keeps the
+  // synchronous gate accurate from the very first observation after a wake.
+  await initDomainLists()
   if (shouldDropUrl(url)) {
     await dwell.cancel() // drop any prior page's pending dwell; this page never counts
     lastObservedKey = obsKey
     // The page must never be NAMED anywhere durable — not in this log line, and not as the
     // neutral hold's activePageKey (the gauge trace klog and the exportable `tick` events both
-    // echo activePageKey, so passing the real host#hash here would leak the sensitive host
-    // into ~/Downloads exports). An opaque constant mirrors the internal-page path above;
-    // distinct sensitive pages don't need distinct holds (once neutral, enterNeutral no-ops).
-    klog("drop (sensitive)")
-    await enterNeutral("sensitive#drop", goal)
+    // echo activePageKey, so passing the real host#hash here would leak the dropped host
+    // into ~/Downloads exports). Opaque constants mirror the internal-page path above;
+    // distinct dropped pages don't need distinct holds (once neutral, enterNeutral no-ops).
+    // Only the CATEGORY differs, so the user can tell their own list fired vs the built-in.
+    if (isUserBlockedUrl(url)) {
+      klog("drop (user-blocked)")
+      await enterNeutral("user-blocked", goal)
+    } else {
+      klog("drop (sensitive)")
+      await enterNeutral("sensitive#drop", goal)
+    }
     return
   }
   // Stop integrating the page just left the moment a new page is observed: hold the gauge
@@ -145,6 +155,33 @@ async function judgeAndDispatch(url: string, title: string, obsKey: string): Pro
   const epoch = goal.epoch
   lastObservedKey = obsKey
   const urlHost = hostOf(url)
+  // User allowlist (options 사이트 pane): this host is always on-goal — skip the Tier-0
+  // embed and the Tier-1/2 judges entirely and dispatch OK (no LLM spend, S recovers).
+  // The blocklist (static or user) wins inside isUserAllowedUrl. The page is still recorded
+  // as a normal observation — it isn't private, just pre-judged — so recent-titles and the
+  // session summary stay correct. The memoized init covers a reconcile() that reaches here
+  // before any observe() ran in a fresh worker.
+  await initDomainLists()
+  if (isUserAllowedUrl(url)) {
+    // B2 (same as below): the dwell took time; drop the verdict if the user moved on.
+    if (!(await stillJudging(pageKey, epoch))) {
+      klog(`judge dropped (page/goal moved on) ${pageKey}`)
+      if (lastObservedKey === obsKey) lastObservedKey = null
+      return
+    }
+    klog(`observe ${pageKey} user-allow final=OK`)
+    // No `score` field on purpose: replay's tau sweep reads only Tier-0-scored observes,
+    // and this page never got one — `mode` records why.
+    logEvent("observe", { pageKey, host: urlHost, verdict: "OK", mode: "user-allow" })
+    const now = Date.now()
+    await setActivePage({ pageKey, title, urlHost, score: 1 })
+    await recordObservation({ title, urlHost, verdict: "OK", ts: now }) // recent_titles / repeat context
+    await noteJudged(pageKey, title, urlHost, "OK", now, epoch, await browserPresent()) // session-summary dwell/verdict
+    // No r0/tauOk: activeMargin stays null → full-speed recovery (the same event shape as
+    // the "관련 있어요" user-override OK).
+    await dispatch({ type: "nav", pageKey, verdict: "OK", ts: now }, goal)
+    return
+  }
   const tauOk = (await getSettings()).tauOk
   const refs = await loadRefs()
   const { score, verdict: tier0Verdict, vector: titleVec, parts } = await judgeTier0(goal.text, title, tauOk, refs)
@@ -303,6 +340,9 @@ chrome.runtime.onInstalled.addListener((details) => {
 // checkpointed but was torn down before finishing: deliver any queued gauge effects
 // (atomic outbox, B1) and resume a dwell that was mid-flight (B3). The 1-min heartbeat
 // alarm guarantees a wake within a minute, bounding recovery latency.
+// Kick the user domain-lists load early so the synchronous privacy gate is warm before the
+// first observation (observe/judge also await the memoized init as a readiness barrier).
+void initDomainLists()
 void flushOutbox()
 void dwell.reconcile()
 chrome.runtime.onStartup.addListener(() => {
@@ -394,6 +434,8 @@ interface PopupMessage {
   keyId?: string
   routes?: Partial<Record<TierName, Partial<TierRoute>>>
   days?: number
+  // user domain lists (options 사이트 pane)
+  lists?: { block?: string[]; allow?: string[] }
 }
 
 async function handleMessage(message: PopupMessage): Promise<unknown> {
@@ -459,6 +501,15 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
   }
   if (message?.type === "set-settings") {
     return await setSettings(message.settings ?? {})
+  }
+  // User domain lists (options 사이트 pane). set-domain-lists normalizes/dedupes, persists,
+  // and refreshes the synchronous privacy gate in this worker; rejected (non-host) entries
+  // travel back so the UI can tell the user what was ignored.
+  if (message?.type === "get-domain-lists") {
+    return await getDomainLists()
+  }
+  if (message?.type === "set-domain-lists") {
+    return await setDomainLists(message.lists ?? {})
   }
   if (message?.type === "delete-all-data") {
     // Wipe activity data (gauge, history, learned vectors, events, observations, log,
@@ -592,6 +643,9 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
         // The active tab is re-queried at click time — a notification can outlive the nagged
         // page, so the tab may now be a sensitive page. Those must never enter the klog,
         // gauge events, or session visits: skip the whole recovery, same as observe().
+        // A notification-button click can wake a fresh worker, so make sure the user lists
+        // are loaded before the drop gate below runs.
+        await initDomainLists()
         const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
         const pageKey = tab?.url && !shouldDropUrl(tab.url) ? pageKeyOf(tab.url) : null
         // Title ingress that bypasses observe() — clamp here too.
