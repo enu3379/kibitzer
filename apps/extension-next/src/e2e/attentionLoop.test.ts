@@ -226,6 +226,33 @@ test("E2E: a sensitive page is dropped — never judged, no drain, no nag (P0-1 
   }
 })
 
+test("E2E: '관련 있어요' clicked while a sensitive page is active — no recovery, never named", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    // Fresh session on a neutral page (a distinct goal → resetState wipes the prior scenario).
+    activeTab = { id: 4, url: "https://example.test/neutral", title: "중립 페이지", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "세금 신고 준비", minutes: null })
+    await settle(50)
+
+    // A nag notification can outlive the page it nagged about: the user switches to a BANK tab,
+    // then clicks "목표와 관련 있어요" on the stale nag. The handler re-queries the active tab, so
+    // without a guard the bank would be klogged, dispatched into the gauge, and stored in visits.
+    activeTab = { id: 4, url: "https://chase.com/account/summary", title: "Account Summary", active: true, windowId: 1 }
+    await send({ type: "kibitzer:toast-feedback", kind: "related" })
+    await settle(100)
+
+    const log = (await send({ type: "get-log" })).text as string
+    assert.ok(!log.includes("chase.com"), "the sensitive host never appears in the exportable log")
+    assert.ok(!/related → OK recover/.test(log), "the OK-recovery is skipped entirely on a sensitive page")
+    const events = JSON.stringify(await send({ type: "export-events" }))
+    assert.ok(!events.includes("chase.com"), "the sensitive host never appears in the durable event export")
+  } finally {
+    mock.timers.reset()
+  }
+})
+
 test("E2E: drifting, then navigating to a new page freezes S — no drain on the page just left", async () => {
   mock.timers.enable({ apis: ["Date"] })
   try {

@@ -589,8 +589,11 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
         // "목표와 관련 있어요": the user says this page IS on-goal (the nag was wrong) →
         // flip the active page to OK so S recovers. ("accepted"/"잘 잡았어요" agrees with
         // the nag, so it must NOT recover.)
+        // The active tab is re-queried at click time — a notification can outlive the nagged
+        // page, so the tab may now be a sensitive page. Those must never enter the klog,
+        // gauge events, or session visits: skip the whole recovery, same as observe().
         const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
-        const pageKey = tab?.url ? pageKeyOf(tab.url) : null
+        const pageKey = tab?.url && !shouldDropUrl(tab.url) ? pageKeyOf(tab.url) : null
         // Title ingress that bypasses observe() — clamp here too.
         const tabTitle = truncateCodePoints(tab?.title ?? "", TITLE_MAX_CHARS)
         if (pageKey) {
@@ -602,7 +605,7 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
           void noteVerdict(pageKey, tabTitle, tab?.url ? hostOf(tab.url) : "", "OK", now, goal.epoch, present)
           // Learn: add this page's embedding as a goal exemplar so this class of page
           // stops drifting at Tier-0 (the user-taught relevance loop).
-          if (tabTitle && tab?.url && !shouldDropUrl(tab.url)) {
+          if (tabTitle && tab?.url) {
             try {
               await addExemplar(await embedText(tabTitle))
               logEvent("exemplar", { pageKey, title: tabTitle })
