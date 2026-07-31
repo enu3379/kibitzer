@@ -1,7 +1,17 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { clampSentences, fillTemplate, pickFallback, PERSONAS, PERSONA_ORDER } from "./personas.ts"
+import {
+  clampSentences,
+  DEFAULT_PERSONA_KEYS,
+  fillTemplate,
+  LAB_PERSONA_KEYS,
+  personaChoices,
+  pickFallback,
+  PERSONA_DEFAULT,
+  PERSONA_ORDER,
+  PERSONAS,
+} from "./personas.ts"
 
 test("clampSentences keeps at most N sentences", () => {
   assert.equal(clampSentences("첫 문장. 둘째 문장. 셋째 문장.", 2), "첫 문장. 둘째 문장.")
@@ -93,4 +103,36 @@ test("every persona is well-formed with fallback + celebrate templates", () => {
     assert.ok(p.fallbackTemplates.length > 0)
     assert.ok(p.celebrateTemplates.length > 0)
   }
+})
+
+test("personaChoices lists the default tier first, in the D15 picker order", () => {
+  const keys = personaChoices().map((c) => c.key)
+  assert.deepEqual(keys.slice(0, 4), ["navigation", "tsundere", "documentary", "dry_kibitzer"])
+  assert.deepEqual(keys.slice(4), [
+    "yandere",
+    "chungcheong",
+    "kyoto",
+    "baseball_caster",
+    "game_caster",
+    "quiet_coach",
+  ])
+})
+
+test("personaChoices tags every choice with its tier", () => {
+  for (const c of personaChoices()) {
+    assert.equal(c.tier, DEFAULT_PERSONA_KEYS.includes(c.key) ? "default" : "lab")
+    assert.ok(LAB_PERSONA_KEYS.includes(c.key) || DEFAULT_PERSONA_KEYS.includes(c.key), c.key)
+    assert.equal(c.name, PERSONAS[c.key].name)
+  }
+})
+
+test("the tier split keeps every persona exactly once", () => {
+  const keys = personaChoices().map((c) => c.key)
+  assert.equal(keys.length, PERSONA_ORDER.length)
+  assert.equal(new Set(keys).size, keys.length)
+  assert.deepEqual(new Set(keys), new Set(PERSONA_ORDER))
+})
+
+test("the fresh-install fallback persona is a default-tier voice", () => {
+  assert.ok(DEFAULT_PERSONA_KEYS.includes(PERSONA_DEFAULT), PERSONA_DEFAULT)
 })

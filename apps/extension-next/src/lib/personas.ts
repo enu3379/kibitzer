@@ -9,6 +9,28 @@ import { PERSONA_DEFAULT, PERSONA_ORDER, PERSONAS, type PersonaData } from "./pe
 export type { PersonaData }
 export { PERSONA_DEFAULT, PERSONA_ORDER, PERSONAS }
 
+/** Picker tier (D15, 2026-07-30): the 4 most polished voices ship as the default tier;
+ *  the other 6 stay fully selectable under "실험실 (베타)". */
+export type PersonaTier = "default" | "lab"
+
+/** Default-tier picker order (D15) — 내비게이션 · 츤데레 · 다큐 내레이터 · 영국 집사. */
+export const DEFAULT_PERSONA_KEYS: readonly string[] = [
+  "navigation",
+  "tsundere",
+  "documentary",
+  "dry_kibitzer",
+]
+
+/** Lab-tier ("실험실") picker order (D15). */
+export const LAB_PERSONA_KEYS: readonly string[] = [
+  "yandere",
+  "chungcheong",
+  "kyoto",
+  "baseball_caster",
+  "game_caster",
+  "quiet_coach",
+]
+
 const PERSONA_KEY = "kibitzer:persona:v1"
 
 /** The persona key the user picked (defaults to dry_kibitzer). */
@@ -32,9 +54,27 @@ export async function activePersona(): Promise<PersonaData> {
   return resolvePersona(await getPersonaKey())
 }
 
-/** {key,name} pairs in display order — for the popup picker. */
-export function personaChoices(): Array<{ key: string; name: string }> {
-  return PERSONA_ORDER.map((key) => ({ key, name: PERSONAS[key]?.name ?? key }))
+export interface PersonaChoice {
+  key: string
+  name: string
+  tier: PersonaTier
+}
+
+/** {key,name,tier} in display order — default tier first, then 실험실 (D15). Any persona
+ *  the codegen adds without a tier assignment falls into the lab group so it never
+ *  disappears from the pickers. */
+export function personaChoices(): PersonaChoice[] {
+  const tiered = new Set([...DEFAULT_PERSONA_KEYS, ...LAB_PERSONA_KEYS])
+  const untiered = PERSONA_ORDER.filter((key) => !tiered.has(key))
+  const choice = (tier: PersonaTier) => (key: string): PersonaChoice => ({
+    key,
+    name: PERSONAS[key]?.name ?? key,
+    tier,
+  })
+  return [
+    ...DEFAULT_PERSONA_KEYS.map(choice("default")),
+    ...[...LAB_PERSONA_KEYS, ...untiered].map(choice("lab")),
+  ]
 }
 
 /** Base contract + persona style layer — the same composition for every persona-voiced

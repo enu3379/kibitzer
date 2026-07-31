@@ -6,7 +6,8 @@
 import { showKibitzerToast } from "../content/toastOverlay.ts"
 import { sundialSVG } from "../lib/sundial.ts"
 import { bandOf } from "../lib/sessionStats.ts"
-import { PERSONAS, PERSONA_ORDER, PERSONA_DEFAULT } from "../lib/personas.data.ts"
+import { PERSONAS, PERSONA_DEFAULT } from "../lib/personas.data.ts"
+import { DEFAULT_PERSONA_KEYS } from "../lib/personas.ts"
 
 interface WizardState {
   persona?: string
@@ -266,9 +267,10 @@ function renderSample(key: string): void {
   sample.textContent = `“${fillTemplate(template, SAMPLE_CTX)}”`
 }
 
+// First-run shows only the default tier (D15) — lab voices live in 설정 → 말투.
 function renderPersonas(): void {
   pgrid.innerHTML = ""
-  for (const key of PERSONA_ORDER) {
+  for (const key of DEFAULT_PERSONA_KEYS) {
     const persona = PERSONAS[key]
     if (!persona) continue
     const b = document.createElement("button")
