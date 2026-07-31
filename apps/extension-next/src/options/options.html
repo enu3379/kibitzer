@@ -104,6 +104,33 @@
       .pcard[aria-pressed="true"] .pn { color: var(--accent); }
       .pcard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+      /* persona preview strip: hover/focus previews a voice, selecting one commits it.
+         The text block is pinned to exactly two lines so a one-line and a two-line quote
+         occupy identical space — browsing the grid never shifts the layout underneath.
+         Copy is length-budgeted in personaSampleLines.test.ts; the clamp is the backstop. */
+      .pquote { border-left: 3px solid var(--accent); background: var(--surface-2);
+        border-radius: 0 9px 9px 0; padding: 11px 13px;
+        display: flex; flex-direction: column; justify-content: center; gap: 5px; }
+      .pquote.preview { border-left-color: var(--page-ink-3); border-left-style: dashed; }
+      .pquote .pqtag { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; color: var(--accent); }
+      .pquote.preview .pqtag { color: var(--page-ink-3); }
+      .pquote .pqtxt { font-size: 13px; line-height: 1.5; color: var(--page-ink);
+        height: 39px; /* 2 lines × 13px × 1.5 — constant whether the quote wraps or not */
+        display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+      .pquote .pqtxt.swap { animation: pqfade .18s ease; }
+      @keyframes pqfade { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+      /* Selection flash — box-shadow and border width only, so nothing reflows. */
+      .pquote.fire { animation: pqflash 850ms ease-out 50ms; }
+      @keyframes pqflash {
+        0%   { box-shadow: 0 0 0 0 var(--accent); border-left-width: 3px; }
+        30%  { box-shadow: 0 0 0 3px var(--accent); border-left-width: 7px; }
+        100% { box-shadow: 0 0 0 0 transparent; border-left-width: 3px; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .pquote.fire { animation: none; }
+        .pquote .pqtxt.swap { animation: none; }
+      }
+
       button.btn { all: unset; cursor: pointer; font-size: 12.5px; font-weight: 650; padding: 7px 14px; border-radius: 8px;
         background: var(--surface-2); color: var(--page-ink); border: 1px solid var(--line); text-align: center; }
       button.btn:hover { border-color: var(--accent); }
@@ -298,6 +325,10 @@
         <div class="card">
           <h3>훈수 말투</h3>
           <div class="pgrid" id="pgrid"></div>
+          <div class="pquote" id="pquote">
+            <span class="pqtag" id="pquoteTag"></span>
+            <span class="pqtxt" id="pquoteTxt"></span>
+          </div>
         </div>
       </section>
 
