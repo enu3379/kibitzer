@@ -87,6 +87,14 @@
       .segbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
       .seg-block small { color: var(--page-ink-3); font-size: 11.5px; }
 
+      /* 사이트 목록 (감시 제외 / 항상 OK) */
+      .listblock { display: flex; flex-direction: column; gap: 7px; padding: 12px 0; }
+      .listblock > b { font-size: 13px; font-weight: 650; }
+      .listblock small { color: var(--page-ink-3); font-size: 11.5px; }
+      .listblock textarea { width: 100%; resize: vertical; min-height: 96px;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; line-height: 1.7; }
+      .listblock .listcount { font-variant-numeric: tabular-nums; }
+
       /* persona grid */
       .pgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px 0; }
       .pcard { all: unset; box-sizing: border-box; cursor: pointer; padding: 9px 11px; border-radius: 9px;
@@ -221,6 +229,7 @@
       <div class="layout">
         <nav class="tabs" role="tablist" aria-label="설정 분류" aria-orientation="vertical">
           <button role="tab" id="tab-general" aria-controls="pane-general" aria-selected="true" data-tab="general">일반</button>
+          <button role="tab" id="tab-sites" aria-controls="pane-sites" aria-selected="false" tabindex="-1" data-tab="sites">사이트</button>
           <button role="tab" id="tab-persona" aria-controls="pane-persona" aria-selected="false" tabindex="-1" data-tab="persona">말투</button>
           <button role="tab" id="tab-ai" aria-controls="pane-ai" aria-selected="false" tabindex="-1" data-tab="ai">AI 판정</button>
           <button role="tab" id="tab-data" aria-controls="pane-data" aria-selected="false" tabindex="-1" data-tab="data">데이터</button>
@@ -252,6 +261,35 @@
             <span class="lab"><b>음성으로 읽기</b><small>훈수를 소리 내어 읽어줍니다 (Web Speech)</small></span>
             <button class="switch" id="ttsSw" role="switch" aria-checked="false" aria-label="음성 알림"></button>
           </div>
+        </div>
+      </section>
+
+      <!-- 사이트: 감시 제외 / 항상 OK 목록 -->
+      <section class="pane" id="pane-sites" role="tabpanel" aria-labelledby="tab-sites" data-pane="sites">
+        <div class="card">
+          <h3>감시 제외 사이트</h3>
+          <div class="listblock">
+            <b>여기서는 아무것도 보지 않기</b>
+            <small>등록된 사이트는 어떤 기록도 남지 않고, 머무는 동안 게이지도 멈춥니다.
+              은행·결제·의료 같은 민감한 사이트는 등록하지 않아도 기본으로 제외됩니다.</small>
+            <textarea id="blockList" rows="6" spellcheck="false" autocomplete="off" autocapitalize="off"
+              aria-label="감시 제외 사이트 목록" placeholder="한 줄에 하나씩 — 예: instagram.com"></textarea>
+            <small class="listcount"><span id="blockCount">0</span>개 등록됨</small>
+          </div>
+        </div>
+        <div class="card">
+          <h3>항상 OK 사이트</h3>
+          <div class="listblock">
+            <b>이 사이트는 항상 목표와 관련 있음</b>
+            <small>등록된 사이트는 AI 판정 없이 항상 목표와 관련 있는 것으로 판정합니다 —
+              훈수가 나가지 않고 게이지가 회복됩니다.</small>
+            <textarea id="allowList" rows="6" spellcheck="false" autocomplete="off" autocapitalize="off"
+              aria-label="항상 OK 사이트 목록" placeholder="한 줄에 하나씩 — 예: docs.python.org"></textarea>
+            <small class="listcount"><span id="allowCount">0</span>개 등록됨</small>
+          </div>
+          <p class="hint">주소 대신 호스트만 적어주세요 (예: instagram.com) — 하위 도메인까지 함께 적용됩니다.
+            두 목록에 모두 있으면 감시 제외가 우선하고, 칸을 벗어나면 자동 저장됩니다.</p>
+          <div class="hint" id="siteResult" role="status"></div>
         </div>
       </section>
 

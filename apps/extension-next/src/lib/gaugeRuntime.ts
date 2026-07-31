@@ -14,6 +14,7 @@ import { activePersona, clampSentences, DEFAULT_MAX_SENTENCES, pickCelebrate, pi
 import { klog } from "./klog.ts"
 import { playChime, speak } from "./chime.ts"
 import { shouldDropUrl } from "./domainFilter.ts"
+import { initDomainLists } from "./domainLists.ts"
 import { getSettings, inQuietHours } from "./settings.ts"
 import { pageKeyOf } from "./url.ts"
 import { browserPresent } from "./presence.ts"
@@ -426,6 +427,7 @@ async function deliver(
  *  still the page being judged and it isn't sensitive. Null on any mismatch/failure
  *  (the judge then falls back to title-only, as before). */
 async function extractActiveExcerpt(pageKey: string): Promise<string | null> {
+  await initDomainLists() // memoized — the user blocklist must be loaded before the drop gate
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
   if (!tab?.id || !tab.url || shouldDropUrl(tab.url) || pageKeyOf(tab.url) !== pageKey) return null
   try {
@@ -559,8 +561,10 @@ async function showToast(
   kind: "intervention" | "celebration",
 ): Promise<number | null> {
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
-  // Privacy: never surface a nudge on a sensitive page, even if one was queued before
-  // the user navigated there.
+  // Privacy: never surface a nudge on a sensitive (or user-blocked) page, even if one was
+  // queued before the user navigated there. A queued effect can be delivered by a freshly
+  // woken worker, so wait for the user lists (memoized) before consulting the gate.
+  await initDomainLists()
   if (tab?.url && shouldDropUrl(tab.url)) return null
   // Delivery invariant: never surface a nudge (toast, its OS-notification fallback, or the
   // chime) while Chrome isn't being looked at — the user explicitly never wants an OS

@@ -40,6 +40,10 @@ interface UsageRow {
   tokensIn: number
   tokensOut: number
 }
+interface DomainLists {
+  block: string[]
+  allow: string[]
+}
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
 
@@ -49,6 +53,11 @@ const quietSw = $<HTMLButtonElement>("quietSw")
 const quietStart = $<HTMLInputElement>("quietStart")
 const quietEnd = $<HTMLInputElement>("quietEnd")
 const ttsSw = $<HTMLButtonElement>("ttsSw")
+const blockList = $<HTMLTextAreaElement>("blockList")
+const allowList = $<HTMLTextAreaElement>("allowList")
+const blockCount = $<HTMLElement>("blockCount")
+const allowCount = $<HTMLElement>("allowCount")
+const siteResult = $<HTMLElement>("siteResult")
 const pgrid = $<HTMLElement>("pgrid")
 const ajProviders = $<HTMLElement>("ajProviders")
 const ajConnect = $<HTMLElement>("ajConnect")
@@ -90,6 +99,7 @@ async function init(): Promise<void> {
   quietEnd.value = settings.quietHours.end
   quietStart.disabled = quietEnd.disabled = !settings.quietHours.enabled
   setChecked(ttsSw, settings.ttsEnabled)
+  renderDomainLists((await send({ type: "get-domain-lists" })) as DomainLists)
 
   const state = (await send({ type: "get-state" })) as StateResponse
   if (state?.personas) {
@@ -170,6 +180,39 @@ ttsSw.addEventListener("click", () => {
   setChecked(ttsSw, on)
   void saveSettings({ ttsEnabled: on })
 })
+
+// --- 사이트 목록 (감시 제외 / 항상 OK) ---------------------------------------------
+
+function renderDomainLists(lists: DomainLists): void {
+  blockList.value = lists.block.join("\n")
+  allowList.value = lists.allow.join("\n")
+  blockCount.textContent = String(lists.block.length)
+  allowCount.textContent = String(lists.allow.length)
+}
+
+let siteResultTimer: ReturnType<typeof setTimeout> | undefined
+async function saveDomainLists(): Promise<void> {
+  const lines = (value: string): string[] => value.split("\n").map((s) => s.trim()).filter(Boolean)
+  const res = (await send({
+    type: "set-domain-lists",
+    lists: { block: lines(blockList.value), allow: lines(allowList.value) },
+  })) as { lists: DomainLists; rejected: string[] } | undefined
+  if (!res) return
+  renderDomainLists(res.lists) // reflect what was actually saved (scheme/path stripped, 중복 제거)
+  clearTimeout(siteResultTimer)
+  if (res.rejected.length > 0) {
+    siteResult.className = "hint err"
+    siteResult.textContent = `저장됨 — 호스트 형식이 아니어서 무시함: ${res.rejected.join(", ")}`
+  } else {
+    siteResult.className = "hint ok"
+    siteResult.textContent = "저장됨 ✓"
+    siteResultTimer = setTimeout(() => {
+      siteResult.textContent = ""
+    }, 1500)
+  }
+}
+blockList.addEventListener("change", () => void saveDomainLists())
+allowList.addEventListener("change", () => void saveDomainLists())
 
 // --- AI 판정 (연결된 제공자 · 판정 라우팅 · 사용량) --------------------------------
 

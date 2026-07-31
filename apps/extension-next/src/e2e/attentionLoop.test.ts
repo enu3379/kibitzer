@@ -232,14 +232,16 @@ test("E2E: '관련 있어요' clicked while a sensitive page is active — no re
     toasts.length = 0
     notifications.length = 0
     // Fresh session on a neutral page (a distinct goal → resetState wipes the prior scenario).
-    activeTab = { id: 4, url: "https://example.test/neutral", title: "중립 페이지", active: true, windowId: 1 }
+    // Distinct URL/title/id from the user-lists scenario below, so the obsKey dedup this test
+    // leaves behind can never swallow that scenario's first observation.
+    activeTab = { id: 8, url: "https://example.test/tax-prep", title: "세금 준비 자료", active: true, windowId: 1 }
     await send({ type: "set-goal", goal: "세금 신고 준비", minutes: null })
     await settle(50)
 
     // A nag notification can outlive the page it nagged about: the user switches to a BANK tab,
     // then clicks "목표와 관련 있어요" on the stale nag. The handler re-queries the active tab, so
     // without a guard the bank would be klogged, dispatched into the gauge, and stored in visits.
-    activeTab = { id: 4, url: "https://chase.com/account/summary", title: "Account Summary", active: true, windowId: 1 }
+    activeTab = { id: 8, url: "https://chase.com/account/summary", title: "Account Summary", active: true, windowId: 1 }
     await send({ type: "kibitzer:toast-feedback", kind: "related" })
     await settle(100)
 
@@ -248,6 +250,61 @@ test("E2E: '관련 있어요' clicked while a sensitive page is active — no re
     assert.ok(!/related → OK recover/.test(log), "the OK-recovery is skipped entirely on a sensitive page")
     const events = JSON.stringify(await send({ type: "export-events" }))
     assert.ok(!events.includes("chase.com"), "the sensitive host never appears in the durable event export")
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: user domain lists — a blocked host drops host-free, an allowlisted host judges OK without Tier-0", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    await send({ type: "clear-log" })
+    // Fresh session on a neutral page; register both user lists via the options message path.
+    activeTab = { id: 4, url: "https://example.test/neutral", title: "중립 페이지", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "논문 초록 정리", minutes: null })
+    const setRes = (await send({
+      type: "set-domain-lists",
+      lists: { block: ["blocked.test"], allow: ["allowed.test"] },
+    })) as { lists?: { block: string[]; allow: string[] }; rejected?: string[] }
+    assert.deepEqual(setRes.lists, { block: ["blocked.test"], allow: ["allowed.test"] })
+    assert.deepEqual(setRes.rejected, [])
+    await settle(50)
+
+    // Navigate to the USER-blocked page: dropped like a sensitive page — no dwell checkpoint,
+    // no judging, gauge held NEUTRAL.
+    activeTab = { id: 4, url: "https://blocked.test/very/private/path", title: "비밀 페이지", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(4, { status: "complete" }, activeTab)
+    await settle(50)
+    mock.timers.tick(6000)
+    await fireStartup() // reconcile: there is no checkpoint to judge
+    await settle(300)
+    for (let i = 0; i < 10; i += 1) await beat()
+    let log = (await send({ type: "get-log" })).text as string
+    assert.ok(log.includes("drop (user-blocked)"), "the drop is logged as a fixed string")
+    assert.ok(!log.includes("blocked.test"), "the blocked host never appears in the log")
+    let st = await send({ type: "get-state" })
+    assert.equal(st.s, 100, "a user-blocked page holds the gauge — S must not drain")
+
+    // Navigate to the ALLOWLISTED page: judged OK without any Tier-0 embed once the dwell
+    // elapses — recorded as a normal observation, no nag, S stays full (OK recovers).
+    activeTab = { id: 4, url: "https://allowed.test/docs/ch1", title: "완전 다른 주제의 문서", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(4, { status: "complete" }, activeTab)
+    await settle(50)
+    mock.timers.tick(6000)
+    await fireStartup() // reconcile fires the dwell's judgement (no WASM needed on this path)
+    await settle(300)
+    log = (await send({ type: "get-log" })).text as string
+    assert.ok(/user-allow final=OK/.test(log), "the allowlisted page short-circuited to OK")
+    assert.ok(!/final=DRIFT/.test(log), "no Tier-0 judgement ran for the allowlisted page")
+    for (let i = 0; i < 10; i += 1) await beat()
+    st = await send({ type: "get-state" })
+    assert.equal(st.s, 100, "an always-OK page keeps S full")
+    assert.equal(toasts.length + notifications.length, 0, "no nag on either list")
+
+    // Clean up the lists so later scenarios observe an unfiltered world.
+    await send({ type: "set-domain-lists", lists: { block: [], allow: [] } })
   } finally {
     mock.timers.reset()
   }
