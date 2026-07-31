@@ -1207,3 +1207,28 @@ the extension badge.
   detection). Side-window title churn no longer steals the dwell or freezes
   the gauge. When Chrome is entirely unfocused observations drop too — safe:
   `windows.onFocusChanged` re-observes the active tab on focus regain.
+
+### D15 — Persona lineup for the beta: completeness-first defaults + lab section → DECIDED (2026-07-30)
+
+Evidence base: v4 (2026-07-15, 50 real writer calls), v5 (07-16, 110 calls,
+delivery/starvation audit), and the 07-28~29 de-parroting blind A/B
+(~200 generations, ~150 nemotron judge votes; artifacts in the study
+worktrees' `_abtest/`, win rates in PR #163). Completeness (measured style
+failures: grammar breaks, hallucination DQs, thinking starvation, delivery
+rate) and appeal were ranked as separate axes.
+
+- **Default 4 (picker order)**: navigation, tsundere (rev), documentary,
+  dry_kibitzer — completeness ranks 1/3/6/4. Yandere (rank 2) is deliberately
+  held back as a later "new persona" release card despite being the
+  single strongest voice (HEAD beat its revision 10–3); first-run jealousy
+  framing judged too risky for a default.
+- **Remaining 6 → options "실험실 (베타)" section**, selectable but labeled.
+- **Workstream A (appeal↑ completeness↓ → invest in completeness)**: kyoto
+  (starvation retry / `think:"low"`, honorific-grammar guard — infra, not
+  prompt), baseball_caster (port game R2's category-stage method + ban
+  English host/word rendering).
+- **Workstream B (appeal↓ → find funnier reference lines + explore new
+  personas)**: quiet_coach, game_caster; plus new-persona scouting.
+- Known tension: chungcheong's R1 revision was adopted in PR #163 despite
+  losing 48.3% to HEAD (adopted for direct-mention reduction); HEAD restore
+  is worth reconsidering when it moves out of the lab.
