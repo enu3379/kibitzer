@@ -1,7 +1,7 @@
 # Kibitzer 개인정보 처리방침
 
 - **운영자**: 이은우 (Kibitzer 개발자)
-- **문의**: jakeclub6@gmail.com · [GitHub Issues](https://github.com/enu3379/kibitzer/issues)
+- **문의**: [GitHub Issues](https://github.com/enu3379/kibitzer/issues)
 - **발효일**: 2026-07-30
 
 Kibitzer는 사용자가 선언한 목표와 브라우징 흐름을 비교해, 주의가 흐트러질 때만 한마디 건네는 Chrome 확장 프로그램입니다. **자체 서버가 없으며**, 모든 판정·상태·기록은 사용자의 브라우저 안에서만 처리·보관됩니다.
