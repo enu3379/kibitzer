@@ -317,16 +317,31 @@ async function refreshPin(): Promise<void> {
 const popupFrame = $<HTMLIFrameElement>("popupFrame")
 
 // Same-extension iframe → same-origin: size the frame to the popup's real height so the
-// setup view (short) and the active view (sundial + gauge) both sit flush.
+// setup view (short) and the active view (sundial + gauge) both sit flush. The popup
+// swaps views after async state fetches (and again when the user declares the goal), so
+// a ResizeObserver on its body tracks every change; the 600px cap mirrors Chrome's own
+// popup height limit, past which the real popup scrolls too.
+let popupObserver: ResizeObserver | null = null
 function resizePopupFrame(): void {
   try {
     const height = popupFrame.contentDocument?.body?.scrollHeight
-    if (height) popupFrame.style.height = `${Math.min(560, Math.max(200, height + 8))}px`
+    if (height) popupFrame.style.height = `${Math.min(600, Math.max(200, height + 8))}px`
   } catch {
     // Not readable (standalone preview) — keep the CSS default height.
   }
 }
-popupFrame.addEventListener("load", resizePopupFrame)
+popupFrame.addEventListener("load", () => {
+  resizePopupFrame()
+  try {
+    const body = popupFrame.contentDocument?.body
+    if (!body) return
+    popupObserver?.disconnect()
+    popupObserver = new ResizeObserver(resizePopupFrame)
+    popupObserver.observe(body)
+  } catch {
+    // Not observable (standalone preview) — the load-time resize above is the best effort.
+  }
+})
 
 $("openSettingsDone").addEventListener("click", () => {
   if (extension) void chrome.runtime.openOptionsPage()
@@ -342,11 +357,10 @@ $("closeTab").addEventListener("click", () => {
 // --- live refresh loop -------------------------------------------------------------
 
 // One slow tick keeps the visible step honest: AI status while the user is off
-// connecting keys, pin state while they hover the puzzle menu, popup height always.
+// connecting keys, pin state while they hover the puzzle menu.
 window.setInterval(() => {
   if (cur === 3) void refreshAiStatus()
   if (cur === 4) void refreshPin()
-  if (cur === 5) resizePopupFrame()
 }, 2000)
 window.addEventListener("focus", () => {
   if (cur === 3) void refreshAiStatus()

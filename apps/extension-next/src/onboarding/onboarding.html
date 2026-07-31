@@ -265,11 +265,13 @@
       .embed { display: flex; flex-direction: column; align-items: center; }
       .embed-label {
         font-size: 10.5px; color: var(--page-ink-3); margin-bottom: 8px;
-        display: flex; align-items: center; gap: 8px; width: 296px;
+        display: flex; align-items: center; gap: 8px; width: 298px;
       }
       .embed-label::before, .embed-label::after { content: ""; flex: 1; border-top: 1px dashed var(--line); }
       .popup-frame {
-        width: 296px; height: 240px; border: 1px solid var(--line); border-radius: 10px;
+        /* 298 = the popup body's full 296px (268 + 14px padding ×2) + the 1px borders;
+           border-box, so anything narrower leaves the embed scrolling sideways. */
+        width: 298px; height: 240px; border: 1px solid var(--line); border-radius: 10px;
         box-shadow: var(--shadow); background: var(--popup-bg);
       }
       .donerow { display: flex; gap: 8px; justify-content: center; margin-top: 18px; }
