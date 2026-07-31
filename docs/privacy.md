@@ -63,7 +63,7 @@ every egress to UI via `toPublicSettings`, and are excluded from logs and
 exports).
 
 **설정 → 모든 활동 데이터 삭제** removes gauge, observation, history,
-learning, event, and nag activity. Goal, Ollama configuration, and persona are
+learning, event, and nag activity. Goal, provider accounts, and persona are
 intentionally retained and the UI states that boundary. Browser/profile
 backups and storage-device snapshots are outside Kibitzer's deletion
 guarantee.
