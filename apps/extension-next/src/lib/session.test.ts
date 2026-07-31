@@ -16,7 +16,7 @@ const store: Record<string, unknown> = {}
   },
 }
 
-const { getGoal, setGoal } = await import("./session.ts")
+const { getGoal, setGoal, GOAL_MAX_CHARS } = await import("./session.ts")
 
 test("epoch is monotonic and never reused across a clear+redeclare", async () => {
   for (const k of Object.keys(store)) delete store[k]
@@ -43,6 +43,30 @@ test("epoch is monotonic and never reused across a clear+redeclare", async () =>
   assert.notEqual(a2?.epoch, a1?.epoch, "the two 독서 sessions are distinguishable")
 
   assert.equal((await getGoal())?.epoch, 3)
+})
+
+test("goal text is clamped at set AND at read — oversized text never reaches a payload", async () => {
+  for (const k of Object.keys(store)) delete store[k]
+
+  // Pasted/scripted goals have no upstream bound; the cap must hold at ingress.
+  const set = await setGoal("가".repeat(GOAL_MAX_CHARS + 5000), null)
+  assert.equal(Array.from(set?.text ?? "").length, GOAL_MAX_CHARS)
+
+  // A goal stored before the cap existed (or written by anything else) is clamped on read —
+  // by code point, so a surrogate pair at the boundary is never split into a lone half.
+  store["kibitzer:goal:v1"] = { text: "😀".repeat(GOAL_MAX_CHARS * 2), availableMinutes: null }
+  const read = await getGoal()
+  assert.equal(Array.from(read?.text ?? "").length, GOAL_MAX_CHARS)
+  assert.ok(read?.text.endsWith("😀"), "no lone surrogate at the clamp boundary")
+
+  // Same oversized text set twice is "unchanged" — the comparison sees the clamped value,
+  // so epoch/revision must not churn.
+  for (const k of Object.keys(store)) delete store[k]
+  const long = "지".repeat(GOAL_MAX_CHARS + 1)
+  const first = await setGoal(long, null)
+  const second = await setGoal(long, null)
+  assert.equal(second?.epoch, first?.epoch)
+  assert.equal(second?.revision, first?.revision)
 })
 
 test("concurrent setGoal calls linearize — no two goals share an epoch", async () => {
