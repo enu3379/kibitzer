@@ -68,8 +68,10 @@
       .step[hidden] { display: none; }
       @keyframes enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
       @media (prefers-reduced-motion: reduce) {
-        .step, .visit { animation: none !important; }
+        .step, .visit, .nudge, .d-slot, .btn.pulse { animation: none !important; }
         .agauge .fill { transition: none !important; }
+        .d-menu { transition: none !important; }
+        .nudge.on { opacity: 0; visibility: hidden; }
       }
 
       .eyebrow {
@@ -194,7 +196,64 @@
       .legend b { color: var(--page-ink); }
       .ldot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 1px 0 3px; transform: translateY(0.5px); }
 
-      /* step 4 — AI judge (the options page's Ollama pane, inlined so it isn't deferred) */
+      /* step 4 — toolbar pin. The two-click demo is drawn with tokens (not screenshots)
+         so it matches both themes; the pushpin is Chrome's own glyph shape, grey → accent
+         like the real one turns grey → blue. */
+      .pindemo { background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 12px; padding: 16px 16px 13px; }
+      .d-toolbar {
+        display: flex; align-items: center; gap: 8px; background: var(--surface);
+        border: 1px solid var(--line-soft); border-radius: 9px; padding: 6px 10px; width: 300px; margin: 0 auto;
+      }
+      .d-toolbar .d-url { flex: 1; height: 15px; border-radius: 999px; background: var(--surface-2); }
+      .d-puzzle { position: relative; font-size: 13px; line-height: 1; padding: 3px 4px; border-radius: 6px; }
+      .pindemo.p0 .d-puzzle { background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent); }
+      .d-slot { display: none; padding: 3px 2px; }
+      .pindemo.p3 .d-slot { display: inline-flex; animation: pin-pop .35s cubic-bezier(.2, 1.6, .5, 1); }
+      @keyframes pin-pop { from { transform: scale(.3); opacity: 0; } }
+      .d-menu {
+        width: 232px; margin: 10px auto 0; background: var(--surface); border: 1px solid var(--line);
+        border-radius: 10px; padding: 5px; box-shadow: var(--shadow);
+        opacity: 0; transform: translateY(-4px); transition: opacity .2s, transform .2s;
+      }
+      .pindemo.p1 .d-menu, .pindemo.p2 .d-menu, .pindemo.p3 .d-menu { opacity: 1; transform: none; }
+      .d-row { display: flex; align-items: center; gap: 8px; padding: 7px 6px 7px 9px; border-radius: 7px; }
+      .pindemo.p2 .d-row { background: var(--accent-soft); }
+      .d-row .xn { flex: 1; font-size: 12px; font-weight: 650; }
+      .d-pin { position: relative; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--page-ink-3); }
+      .d-pin svg { width: 15px; height: 15px; }
+      .d-pin .pf, .pindemo.p2 .d-pin .po, .pindemo.p3 .d-pin .po { display: none; }
+      .pindemo.p2 .d-pin, .pindemo.p3 .d-pin { color: var(--accent); }
+      .pindemo.p2 .d-pin .pf, .pindemo.p3 .d-pin .pf { display: block; }
+      .pindemo .co {
+        position: absolute; top: -9px; right: -9px; z-index: 5; width: 18px; height: 18px; border-radius: 50%;
+        background: var(--accent); color: var(--accent-ink); font-size: 10.5px; font-weight: 800;
+        display: grid; place-items: center; box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
+      }
+      .d-cap { font-size: 11.5px; color: var(--page-ink-3); text-align: center; margin: 12px 0 0; }
+      .d-cap b { color: var(--page-ink-2); }
+      .prebox {
+        display: flex; gap: 12px; align-items: center; background: var(--accent-soft); color: var(--ok-fg);
+        border: 1px solid var(--accent); border-radius: 10px; padding: 13px 16px; font-size: 12.5px; font-weight: 650;
+      }
+      /* Corner nudge pointing at the real puzzle icon just above the viewport's top right.
+         Kept small and step-scoped on purpose — a quiet hint, not a billboard. */
+      .nudge {
+        position: fixed; top: 12px; right: 18px; z-index: 40;
+        display: flex; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 700;
+        background: var(--surface); color: var(--page-ink-2);
+        border: 1.5px dashed var(--accent); border-radius: 999px; padding: 6px 13px;
+        box-shadow: var(--shadow); animation: nudge-bob 2.4s ease-in-out infinite;
+      }
+      .nudge[hidden] { display: none; }
+      .nudge .up { color: var(--accent); font-size: 13px; }
+      @keyframes nudge-bob { 50% { transform: translateY(-4px); } }
+      .nudge.on { border-style: solid; background: var(--accent); color: var(--accent-ink); animation: nudge-fade .5s ease-in 1.4s forwards; }
+      .nudge.on .up { color: var(--accent-ink); }
+      @keyframes nudge-fade { to { opacity: 0; visibility: hidden; } }
+      .btn.pulse { animation: next-pulse .55s ease-out 2; }
+      @keyframes next-pulse { 50% { transform: scale(1.06); } }
+
+      /* step 5 — AI judge (the options page's Ollama pane, inlined so it isn't deferred) */
       .tiers { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
       .tier { border: 1px solid var(--line-soft); border-radius: 10px; padding: 11px 13px; background: var(--surface-2); }
       .tier b { display: block; font-size: 12px; font-weight: 800; margin-bottom: 3px; }
@@ -228,7 +287,7 @@
       .skip:hover { color: var(--page-ink-2); }
       .privacy { font-size: 11px; color: var(--page-ink-3); margin: 14px 0 0; line-height: 1.6; border-top: 1px solid var(--line-soft); padding-top: 10px; }
 
-      /* step 5 — persona + pin */
+      /* step 6 — persona */
       .pgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
       .pcard {
         all: unset; box-sizing: border-box; cursor: pointer; padding: 10px 12px; border-radius: 9px;
@@ -242,16 +301,23 @@
         background: var(--surface-2); border-left: 3px solid var(--accent); border-radius: 0 9px 9px 0;
         font-size: 13px; padding: 10px 14px; margin-bottom: 16px; color: var(--page-ink-2); min-height: 42px;
       }
+      /* shared by the pin step's live strip and the persona step's reminder */
       .pinlive {
         display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--page-ink-2);
-        background: var(--surface-2); border: 1px dashed var(--line); border-radius: 10px; padding: 10px 13px;
+        background: var(--surface-2); border: 1.5px dashed var(--line); border-radius: 10px; padding: 10px 13px;
+        transition: background .3s, border-color .3s;
       }
       .pinlive .kbd {
         flex: none; font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px;
         padding: 1px 7px; background: var(--surface); font-weight: 700;
       }
-      .pinstate { margin-left: auto; flex: none; font-size: 11px; font-weight: 800; color: var(--page-ink-3); }
-      .pinstate.on { color: var(--ok-fg); }
+      .pinlive .pl-on, .nudge .pl-on { display: none; }
+      .pinlive.on { border-style: solid; border-color: var(--accent); background: var(--accent-soft); color: var(--ok-fg); }
+      .pinlive.on .pl-off, .nudge.on .pl-off { display: none; }
+      .pinlive.on .pl-on, .nudge.on .pl-on { display: inline; }
+      .pinlive.on b { color: inherit; }
+      .plstate { margin-left: auto; flex: none; font-size: 11px; font-weight: 800; color: var(--page-ink-3); }
+      .pinlive.on .plstate { color: var(--ok-fg); }
 
       /* done — live popup embed */
       .done { text-align: center; padding: 10px 0; }
@@ -298,7 +364,7 @@
           <img src="../icons/icon-32.png" alt="" />
           <span class="name">Kibitzer 시작하기</span>
           <span class="dots" id="dots" role="tablist" aria-label="단계"></span>
-          <span class="count" id="count">1 / 5</span>
+          <span class="count" id="count">1 / 6</span>
         </div>
 
         <div class="body">
@@ -410,8 +476,53 @@
             <p class="footnote">실제 위치(이 화면 오른쪽 아래)에 실물 훈수가 그대로 뜹니다. 연습 훈수의 응답은 기록되지 않습니다.</p>
           </section>
 
-          <!-- ④ AI 판정 -->
+          <!-- ④ 툴바 고정 -->
           <section class="step" id="s3" hidden>
+            <div id="pinFresh">
+              <p class="eyebrow">자리 잡기</p>
+              <h1>훈수꾼 자리부터 마련해 주세요.</h1>
+              <p class="lede">방금 본 <b>색 점</b>은 툴바에 아이콘이 보여야 일합니다. 설치 직후엔 퍼즐 메뉴 속에 숨어 있어요 — 딱 <b>두 번의 클릭</b>으로 꺼내 주세요.</p>
+              <div class="pindemo" id="pindemo">
+                <div class="d-toolbar">
+                  <span class="d-url"></span>
+                  <span class="d-slot"><span class="kicon"><img src="../icons/icon-32.png" alt="" /><i class="dot"></i></span></span>
+                  <span class="d-puzzle">🧩<span class="co">①</span></span>
+                </div>
+                <div class="d-menu">
+                  <div class="d-row">
+                    <span class="kicon"><img src="../icons/icon-32.png" alt="" /><i class="dot"></i></span>
+                    <span class="xn">Kibitzer</span>
+                    <span class="d-pin">
+                      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path class="po" d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4m3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z"/>
+                        <path class="pf" d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z"/>
+                      </svg>
+                      <span class="co">②</span>
+                    </span>
+                  </div>
+                </div>
+                <p class="d-cap">메뉴 이름도 실제와 같아요 — ① 🧩 <b>확장 프로그램 메뉴</b> → ② 📌 <b>툴바에 고정</b></p>
+              </div>
+              <div class="pinlive" id="pinLive">
+                <span class="kicon"><img src="../icons/icon-32.png" alt="" /><i class="dot"></i></span>
+                <span><span class="pl-off">지금 <b>진짜 툴바</b>에서 눌러 보세요. 고정되면 여기 불이 켜집니다.</span><span class="pl-on"><b>고정 감지됨</b> — 색 점이 자리에 앉았습니다. 이제 항상 보여요.</span></span>
+                <span class="plstate"><span class="pl-off">미고정</span><span class="pl-on">고정 감지됨 ✓</span></span>
+              </div>
+              <p class="footnote">고정하지 않아도 다음으로 넘어갈 수 있어요 — 다만 색 점은 고정해야 보입니다.</p>
+            </div>
+            <div id="pinPre" hidden>
+              <p class="eyebrow">자리 잡기</p>
+              <h1>자리는 이미 마련돼 있네요.</h1>
+              <p class="lede">Kibitzer가 벌써 툴바에 고정돼 있어요. 아이콘의 <b>색 점</b>이 몰입 상태를 계속 알려줄 겁니다 — 바로 다음으로 가죠.</p>
+              <div class="prebox">
+                <span class="kicon"><img src="../icons/icon-32.png" alt="" /><i class="dot"></i></span>
+                <span>고정 확인됨 ✓ — 색 점: <span class="ldot" style="background:#1f9d6b"></span>몰입 <span class="ldot" style="background:#e0a100"></span>주의 <span class="ldot" style="background:#d1495b"></span>이탈 <span class="ldot" style="background:#8a8a90"></span>조용히 중</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- ⑤ AI 판정 -->
+          <section class="step" id="s4" hidden>
             <p class="eyebrow">AI 판정</p>
             <h1>판정의 눈을 밝혀 주세요.</h1>
             <p class="lede">키 없이도 동작하지만 페이지 <b>제목</b>만 봅니다. AI 키를 연결하면 페이지 내용까지 읽고 훨씬 정확해집니다 — 훈수 문장도 AI가 씁니다.</p>
@@ -437,22 +548,21 @@
             <p class="privacy">키를 연결하면: 목표, 페이지 제목·호스트, 페이지 요약(최대 3,000자)이 판정을 위해 전송될 수 있습니다. 원본 URL과 저장된 기록 전체는 전송하지 않습니다. 설정에서 언제든 바꿀 수 있습니다.</p>
           </section>
 
-          <!-- ⑤ 말투 + 핀 -->
-          <section class="step" id="s4" hidden>
+          <!-- ⑥ 말투 -->
+          <section class="step" id="s5" hidden>
             <p class="eyebrow">마지막 하나</p>
             <h1>훈수 말투를 고르면, 준비 끝.</h1>
             <p class="lede">같은 훈수도 누가 하느냐에 따라 다르게 들리죠. 설정에서 언제든 바꿀 수 있습니다.</p>
             <div class="pgrid" id="pgrid"></div>
             <div class="sample" id="sample"></div>
-            <div class="pinlive">
+            <div class="pinlive" id="pinReminder">
               <span class="kbd">🧩</span>
-              <span>주소창 옆 퍼즐 메뉴에서 <b>Kibitzer 핀 고정</b> — 색 점이 항상 보이게. 고정되면 여기 불이 켜집니다.</span>
-              <span class="pinstate" id="pinstate">미고정</span>
+              <span>아직 툴바 고정 전이에요 — 퍼즐 메뉴에서 <b>툴바에 고정</b>을 누르면 색 점이 항상 보입니다.</span>
             </div>
           </section>
 
           <!-- 완료 -->
-          <section class="step done" id="s5" hidden>
+          <section class="step done" id="s6" hidden>
             <div class="ring">✓</div>
             <h1>훈수꾼이 자리에 앉았습니다.</h1>
             <p class="lede">마지막으로, <b>첫 목표</b>를 여기서 바로 선언해 보세요.<br />여기서 선언한 목표는 진짜로 시작됩니다.</p>
@@ -473,6 +583,11 @@
           <button class="btn primary" id="next">다음 →</button>
         </div>
       </div>
+    </div>
+    <div class="nudge" id="nudge" hidden>
+      <span class="pl-off">진짜 🧩는 바로 위에 있어요</span>
+      <span class="pl-on">고정됐어요!</span>
+      <span class="up">↗</span>
     </div>
     <script type="module" src="onboarding.js"></script>
   </body>
