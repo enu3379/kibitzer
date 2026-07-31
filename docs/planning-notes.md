@@ -5,9 +5,28 @@ Living working doc. Unlike `progress.md` (a log of completed work) and
 the user think out loud and record decisions as they are made. Edit freely from
 both sides; keep the "Open decisions" statuses current.
 
-Last updated: 2026-07-20.
+Last updated: 2026-07-31.
 
-## Where the project actually is (verified 2026-07-08)
+## Where the project is (verified 2026-07-31)
+
+The product is a single serverless Chrome MV3 extension
+(`apps/extension-next`) — the Python server / macOS app era ended with the
+2026-07-24 cutover (D14). `main` carries v0.2.0 with `release.yml`
+auto-releases (nested zip + CWS store-root zip). Judging is multi-provider
+BYOK (7 providers, #158) on top of local KoEn-E5 WASM Tier-0 embeddings; with
+no key registered nothing leaves the browser.
+
+Beta hardening merged 2026-07-31: Tier-2 de-parroting (#163), title/goal
+ingress clamps (#166), `web_accessible_resources` removal (#167), sensitive
+pages never named in logs/gauge traces (#168), Korean sensitive-domain
+expansion (#170), CWS store zip (#169), user-editable domain block/allow
+lists (#173), plus the Korean privacy policy (#171) and store submission kit
+(#172). The D15 persona lineup (default 4 + 실험실 6) is decided; its picker
+implementation (#174) waits on the sample-line preview PR (#164). Baseline:
+244 extension tests green on macOS + Windows CI (Node 22). Remaining store
+P0s: listing screenshots/promo tile and the hosted privacy-policy URL.
+
+## Where the project was (2026-07-08 snapshot — pre-serverless, historical)
 
 Two tracks ran in parallel since the P0 persona engine landed:
 
@@ -189,6 +208,11 @@ Update 2026-07-15: partly superseded by D9 — the Web Store moves from "later
 option" to a prerequisite of the app-onboarding flow; the CI release-zip remains
 the interim bridge until the listing is live.
 
+Update 2026-07-31: no longer deferred. `release.yml` auto-attaches both a
+nested release zip and a CWS store-root zip (#169) on version bump, and the
+Chrome Web Store unlisted-beta submission is in flight (kit: #172, policy:
+#171). Remaining: listing screenshots/tile + hosted policy URL.
+
 ### D7 — Time-budget drift rule → RESOLVED + IMPLEMENTED (PR #49, 2026-07-15)
 
 Goal declaration gains an optional **available-time budget** ("몇 시간 사용").
@@ -247,7 +271,13 @@ relevance with `0.85` (the same deliberate mapping used by Tier 1 OK),
 recomputes `A_t`, and reapplies the alignment thresholds. User-declared drift
 does not synthesize a new nag at click time.
 
-### D9 — Packaging & distribution strategy → DECIDED, IMPLEMENTATION PENDING (2026-07-15; audited 2026-07-16)
+### D9 — Packaging & distribution strategy → SUPERSEDED BY D14 (2026-07-31; originally DECIDED 2026-07-15, audited 2026-07-16)
+
+> 2026-07-31: the phased packaging plan below (path relocation, launchers,
+> `.env` removal, app onboarding) targeted the Python-server architecture and
+> died with it. What survived, serverless-shaped: keys moved into the options
+> UI (multi-provider, #158), CI release zips + CWS store zip via `release.yml`
+> (#169), and the Web Store beta submission kit (#172). Kept for the record.
 
 Functional testing is judged good enough to start distribution work. Today's
 reality: clone → two builds → Load unpacked → hand-edit `.env` — developer-only.
@@ -353,7 +383,12 @@ phrases) and current/recent title/host, Tier 2 additionally a bounded excerpt
 usable, and Chrome Web Store disclosures matching the behavior
 ([policy](https://developer.chrome.com/docs/webstore/cws-dashboard-privacy)).
 
-### D10 — App/extension role split + refactor venue → DECIDED, IMPLEMENTATION PENDING (2026-07-15)
+### D10 — App/extension role split + refactor venue → SUPERSEDED BY D14 (2026-07-31; originally DECIDED 2026-07-15)
+
+> 2026-07-31: there is no app and no local server anymore (D14 serverless
+> cutover) — the extension owns every surface this split assigned to the app
+> (provider keys/settings in options, reports in the popup/summary). Kept for
+> the record.
 
 **Role split — "in-flow → extension, occasional admin/review → app":**
 
@@ -614,57 +649,7 @@ exists nowhere else in repo history). When the per-install auth decision is
 made, evaluate/rebase that branch rather than rewriting from scratch. F2
 input caps also remain. F3/F4 stay informational.
 
-### D9 — Gauge controller: v0 semantics locked, TypeScript-first rollout → RESOLVED (design, 2026-07-21)
-
-The gauge design (`docs/analysis-plan-a-gauge-design.md`, PR #121) is the v0
-behavior contract, superseding plan A (`AlignmentController`) and — on the
-shipping path — plan B (`StreakController`). §1–§6 (state model, dynamics, Tier 2
-dual gate, nag/renag/celebration semantics) are frozen as the contract; every
-numeric knob in §8 stays a placeholder until D4 Replay-CLI calibration.
-
-Semantics-affecting open questions (§10) decided (2026-07-21):
-- **Q1 S recovery ceiling → full recovery to 100** (no session cap; revisit by dogfooding).
-- **Q3 degraded-mode OK-side margin → keep as designed** (both directions weighted
-  by `f(margin)`); revisit later.
-- **Q4 plan B → dropped from consideration entirely.** `StreakController` survives
-  only as the current shipping default until the Python server is removed; it is not
-  a design constraint (no shared-component compromise).
-- **Q7 page-switch impulse → disabled (`J_page = 0`)**; not in v0.
-- **Q5 recovery denominator → resolved by issue #122 "F"** (2026-07-22): the OK-branch
-  recovery multiplier becomes `((1-m)/K) · min(exp(γ·max(-m,0)), F_max)` (K=2.45, γ=3.0,
-  F_max=6.0, placeholders). Slow just after a return, accelerating with sustained
-  return-inertia depth — no new state variable (reuses m), robust to a single false-DRIFT.
-  Fixes the drain(2.5×)/recovery(1×) asymmetry; full refill drops ~20 min → ~10 min and
-  celebration arrives sooner. Adopted in both reducers; benchmark stays byte-identical.
-
-Rollout revised to **TypeScript-first**, superseding the Python stage roadmap in
-gauge-design §9. Because the endgame is a full TS/serverless refactor (Tier 0 WASM
-+ Ollama Tier 1/2 + Gauge in the extension, Python server removed), the gauge is
-built once in TS rather than in Python then re-ported:
-1. Pure `reduceGauge(state, event, config)` core under `apps/extension/src/core/gauge/`
-   — no Chrome/IndexedDB/network/notification code. Language-neutral JSON fixtures
-   (each bundling its config) from the PR #121 simulator are the source of truth.
-2. Shadow mode: consume existing server Tier 0/1 verdicts + the local heartbeat
-   clock; record/display S/m/accel only; the existing controller keeps nagging.
-3. After shadow validation → IndexedDB SSOT (outbox: state + effects in one txn;
-   `chrome.storage.session`/worker memory are not authoritative).
-4. Move Tier 0 WASM + Ollama providers to TS, then switch the gauge to the real
-   trigger and remove the Python server. A single SSOT only from the moment the
-   gauge nags.
-
-Consequence: the Python-side stage 0 (all-page dwell in `observations.py`/`sqlite.py`)
-and `gauge.py`/`gauge_states` from §9 are **not built** — the TS gauge derives dwell
-from its own heartbeat clock. Degraded-mode margin (§3.2) needs `r0`/`tau_ok`, which
-`PipelineResult` does not currently expose to the extension; defer degraded mode or
-add those fields when it is first exercised.
-
-**Ship timing → RESOLVED (2026-07-22):** the gauge stays shadow until the TS cutover —
-**no interim Python trigger.** The Python reducer (`gauge.py`) was validation-only:
-its sole job was to confirm the design runs correctly (byte-identical to TS over the
-benchmark), which is done. Work proceeds **TypeScript-only**; the Python reducer is a
-frozen reference deleted with the server. Canonical roadmap: `docs/ts-migration-plan.md`.
-
-### D9 — Gauge controller: v0 semantics locked, TypeScript-first rollout → RESOLVED (design, 2026-07-21)
+### D16 — Gauge controller: v0 semantics locked, TypeScript-first rollout → RESOLVED (design, 2026-07-21; renumbered from a duplicate “D9” 2026-07-31)
 
 The gauge design (`docs/analysis-plan-a-gauge-design.md`, PR #121) is the v0
 behavior contract, superseding plan A (`AlignmentController`) and — on the
@@ -751,7 +736,38 @@ Preservation is layered:
 `dev-legacy` is read-only and never forward-merged. A bad cutover is reverted
 on `dev`; the tags are immutable recovery/evidence points.
 
-## Backlog (consolidated 2026-07-08, post-P1)
+### D15 — Persona lineup for the beta: completeness-first defaults + lab section → DECIDED (2026-07-30)
+
+Evidence base: v4 (2026-07-15, 50 real writer calls), v5 (07-16, 110 calls,
+delivery/starvation audit), and the 07-28~29 de-parroting blind A/B
+(~200 generations, ~150 nemotron judge votes; artifacts in the study
+worktrees' `_abtest/`, win rates in PR #163). Completeness (measured style
+failures: grammar breaks, hallucination DQs, thinking starvation, delivery
+rate) and appeal were ranked as separate axes.
+
+- **Default 4 (picker order)**: navigation, tsundere (rev), documentary,
+  dry_kibitzer — completeness ranks 1/3/6/4. Yandere (rank 2) is deliberately
+  held back as a later "new persona" release card despite being the
+  single strongest voice (HEAD beat its revision 10–3); first-run jealousy
+  framing judged too risky for a default.
+- **Remaining 6 → options "실험실 (베타)" section**, selectable but labeled.
+- **Workstream A (appeal↑ completeness↓ → invest in completeness)**: kyoto
+  (starvation retry / `think:"low"`, honorific-grammar guard — infra, not
+  prompt), baseball_caster (port game R2's category-stage method + ban
+  English host/word rendering).
+- **Workstream B (appeal↓ → find funnier reference lines + explore new
+  personas)**: quiet_coach, game_caster; plus new-persona scouting.
+- Known tension: chungcheong's R1 revision was adopted in PR #163 despite
+  losing 48.3% to HEAD (adopted for direct-mention reduction); HEAD restore
+  is worth reconsidering when it moves out of the lab.
+
+
+## Backlog (consolidated 2026-07-08, post-P1 — historical; server-era items)
+
+> 2026-07-31: this backlog predates the serverless cutover — most items below
+> either shipped in another shape or died with the server. Current work is
+> tracked in `docs/migration-gap-analysis.md` (feature gaps) and the store
+> submission checklist in `docs/store-submission.ko.md` (beta P0s).
 
 P0 + P1 + detection fixes + Ollama Cloud stack are all shipped. What remains,
 in rough priority order:
@@ -1052,7 +1068,7 @@ Writer-단독 감사(110콜, `docs/benchmarks/persona-voice-v5/`)가 Round 4의 
 ④ D9 패키징 스펙에 `configs/personas/*.yaml` 포함, ⑤ 팝업 페르소나 선택 UI
 10종 표시 확인.
 
-## Design section: menu bar states
+## Design section: menu bar states (historical — pre-serverless macOS app era; the extension has no menu bar)
 
 Monochrome template glyph + status dot to its right. Dot brightness = alpha;
 the attention state gets a gentle breathing pulse. No color at all.
@@ -1207,28 +1223,18 @@ the extension badge.
   detection). Side-window title churn no longer steals the dwell or freezes
   the gauge. When Chrome is entirely unfocused observations drop too — safe:
   `windows.onFocusChanged` re-observes the active tab on focus regain.
+- 2026-07-30: D15 decided — beta persona lineup (completeness-first default
+  4 + 실험실 6; yandere held back as a later release card). Workstream A/B
+  research docs merged alongside (#176 kyoto/baseball prescriptions, #177
+  coach/caster reference mining + new-persona candidates).
+- 2026-07-31: Full open-PR review (14 PRs, parallel agent audit) and the
+  beta hardening batch merged: #163 de-parroting, #166 ingress clamps,
+  #167 WAR removal, #168 sensitive pages never named (review extended the
+  invariant to the '관련 있어요' handler), #169 CWS store zip, #170 Korean
+  sensitive domains, #173 user domain lists, #171 privacy policy + #172
+  store kit (both amended per review: non-judgment transmission moments
+  disclosed; store copy over-claim fixed). #164/#174 stay open pending the
+  sample-line copy decision. This cleanup pass: duplicate gauge "D9" block
+  deduped and renumbered to D16, D9/D10 marked superseded by D14, status
+  header refreshed.
 
-### D15 — Persona lineup for the beta: completeness-first defaults + lab section → DECIDED (2026-07-30)
-
-Evidence base: v4 (2026-07-15, 50 real writer calls), v5 (07-16, 110 calls,
-delivery/starvation audit), and the 07-28~29 de-parroting blind A/B
-(~200 generations, ~150 nemotron judge votes; artifacts in the study
-worktrees' `_abtest/`, win rates in PR #163). Completeness (measured style
-failures: grammar breaks, hallucination DQs, thinking starvation, delivery
-rate) and appeal were ranked as separate axes.
-
-- **Default 4 (picker order)**: navigation, tsundere (rev), documentary,
-  dry_kibitzer — completeness ranks 1/3/6/4. Yandere (rank 2) is deliberately
-  held back as a later "new persona" release card despite being the
-  single strongest voice (HEAD beat its revision 10–3); first-run jealousy
-  framing judged too risky for a default.
-- **Remaining 6 → options "실험실 (베타)" section**, selectable but labeled.
-- **Workstream A (appeal↑ completeness↓ → invest in completeness)**: kyoto
-  (starvation retry / `think:"low"`, honorific-grammar guard — infra, not
-  prompt), baseball_caster (port game R2's category-stage method + ban
-  English host/word rendering).
-- **Workstream B (appeal↓ → find funnier reference lines + explore new
-  personas)**: quiet_coach, game_caster; plus new-persona scouting.
-- Known tension: chungcheong's R1 revision was adopted in PR #163 despite
-  losing 48.3% to HEAD (adopted for direct-mention reduction); HEAD restore
-  is worth reconsidering when it moves out of the lab.
