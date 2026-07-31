@@ -25,7 +25,7 @@ body:
       placeholder: |
         - [ ] ...
         - [ ] ...
-        - [ ] 서버 pytest·확장 빌드 통과
+        - [ ] `apps/extension-next` `npm run build` 통과
     validations:
       required: true
   - type: textarea

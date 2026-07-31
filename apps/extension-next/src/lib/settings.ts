@@ -10,13 +10,45 @@ export interface QuietHours {
 }
 
 export interface Settings {
-  tauOk: number // Tier-0 OK threshold (sensitivity); lower = stricter (more drift)
+  tauOk: number // Tier-0 OK threshold; one of SENSITIVITY_PRESETS (higher = stricter, more drift)
   quietHours: QuietHours
   ttsEnabled: boolean // speak the nag via Web Speech
 }
 
+export type SensitivityLevel = "lenient" | "standard" | "strict"
+
+/** Preset tauOk values anchored to the O4 benchmark FPR sweep
+ *  (docs/benchmarks/tier0-embedding-o4/operating_points.csv): lenient = FPR-15%
+ *  point (0.5487), standard = the shipped FPR-10% default (0.5869 → 0.59, matches
+ *  tier0.TAU_OK), strict = FPR-5% point (0.6765). Only three levels: Tier-1 rescue
+ *  re-checks DRIFT but never OK, so strictness beyond this stops being felt. */
+export const SENSITIVITY_PRESETS: Record<SensitivityLevel, number> = {
+  lenient: 0.55,
+  standard: 0.59,
+  strict: 0.68,
+}
+
+/** The preset level whose tauOk is nearest to the given value. */
+export function sensitivityLevelFor(tauOk: number): SensitivityLevel {
+  let best: SensitivityLevel = "standard"
+  let bestDist = Number.POSITIVE_INFINITY
+  for (const level of Object.keys(SENSITIVITY_PRESETS) as SensitivityLevel[]) {
+    const dist = Math.abs(SENSITIVITY_PRESETS[level] - tauOk)
+    if (dist < bestDist) {
+      best = level
+      bestDist = dist
+    }
+  }
+  return best
+}
+
+/** Snap an arbitrary tauOk (e.g. a legacy 0.01-step slider value) to the nearest preset. */
+export function snapTauOk(tauOk: number): number {
+  return SENSITIVITY_PRESETS[sensitivityLevelFor(tauOk)]
+}
+
 export const DEFAULT_SETTINGS: Settings = {
-  tauOk: 0.59, // O4-recalibrated default (matches tier0.TAU_OK)
+  tauOk: SENSITIVITY_PRESETS.standard,
   quietHours: { enabled: false, start: "22:00", end: "08:00" },
   ttsEnabled: false,
 }
@@ -24,7 +56,7 @@ export const DEFAULT_SETTINGS: Settings = {
 function coerce(value: Partial<Settings> | undefined): Settings {
   const q = value?.quietHours
   return {
-    tauOk: typeof value?.tauOk === "number" ? clamp(value.tauOk, 0, 1) : DEFAULT_SETTINGS.tauOk,
+    tauOk: typeof value?.tauOk === "number" ? snapTauOk(value.tauOk) : DEFAULT_SETTINGS.tauOk,
     quietHours: {
       enabled: Boolean(q?.enabled),
       start: typeof q?.start === "string" ? q.start : DEFAULT_SETTINGS.quietHours.start,
@@ -32,10 +64,6 @@ function coerce(value: Partial<Settings> | undefined): Settings {
     },
     ttsEnabled: Boolean(value?.ttsEnabled),
   }
-}
-
-function clamp(x: number, lo: number, hi: number): number {
-  return Math.max(lo, Math.min(hi, x))
 }
 
 export async function getSettings(): Promise<Settings> {

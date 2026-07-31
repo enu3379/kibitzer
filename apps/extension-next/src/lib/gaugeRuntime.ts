@@ -14,6 +14,7 @@ import { activePersona, clampSentences, DEFAULT_MAX_SENTENCES, pickCelebrate, pi
 import { klog } from "./klog.ts"
 import { playChime, speak } from "./chime.ts"
 import { shouldDropUrl } from "./domainFilter.ts"
+import { initDomainLists } from "./domainLists.ts"
 import { getSettings, inQuietHours } from "./settings.ts"
 import { pageKeyOf } from "./url.ts"
 import { browserPresent } from "./presence.ts"
@@ -426,6 +427,7 @@ async function deliver(
  *  still the page being judged and it isn't sensitive. Null on any mismatch/failure
  *  (the judge then falls back to title-only, as before). */
 async function extractActiveExcerpt(pageKey: string): Promise<string | null> {
+  await initDomainLists() // memoized — the user blocklist must be loaded before the drop gate
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
   if (!tab?.id || !tab.url || shouldDropUrl(tab.url) || pageKeyOf(tab.url) !== pageKey) return null
   try {
@@ -498,6 +500,9 @@ async function serviceTier2(
   })
   klog(`tier2 gate (${effect.reason}) on ${effect.pageKey} excerpt=${excerpt?.length ?? 0}c -> ${outcome.flow}`)
   logEvent("tier2", { pageKey: effect.pageKey, reason: effect.reason, flow: outcome.flow, excerpt: excerpt?.length ?? 0 })
+  // The judge itself broke (fail-open ate a would-be nag) — tell the user once in a
+  // while; the toolbar "!" mark carries the ambient state between alerts.
+  if (outcome.providerError) void notifyProviderProblem(outcome.providerError)
   // Apply guarded: dispatchTier2 re-checks (serialized) that the pending slot, goal revision,
   // and active page still match before applying — else it releases the slot (tier2_cancel)
   // with no side effect on whatever page the user is on now. The Writer message is staged
@@ -505,7 +510,36 @@ async function serviceTier2(
   await dispatchTier2(token, outcome.flow, outcome.flow === "drift" ? outcome.message : null, goal)
 }
 
+/** Clicking the alert opens the options page (wired in background's onClicked). */
+export const PROVIDER_ALERT_ID = "kibitzer-provider-alert"
+const PROVIDER_ALERT_TS_KEY = "kibitzer:provider-alert-ts"
+const PROVIDER_ALERT_THROTTLE_MS = 6 * 60 * 60_000
+
+/** OS notification for "the LLM judge is broken, so a nag was swallowed" — throttled
+ *  hard (6h) so a dead key doesn't turn into a notification storm, and gated on
+ *  presence like every other nudge (never pop over another app). The id deliberately
+ *  does NOT start with "kbz-" so the nag feedback handlers ignore it. */
+async function notifyProviderProblem(message: string): Promise<void> {
+  if (!(await browserPresent())) return
+  const stored = await chrome.storage.local.get(PROVIDER_ALERT_TS_KEY)
+  const last = typeof stored[PROVIDER_ALERT_TS_KEY] === "number" ? stored[PROVIDER_ALERT_TS_KEY] : 0
+  const now = Date.now()
+  if (now - last < PROVIDER_ALERT_THROTTLE_MS) return
+  await chrome.storage.local.set({ [PROVIDER_ALERT_TS_KEY]: now })
+  try {
+    chrome.notifications.create(PROVIDER_ALERT_ID, {
+      type: "basic",
+      iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+      title: "Kibitzer — AI 판정 오류",
+      message: `${message} · 지금은 제목 유사도만으로 판정합니다. 알림을 누르면 설정이 열립니다.`,
+    })
+  } catch {
+    // No notifications permission / platform limit — the toolbar mark still shows.
+  }
+}
+
 const TOAST_TOKEN_KEY = "toast-token"
+const FIRST_NAG_KEY = "first-nag-count" // lifetime intervention-toast counter (첫 훈수 변형)
 
 /** A durable, strictly-increasing display token. In-memory (`let toastToken = 0`) reset to 0
  *  on every service-worker restart, so a post-restart nag reused an id an earlier nag's
@@ -527,8 +561,10 @@ async function showToast(
   kind: "intervention" | "celebration",
 ): Promise<number | null> {
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
-  // Privacy: never surface a nudge on a sensitive page, even if one was queued before
-  // the user navigated there.
+  // Privacy: never surface a nudge on a sensitive (or user-blocked) page, even if one was
+  // queued before the user navigated there. A queued effect can be delivered by a freshly
+  // woken worker, so wait for the user lists (memoized) before consulting the gate.
+  await initDomainLists()
   if (tab?.url && shouldDropUrl(tab.url)) return null
   // Delivery invariant: never surface a nudge (toast, its OS-notification fallback, or the
   // chime) while Chrome isn't being looked at — the user explicitly never wants an OS
@@ -543,6 +579,14 @@ async function showToast(
   void playChime(kind) // audible cue via the offscreen document (works off-screen)
   const token = await nextToastToken()
   if (tab?.id) {
+    // The first-ever intervention toast renders as a one-time explainer variant (the
+    // response buttons and the bubble-click="잘 잡았어요" are not self-evident). Same
+    // atomic-kv pattern as the display token; counted at injection so an OS-notification
+    // fallback (which has no room to explain) doesn't normally consume the slot — only
+    // an injection FAILURE below can, which we accept for one-shot simplicity.
+    const firstRun =
+      kind === "intervention" &&
+      (await kvUpdate<number>(FIRST_NAG_KEY, (c) => (typeof c === "number" ? c : 0) + 1)) === 1
     const payload: ToastPayload = {
       notificationId: `kbz-${token}`,
       displayToken: token,
@@ -550,6 +594,7 @@ async function showToast(
       contextLabel,
       autoDismissMs: 12_000,
       kind,
+      firstRun,
     }
     try {
       await chrome.scripting.executeScript({

@@ -9,10 +9,23 @@ import { getGoal, setGoal, type SessionGoal } from "./lib/session.ts"
 import { embedText, embedTexts, judgeTier0 } from "./lib/tier0.ts"
 import { addExemplar, admissionEligible, admitAnchor, loadRefs, setDerived } from "./lib/relevance.ts"
 import { filterDerivedPhrases, MAX_PHRASES } from "./lib/goalEnrichment.ts"
-import { currentState, dispatch, enterNeutral, flushOutbox, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
-import { enrichGoal, getOllamaConfig, ollamaEnabled, setOllamaConfig, testOllama, tier1Rescue } from "./lib/tier12.ts"
+import { currentState, dispatch, enterNeutral, flushOutbox, PROVIDER_ALERT_ID, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
+import { enrichGoal, judgeEnabled, testRoute, tier1Rescue } from "./lib/tier12.ts"
+import {
+  addProviderKey,
+  connectProvider,
+  disconnectProvider,
+  getJudgeSettings,
+  removeProviderKey,
+  setRoutes,
+  toPublicSettings,
+  type ProviderId,
+  type TierName,
+  type TierRoute,
+} from "./lib/providers.ts"
+import { getUsage } from "./lib/usage.ts"
 import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
-import { getProviderHealth } from "./lib/providerHealth.ts"
+import { clearProviderHealth, getProviderHealth } from "./lib/providerHealth.ts"
 import { clearBadge } from "./lib/badge.ts"
 import { clearEvents, exportEvents, logEvent } from "./lib/events.ts"
 import { getSettings, setSettings, type Settings } from "./lib/settings.ts"
@@ -23,11 +36,19 @@ import { clearVisits, noteHeartbeat, noteInactive, noteJudged, noteObserve, note
 import { clearSessionSummary, dismissSessionSummary, finalizeSession, generateSummaryComment, getSessionSummary } from "./lib/sessionSummary.ts"
 import { clearSessionHistory } from "./lib/sessionHistory.ts"
 import { clearLog, exportLog, klog, logText } from "./lib/klog.ts"
-import { shouldDropUrl } from "./lib/domainFilter.ts"
+import { isUserAllowedUrl, isUserBlockedUrl, shouldDropUrl } from "./lib/domainFilter.ts"
+import { getDomainLists, initDomainLists, setDomainLists } from "./lib/domainLists.ts"
+import { truncateCodePoints } from "./providers/judgeParsing.ts"
 import { hostOf, pageKeyOf } from "./lib/url.ts"
 import { browserPresent, isFocusedWindow } from "./lib/presence.ts"
 
 const HEARTBEAT_ALARM = "kibitzer-next-heartbeat"
+
+// document.title is page-controlled and unbounded (a hostile page can set megabytes), and the
+// title flows into cloud payloads, recent-titles context, and durable observation records — so
+// every title is clamped at its ingress points. 512 code points is far beyond any legitimate
+// title. (Excerpts have their own cap in pageExcerpt.ts; the goal's cap lives in session.ts.)
+const TITLE_MAX_CHARS = 512
 
 let lastObservedKey: string | null = null
 
@@ -47,6 +68,7 @@ const dwell = new DwellScheduler({
 async function observe(url: string | undefined, title: string | undefined): Promise<void> {
   const goal = await getGoal()
   if (!goal || !url || !title) return
+  title = truncateCodePoints(title, TITLE_MAX_CHARS)
   const pageKey = pageKeyOf(url)
   if (!pageKey) {
     // Non-http(s) internal pages (chrome://newtab, chrome://extensions, about:blank, the web
@@ -82,13 +104,25 @@ async function observe(url: string | undefined, title: string | undefined): Prom
   const obsKey = `${pageKey}\n${title}`
   if (obsKey === lastObservedKey) return
   // Privacy gate: sensitive pages pause the gauge immediately — no dwell, no judging.
+  // The user lists load once per worker lifetime; awaiting the memoized init here keeps the
+  // synchronous gate accurate from the very first observation after a wake.
+  await initDomainLists()
   if (shouldDropUrl(url)) {
     await dwell.cancel() // drop any prior page's pending dwell; this page never counts
     lastObservedKey = obsKey
-    klog(`drop (sensitive) ${pageKey}`)
-    // NEUTRAL, not just a one-tick pause: we won't judge this page, so the previous page's
-    // verdict must not keep draining/recovering S across the heartbeats spent here.
-    await enterNeutral(pageKey, goal)
+    // The page must never be NAMED anywhere durable — not in this log line, and not as the
+    // neutral hold's activePageKey (the gauge trace klog and the exportable `tick` events both
+    // echo activePageKey, so passing the real host#hash here would leak the dropped host
+    // into ~/Downloads exports). Opaque constants mirror the internal-page path above;
+    // distinct dropped pages don't need distinct holds (once neutral, enterNeutral no-ops).
+    // Only the CATEGORY differs, so the user can tell their own list fired vs the built-in.
+    if (isUserBlockedUrl(url)) {
+      klog("drop (user-blocked)")
+      await enterNeutral("user-blocked", goal)
+    } else {
+      klog("drop (sensitive)")
+      await enterNeutral("sensitive#drop", goal)
+    }
     return
   }
   // Stop integrating the page just left the moment a new page is observed: hold the gauge
@@ -121,10 +155,37 @@ async function judgeAndDispatch(url: string, title: string, obsKey: string): Pro
   const epoch = goal.epoch
   lastObservedKey = obsKey
   const urlHost = hostOf(url)
+  // User allowlist (options 사이트 pane): this host is always on-goal — skip the Tier-0
+  // embed and the Tier-1/2 judges entirely and dispatch OK (no LLM spend, S recovers).
+  // The blocklist (static or user) wins inside isUserAllowedUrl. The page is still recorded
+  // as a normal observation — it isn't private, just pre-judged — so recent-titles and the
+  // session summary stay correct. The memoized init covers a reconcile() that reaches here
+  // before any observe() ran in a fresh worker.
+  await initDomainLists()
+  if (isUserAllowedUrl(url)) {
+    // B2 (same as below): the dwell took time; drop the verdict if the user moved on.
+    if (!(await stillJudging(pageKey, epoch))) {
+      klog(`judge dropped (page/goal moved on) ${pageKey}`)
+      if (lastObservedKey === obsKey) lastObservedKey = null
+      return
+    }
+    klog(`observe ${pageKey} user-allow final=OK`)
+    // No `score` field on purpose: replay's tau sweep reads only Tier-0-scored observes,
+    // and this page never got one — `mode` records why.
+    logEvent("observe", { pageKey, host: urlHost, verdict: "OK", mode: "user-allow" })
+    const now = Date.now()
+    await setActivePage({ pageKey, title, urlHost, score: 1 })
+    await recordObservation({ title, urlHost, verdict: "OK", ts: now }) // recent_titles / repeat context
+    await noteJudged(pageKey, title, urlHost, "OK", now, epoch, await browserPresent()) // session-summary dwell/verdict
+    // No r0/tauOk: activeMargin stays null → full-speed recovery (the same event shape as
+    // the "관련 있어요" user-override OK).
+    await dispatch({ type: "nav", pageKey, verdict: "OK", ts: now }, goal)
+    return
+  }
   const tauOk = (await getSettings()).tauOk
   const refs = await loadRefs()
   const { score, verdict: tier0Verdict, vector: titleVec, parts } = await judgeTier0(goal.text, title, tauOk, refs)
-  const enabled = await ollamaEnabled()
+  const enabled = await judgeEnabled()
   let verdict = tier0Verdict
   let tierReached = 0
   if (verdict === "DRIFT" && enabled) {
@@ -170,7 +231,7 @@ async function observeActiveTab(): Promise<void> {
 /** Expand the goal into cross-lingual derived exemplars (Tier 1 → embed → dedup → store).
  *  Fire-and-forget on goal change; dropped if the goal moves on while enriching. */
 async function enrichGoalDerived(goal: SessionGoal): Promise<void> {
-  if (!(await ollamaEnabled())) return
+  if (!(await judgeEnabled())) return
   try {
     const phrases = await enrichGoal(goal.text)
     if (phrases.length === 0) return
@@ -256,10 +317,32 @@ chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
 chrome.runtime.onInstalled.addListener(ensureHeartbeat)
 chrome.runtime.onStartup.addListener(ensureHeartbeat)
 
+// --- first-run onboarding --------------------------------------------------------
+
+// Open the onboarding wizard exactly once per profile. onInstalled also fires for
+// extension/Chrome updates (and unpacked reloads report "update"), so gate on the
+// "install" reason AND a storage flag — the flag survives dev reinstalls and can be
+// cleared later by a "튜토리얼 다시 보기" control.
+const ONBOARDING_SHOWN_KEY = "kibitzer:onboarding-shown:v1"
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details?.reason !== "install") return
+  void (async () => {
+    const stored = await chrome.storage.local.get(ONBOARDING_SHOWN_KEY)
+    if (stored[ONBOARDING_SHOWN_KEY]) return
+    // Flag only after the tab actually opened — if tabs.create fails, the next
+    // install still gets the wizard.
+    await chrome.tabs.create({ url: chrome.runtime.getURL("onboarding/onboarding.html") })
+    await chrome.storage.local.set({ [ONBOARDING_SHOWN_KEY]: Date.now() })
+  })()
+})
+
 // On every service-worker spin-up (wake or browser start), recover work a prior lifetime
 // checkpointed but was torn down before finishing: deliver any queued gauge effects
 // (atomic outbox, B1) and resume a dwell that was mid-flight (B3). The 1-min heartbeat
 // alarm guarantees a wake within a minute, bounding recovery latency.
+// Kick the user domain-lists load early so the synchronous privacy gate is warm before the
+// first observation (observe/judge also await the memoized init as a readiness barrier).
+void initDomainLists()
 void flushOutbox()
 void dwell.reconcile()
 chrome.runtime.onStartup.addListener(() => {
@@ -324,6 +407,11 @@ chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) =
   void chrome.notifications.clear(notificationId)
 })
 chrome.notifications.onClicked.addListener((notificationId) => {
+  if (notificationId === PROVIDER_ALERT_ID) {
+    void chrome.runtime.openOptionsPage()
+    void chrome.notifications.clear(notificationId)
+    return
+  }
   if (notificationId.startsWith("kbz-")) void chrome.notifications.clear(notificationId)
 })
 
@@ -334,13 +422,20 @@ interface PopupMessage {
   goal?: string
   minutes?: number | null
   kind?: string
-  apiUrl?: string
-  apiKeys?: string[]
-  tier1Model?: string
-  tier2Model?: string
   persona?: string
   displayToken?: number
   settings?: Partial<Settings>
+  // provider settings (options AI 판정 pane)
+  provider?: ProviderId
+  tier?: TierName
+  model?: string
+  name?: string
+  value?: string
+  keyId?: string
+  routes?: Partial<Record<TierName, Partial<TierRoute>>>
+  days?: number
+  // user domain lists (options 사이트 pane)
+  lists?: { block?: string[]; allow?: string[] }
 }
 
 async function handleMessage(message: PopupMessage): Promise<unknown> {
@@ -353,9 +448,9 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     // rebases the reducer clock without integrating. (No notePresence here — per the alarm's
     // comment, only the alarm heartbeat logs presence transitions.)
     if (goal) await dispatch({ type: (await browserPresent()) ? "heartbeat" : "inactive", ts: Date.now() }, goal)
-    const [state, ollama, persona, health] = await Promise.all([
+    const [state, enabled, persona, health] = await Promise.all([
       currentState(),
-      getOllamaConfig(),
+      judgeEnabled(),
       getPersonaKey(),
       getProviderHealth(),
     ])
@@ -364,7 +459,7 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
       s: Math.round(state.s),
       accelTier: state.accelTier,
       snoozedUntil: state.snoozedUntil ?? null,
-      ollama,
+      judgeEnabled: enabled,
       persona,
       personas: personaChoices(),
       health,
@@ -407,6 +502,15 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
   if (message?.type === "set-settings") {
     return await setSettings(message.settings ?? {})
   }
+  // User domain lists (options 사이트 pane). set-domain-lists normalizes/dedupes, persists,
+  // and refreshes the synchronous privacy gate in this worker; rejected (non-host) entries
+  // travel back so the UI can tell the user what was ignored.
+  if (message?.type === "get-domain-lists") {
+    return await getDomainLists()
+  }
+  if (message?.type === "set-domain-lists") {
+    return await setDomainLists(message.lists ?? {})
+  }
   if (message?.type === "delete-all-data") {
     // Wipe activity data (gauge, history, learned vectors, events, observations, log,
     // visit tracker, cached session summary); keep the goal, Ollama config, persona,
@@ -420,22 +524,40 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     await clearSessionHistory()
     return { ok: true }
   }
-  if (message?.type === "test-ollama") {
-    return await testOllama({
-      apiUrl: message.apiUrl,
-      apiKeys: message.apiKeys,
-      tier1Model: message.tier1Model,
-      tier2Model: message.tier2Model,
-    })
+  // Provider settings (options AI 판정 pane). Key values only ever travel INTO the
+  // worker; responses carry masked keys via toPublicSettings. tier12 picks up every
+  // change on its next call through the settings fingerprint — no cache reset needed.
+  // Mutations also clear the recorded provider error: the toolbar "!" mark must not
+  // keep accusing a config the user just changed.
+  if (message?.type === "get-judge-settings") {
+    return toPublicSettings(await getJudgeSettings())
   }
-  if (message?.type === "set-ollama") {
-    const ollama = await setOllamaConfig({
-      apiUrl: message.apiUrl,
-      apiKeys: message.apiKeys,
-      tier1Model: message.tier1Model,
-      tier2Model: message.tier2Model,
-    })
-    return { ollama }
+  if (message?.type === "connect-provider" && message.provider) {
+    return toPublicSettings(await connectProvider(message.provider))
+  }
+  if (message?.type === "disconnect-provider" && message.provider) {
+    await clearProviderHealth()
+    return toPublicSettings(await disconnectProvider(message.provider))
+  }
+  if (message?.type === "add-provider-key" && message.provider) {
+    await clearProviderHealth()
+    return toPublicSettings(
+      await addProviderKey(message.provider, message.name ?? "", message.value ?? ""),
+    )
+  }
+  if (message?.type === "remove-provider-key" && message.provider && message.keyId) {
+    await clearProviderHealth()
+    return toPublicSettings(await removeProviderKey(message.provider, message.keyId))
+  }
+  if (message?.type === "set-routes") {
+    await clearProviderHealth()
+    return toPublicSettings(await setRoutes(message.routes ?? {}))
+  }
+  if (message?.type === "test-route" && message.tier && message.provider) {
+    return await testRoute(message.tier, message.provider, message.model ?? "")
+  }
+  if (message?.type === "get-usage") {
+    return { rows: await getUsage(message.days ?? 1) }
   }
   if (message?.type === "end-session") {
     const goal = await getGoal()
@@ -518,21 +640,29 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
         // "목표와 관련 있어요": the user says this page IS on-goal (the nag was wrong) →
         // flip the active page to OK so S recovers. ("accepted"/"잘 잡았어요" agrees with
         // the nag, so it must NOT recover.)
+        // The active tab is re-queried at click time — a notification can outlive the nagged
+        // page, so the tab may now be a sensitive page. Those must never enter the klog,
+        // gauge events, or session visits: skip the whole recovery, same as observe().
+        // A notification-button click can wake a fresh worker, so make sure the user lists
+        // are loaded before the drop gate below runs.
+        await initDomainLists()
         const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
-        const pageKey = tab?.url ? pageKeyOf(tab.url) : null
+        const pageKey = tab?.url && !shouldDropUrl(tab.url) ? pageKeyOf(tab.url) : null
+        // Title ingress that bypasses observe() — clamp here too.
+        const tabTitle = truncateCodePoints(tab?.title ?? "", TITLE_MAX_CHARS)
         if (pageKey) {
           klog(`related → OK recover ${pageKey}`)
           await dispatch({ type: "nav", pageKey, verdict: "OK", ts: now }, goal)
           // The user override also flips the page in the session-summary tracker (open a timed
           // interval only if present — a notification-button click can arrive with Chrome unfocused).
           const present = await browserPresent()
-          void noteVerdict(pageKey, tab?.title ?? "", tab?.url ? hostOf(tab.url) : "", "OK", now, goal.epoch, present)
+          void noteVerdict(pageKey, tabTitle, tab?.url ? hostOf(tab.url) : "", "OK", now, goal.epoch, present)
           // Learn: add this page's embedding as a goal exemplar so this class of page
           // stops drifting at Tier-0 (the user-taught relevance loop).
-          if (tab?.title && tab.url && !shouldDropUrl(tab.url)) {
+          if (tabTitle && tab?.url) {
             try {
-              await addExemplar(await embedText(tab.title))
-              logEvent("exemplar", { pageKey, title: tab.title })
+              await addExemplar(await embedText(tabTitle))
+              logEvent("exemplar", { pageKey, title: tabTitle })
             } catch {
               // embedding failed — the S-recovery above still applies.
             }

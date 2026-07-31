@@ -1,7 +1,14 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { inQuietHours, type QuietHours } from "./settings.ts"
+import {
+  DEFAULT_SETTINGS,
+  SENSITIVITY_PRESETS,
+  inQuietHours,
+  sensitivityLevelFor,
+  snapTauOk,
+  type QuietHours,
+} from "./settings.ts"
 
 const at = (h: number, m = 0): number => new Date(2026, 0, 1, h, m, 0).getTime()
 
@@ -27,4 +34,29 @@ test("inQuietHours handles a same-day window (09:00–17:00)", () => {
 
 test("inQuietHours is false for a zero-length window", () => {
   assert.equal(inQuietHours({ enabled: true, start: "09:00", end: "09:00" }, at(9)), false)
+})
+
+test("sensitivity presets are strictly ordered and the default is standard", () => {
+  assert.ok(SENSITIVITY_PRESETS.lenient < SENSITIVITY_PRESETS.standard)
+  assert.ok(SENSITIVITY_PRESETS.standard < SENSITIVITY_PRESETS.strict)
+  assert.equal(SENSITIVITY_PRESETS.standard, 0.59) // O4 FPR-10% operating point (tier0.TAU_OK)
+  assert.equal(DEFAULT_SETTINGS.tauOk, SENSITIVITY_PRESETS.standard)
+})
+
+test("sensitivityLevelFor maps a tauOk to the nearest preset level", () => {
+  assert.equal(sensitivityLevelFor(SENSITIVITY_PRESETS.lenient), "lenient")
+  assert.equal(sensitivityLevelFor(SENSITIVITY_PRESETS.standard), "standard")
+  assert.equal(sensitivityLevelFor(SENSITIVITY_PRESETS.strict), "strict")
+  assert.equal(sensitivityLevelFor(0), "lenient")
+  assert.equal(sensitivityLevelFor(0.61), "standard")
+  assert.equal(sensitivityLevelFor(1), "strict")
+})
+
+test("snapTauOk folds legacy 0.01-step slider values onto preset values", () => {
+  assert.equal(snapTauOk(0.4), SENSITIVITY_PRESETS.lenient) // old slider min
+  assert.equal(snapTauOk(0.47), SENSITIVITY_PRESETS.lenient)
+  assert.equal(snapTauOk(0.59), SENSITIVITY_PRESETS.standard)
+  assert.equal(snapTauOk(0.62), SENSITIVITY_PRESETS.standard)
+  assert.equal(snapTauOk(0.7), SENSITIVITY_PRESETS.strict)
+  assert.equal(snapTauOk(0.8), SENSITIVITY_PRESETS.strict) // old slider max
 })

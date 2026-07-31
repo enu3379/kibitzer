@@ -1,6 +1,13 @@
 // The declared goal for the current session, owned by the extension (no server).
 
+import { truncateCodePoints } from "../providers/judgeParsing.ts"
+
 const GOAL_KEY = "kibitzer:goal:v1"
+// The goal text is embedded verbatim in every cloud payload (Tier-1/2, session summary), so it
+// must be bounded at ingress — nothing upstream guarantees a cap (the popup input can be pasted
+// into, and any extension page can set-goal via message). Clamped on read too, so values stored
+// before this cap existed can't bypass it.
+export const GOAL_MAX_CHARS = 2000
 // A strictly-monotonic counter that survives goal clears — see `epoch` below.
 const EPOCH_KEY = "kibitzer:goal-epoch:v1"
 
@@ -36,7 +43,7 @@ export async function getGoal(): Promise<SessionGoal | null> {
   const value = stored[GOAL_KEY] as Partial<SessionGoal> | undefined
   if (!value || typeof value.text !== "string" || !value.text.trim()) return null
   return {
-    text: value.text,
+    text: truncateCodePoints(value.text, GOAL_MAX_CHARS),
     availableMinutes: typeof value.availableMinutes === "number" ? value.availableMinutes : null,
     startedAt: typeof value.startedAt === "number" ? value.startedAt : nowMs(),
     revision: typeof value.revision === "number" ? value.revision : 0,
@@ -61,7 +68,7 @@ function serialize<T>(op: () => Promise<T>): Promise<T> {
  *  `epoch` when either the text or the available-minutes changes. Serialized. */
 export function setGoal(text: string, availableMinutes: number | null): Promise<SessionGoal | null> {
   return serialize(async () => {
-    const trimmed = text.trim()
+    const trimmed = truncateCodePoints(text.trim(), GOAL_MAX_CHARS)
     if (!trimmed) {
       await chrome.storage.local.remove(GOAL_KEY)
       return null

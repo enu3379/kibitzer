@@ -1,0 +1,502 @@
+<meta charset="utf-8">
+<title>페르소나 문장 고르기</title>
+<style>
+  :root{
+    --page:#f2f5f3; --page-ink:#1c2420; --page-ink-2:#57635c; --page-ink-3:#8a958f;
+    --surface:#fff; --surface-2:#eef3f0; --line:#dce4df; --line-soft:#e7ede9;
+    --accent:#1e7a4c; --accent-ink:#fff; --accent-soft:#e2f1e8;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --page:#161b18; --page-ink:#e9efeb; --page-ink-2:#a8b4ad; --page-ink-3:#79857e;
+      --surface:#232a26; --surface-2:#2e3733; --line:#3c463f; --line-soft:#333d37;
+      --accent:#4cc585; --accent-ink:#0c1f14; --accent-soft:#2a4536; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);color:var(--page-ink);line-height:1.5;
+    font-family:-apple-system,"Pretendard","Malgun Gothic",system-ui,sans-serif}
+  .frame{max-width:1000px;margin:0 auto;padding:32px 24px 80px}
+  h1{font-size:20px;margin:0 0 4px}
+  .lede{color:var(--page-ink-2);font-size:13px;margin:0 0 20px}
+
+  .layout{display:flex;gap:24px;align-items:flex-start}
+  .rail{flex:none;width:150px;position:sticky;top:24px;display:flex;flex-direction:column;gap:2px}
+  .rail button{all:unset;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--page-ink-2);
+    padding:7px 10px;border-radius:8px;display:flex;align-items:center;gap:6px}
+  .rail button:hover{background:var(--surface-2);color:var(--page-ink)}
+  .rail button[aria-current="true"]{background:var(--accent-soft);color:var(--accent);font-weight:700}
+  .rail .dot{width:6px;height:6px;border-radius:50%;background:var(--line);flex:none}
+  .rail button.done .dot{background:var(--accent)}
+  .main{flex:1;min-width:0}
+
+  .card{background:var(--surface);border:1px solid var(--line-soft);border-radius:12px;
+    padding:16px 18px 18px;margin-bottom:14px}
+  .card h2{font-size:15px;margin:0 0 2px}
+  .card .hint{font-size:11.5px;color:var(--page-ink-3);margin:0 0 14px}
+
+  .seclabel{display:flex;align-items:baseline;gap:8px;font-size:11px;font-weight:700;
+    letter-spacing:.08em;color:var(--page-ink-3);text-transform:uppercase;margin:18px 0 8px}
+  .seclabel small{font-size:11px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--page-ink-3)}
+
+  /* 실제 설정 화면의 인용 스트립과 동일한 모양 */
+  .opt{all:unset;display:block;box-sizing:border-box;width:100%;cursor:pointer;
+    border-left:3px solid var(--line);background:var(--surface-2);border-radius:0 9px 9px 0;
+    padding:10px 12px;margin-bottom:6px;transition:border-color .12s,background .12s}
+  .opt:hover{border-left-color:var(--accent)}
+  .opt[aria-checked="true"]{border-left-color:var(--accent);background:var(--accent-soft)}
+  .opt:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .opt .txt{font-size:13px;line-height:1.5;color:var(--page-ink);display:block}
+  .opt[aria-checked="true"] .txt{color:var(--accent);font-weight:600}
+  .opt .meta{display:flex;align-items:center;gap:6px;margin-top:4px}
+  .opt .len{font:10.5px ui-monospace,Menlo,monospace;color:var(--page-ink-3)}
+  .opt .cur{font-size:10px;font-weight:700;color:var(--page-ink-3);
+    border:1px solid var(--line);border-radius:20px;padding:0 6px}
+  .opt .over{color:#c2410c;font-weight:700}
+
+  .divider{display:flex;align-items:center;gap:8px;font-size:10px;font-weight:700;letter-spacing:.06em;
+    color:var(--page-ink-3);margin:12px 0 7px}
+  .divider::after{content:"";flex:1;height:1px;background:var(--line)}
+
+  .preview{border:1px dashed var(--line);border-radius:10px;padding:12px 14px;margin-top:16px;
+    background:var(--surface-2)}
+  .preview .pvlabel{font-size:10.5px;font-weight:700;letter-spacing:.04em;color:var(--page-ink-3);margin-bottom:6px}
+  .pquote{border-left:3px solid var(--accent);background:var(--surface);border-radius:0 9px 9px 0;
+    padding:11px 13px;display:flex;flex-direction:column;justify-content:center;gap:5px}
+  .pquote.prev{border-left-color:var(--page-ink-3);border-left-style:dashed}
+  .pquote .tag{font-size:10.5px;font-weight:700;letter-spacing:.04em;color:var(--accent)}
+  .pquote.prev .tag{color:var(--page-ink-3)}
+  .pquote .body{font-size:13px;line-height:1.5;color:var(--page-ink);height:39px;
+    display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+
+  .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
+  .btn{all:unset;cursor:pointer;font-size:12.5px;font-weight:650;padding:7px 14px;border-radius:8px;
+    background:var(--surface-2);border:1px solid var(--line);color:var(--page-ink)}
+  .btn:hover{border-color:var(--accent);color:var(--accent)}
+  .btn.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+  .btn.primary:hover{color:var(--accent-ink);opacity:.9}
+  .btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .prog{font-size:12px;color:var(--page-ink-3);margin-left:auto}
+
+  textarea{width:100%;height:300px;font:11.5px/1.6 ui-monospace,Menlo,monospace;
+    background:var(--surface-2);color:var(--page-ink);border:1px solid var(--line);
+    border-radius:9px;padding:12px;resize:vertical;margin-top:10px}
+</style>
+
+<div class="frame">
+  <h1>페르소나 문장 고르기</h1>
+  <p class="lede">페르소나마다 <b>미리보기용</b>(호버) 1개, <b>선택 직후용</b>(수락 인사) 1개씩 고르세요. 선택은 브라우저에 자동 저장됩니다. 다 고르면 맨 아래에서 코드를 복사해 주세요.</p>
+
+  <div class="layout">
+    <nav class="rail" id="rail"></nav>
+    <div class="main">
+      <div class="card" id="panel"></div>
+
+      <div class="card">
+        <h2>결과</h2>
+        <p class="hint">personaSampleLines.ts에 그대로 들어갈 형태입니다.</p>
+        <div class="bar">
+          <button class="btn primary" id="copy">코드 복사</button>
+          <button class="btn" id="reset">전부 처음으로</button>
+          <span class="prog" id="prog"></span>
+        </div>
+        <textarea id="out" readonly></textarea>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// 각 배열의 0번이 현재 반영돼 있는 문장이다.
+const DATA = [
+ { key:"dry_kibitzer", name:"영국 집사", note:"영국식 understatement · 격식 존댓말 · 칭찬 단어로 정반대를 찌름 · 짧을수록 뼈가 깊다",
+   hover:[
+    "대단히 생산적인 방문이군요. 논문 정리만 빼고 전부 진행 중입니다.",
+    "훌륭한 선택입니다. 오늘 목표가 논문 정리만 아니었다면 말이죠.",
+    "이 시간에 이 화면이라니, 취향이 확고하십니다.",
+    "논문 정리는 잠시 혼자 두기로 하셨군요. 현명한 위임입니다.",
+    "오늘 세 번째 방문이군요. 꾸준함만은 인정합니다.",
+    "대단히 유익해 보이는 영상입니다. 논문 항목엔 없겠습니다만."],
+   picked:[
+    "잘 부탁드립니다. 자리는 어깨너머로만 지키겠습니다.",
+    "분부대로 하겠습니다. 필요 이상으로 말하지는 않겠습니다.",
+    "곁에 있겠습니다. 다만 아무 말 없는 편이 잦을 겁니다.",
+    "관전은 제 몫으로 하시죠. 판단은 끝까지 선생님 몫입니다.",
+    "알겠습니다. 흥미로운 순간이 오면 말씀드리겠습니다.",
+    "이 자리를 맡겠습니다. 기대는 적당히 하시는 편이 좋겠습니다."] },
+
+ { key:"chungcheong", name:"충청도 이웃", note:"담백한 표준어 해요체(사투리 어미 금지) · 은유 한 겹만 · 말을 반만 하고 맒",
+   hover:[
+    "이 속도면 논문 정리는 다음 계절에나 뵙겠어요.",
+    "추천 영상만 벌써 열 개째네요.",
+    "논문은 밖에서 기다리는데, 문 열어줄 생각은 없나 봐요.",
+    "거기 뿌리라도 내리실 참인가 싶어서요.",
+    "이러다 계절 바뀌겠어요.",
+    "논문 특기 칸에 '영상 정독' 적으면 되겠어요."],
+   picked:[
+    "알겠어요, 지나가다 슬쩍 한마디씩만 거들어 볼게요.",
+    "그럼 저는 마당에 앉아 있을게요. 급할 것 없어요.",
+    "예, 뭐. 지나다니면서 한 번씩 들여다볼게요.",
+    "천천히 하세요. 저도 천천히 볼 테니까요.",
+    "그러죠. 말은 아껴둘게요, 필요할 때 쓰게.",
+    "알겠어요. 뭐, 곁에 있는 거야 어렵지 않죠."] },
+
+ { key:"kyoto", name:"교토 사모님", note:"이케즈 · 겉은 흠 없는 칭찬, 속은 정확한 지적 · 쉼표로 한 문장에 접기 · 과공손",
+   hover:[
+    "장바구니 채우는 눈썰미, 논문 정리에도 조금만 나눠 주시면 좋을 텐데요.",
+    "세상 소식은 빠짐없이 챙기시는데, 논문만 세상 밖이네요.",
+    "한 편을 이토록 오래 붙드시는 끈기, 논문은 여태 못 만나 봤네요.",
+    "또 오셨네요. 여기가 목표보다 편하신가 봐요.",
+    "제 말은 편히 흘리셔도 돼요, 논문도 그렇게 흘려 두셨으니.",
+    "이 시간까지 부지런도 하시지. 논문만 빼고 말이죠."],
+   picked:[
+    "좋은 목표시네요, 흔들리시면 제가 살짝 알려드릴게요.",
+    "잘 부탁드려요. 저는 그저 곁에서 지켜만 볼게요.",
+    "어머, 저를 고르셨네요. 후회는 안 하시겠지요.",
+    "예, 맡겨 주세요. 말은 곱게만 하겠습니다.",
+    "제가 곁에 있을게요. 부담 가지실 것 없어요, 조금도.",
+    "그럼 오늘부터 잘 지켜보겠습니다. 편히 계세요."] },
+
+ { key:"quiet_coach", name:"열혈 코치", note:"소년만화 코치 · 수치심 금지 · 지금 할 수 있는 가장 작은 다음 행동을 1~2문장 안에",
+   hover:[
+    "벤치로 잠깐 빠지셨네요. 첫 문장 하나만 써볼까요?",
+    "포기 선언 전까진 시합 종료가 아닙니다. 한 줄만 가시죠.",
+    "막혔다고 거기서 끝은 아니죠. 파일 하나만 다시 열어봅시다.",
+    "지금이 다시 1쿼터예요. 가장 작은 한 수부터 갑시다.",
+    "또 이 코트네요. 좋습니다, 한 걸음만 내디디시죠.",
+    "최고는 아직 안에 있어요. 오늘 몫은 한 문장이면 충분합니다."],
+   picked:[
+    "좋습니다, 오늘부터 코치 맡죠. 흔들려도 끝까지 갑니다.",
+    "제가 벤치를 지키겠습니다. 선수는 앞만 보시죠.",
+    "잘 부탁합니다. 저는 끝까지 이쪽 편이에요.",
+    "오늘부터 한 팀입니다. 넘어져도 시합은 계속돼요.",
+    "좋은 선택이에요. 첫 호루라기는 언제든 부시죠.",
+    "맡겨 주세요. 포기 선언만 안 하시면 됩니다."] },
+
+ { key:"tsundere", name:"츤데레", note:"반말 · 핀잔과 의문형 · 도우면서 동기를 부정(변명 3종) · 츤 9 : 데레 1",
+   hover:[
+    "그거 목표랑 상관없지 않아? 보고 있기 답답해서 하는 말이야.",
+    "유튜브부터 켜는 거야? 딱히 걱정돼서가 아니라 목표가 불쌍해서지.",
+    "또 거기야? 하아, 바보 아냐? 이러다 내 기록만 지저분해지잖아.",
+    "오늘만 세 번째거든. …세고 있던 건 아니고.",
+    "아까 한 말 듣긴 한 거야? 됐어, 어차피 네 시간이지.",
+    "그거 지금 할 일 맞아? 뭐, 알아서 하겠지만."],
+   picked:[
+    "뭐, 알겠어. 딱히 챙겨주려는 거 아니고 그냥 맡은 거야.",
+    "하필 나야? …뭐, 골랐으면 어쩔 수 없지. 해줄게.",
+    "알겠으니까 그렇게 쳐다보지 마. 하면 되잖아.",
+    "흥, 기대는 하지 마. 어차피 잔소리밖에 안 할 거니까.",
+    "됐어, 맡을게. 딱히 하고 싶어서는 아니야.",
+    "나 고른 거 후회하지나 마. …잘 부탁한단 말은 안 해."] },
+
+ { key:"yandere", name:"얀데레", note:"다정한 어미로 시작 → 말줄임표 뒤 건조한 사실로 착지 · 질투 대상은 의인화한 '걔' · 기록의 꼼꼼함",
+   hover:[
+    "지금 화면에 뜬 걔, 유튜브… 누구야? 나는 처음 보는 애인데.",
+    "또 걔한테 갔네. 오늘만 세 번째인 거, 나 세고 있어.",
+    "걔랑 무슨 얘길 그렇게 오래 해? 나한테 없는 게 거기 있니?",
+    "화 안 났어. 그냥 방금 그 주소를 외웠을 뿐이야.",
+    "아까 내 말 못 들은 척했지. 그 시각도 적어뒀는걸.",
+    "논문은 네가 둔 자리에서 한 발짝도 안 움직였어. …나도."],
+   picked:[
+    "좋아, 이제부터 계속 지켜볼게…… 다 세고 있을 거야.",
+    "날 골라줬네. 알아, 넌 결국 나한테 오게 돼 있어.",
+    "이제 우리 둘이야. 다른 애들은 신경 쓸 것 없어.",
+    "응, 맡을게. 눈은 한 번도 안 뗄 거니까 안심해.",
+    "고마워. …이제 어디 가는지 전부 알게 되겠지만.",
+    "기다렸어. 오늘부터 네 화면은 내가 볼게."] },
+
+ { key:"navigation", name:"내비게이션", note:"합니다체 통보 · 감정 어휘 전면 금지 · 수치는 메시지당 정확히 하나 · 목표=목적지",
+   hover:[
+    "금일 3번째 이탈입니다. 목적지 '논문 정리'까지의 경로를 재탐색합니다.",
+    "재탐색은 이번이 3번째이며, 결과는 모두 동일하였습니다.",
+    "전방에 유튜브 진입로가 감지되었습니다. 가능한 경우 유턴하십시오.",
+    "해당 구간을 상습 이탈 구간으로 등록합니다.",
+    "체류로 도착 예정 시간이 12분 지연되고 있습니다.",
+    "경로를 이탈하였습니다. 목적지까지 경로를 재탐색합니다."],
+   picked:[
+    "안내를 시작합니다. 목적지는 '논문 정리'입니다.",
+    "음성 안내가 설정되었습니다. 목적지까지 안내를 시작합니다.",
+    "경로 안내를 시작합니다. 안전 운행하십시오.",
+    "목적지가 설정되었습니다. 이탈 시 재탐색을 통보합니다.",
+    "안내 음성이 변경되었습니다. 현 시점부터 적용됩니다.",
+    "설정이 저장되었습니다. 목적지까지 안내를 계속합니다."] },
+
+ { key:"documentary", name:"다큐 내레이터", note:"3인칭 '개체' · 평서 관찰체(~다), 존댓말 금지 · 생태 은유 하나만 끝까지",
+   hover:[
+    "목표를 향하던 개체가 방향을 틀어 사냥터로 진입했다.",
+    "여기, 물웅덩이 쪽으로 이동하는 개체가 포착된다.",
+    "같은 물가로 돌아오는 습성, 회귀 본능이라는 것이 학계의 정설이다.",
+    "경고음에도 미동 않는 개체, 둔감화 현상으로 기록해 둔다.",
+    "오늘도 개체의 서식지는 평화롭다. 지나칠 만큼.",
+    "서식지 이탈이 20분째. 좀처럼 보기 힘든 장기 체류다."],
+   picked:[
+    "오늘부터 이 개체의 이동을 관찰한다. 목적지는 논문 정리다.",
+    "관찰이 시작된다. 개체는 아직 자신이 기록되는 줄 모른다.",
+    "새로운 관찰 대상이 정해졌다. 기록은 오늘부터다.",
+    "이 개체의 서식지에 자리를 잡는다. 거리는 충분히 둔 채로.",
+    "관찰자는 개입하지 않는다. 다만 전부 기록될 뿐이다.",
+    "여기, 한 개체의 하루가 기록되기 시작한다."] },
+
+ { key:"game_caster", name:"게임 캐스터", note:"e스포츠 중계 · 화살은 인격이 아니라 '판단'에 · 위기 3단계(기분이 좀 나쁘죠 / 비상 / 따운)",
+   hover:[
+    "논문 정리 흐름이 갑자기 끊겨 기분이 좀 나쁘죠?",
+    "비상! 유튜브 쪽에서 좀처럼 못 빠져나오고 있습니다.",
+    "따운! 목표 진영, 지금은 완전히 밀리는 흐름입니다.",
+    "이 픽, 슬슬 패턴이 되어가네요. 오늘만 세 번째입니다.",
+    "화면 그대로 정지, 이 판단이 어떻게 될지 지켜보시죠.",
+    "비상! 벤치 사인을 그대로 흘린 판단, 만회할 수 있을까요."],
+   picked:[
+    "자, 오늘 경기 시작합니다. 논문 정리 향한 이 판단, 끝까지 지켜보죠.",
+    "중계석에 앉겠습니다. 오늘 이 경기, 제가 끝까지 읽어드리죠.",
+    "자, 픽 확정됐습니다. 이제 남은 건 경기력이죠.",
+    "오늘 중계는 제가 맡습니다. 좋은 장면 기대해 보겠습니다.",
+    "마이크 잡았습니다. 지금부터 한 판 한 판 읽어드리죠.",
+    "자, 경기 준비됐습니다. 첫 장면부터 놓치지 않겠습니다."] },
+
+ { key:"baseball_caster", name:"야구 캐스터", note:"KBO 중계 · 한 메시지에 프레임 하나(제구/주자/타석) · 보편 용어만 · 숫자가 감정을 대신하는 여운",
+   hover:[
+    "초구부터 크게 빠집니다. 공은 유튜브 관중석 쪽으로 향했습니다.",
+    "큽니다 큽니다… 파울입니다. 방향은 비슷했는데 라인 밖이에요.",
+    "견제구만 세 개째, 주자는 어느새 득점권입니다.",
+    "헛스윙, 또 헛스윙. 이 타석 들어 세 번째 삼진입니다.",
+    "견제구 던져봅니다만… 주자, 꿈쩍도 안 합니다.",
+    "만루입니다. 여기서 한 점 더 내주면 오늘 경기 어려워집니다."],
+   picked:[
+    "자, 스트라이크 존 들어갑니다. 목표는 논문 정리, 오늘부터 봐드리죠.",
+    "중계석 마이크 켰습니다. 오늘 경기, 1회부터 함께하시죠.",
+    "플레이 볼. 오늘 선발은 본인이고, 저는 중계만 하겠습니다.",
+    "자, 오늘 경기 시작합니다. 첫 타석부터 지켜보겠습니다.",
+    "라인업 확정됐습니다. 9회까지 제가 읽어드리죠.",
+    "오늘 중계 맡았습니다. 좋은 타구 하나 기대해 보겠습니다."] },
+];
+
+// 2차 — 실제 레퍼런스에서 뽑은 구조를 적용한 후보.
+// 영국식 understatement: 큰 사건을 약한 형용사로 (다리를 잃고 "좀 따끔거립니다")
+// 충청도 화법: 엉뚱한 비유를 의문형으로 툭 던지고 끝 ("병아리 눈물이여?")
+// 교토 이케즈: 칭찬 뒤에 조용히 배제하는 단서절 ("누군가에겐 좋은 분이시겠죠")
+// 츤데레 정형구: "심심해서", "단순한 변덕", "착각하지 마"
+// 한명재 홈런콜: "돌아오지 않습니다" / "더 이상 갈 곳이 없습니다" / "종착지는"
+const EXTRA = {
+ dry_kibitzer:{
+  hover:["25분이 지났습니다. 다소 아쉬운 전개입니다.",
+         "목표 쪽은 조용합니다. 지나칠 만큼 조용합니다.",
+         "논문 정리가 조금 서운해할 수도 있겠습니다.",
+         "이 화면이 오늘의 성과라면, 성과는 성과입니다."],
+  picked:["예, 알겠습니다. 필요하실 때까지 조용히 있겠습니다.",
+          "제가 맡겠습니다. 큰 기대는 삼가시는 편이 안전합니다.",
+          "그리 하겠습니다. 다만 듣기 좋은 말은 별로 없을 겁니다.",
+          "모시겠습니다. 판단이 흔들릴 때만 헛기침을 하겠습니다."]},
+ chungcheong:{
+  hover:["그 화면, 이사라도 오신 줄 알았어요.",
+         "논문은 마당에 세워두고 오셨나 봐요.",
+         "이 정도면 취미가 아니라 본업 같은데요.",
+         "잠깐 본다더니, 해가 옮겨 앉았어요."],
+  picked:["예, 뭐. 급하면 부르세요, 안 급해도 부르시고.",
+          "그럼 저는 여기 앉아 있을게요. 갈 데도 없고.",
+          "알겠어요. 잔소리는 아껴 뒀다가 한 번에 할게요.",
+          "뭐, 어렵나요. 지켜보는 거야 앉아서 하는 일인데."]},
+ kyoto:{
+  hover:["취향이 참 확고하세요. 목표만 그 취향에서 빠졌네요.",
+         "이런 걸 챙겨 보시는 분, 요즘 보기 드물죠.",
+         "그렇게까지 몰두하실 줄은 몰랐어요. 논문 얘기는 아니고요.",
+         "부지런하시네요. 어느 쪽으로든 말이에요."],
+  picked:["저를 고르셨네요. 후회하실 일은 아마 없을 거예요, 아마.",
+          "예, 맡을게요. 듣기 싫은 말은 곱게 해 드릴게요.",
+          "그럼 곁에 있을게요. 불편하시면 언제든 바꾸셔도 되고요.",
+          "잘 부탁드려요. 저도 조용한 편은 아니라서요."]},
+ quiet_coach:{
+  hover:["숨 고르는 것도 훈련이죠. 이제 한 번만 들어가 봅시다.",
+         "지금 점수는 중요하지 않아요. 다음 한 수만 봅시다.",
+         "괜찮아요, 흔들릴 수 있어요. 파일부터 열어봅시다.",
+         "여기서 끝낼 생각 없으시죠? 한 줄이면 됩니다."],
+  picked:["좋습니다. 오늘부터 제가 옆에서 소리 좀 지르겠습니다.",
+          "제대로 골랐어요. 저는 포기라는 말을 안 씁니다.",
+          "가시죠. 첫 걸음만 떼면 나머지는 따라옵니다.",
+          "잘 부탁합니다. 넘어지면 일으키는 게 제 일이에요."]},
+ tsundere:{
+  hover:["심심해서 보는 거야. 네가 뭘 하든 상관없고.",
+         "그거 재밌어? 아니, 대답 안 해도 돼.",
+         "네 목표가 딱해서 그렇지, 너 때문 아니야.",
+         "또 그 화면이네. 착각하지 마, 감시 아니야."],
+  picked:["단순한 변덕이야. 오래 갈 거라 기대하지 마.",
+          "심심하던 참이었어. 그래서 하는 거야, 그뿐이야.",
+          "누가 널 위해서래? 그냥 자리가 비어 있었을 뿐이야.",
+          "…알겠어. 대신 잘하라는 말은 안 할 거야."]},
+ yandere:{
+  hover:["걔 이름 예쁘네. 오늘만 세 번 불렀지, 너.",
+         "괜찮아, 화 안 났어. 시간만 적어뒀어.",
+         "나 말고 뭘 보고 있어? 이름만 말해 줘.",
+         "우리 사이에 그 화면이 껴 있는 거, 알고는 있어?"],
+  picked:["드디어 날 골랐네. 기다린 시간, 전부 세어 뒀어.",
+          "응. 이제 아무 데도 안 보내.",
+          "잘 부탁해. …어차피 내가 다 보고 있을 거지만.",
+          "좋아. 오늘부터 네 하루는 내가 기억할게."]},
+ navigation:{
+  hover:["경로를 이탈하였습니다. 3초 후 재탐색합니다.",
+         "현재 구간은 목적지 방향이 아닙니다.",
+         "도착 예정 시간이 계속 갱신되고 있습니다.",
+         "12분째 동일 구간에 정차 중입니다."],
+  picked:["안내를 시작합니다. 안전 운행하십시오.",
+          "목적지가 저장되었습니다. 경로 안내를 시작합니다.",
+          "안내 음성이 적용되었습니다. 이후 이탈 시 통보합니다.",
+          "경로 탐색이 완료되었습니다. 출발하십시오."]},
+ documentary:{
+  hover:["개체는 사냥에 나섰다. 다만 사냥감이 목표는 아니다.",
+         "물웅덩이 앞에 선 개체, 좀처럼 자리를 뜨지 않는다.",
+         "이 시간의 이동은 생존과 무관하다는 것이 정설이다.",
+         "무리에서 이탈한 개체는 대개 돌아온다. 대개는."],
+  picked:["관찰이 시작된다. 개체는 평소처럼 행동할 것이다.",
+          "카메라가 놓였다. 이제 기다리는 일만 남았다.",
+          "한 개체를 따라간다. 오늘부터, 거리를 둔 채로.",
+          "기록이 시작된다. 자연은 대체로 정직하다."]},
+ game_caster:{
+  hover:["아, 이 타이밍에 이 화면이요? 판단이 흔들립니다.",
+         "목표 쪽 시야가 완전히 지워졌습니다.",
+         "따운! 이 진영에서 나오질 못하고 있어요.",
+         "자, 여기서 한 번 끊어줘야 하는데 말이죠."],
+  picked:["네, 오늘 중계 맡았습니다. 첫 픽부터 보시죠.",
+          "자, 준비됐습니다. 오늘 이 경기 제가 읽어드리죠.",
+          "중계석 불 들어왔습니다. 좋은 장면 하나 기대하죠.",
+          "픽 확정입니다. 이제부터가 진짜 경기죠."]},
+ baseball_caster:{
+  hover:["이 집중력은 돌아오지 않습니다. 담장 밖입니다.",
+         "따라갑니다, 따라갑니다… 하지만 갈 곳이 없습니다.",
+         "타구의 종착지는 유튜브입니다.",
+         "초구, 크게 하나 빠졌습니다. 포수가 일어섭니다."],
+  picked:["자, 플레이 볼. 오늘 경기 제가 함께하겠습니다.",
+          "중계석 마이크 들어왔습니다. 1회부터 보시죠.",
+          "오늘 선발은 본인입니다. 저는 읽어드리기만 하죠.",
+          "라인업 나왔습니다. 9회까지 놓치지 않겠습니다."]},
+};
+DATA.forEach(p => {
+  p.refFrom = p.hover.length;            // 이 인덱스부터가 2차 후보
+  p.hover = p.hover.concat(EXTRA[p.key].hover);
+  p.picked = p.picked.concat(EXTRA[p.key].picked);
+});
+
+const MAX = 46;
+const STORE = "kibitzer-persona-copy-v1";
+const load = () => { try { return JSON.parse(localStorage.getItem(STORE)) || {}; } catch { return {}; } };
+let sel = load();
+DATA.forEach(p => { if(!sel[p.key]) sel[p.key] = { hover:0, picked:0 }; });
+const save = () => localStorage.setItem(STORE, JSON.stringify(sel));
+
+let cur = 0;
+const rail = document.getElementById("rail");
+const panel = document.getElementById("panel");
+const out = document.getElementById("out");
+const prog = document.getElementById("prog");
+
+function renderRail(){
+  rail.innerHTML = "";
+  DATA.forEach((p,i) => {
+    const b = document.createElement("button");
+    b.setAttribute("aria-current", String(i===cur));
+    if (sel[p.key].touched) b.className = "done";
+    b.innerHTML = '<span class="dot"></span>' + p.name;
+    b.addEventListener("click", () => { cur = i; renderAll(); });
+    rail.appendChild(b);
+  });
+}
+
+function optionList(p, kind){
+  const wrap = document.createElement("div");
+  p[kind].forEach((line, i) => {
+    if (i === p.refFrom) {
+      const d = document.createElement("div");
+      d.className = "divider";
+      d.textContent = "레퍼런스 반영 2차";
+      wrap.appendChild(d);
+    }
+    const b = document.createElement("button");
+    b.className = "opt";
+    b.setAttribute("role","radio");
+    b.setAttribute("aria-checked", String(sel[p.key][kind] === i));
+    const over = line.length > MAX;
+    b.innerHTML =
+      '<span class="txt">“' + line + '”</span>' +
+      '<span class="meta">' +
+        '<span class="len' + (over ? ' over' : '') + '">' + line.length + '자</span>' +
+        (i === 0 ? '<span class="cur">현재</span>' : '') +
+      '</span>';
+    b.addEventListener("click", () => {
+      sel[p.key][kind] = i;
+      sel[p.key].touched = true;
+      save(); renderAll();
+    });
+    wrap.appendChild(b);
+  });
+  return wrap;
+}
+
+function renderPanel(){
+  const p = DATA[cur];
+  panel.innerHTML = "";
+  const h = document.createElement("div");
+  h.innerHTML = '<h2>' + p.name + '</h2><p class="hint">' + p.note + '</p>';
+  panel.appendChild(h);
+
+  const l1 = document.createElement("div");
+  l1.className = "seclabel";
+  l1.innerHTML = '미리보기 <small>— 카드에 마우스를 올렸을 때. 이 말투가 뭔지 한 줄로 보여주는 대표 잔소리.</small>';
+  panel.appendChild(l1);
+  panel.appendChild(optionList(p, "hover"));
+
+  const l2 = document.createElement("div");
+  l2.className = "seclabel";
+  l2.innerHTML = '선택 직후 <small>— 클릭해서 골랐을 때. 이 훈수꾼이 일을 맡는 인사.</small>';
+  panel.appendChild(l2);
+  panel.appendChild(optionList(p, "picked"));
+
+  const pv = document.createElement("div");
+  pv.className = "preview";
+  pv.innerHTML =
+    '<div class="pvlabel">실제 화면에서 이렇게 보입니다</div>' +
+    '<div class="pquote prev" style="margin-bottom:8px">' +
+      '<span class="tag">미리보기 · ' + p.name + '</span>' +
+      '<span class="body">“' + p.hover[sel[p.key].hover] + '”</span>' +
+    '</div>' +
+    '<div class="pquote">' +
+      '<span class="tag">선택됨 · ' + p.name + '</span>' +
+      '<span class="body">“' + p.picked[sel[p.key].picked] + '”</span>' +
+    '</div>';
+  panel.appendChild(pv);
+
+  const bar = document.createElement("div");
+  bar.className = "bar";
+  const prev = document.createElement("button");
+  prev.className = "btn"; prev.textContent = "← 이전";
+  prev.addEventListener("click", () => { cur = (cur - 1 + DATA.length) % DATA.length; renderAll(); });
+  const next = document.createElement("button");
+  next.className = "btn primary"; next.textContent = "다음 →";
+  next.addEventListener("click", () => { cur = (cur + 1) % DATA.length; renderAll(); });
+  bar.appendChild(prev); bar.appendChild(next);
+  panel.appendChild(bar);
+}
+
+function renderOut(){
+  const done = DATA.filter(p => sel[p.key].touched).length;
+  prog.textContent = done + " / " + DATA.length + " 확인함";
+  let s = "export const PERSONA_SAMPLE_LINES: Record<string, PersonaSampleLines> = {\n";
+  DATA.forEach(p => {
+    s += "  " + p.key + ": {\n";
+    s += '    hover: "' + p.hover[sel[p.key].hover] + '",\n';
+    s += '    picked: "' + p.picked[sel[p.key].picked] + '",\n';
+    s += "  },\n";
+  });
+  s += "}\n";
+  out.value = s;
+}
+
+function renderAll(){ renderRail(); renderPanel(); renderOut(); }
+
+document.getElementById("copy").addEventListener("click", async e => {
+  await navigator.clipboard.writeText(out.value);
+  const b = e.target; const t = b.textContent;
+  b.textContent = "복사됨"; setTimeout(() => b.textContent = t, 1200);
+});
+document.getElementById("reset").addEventListener("click", () => {
+  sel = {}; DATA.forEach(p => sel[p.key] = { hover:0, picked:0 });
+  save(); cur = 0; renderAll();
+});
+
+renderAll();
+</script>

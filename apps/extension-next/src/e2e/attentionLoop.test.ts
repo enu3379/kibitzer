@@ -32,6 +32,7 @@ const evt = (name: string) => {
   return { addListener: (fn: (...a: unknown[]) => unknown) => listeners[name].push(fn), removeListener() {} }
 }
 const store = new Map<string, unknown>() // backs chrome.storage.local
+const createdTabs: string[] = [] // URLs opened via chrome.tabs.create (onboarding assertions)
 let activeTab: { id: number; url: string; title: string; active: boolean; windowId: number } | null = null
 const toasts: Array<Record<string, unknown>> = [] // captured injected toast payloads
 const notifications: Array<{ id: string; opts: Record<string, unknown> }> = []
@@ -46,7 +47,10 @@ const chrome = {
     onActivated: evt("tabs.onActivated"),
     query: async () => (activeTab ? [activeTab] : []),
     get: async () => activeTab,
-    create: async () => ({}),
+    create: async (opts: { url?: string } = {}) => {
+      createdTabs.push(opts.url ?? "")
+      return {}
+    },
   },
   webNavigation: { onHistoryStateUpdated: evt("wn") },
   runtime: {
@@ -174,6 +178,12 @@ test("E2E: goal → drift on an off-goal page → S drains to 0 → nag delivere
     const final = await send({ type: "get-state" })
     assert.ok(nagged, `a nag was delivered once S drained (final S=${final.s}, toasts=${toasts.length})`)
     assert.equal(final.s, 0, "S bottomed out at 0")
+    // The lifetime-first intervention toast carries the one-time explainer variant.
+    assert.equal(
+      (toasts[0] as { firstRun?: boolean } | undefined)?.firstRun,
+      true,
+      "the first-ever intervention toast is the explainer variant",
+    )
   } finally {
     mock.timers.reset()
   }
@@ -206,6 +216,95 @@ test("E2E: a sensitive page is dropped — never judged, no drain, no nag (P0-1 
     const st = await send({ type: "get-state" })
     assert.equal(st.s, 100, "a sensitive page pauses the gauge — S must not drain")
     assert.equal(toasts.length + notifications.length, 0, "no nag is ever surfaced for a sensitive page")
+    // The exportable debug log must never NAME the sensitive page: neither the drop line nor
+    // the gauge trace (which echoes the neutral hold's activePageKey) may carry its host.
+    const log = (await send({ type: "get-log" })).text as string
+    assert.ok(!log.includes("chase.com"), "the sensitive host never appears in the exportable log")
+    assert.ok(/drop \(sensitive\)/.test(log), "the drop itself is still traced (category only)")
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: '관련 있어요' clicked while a sensitive page is active — no recovery, never named", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    // Fresh session on a neutral page (a distinct goal → resetState wipes the prior scenario).
+    // Distinct URL/title/id from the user-lists scenario below, so the obsKey dedup this test
+    // leaves behind can never swallow that scenario's first observation.
+    activeTab = { id: 8, url: "https://example.test/tax-prep", title: "세금 준비 자료", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "세금 신고 준비", minutes: null })
+    await settle(50)
+
+    // A nag notification can outlive the page it nagged about: the user switches to a BANK tab,
+    // then clicks "목표와 관련 있어요" on the stale nag. The handler re-queries the active tab, so
+    // without a guard the bank would be klogged, dispatched into the gauge, and stored in visits.
+    activeTab = { id: 8, url: "https://chase.com/account/summary", title: "Account Summary", active: true, windowId: 1 }
+    await send({ type: "kibitzer:toast-feedback", kind: "related" })
+    await settle(100)
+
+    const log = (await send({ type: "get-log" })).text as string
+    assert.ok(!log.includes("chase.com"), "the sensitive host never appears in the exportable log")
+    assert.ok(!/related → OK recover/.test(log), "the OK-recovery is skipped entirely on a sensitive page")
+    const events = JSON.stringify(await send({ type: "export-events" }))
+    assert.ok(!events.includes("chase.com"), "the sensitive host never appears in the durable event export")
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: user domain lists — a blocked host drops host-free, an allowlisted host judges OK without Tier-0", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    await send({ type: "clear-log" })
+    // Fresh session on a neutral page; register both user lists via the options message path.
+    activeTab = { id: 4, url: "https://example.test/neutral", title: "중립 페이지", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "논문 초록 정리", minutes: null })
+    const setRes = (await send({
+      type: "set-domain-lists",
+      lists: { block: ["blocked.test"], allow: ["allowed.test"] },
+    })) as { lists?: { block: string[]; allow: string[] }; rejected?: string[] }
+    assert.deepEqual(setRes.lists, { block: ["blocked.test"], allow: ["allowed.test"] })
+    assert.deepEqual(setRes.rejected, [])
+    await settle(50)
+
+    // Navigate to the USER-blocked page: dropped like a sensitive page — no dwell checkpoint,
+    // no judging, gauge held NEUTRAL.
+    activeTab = { id: 4, url: "https://blocked.test/very/private/path", title: "비밀 페이지", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(4, { status: "complete" }, activeTab)
+    await settle(50)
+    mock.timers.tick(6000)
+    await fireStartup() // reconcile: there is no checkpoint to judge
+    await settle(300)
+    for (let i = 0; i < 10; i += 1) await beat()
+    let log = (await send({ type: "get-log" })).text as string
+    assert.ok(log.includes("drop (user-blocked)"), "the drop is logged as a fixed string")
+    assert.ok(!log.includes("blocked.test"), "the blocked host never appears in the log")
+    let st = await send({ type: "get-state" })
+    assert.equal(st.s, 100, "a user-blocked page holds the gauge — S must not drain")
+
+    // Navigate to the ALLOWLISTED page: judged OK without any Tier-0 embed once the dwell
+    // elapses — recorded as a normal observation, no nag, S stays full (OK recovers).
+    activeTab = { id: 4, url: "https://allowed.test/docs/ch1", title: "완전 다른 주제의 문서", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(4, { status: "complete" }, activeTab)
+    await settle(50)
+    mock.timers.tick(6000)
+    await fireStartup() // reconcile fires the dwell's judgement (no WASM needed on this path)
+    await settle(300)
+    log = (await send({ type: "get-log" })).text as string
+    assert.ok(/user-allow final=OK/.test(log), "the allowlisted page short-circuited to OK")
+    assert.ok(!/final=DRIFT/.test(log), "no Tier-0 judgement ran for the allowlisted page")
+    for (let i = 0; i < 10; i += 1) await beat()
+    st = await send({ type: "get-state" })
+    assert.equal(st.s, 100, "an always-OK page keeps S full")
+    assert.equal(toasts.length + notifications.length, 0, "no nag on either list")
+
+    // Clean up the lists so later scenarios observe an unfiltered world.
+    await send({ type: "set-domain-lists", lists: { block: [], allow: [] } })
   } finally {
     mock.timers.reset()
   }
@@ -331,6 +430,11 @@ test("E2E: a nag is never surfaced while Chrome is unfocused, but delivers once 
     await send({ type: "set-goal", goal: "알림보기", minutes: null })
     await settle(50)
     assert.ok(toasts.length + notifications.length > 0, "the nudge delivers once Chrome is focused again")
+    // The first-run explainer slot was consumed by the suite's first nag (the drain
+    // scenario above) — every later toast must render the normal compact variant.
+    for (const t of toasts) {
+      assert.ok(!(t as { firstRun?: boolean }).firstRun, "later nags render the normal toast")
+    }
   } finally {
     winFocused = true
     idleActive = true
@@ -377,4 +481,21 @@ test("E2E: title churn in an UNFOCUSED window's active tab cannot steal the focu
   } finally {
     mock.timers.reset()
   }
+})
+
+test("E2E: first install opens the onboarding tab once — updates and re-fires never re-open it", async () => {
+  createdTabs.length = 0
+  const fireInstalled = async (details?: { reason: string }) => {
+    for (const fn of listeners["runtime.onInstalled"]) await fn(details)
+    await settle(20) // the listener's storage check + tabs.create are async
+  }
+  const opened = () => createdTabs.filter((u) => u.includes("onboarding/onboarding.html")).length
+
+  await fireInstalled({ reason: "install" })
+  assert.equal(opened(), 1, "a true first install opens the wizard tab")
+
+  await fireInstalled({ reason: "install" }) // duplicate install event → storage flag blocks it
+  await fireInstalled({ reason: "update" }) // extension update (incl. unpacked reloads)
+  await fireInstalled() // defensive: event fired with no details
+  assert.equal(opened(), 1, "the wizard never opens a second time")
 })

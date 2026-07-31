@@ -76,6 +76,12 @@ jobs:
           shasum -a 256 "$STAGE/kibitzer-extension-next-v${VERSION}.zip" | awk '{print $1}' > "$STAGE/sha256.txt"
           echo "asset=$STAGE/kibitzer-extension-next-v${VERSION}.zip" >> "$GITHUB_ENV"
           echo "sha256=$(cat "$STAGE/sha256.txt")" >> "$GITHUB_ENV"
+          # Chrome Web Store variant: the dashboard requires manifest.json at the ZIP ROOT
+          # (the folder-nested zip above is for manual "Load unpacked" installs only).
+          (cd dist && zip -rq "$STAGE/kibitzer-extension-next-store-v${VERSION}.zip" .)
+          shasum -a 256 "$STAGE/kibitzer-extension-next-store-v${VERSION}.zip" | awk '{print $1}' > "$STAGE/sha256-store.txt"
+          echo "store_asset=$STAGE/kibitzer-extension-next-store-v${VERSION}.zip" >> "$GITHUB_ENV"
+          echo "sha256_store=$(cat "$STAGE/sha256-store.txt")" >> "$GITHUB_ENV"
 
       - name: Publish the GitHub release
         if: steps.gate.outputs.exists == 'false'
@@ -102,8 +108,9 @@ jobs:
           - All data stays in the extension's local IndexedDB; nothing is sent to any server.
           - Built by the Release workflow with \`npm run build\` (tests + typecheck green, model SHA-256 verified).
           - Asset SHA-256: \`${sha256}\`
+          - **kibitzer-extension-next-store-v${VERSION}.zip** is the Chrome Web Store upload variant (manifest.json at the zip root — not for manual installs). SHA-256: \`${sha256_store}\`
           EOF
-          gh release create "$TAG" "$asset" \
+          gh release create "$TAG" "$asset" "$store_asset" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "Kibitzer extension-next v${VERSION}" \
