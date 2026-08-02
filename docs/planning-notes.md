@@ -617,9 +617,8 @@ request, auto-scores leakage + hijack).
 ### D13 — Security review beyond prompt injection → RECORDED + PARTLY IMPLEMENTED (2026-07-16)
 
 Follow-on review of the non-prompt-injection attack surface (server HTTP, secrets,
-SQLite, TTS, extension). Full write-up:
-[security-review-2026-07-15.md](security-review-2026-07-15.md). One finding worth
-scheduling:
+SQLite, TTS, extension). The full pre-cutover write-up is preserved by
+`pre-serverless-cutover-2026-07-24`. One finding was worth scheduling:
 
 - **F1 [MEDIUM] — local API has no origin authentication.** No CORS/Host
   validation/token; binds `127.0.0.1` (not LAN-exposed) but the JSON-content-type
@@ -1162,8 +1161,9 @@ the extension badge.
 - 2026-07-15 (security review): non-prompt-injection pass (D13). Main finding F1
   — local API has no origin auth, DNS-rebinding-reachable from any visited site;
   fix = Host allowlist middleware. Also F2 (uncapped goal/title). Confirmed safe:
-  no SQLi, no secret leak, no extension XSS, 127.0.0.1 bind. Findings in
-  security-review-2026-07-15.md; fixes deferred to the localhost-hardening track.
+  no SQLi, no secret leak, no extension XSS, 127.0.0.1 bind. The full review is
+  preserved by the pre-serverless cutover tag; fixes were deferred to the
+  localhost-hardening track.
 - 2026-07-08 (P1 design layer): Claude completed the design handoff — celebration
   toast (happy-arc eyes as the observer's one expression change; buttonless
   markup fix: `[hidden]` was defeated by `.row{display:flex}` and celebrations
@@ -1237,4 +1237,3 @@ the extension badge.
   sample-line copy decision. This cleanup pass: duplicate gauge "D9" block
   deduped and renumbered to D16, D9/D10 marked superseded by D14, status
   header refreshed.
-

@@ -197,7 +197,7 @@ v3 하네스가 최종 fallback 문자열을 별도로 보존하지 않아, 당�
 
 상세 보고서: [persona-voice-v4/report.md](benchmarks/persona-voice-v4/report.md) ·
 원응답: [results.json](benchmarks/persona-voice-v4/results.json) · 재현 스크립트:
-[`scripts/eval_persona_voice.py`](../scripts/eval_persona_voice.py).
+[`scripts/eval_persona_voice.py`](https://github.com/enu3379/kibitzer/blob/pre-serverless-cutover-2026-07-24/scripts/eval_persona_voice.py).
 
 - 실제 `minimax-m3` 50콜 모두 drift를 확인했다.
 - strict JSON 45건 + 코드펜스 복구 5건, fallback 0건이다.

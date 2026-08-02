@@ -49,7 +49,7 @@ CWS 대시보드의 각 폼에 그대로 붙여 넣을 수 있게 정리한 제�
 | `idle` | 자리 비움을 감지해 부재 중 게이지 증감을 멈춘다. |
 | `downloads` | 사용자가 설정에서 직접 실행하는 진단 로그/이벤트 JSONL 내보내기 전용. |
 | `offscreen` | 훈수 알림 차임 오디오 재생(MV3 워커는 오디오 재생 불가). |
-| `notifications` | 브라우저가 포커스 밖일 때 토스트 대신 OS 알림으로 전달하는 폴백. |
+| `notifications` | Chrome이 포커스되고 사용자가 활성 상태지만 현재 페이지에 인페이지 토스트를 주입할 수 없을 때(Chrome 내부 페이지·PDF 등) 같은 훈수를 OS 알림으로 전달한다. 설정한 AI 제공자 오류로 훈수가 보류됐을 때도 최대 6시간에 한 번 상태 안내에 사용한다. Chrome이 포커스 밖이거나 사용자가 자리를 비운 동안에는 어느 알림도 표시하지 않는다. |
 
 원격 코드 없음(esbuild 정적 번들, CSP `script-src 'self' 'wasm-unsafe-eval'` — WASM은 동봉된 로컬 임베딩 모델용). `incognito: not_allowed`.
 

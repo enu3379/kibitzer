@@ -1,6 +1,6 @@
 // Replays every shared fixture (fixtures/gauge/*.json) through reduceGauge and
-// asserts `expected` per fixtures/gauge/README.md. The Python track loads the
-// same files. Run: `npm run test` (node --experimental-strip-types --test).
+// asserts `expected` per fixtures/gauge/README.md.
+// Run: `npm run test` (node --experimental-strip-types --test).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

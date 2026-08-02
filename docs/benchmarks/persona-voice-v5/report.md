@@ -6,7 +6,7 @@ Calls: 10 personas × 5 scenarios × 2 예산(1024/2048) + 수정 후 재검증 
 원자료: [results.json](results.json) (Writer 1024, 배포 기본값),
 [results-writer2048.json](results-writer2048.json) (진단용 로컬 오버라이드),
 [results-recheck.json](results-recheck.json) (dry/chungcheong 프롬프트 수정 후, 2048).
-재현 스크립트: [`scripts/eval_persona_voice.py`](../../../scripts/eval_persona_voice.py).
+재현 스크립트: [`scripts/eval_persona_voice.py`](https://github.com/enu3379/kibitzer/blob/pre-serverless-cutover-2026-07-24/scripts/eval_persona_voice.py).
 
 ## 방법
 

@@ -35,7 +35,7 @@ Two consumers, immediately:
 
 Per observation, in original timestamp order, mirroring
 `POST /observations/browser-nav` in
-[observations.py](../apps/server/app/api/observations.py):
+[observations.py](https://github.com/enu3379/kibitzer/blob/pre-serverless-cutover-2026-07-24/apps/server/app/api/observations.py):
 
 1. **Title-furniture strip** — `strip_repeated_title_suffix(embedding_text,
    recent_titles_for_host(host))`. The recent-titles state is cross-session
@@ -169,7 +169,7 @@ gets auto-filled once audit-plan Step 2 ships its classifier).
 
 ## Required small refactor
 
-`apply_controller` ([controller_flow.py](../apps/server/app/core/controller_flow.py))
+`apply_controller` ([controller_flow.py](https://github.com/enu3379/kibitzer/blob/pre-serverless-cutover-2026-07-24/apps/server/app/core/controller_flow.py))
 calls `datetime.now(timezone.utc)` internally — add an optional `now:
 datetime | None = None` parameter (default preserves live behavior) so replay
 can inject `obs.ts`. Also give the replay module its own in-memory

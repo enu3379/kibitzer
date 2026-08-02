@@ -4,17 +4,19 @@
 
 > **Rollout status (2026-07-22):** 실행 로드맵은
 > `docs/ts-migration-plan.md`가 대체한다. 아래 §7과 §9는 폐기되었으며 최종
-> 결정은 `docs/planning-notes.md` D9를 따른다. §1–§6의 알고리즘·의미론과
+> 결정은 `docs/planning-notes.md` D16을 따른다. §1–§6의 알고리즘·의미론과
 > §8·§10의 설계 근거는 계속 유효하다.
 
 ## 지위 (Status)
 
 - **이 문서는 단일 몰입 게이지 컨트롤러의 설계 근거다.** 게이지는
-  A안(`AlignmentController`, EWMA + 히스테리시스)을 완전히 대체한다.
-  `docs/analysis-plan-a-redesign.md` §3(재설계안)~§5(미해결 질문)를 supersede하며,
-  같은 문서의 §1~§2(현황 분석·문제점 P1~P10)는 이 설계의 근거 기록으로 유효하다.
-- **출하·마이그레이션 순서는 `docs/ts-migration-plan.md`가 정의한다.** 현행
-  `StreakController`는 TypeScript 전환까지의 임시 기본값일 뿐 설계 제약이 아니다.
+  구 A안(`AlignmentController`, EWMA + 히스테리시스)과 B안
+  (`StreakController`)을 완전히 대체한다. 구 A안 분석의 P1~P10과 이 설계의
+  해소 방식은 아래 표에 자립적으로 요약돼 있으며, 전체 pre-cutover 분석은
+  `pre-serverless-cutover-2026-07-24`에 보존돼 있다.
+- **출하·마이그레이션은 완료됐다.** 현재 실행 계약은
+  `docs/gauge/contract.md`와 `apps/extension-next/src/core/gauge/`가 정의하며,
+  `docs/ts-migration-plan.md`는 완료된 전환 기록이다.
 - 병행 별도 과제: TIER 0/1 오판정 개선(별도 작업으로 진행 — 게이지는 오판을
   관성으로 완충할 뿐 판정 품질을 대신 고치지 않는다), 누적 드리프트 시간
   조건. 시간 조건 과제의 "무감쇠 예산 클록" 전제는 **이 설계와 충돌하므로
