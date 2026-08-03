@@ -2,6 +2,7 @@ import {
   ProviderHttpError,
   ProviderResponseError,
 } from "./errors.ts"
+import { readProviderJson, withResponseDebug } from "./responseDebug.ts"
 import {
   parseTier1Json,
   parseTier2DecisionJson,
@@ -89,11 +90,9 @@ export class OllamaChatJudgeProvider implements JudgeProvider {
       { role: "system", content: TIER1_OLLAMA_SYSTEM_PROMPT },
       { role: "user", content: JSON.stringify(payload) },
     ])
-    return parseJudgeResponse(
-      response,
-      this.maxOutputTokens,
-      parseTier1Json,
-    )
+    return withResponseDebug(response, "ollama tier1 judge", () => (
+      parseJudgeResponse(response, this.maxOutputTokens, parseTier1Json)
+    ))
   }
 
   async completeGoalEnrichment(prompt: string, timeoutMs: number): Promise<string> {
@@ -104,14 +103,14 @@ export class OllamaChatJudgeProvider implements JudgeProvider {
         think: false,
         numPredict: GOAL_ENRICHMENT_NUM_PREDICT,
       })
-      return messageContent(response)
+      return withResponseDebug(response, "ollama goal enrichment", () => messageContent(response))
     } catch (error) {
       if (!(error instanceof ProviderHttpError)) throw error
       const response = await this.postChat(messages, {
         timeoutMs,
         numPredict: GOAL_ENRICHMENT_THINKING_NUM_PREDICT,
       })
-      return messageContent(response)
+      return withResponseDebug(response, "ollama goal enrichment", () => messageContent(response))
     }
   }
 
@@ -123,11 +122,9 @@ export class OllamaChatJudgeProvider implements JudgeProvider {
       { role: "system", content: systemPrompt },
       { role: "user", content: JSON.stringify(payload) },
     ])
-    return parseJudgeResponse(
-      response,
-      this.maxOutputTokens,
-      parseTier2Json,
-    )
+    return withResponseDebug(response, "ollama tier2 judge", () => (
+      parseJudgeResponse(response, this.maxOutputTokens, parseTier2Json)
+    ))
   }
 
   async decideTier2(
@@ -144,11 +141,9 @@ export class OllamaChatJudgeProvider implements JudgeProvider {
         jsonMode: true,
       },
     )
-    return parseJudgeResponse(
-      response,
-      this.maxOutputTokens,
-      parseTier2DecisionJson,
-    )
+    return withResponseDebug(response, "ollama tier2 judge", () => (
+      parseJudgeResponse(response, this.maxOutputTokens, parseTier2DecisionJson)
+    ))
   }
 
   async writeTier2Message(
@@ -168,17 +163,19 @@ export class OllamaChatJudgeProvider implements JudgeProvider {
         temperature: opts.temperature,
       },
     )
-    const content = messageContent(response).trim()
-    if (outputBudgetExhausted(response, this.writerMaxOutputTokens)) {
-      throw new ProviderResponseError(
-        "output_exhausted",
-        "tier2 writer response exhausted output budget",
-      )
-    }
-    if (!content) {
-      throw new ProviderResponseError("writer_empty", "tier2 writer response was empty")
-    }
-    return truncateCodePoints(content, 320)
+    return withResponseDebug(response, "ollama tier2 writer", () => {
+      const content = messageContent(response).trim()
+      if (outputBudgetExhausted(response, this.writerMaxOutputTokens)) {
+        throw new ProviderResponseError(
+          "output_exhausted",
+          "tier2 writer response exhausted output budget",
+        )
+      }
+      if (!content) {
+        throw new ProviderResponseError("writer_empty", "tier2 writer response was empty")
+      }
+      return truncateCodePoints(content, 320)
+    })
   }
 
   private async postChat(
@@ -234,7 +231,7 @@ export class OllamaChatJudgeProvider implements JudgeProvider {
         // Read the body INSIDE the abort window: a server that sends headers then stalls the
         // body would otherwise hang forever (clearTimeout used to run before this), and with
         // serialized judging that froze the whole pipeline.
-        const data = await responseJson(response)
+        const data = await readProviderJson(response, "ollama transport")
         if (this.onUsage) {
           const num = (v: unknown): number =>
             typeof v === "number" && Number.isFinite(v) ? v : 0
@@ -285,19 +282,6 @@ export function outputBudgetExhausted(
     && Number.isInteger(evalCount)
     && evalCount >= maxOutputTokens
   return response.done_reason === "length" || pinned
-}
-
-async function responseJson(response: Response): Promise<Record<string, unknown>> {
-  let data: unknown
-  try {
-    data = await response.json()
-  } catch {
-    throw new ProviderResponseError("http_json", "provider HTTP body was not JSON")
-  }
-  if (!data || typeof data !== "object" || Array.isArray(data)) {
-    throw new ProviderResponseError("envelope", "provider response was not a JSON object")
-  }
-  return data as Record<string, unknown>
 }
 
 function parseJudgeResponse<T>(

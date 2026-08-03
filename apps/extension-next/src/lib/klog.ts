@@ -16,6 +16,9 @@ let queue: Promise<void> = Promise.resolve()
 
 export function klog(message: string): void {
   console.log(`[kbz] ${message}`)
+  // Provider adapters also run in Node-based unit tests and tooling, where the
+  // extension storage API does not exist. Console diagnostics still work there.
+  if (typeof chrome === "undefined") return
   const entry: LogEntry = { t: Date.now(), m: message }
   queue = queue.then(async () => {
     const stored = await chrome.storage.local.get(LOG_KEY)
@@ -26,12 +29,19 @@ export function klog(message: string): void {
 }
 
 export async function readLog(): Promise<LogEntry[]> {
+  await queue
   const stored = await chrome.storage.local.get(LOG_KEY)
   return Array.isArray(stored[LOG_KEY]) ? (stored[LOG_KEY] as LogEntry[]) : []
 }
 
 export async function clearLog(): Promise<void> {
-  await chrome.storage.local.remove(LOG_KEY)
+  // Keep clearing in the same ordering chain as appends. Otherwise a pending raw
+  // response write can land after remove() and resurrect content the user cleared.
+  queue = queue.then(
+    () => chrome.storage.local.remove(LOG_KEY),
+    () => chrome.storage.local.remove(LOG_KEY),
+  )
+  await queue
 }
 
 function hhmmss(t: number): string {

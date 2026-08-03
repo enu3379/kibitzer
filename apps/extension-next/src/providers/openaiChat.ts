@@ -15,6 +15,7 @@ import {
   rotated,
 } from "./chatTransport.ts"
 import { ProviderResponseError } from "./errors.ts"
+import { withResponseDebug } from "./responseDebug.ts"
 import {
   parseTier1Json,
   parseTier2DecisionJson,
@@ -99,7 +100,7 @@ export class OpenAIChatJudgeProvider implements JudgeProvider {
       timeoutMs,
       maxTokens: GOAL_ENRICHMENT_MAX_TOKENS,
     })
-    return chatContent(response)
+    return withResponseDebug(response, "openai goal enrichment", () => chatContent(response))
   }
 
   async confirmTier2(
@@ -142,17 +143,19 @@ export class OpenAIChatJudgeProvider implements JudgeProvider {
       ],
       { maxTokens: this.writerMaxOutputTokens, temperature: opts.temperature },
     )
-    const content = chatContent(response).trim()
-    if (chatExhausted(response, this.writerMaxOutputTokens)) {
-      throw new ProviderResponseError(
-        "output_exhausted",
-        "tier2 writer response exhausted output budget",
-      )
-    }
-    if (!content) {
-      throw new ProviderResponseError("writer_empty", "tier2 writer response was empty")
-    }
-    return truncateCodePoints(content, 320)
+    return withResponseDebug(response, "openai tier2 writer", () => {
+      const content = chatContent(response).trim()
+      if (chatExhausted(response, this.writerMaxOutputTokens)) {
+        throw new ProviderResponseError(
+          "output_exhausted",
+          "tier2 writer response exhausted output budget",
+        )
+      }
+      if (!content) {
+        throw new ProviderResponseError("writer_empty", "tier2 writer response was empty")
+      }
+      return truncateCodePoints(content, 320)
+    })
   }
 
   private async judgeCall<T>(
@@ -161,11 +164,13 @@ export class OpenAIChatJudgeProvider implements JudgeProvider {
     parser: (content: string) => T,
   ): Promise<T> {
     const response = await this.postChat(messages, { maxTokens })
-    return parseJudgeContent(
-      chatContent(response),
-      chatExhausted(response, maxTokens),
-      parser,
-    )
+    return withResponseDebug(response, "openai judge", () => (
+      parseJudgeContent(
+        chatContent(response),
+        chatExhausted(response, maxTokens),
+        parser,
+      )
+    ))
   }
 
   private async postChat(
@@ -182,6 +187,7 @@ export class OpenAIChatJudgeProvider implements JudgeProvider {
     const response = await postJsonRotating({
       url: this.chatUrl,
       body,
+      debugContext: "openai transport",
       keys: rotated(this.apiKeys, this.rotation++),
       headersFor: (key) => ({ authorization: `Bearer ${key}` }),
       timeoutMs: options.timeoutMs ?? this.timeoutMs,
