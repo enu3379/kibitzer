@@ -14,6 +14,7 @@ const options = {
     join(extensionRoot, "src/options/options.ts"),
     join(extensionRoot, "src/replay/replay.ts"),
     join(extensionRoot, "src/onboarding/onboarding.ts"),
+    join(extensionRoot, "src/localPdfPrompt/localPdfPrompt.ts"),
     join(extensionRoot, "src/offscreen.ts"),
   ],
   outdir: distDir,
@@ -30,12 +31,14 @@ function copyStatic() {
   mkdirSync(join(distDir, "options"), { recursive: true })
   mkdirSync(join(distDir, "replay"), { recursive: true })
   mkdirSync(join(distDir, "onboarding"), { recursive: true })
+  mkdirSync(join(distDir, "localPdfPrompt"), { recursive: true })
   mkdirSync(join(distDir, "assets", "ort"), { recursive: true })
   cpSync(join(extensionRoot, "manifest.json"), join(distDir, "manifest.json"))
   cpSync(join(extensionRoot, "src/popup/popup.html"), join(distDir, "popup/popup.html"))
   cpSync(join(extensionRoot, "src/options/options.html"), join(distDir, "options/options.html"))
   cpSync(join(extensionRoot, "src/replay/replay.html"), join(distDir, "replay/replay.html"))
   cpSync(join(extensionRoot, "src/onboarding/onboarding.html"), join(distDir, "onboarding/onboarding.html"))
+  cpSync(join(extensionRoot, "src/localPdfPrompt/localPdfPrompt.html"), join(distDir, "localPdfPrompt/localPdfPrompt.html"))
   cpSync(join(extensionRoot, "src/offscreen.html"), join(distDir, "offscreen.html"))
   cpSync(join(extensionRoot, "icons"), join(distDir, "icons"), { recursive: true })
   // Bundles the ONNX model + tokenizer (model.onnx is fetched by assets:check first).
