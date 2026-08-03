@@ -28,9 +28,10 @@ import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
 import { clearProviderHealth, getProviderHealth } from "./lib/providerHealth.ts"
 import { clearBadge } from "./lib/badge.ts"
 import { clearEvents, exportEvents, logEvent } from "./lib/events.ts"
-import { getSettings, setSettings, type Settings } from "./lib/settings.ts"
+import { getSettings, localPdfPolicyMatches, setSettings, type Settings } from "./lib/settings.ts"
 import { clearStore, kvGet, kvSet, OBS_STORE } from "./lib/db.ts"
 import { DwellScheduler } from "./lib/dwellScheduler.ts"
+import { PENDING_DWELL_VERSION, type PendingDwell } from "./lib/dwell.ts"
 import { markNagActed, recentTitles, recordObservation } from "./lib/history.ts"
 import { clearVisits, noteHeartbeat, noteInactive, noteJudged, noteObserve, noteVerdict } from "./lib/visits.ts"
 import { clearSessionSummary, dismissSessionSummary, finalizeSession, generateSummaryComment, getSessionSummary } from "./lib/sessionSummary.ts"
@@ -39,7 +40,7 @@ import { clearLog, exportLog, klog, logText } from "./lib/klog.ts"
 import { isUserAllowedUrl, isUserBlockedUrl, shouldDropUrl } from "./lib/domainFilter.ts"
 import { getDomainLists, initDomainLists, setDomainLists } from "./lib/domainLists.ts"
 import { truncateCodePoints } from "./providers/judgeParsing.ts"
-import { hostOf, pageKeyOf } from "./lib/url.ts"
+import { describeObservableUrl } from "./lib/url.ts"
 import { browserPresent, isFocusedWindow } from "./lib/presence.ts"
 
 const HEARTBEAT_ALARM = "kibitzer-next-heartbeat"
@@ -59,18 +60,33 @@ let lastObservedKey: string | null = null
 const OBSERVE_DWELL_MS = 5000
 const dwell = new DwellScheduler({
   dwellMs: OBSERVE_DWELL_MS,
-  judge: (pending) => judgeAndDispatch(pending.url, pending.title, pending.obsKey),
+  judge: judgeAndDispatch,
 })
+
+async function holdLocalPdfDisabled(goal: SessionGoal): Promise<void> {
+  const disabledKey = "local-pdf#disabled"
+  // A judged PDF may have an open visit interval. OFF means observation stops now, even if
+  // the gauge was already neutral or a stale observe later tries to resume the interval.
+  await noteInactive(Date.now(), goal.epoch)
+  if (lastObservedKey === disabledKey) return
+  await dwell.cancel()
+  lastObservedKey = disabledKey
+  klog("drop (local-pdf disabled)")
+  await enterNeutral(disabledKey, goal)
+}
 
 /** Entry for every observation trigger (nav / activate / SPA). Debounces per page, pauses
  *  immediately on sensitive pages, and otherwise schedules the judgement after a dwell so
  *  transient pages don't count. */
 async function observe(url: string | undefined, title: string | undefined): Promise<void> {
   const goal = await getGoal()
-  if (!goal || !url || !title) return
+  if (!goal || !url) return
+  const descriptor = describeObservableUrl(url)
+  const localPdfSettings = descriptor?.kind === "local_pdf" ? await getSettings() : null
+  if (localPdfSettings && !localPdfSettings.observeLocalPdfs) return void (await holdLocalPdfDisabled(goal))
+  if (!title) return
   title = truncateCodePoints(title, TITLE_MAX_CHARS)
-  const pageKey = pageKeyOf(url)
-  if (!pageKey) {
+  if (!descriptor) {
     // Non-http(s) internal pages (chrome://newtab, chrome://extensions, about:blank, the web
     // store, …) get no page key, so they can never be judged. Treat them exactly like the
     // sensitive drop below: cancel any pending dwell and hold the gauge NEUTRAL — otherwise
@@ -93,21 +109,23 @@ async function observe(url: string | undefined, title: string | undefined): Prom
     await enterNeutral(internalPageKey, goal)
     return
   }
+  const { pageKey } = descriptor
   // Visit tracking must see every observation trigger — including a presence-resume on the
   // same page, which the lastObservedKey debounce below hides. The reducer only reopens an
   // interval for already-judged pages, so this can't credit unjudged/sensitive pages (internal
   // pages returned above, before this point).
-  void noteObserve(pageKey, Date.now(), goal.epoch)
+  await noteObserve(pageKey, Date.now(), goal.epoch)
   // Debounce on pageKey+title, not pageKey alone: an SPA route change that keeps the
   // path but swaps the title (YouTube video → video) still re-judges, while an update
   // storm on the identical page is collapsed (the old S 0↔30 yo-yo guard).
-  const obsKey = `${pageKey}\n${title}`
+  const localPdfPolicyRevision = localPdfSettings?.localPdfPolicyRevision ?? null
+  const obsKey = `${pageKey}\n${title}${localPdfPolicyRevision == null ? "" : `\npolicy:${localPdfPolicyRevision}`}`
   if (obsKey === lastObservedKey) return
   // Privacy gate: sensitive pages pause the gauge immediately — no dwell, no judging.
   // The user lists load once per worker lifetime; awaiting the memoized init here keeps the
   // synchronous gate accurate from the very first observation after a wake.
   await initDomainLists()
-  if (shouldDropUrl(url)) {
+  if (descriptor.kind === "web" && shouldDropUrl(url)) {
     await dwell.cancel() // drop any prior page's pending dwell; this page never counts
     lastObservedKey = obsKey
     // The page must never be NAMED anywhere durable — not in this log line, and not as the
@@ -132,29 +150,58 @@ async function observe(url: string | undefined, title: string | undefined): Prom
   await enterNeutral(pageKey, goal)
   // A new candidate atomically REPLACES the previous checkpoint (a single durable write) —
   // no cancel-then-schedule gap where a teardown in between would leave nothing to recover.
-  await dwell.schedule(url, title, obsKey)
+  const candidate = {
+    version: PENDING_DWELL_VERSION,
+    pageKey,
+    title,
+    urlHost: descriptor.urlHost,
+    kind: descriptor.kind,
+    localPdfPolicyRevision,
+    obsKey,
+  } satisfies Parameters<typeof dwell.schedule>[0]
+  await dwell.schedule(candidate)
+  // An OFF edge can interleave with any await above or inside schedule(). Remove only this
+  // stale revision; an OFF→ON observation has a different token and must keep its checkpoint.
+  if (localPdfPolicyRevision != null && !(await localPdfPolicyMatches(localPdfPolicyRevision))) {
+    await dwell.cancelCandidate(candidate)
+    await noteInactive(Date.now(), goal.epoch)
+  }
 }
 
-/** True iff, after the async embed/rescue, we are STILL judging the same page under the same
- *  goal session — i.e. the user hasn't navigated away and the goal hasn't been changed/cleared.
- *  Guards against applying a stale verdict to whatever page/goal is current now (B2). */
-async function stillJudging(pageKey: string, epoch: number): Promise<boolean> {
+/** Return the current tab only while it still matches this candidate and privacy/opt-in
+ *  policy. Re-run after slow model calls so an OFF toggle or navigation always wins. */
+async function currentJudgingTab(
+  pageKey: string,
+  kind: PendingDwell["kind"],
+  localPdfPolicyRevision: number | null,
+  epoch: number,
+): Promise<chrome.tabs.Tab | null> {
   const goal = await getGoal()
-  if (!goal || goal.epoch !== epoch) return false // goal changed or cleared mid-judge
+  if (!goal || goal.epoch !== epoch) return null
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
-  return !!tab?.url && pageKeyOf(tab.url) === pageKey // still on the judged page
+  if (!tab?.url) return null
+  const current = describeObservableUrl(tab.url)
+  if (!current || current.pageKey !== pageKey || current.kind !== kind) return null
+  if (kind === "local_pdf") {
+    return localPdfPolicyRevision != null && (await localPdfPolicyMatches(localPdfPolicyRevision)) ? tab : null
+  }
+  await initDomainLists()
+  return shouldDropUrl(tab.url) ? null : tab
 }
 
 /** Embed title vs goal (Tier 0), optionally rescue via Tier 1 (Ollama), and feed the
  *  verdict into the gauge — invoked by the dwell scheduler once the dwell has elapsed. */
-async function judgeAndDispatch(url: string, title: string, obsKey: string): Promise<void> {
+async function judgeAndDispatch(pending: PendingDwell): Promise<void> {
   const goal = await getGoal()
   if (!goal) return
-  const pageKey = pageKeyOf(url)
-  if (!pageKey) return
+  const { pageKey, title, urlHost, obsKey, kind, localPdfPolicyRevision } = pending
   const epoch = goal.epoch
   lastObservedKey = obsKey
-  const urlHost = hostOf(url)
+  const initialTab = await currentJudgingTab(pageKey, kind, localPdfPolicyRevision, epoch)
+  if (!initialTab) {
+    if (lastObservedKey === obsKey) lastObservedKey = null
+    return
+  }
   // User allowlist (options 사이트 pane): this host is always on-goal — skip the Tier-0
   // embed and the Tier-1/2 judges entirely and dispatch OK (no LLM spend, S recovers).
   // The blocklist (static or user) wins inside isUserAllowedUrl. The page is still recorded
@@ -162,9 +209,9 @@ async function judgeAndDispatch(url: string, title: string, obsKey: string): Pro
   // session summary stay correct. The memoized init covers a reconcile() that reaches here
   // before any observe() ran in a fresh worker.
   await initDomainLists()
-  if (isUserAllowedUrl(url)) {
+  if (kind === "web" && initialTab.url && isUserAllowedUrl(initialTab.url)) {
     // B2 (same as below): the dwell took time; drop the verdict if the user moved on.
-    if (!(await stillJudging(pageKey, epoch))) {
+    if (!(await currentJudgingTab(pageKey, kind, localPdfPolicyRevision, epoch))) {
       klog(`judge dropped (page/goal moved on) ${pageKey}`)
       if (lastObservedKey === obsKey) lastObservedKey = null
       return
@@ -174,7 +221,7 @@ async function judgeAndDispatch(url: string, title: string, obsKey: string): Pro
     // and this page never got one — `mode` records why.
     logEvent("observe", { pageKey, host: urlHost, verdict: "OK", mode: "user-allow" })
     const now = Date.now()
-    await setActivePage({ pageKey, title, urlHost, score: 1 })
+    await setActivePage({ pageKey, title, urlHost, score: 1, kind, localPdfPolicyRevision })
     await recordObservation({ title, urlHost, verdict: "OK", ts: now }) // recent_titles / repeat context
     await noteJudged(pageKey, title, urlHost, "OK", now, epoch, await browserPresent()) // session-summary dwell/verdict
     // No r0/tauOk: activeMargin stays null → full-speed recovery (the same event shape as
@@ -189,15 +236,21 @@ async function judgeAndDispatch(url: string, title: string, obsKey: string): Pro
   let verdict = tier0Verdict
   let tierReached = 0
   if (verdict === "DRIFT" && enabled) {
+    const titles = await recentTitles()
+    // Do not start a provider request after a local-PDF OFF edge that landed during Tier 0.
+    if (!(await currentJudgingTab(pageKey, kind, localPdfPolicyRevision, epoch))) {
+      if (lastObservedKey === obsKey) lastObservedKey = null
+      return
+    }
     // Give Tier-1 the recent-visit context (mirrors the server) so it can judge the escalation
     // pattern, not just this title in isolation.
-    verdict = await tier1Rescue(goal.text, title, urlHost, await recentTitles()) // Tier 1 may rescue to OK
+    verdict = await tier1Rescue(goal.text, title, urlHost, titles) // Tier 1 may rescue to OK
     tierReached = 1
   }
   // B2: the dwell + embed + Tier-1 rescue took time; the user may have navigated away or
   // changed the goal. Applying this verdict now would drive the gauge / active page for a
   // page they left. Drop it — the page they're on now gets its own dwell + judge.
-  if (!(await stillJudging(pageKey, epoch))) {
+  if (!(await currentJudgingTab(pageKey, kind, localPdfPolicyRevision, epoch))) {
     klog(`judge dropped (page/goal moved on) ${pageKey}`)
     // This page was never actually judged (lastObservedKey was set optimistically at entry).
     // Clear the debounce marker so returning to it later re-judges, instead of observe()
@@ -212,7 +265,7 @@ async function judgeAndDispatch(url: string, title: string, obsKey: string): Pro
   klog(`observe ${pageKey} tier0=${tier0Verdict}(${score.toFixed(2)} ex=${parts.exemplarScore.toFixed(2)} an=${parts.anchorScore.toFixed(2)}) final=${verdict} mode=${enabled ? "ollama" : "degraded"}`)
   logEvent("observe", { pageKey, host: urlHost, tier0: tier0Verdict, score: Number(score.toFixed(3)), exemplar: Number(parts.exemplarScore.toFixed(3)), anchor: Number(parts.anchorScore.toFixed(3)), derived: Number(parts.derivedScore.toFixed(3)), verdict, mode: enabled ? "ollama" : "degraded" })
   const now = Date.now()
-  await setActivePage({ pageKey, title, urlHost, score })
+  await setActivePage({ pageKey, title, urlHost, score, kind, localPdfPolicyRevision })
   await recordObservation({ title, urlHost, verdict, ts: now }) // recent_titles / repeat context
   // Only open a timed visit interval if the user is present now — this verdict may have landed
   // after the dwell/embed while Chrome sits unfocused/idle on the same page.
@@ -500,7 +553,16 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     return await getSettings()
   }
   if (message?.type === "set-settings") {
-    return await setSettings(message.settings ?? {})
+    const before = await getSettings()
+    const next = await setSettings(message.settings ?? {})
+    if (before.observeLocalPdfs !== next.observeLocalPdfs) {
+      // A setting change supersedes both a checkpointed and an already-running PDF judge.
+      // Re-observe the current tab so OFF holds it neutral and ON begins a fresh full dwell.
+      await dwell.cancel()
+      lastObservedKey = null
+      if (await getGoal()) void observeActiveTab()
+    }
+    return next
   }
   // User domain lists (options 사이트 pane). set-domain-lists normalizes/dedupes, persists,
   // and refreshes the synchronous privacy gate in this worker; rejected (non-host) entries
@@ -515,6 +577,8 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     // Wipe activity data (gauge, history, learned vectors, events, observations, log,
     // visit tracker, cached session summary); keep the goal, Ollama config, persona,
     // and settings.
+    await dwell.cancel()
+    lastObservedKey = null
     await resetState()
     await clearEvents()
     await clearStore(OBS_STORE)
@@ -647,16 +711,21 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
         // are loaded before the drop gate below runs.
         await initDomainLists()
         const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
-        const pageKey = tab?.url && !shouldDropUrl(tab.url) ? pageKeyOf(tab.url) : null
+        const descriptor = tab?.url ? describeObservableUrl(tab.url) : null
+        const permitted =
+          descriptor?.kind === "local_pdf"
+            ? (await getSettings()).observeLocalPdfs
+            : descriptor?.kind === "web" && !!tab?.url && !shouldDropUrl(tab.url)
         // Title ingress that bypasses observe() — clamp here too.
         const tabTitle = truncateCodePoints(tab?.title ?? "", TITLE_MAX_CHARS)
-        if (pageKey) {
+        if (descriptor && permitted) {
+          const { pageKey, urlHost } = descriptor
           klog(`related → OK recover ${pageKey}`)
           await dispatch({ type: "nav", pageKey, verdict: "OK", ts: now }, goal)
           // The user override also flips the page in the session-summary tracker (open a timed
           // interval only if present — a notification-button click can arrive with Chrome unfocused).
           const present = await browserPresent()
-          void noteVerdict(pageKey, tabTitle, tab?.url ? hostOf(tab.url) : "", "OK", now, goal.epoch, present)
+          void noteVerdict(pageKey, tabTitle, urlHost, "OK", now, goal.epoch, present)
           // Learn: add this page's embedding as a goal exemplar so this class of page
           // stops drifting at Tier-0 (the user-taught relevance loop).
           if (tabTitle && tab?.url) {

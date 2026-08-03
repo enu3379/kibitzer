@@ -15,8 +15,8 @@ import { klog } from "./klog.ts"
 import { playChime, speak } from "./chime.ts"
 import { shouldDropUrl } from "./domainFilter.ts"
 import { initDomainLists } from "./domainLists.ts"
-import { getSettings, inQuietHours } from "./settings.ts"
-import { pageKeyOf } from "./url.ts"
+import { getSettings, inQuietHours, localPdfPolicyMatches } from "./settings.ts"
+import { describeObservableUrl, type ObservablePageKind } from "./url.ts"
 import { browserPresent } from "./presence.ts"
 import { extractPageExcerpt } from "../content/pageExcerpt.ts"
 import { updateBadge } from "./badge.ts"
@@ -44,6 +44,13 @@ export interface ActivePage {
   title: string
   urlHost: string
   score: number
+  kind: ObservablePageKind
+  localPdfPolicyRevision: number | null
+}
+
+interface EffectSource {
+  kind: ObservablePageKind
+  localPdfPolicyRevision: number | null
 }
 
 // A gauge effect queued for durable delivery. Persisted atomically with the gauge
@@ -55,6 +62,7 @@ interface OutboxEntry {
   goal: SessionGoal | null
   ts: number
   writerMessage: string | null
+  source?: EffectSource | null
   // For a request_tier2 effect: the opaque requestId of the pending slot it opened, so the
   // job identifies its exact request instance end-to-end (page+reason+requestedAt can collide).
   requestId?: number
@@ -68,7 +76,17 @@ export async function setActivePage(page: ActivePage): Promise<void> {
 
 async function getActivePage(): Promise<ActivePage | null> {
   const value = await kvGet<ActivePage>(ACTIVE_PAGE_KEY)
-  return value && typeof value.pageKey === "string" ? value : null
+  if (!value || typeof value.pageKey !== "string") return null
+  // Pre-feature web checkpoints have no kind. They remain safe web observations.
+  if (value.kind !== "local_pdf" && value.kind !== "web") {
+    return { ...value, kind: "web", localPdfPolicyRevision: null }
+  }
+  return value
+}
+
+async function effectSourceAllowed(source: EffectSource | null | undefined): Promise<boolean> {
+  if (source?.kind !== "local_pdf") return true
+  return source.localPdfPolicyRevision != null && localPdfPolicyMatches(source.localPdfPolicyRevision)
 }
 
 function isGaugeState(value: unknown): value is GaugeState {
@@ -200,6 +218,7 @@ async function runEvent(event: GaugeEvent, goal: SessionGoal | null, state: Gaug
   // lose it across a teardown.
   const entries: OutboxEntry[] = []
   const kvDeletes: string[] = []
+  const activePage = transition.effects.length > 0 ? await getActivePage() : null
   for (const effect of transition.effects) {
     let writerMessage: string | null = null
     if (effect.type === "nag") {
@@ -209,7 +228,11 @@ async function runEvent(event: GaugeEvent, goal: SessionGoal | null, state: Gaug
     // Read the id off the EFFECT, not final state: a promotion+s_zero in one reduce leaves
     // pendingTier2 as the s_zero's slot, so final state would mis-tag the promotion record.
     const requestId = effect.type === "request_tier2" ? effect.requestId : undefined
-    entries.push({ effect, goal, ts: event.ts, writerMessage, requestId })
+    const source =
+      activePage && (effect.type === "celebrate" || activePage.pageKey === effect.pageKey)
+        ? { kind: activePage.kind, localPdfPolicyRevision: activePage.localPdfPolicyRevision }
+        : null
+    entries.push({ effect, goal, ts: event.ts, writerMessage, requestId, source })
   }
   await persistStateAndOutbox(transition.state, entries, kvDeletes)
   updateBadge(transition.state, goal, event.ts) // reflect live status on the toolbar
@@ -278,7 +301,7 @@ async function drainOutbox(): Promise<void> {
       startTier2Job(record)
       return false // keep; the job self-ACKs when it truly completes
     }
-    await deliver(record.effect, record.goal, record.ts, record.writerMessage)
+    await deliver(record.effect, record.goal, record.ts, record.writerMessage, record.source)
     return true
   })
 }
@@ -318,7 +341,13 @@ function dispatchTier2(
     const state = await loadState()
     if (!tokenMatchesPending(token, state.pendingTier2)) return // superseded by a newer request
     const current = await getGoal()
-    const fresh = current != null && current.epoch === token.epoch && state.activePageKey === token.pageKey
+    const activePage = await getActivePage()
+    const fresh =
+      current != null &&
+      current.epoch === token.epoch &&
+      state.activePageKey === token.pageKey &&
+      activePage?.pageKey === token.pageKey &&
+      (await effectSourceAllowed(activePage))
     if (!fresh) {
       await runEvent({ type: "tier2_cancel", requestId: token.requestId, ts: Date.now() }, goal, state)
       return
@@ -350,7 +379,7 @@ function cancelTier2(token: Tier2Token): Promise<void> {
 
 /** Fire a nag notification immediately, for manual testing (goal = "알림보기"). */
 export async function testNag(goal: SessionGoal | null): Promise<void> {
-  await deliver({ type: "nag", pageKey: "test" }, goal, Date.now(), null)
+  await deliver({ type: "nag", pageKey: "test" }, goal, Date.now(), null, null)
 }
 
 const PENDING_WRITER_KEY = "pending-writer"
@@ -373,6 +402,7 @@ async function deliver(
   goal: SessionGoal | null,
   ts: number,
   writerMessage: string | null,
+  source: EffectSource | null | undefined,
 ): Promise<void> {
   const goalText = goal?.text ?? "목표"
   // request_tier2 is never delivered here — it is a durable job handled by startTier2Job.
@@ -405,7 +435,7 @@ async function deliver(
     }
     klog(`nag (${fromWriter ? "writer" : "fallback"}): "${message.slice(0, 48)}"`)
     logEvent("nag", { pageKey: effect.pageKey, source: fromWriter ? "writer" : "fallback", message })
-    const token = await showToast(message, effect.pageKey, "intervention")
+    const token = await showToast(message, effect.pageKey, "intervention", source)
     if (token != null) {
       await recordNag({ ts, host: page?.urlHost ?? "", token })
       if (settings.ttsEnabled) void speak(message) // read the nudge aloud
@@ -419,17 +449,23 @@ async function deliver(
     await setDriftSince(null)
     klog(`celebrate: "${message.slice(0, 48)}"`)
     logEvent("celebrate", { message })
-    await showToast(message, null, "celebration")
+    await showToast(message, null, "celebration", source)
   }
 }
 
 /** Grab the active tab's body text for the Tier-2 judge — but only if the active tab is
  *  still the page being judged and it isn't sensitive. Null on any mismatch/failure
  *  (the judge then falls back to title-only, as before). */
-async function extractActiveExcerpt(pageKey: string): Promise<string | null> {
+export async function extractActiveExcerpt(pageKey: string): Promise<string | null> {
   await initDomainLists() // memoized — the user blocklist must be loaded before the drop gate
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
-  if (!tab?.id || !tab.url || shouldDropUrl(tab.url) || pageKeyOf(tab.url) !== pageKey) return null
+  if (!tab?.id || !tab.url) return null
+  const descriptor = describeObservableUrl(tab.url)
+  if (!descriptor || descriptor.pageKey !== pageKey) return null
+  // Chrome's built-in PDF viewer is title-only by policy. Do not even attempt injection:
+  // local file contents are outside this feature's permission and disclosure boundary.
+  if (descriptor.kind === "local_pdf") return null
+  if (shouldDropUrl(tab.url)) return null
   try {
     const [injected] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
@@ -466,6 +502,12 @@ async function serviceTier2(
     await cancelTier2(token)
     return
   }
+  if (!(await effectSourceAllowed(page))) {
+    klog(`tier2 cancelled (local-pdf disabled) on ${effect.pageKey}`)
+    logEvent("tier2", { pageKey: effect.pageKey, reason: effect.reason, cancelled: true })
+    await cancelTier2(token)
+    return
+  }
   // Build the persona's message context from the nag / visit history (mirrors the
   // server's _nagging_context). nag_count_today is the count BEFORE this nag.
   const now = Date.now()
@@ -486,6 +528,10 @@ async function serviceTier2(
           current_page_drift_minutes: drift,
         }
       : null
+  if (!(await effectSourceAllowed(page))) {
+    await cancelTier2(token)
+    return
+  }
   const outcome = await tier2Confirm(goal?.text ?? "", page, {
     nagCount: count + 1,
     naggingContext: {
@@ -497,7 +543,11 @@ async function serviceTier2(
     recentTitles: titles,
     excerpt,
     timeContext,
-  })
+  }, () => effectSourceAllowed(page))
+  if (outcome.cancelled) {
+    await cancelTier2(token)
+    return
+  }
   klog(`tier2 gate (${effect.reason}) on ${effect.pageKey} excerpt=${excerpt?.length ?? 0}c -> ${outcome.flow}`)
   logEvent("tier2", { pageKey: effect.pageKey, reason: effect.reason, flow: outcome.flow, excerpt: excerpt?.length ?? 0 })
   // The judge itself broke (fail-open ate a would-be nag) — tell the user once in a
@@ -559,13 +609,21 @@ async function showToast(
   message: string,
   contextLabel: string | null,
   kind: "intervention" | "celebration",
+  source: EffectSource | null | undefined,
 ): Promise<number | null> {
+  // Source policy, not the current tab, owns queued work. Missing source metadata on a
+  // local-PDF page key is a legacy/fail-closed case.
+  if ((contextLabel?.startsWith("local-pdf#") && !source) || !(await effectSourceAllowed(source))) return null
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
   // Privacy: never surface a nudge on a sensitive (or user-blocked) page, even if one was
   // queued before the user navigated there. A queued effect can be delivered by a freshly
   // woken worker, so wait for the user lists (memoized) before consulting the gate.
   await initDomainLists()
-  if (tab?.url && shouldDropUrl(tab.url)) return null
+  if (tab?.url) {
+    const descriptor = describeObservableUrl(tab.url)
+    if (descriptor?.kind === "local_pdf" && !(await getSettings()).observeLocalPdfs) return null
+    if (descriptor?.kind === "web" && shouldDropUrl(tab.url)) return null
+  }
   // Delivery invariant: never surface a nudge (toast, its OS-notification fallback, or the
   // chime) while Chrome isn't being looked at — the user explicitly never wants an OS
   // notification popping over another app. Drop it here (ACKed, no retry — the drift is already
@@ -576,6 +634,7 @@ async function showToast(
     klog(`nag suppressed (browser unfocused)`)
     return null
   }
+  if (!(await effectSourceAllowed(source))) return null
   void playChime(kind) // audible cue via the offscreen document (works off-screen)
   const token = await nextToastToken()
   if (tab?.id) {
@@ -596,6 +655,7 @@ async function showToast(
       kind,
       firstRun,
     }
+    if (!(await effectSourceAllowed(source))) return null
     try {
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
@@ -607,6 +667,7 @@ async function showToast(
       // Injection blocked (chrome://, web store, PDF) — fall through to a notification.
     }
   }
+  if (!(await effectSourceAllowed(source))) return null
   showSystemNotification(token, message, kind)
   return token
 }

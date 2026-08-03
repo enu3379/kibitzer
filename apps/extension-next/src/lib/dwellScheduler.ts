@@ -6,18 +6,13 @@
 // against real IndexedDB, mirroring the original extension's PersistentDwellScheduler.
 
 import { kvDelete, kvDeleteIf, kvGet, kvSet } from "./db.ts"
-import { dwellDecision, type PendingDwell } from "./dwell.ts"
+import { dwellDecision, isPendingDwell, type DwellCandidate, type PendingDwell } from "./dwell.ts"
 
 export const PENDING_DWELL_KEY = "pending-dwell"
 
 /** The pageKey portion of an obsKey (`pageKey + "\n" + title`) — the page identity a title
  *  change does not alter. With query-inclusive pageKeys (B4) this correctly separates SPA
  *  content (youtube ?v=A vs ?v=B) while treating same-URL title churn as the same page. */
-function pageKeyOfObs(obsKey: string): string {
-  const nl = obsKey.indexOf("\n")
-  return nl === -1 ? obsKey : obsKey.slice(0, nl)
-}
-
 export interface DwellSchedulerOptions {
   dwellMs: number
   judge: (pending: PendingDwell) => Promise<void>
@@ -61,16 +56,19 @@ export class DwellScheduler {
    *  including SPA content (youtube ?v=A→?v=B, now distinct under B4) — starts a fresh dwell,
    *  so real content isn't judged under-dwelt. Preserving only a still-FUTURE deadline also
    *  avoids instantly judging a stale past-deadline checkpoint revived after a teardown. */
-  async schedule(url: string, title: string, obsKey: string): Promise<void> {
-    const existing = await kvGet<PendingDwell>(PENDING_DWELL_KEY)
+  async schedule(candidate: DwellCandidate): Promise<void> {
+    const rawExisting = await kvGet<unknown>(PENDING_DWELL_KEY)
+    const existing = isPendingDwell(rawExisting) ? rawExisting : undefined
     const samePage =
       existing != null &&
-      pageKeyOfObs(existing.obsKey) === pageKeyOfObs(obsKey) &&
+      existing.pageKey === candidate.pageKey &&
+      existing.kind === candidate.kind &&
+      existing.localPdfPolicyRevision === candidate.localPdfPolicyRevision &&
       existing.dueAt > this.now()
     const dueAt = samePage ? existing.dueAt : this.now() + this.opts.dwellMs
-    await kvSet(PENDING_DWELL_KEY, { url, title, obsKey, dueAt })
+    await kvSet(PENDING_DWELL_KEY, { ...candidate, dueAt })
     this.disarm()
-    this.arm(() => void this.fire(obsKey), Math.max(0, dueAt - this.now()))
+    this.arm(() => void this.fire(candidate.obsKey), Math.max(0, dueAt - this.now()))
   }
 
   /** Cancel any pending dwell (navigated away / went idle / lost focus). */
@@ -79,13 +77,31 @@ export class DwellScheduler {
     await kvDelete(PENDING_DWELL_KEY)
   }
 
+  /** Remove one stale invocation without touching a newer policy revision's checkpoint/timer. */
+  async cancelCandidate(candidate: DwellCandidate): Promise<void> {
+    await kvDeleteIf(PENDING_DWELL_KEY, (value) => {
+      if (!isPendingDwell(value)) return false
+      return (
+        value.obsKey === candidate.obsKey &&
+        value.localPdfPolicyRevision === candidate.localPdfPolicyRevision
+      )
+    })
+  }
+
   /** Fire the checkpointed dwell — from the live timer (`expectedObsKey` set) or a wake-time
    *  reconcile (`null`). Skips a superseded candidate, re-arms if the dwell hasn't elapsed,
    *  else judges. The checkpoint is deleted only AFTER a successful judge, and only if it is
    *  still the record we judged (CAS) — so a slow judge can't clobber a newer dwell, and a
    *  teardown mid-judge leaves the record for reconcile to retry. */
   async fire(expectedObsKey: string | null): Promise<void> {
-    const pending = await kvGet<PendingDwell>(PENDING_DWELL_KEY)
+    const rawPending = await kvGet<unknown>(PENDING_DWELL_KEY)
+    if (rawPending !== undefined && !isPendingDwell(rawPending)) {
+      // Pre-v2 checkpoints contain a raw URL. Never revive them: delete only if the current
+      // value is still malformed, so a concurrent valid schedule cannot be clobbered.
+      await kvDeleteIf(PENDING_DWELL_KEY, (value) => !isPendingDwell(value))
+      return
+    }
+    const pending = rawPending as PendingDwell | undefined
     const decision = dwellDecision(pending, expectedObsKey, this.now())
     if (decision.action === "skip") return
     if (decision.action === "rearm") {
@@ -102,8 +118,8 @@ export class DwellScheduler {
       // Delete only after a successful judge, and only if the checkpoint is still the one we
       // judged (CAS) — a mid-judge teardown or a newer dwell both leave it for reconcile.
       await kvDeleteIf(PENDING_DWELL_KEY, (v) => {
-        const d = v as PendingDwell
-        return d?.obsKey === p.obsKey && d?.dueAt === p.dueAt
+        if (!isPendingDwell(v)) return false
+        return v.obsKey === p.obsKey && v.dueAt === p.dueAt
       })
     } catch {
       // Judge failed (or the worker was torn down mid-judge): leave the checkpoint so a

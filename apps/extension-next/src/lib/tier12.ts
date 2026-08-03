@@ -137,6 +137,8 @@ export async function tier1Rescue(
 export interface Tier2Outcome {
   flow: "drift" | "ok"
   message: string | null
+  /** Policy changed before a not-yet-started provider boundary; caller cancels the job. */
+  cancelled?: boolean
   /** Set when the judge call itself failed (nag suppressed by fail-open) — lets the
    *  caller tell the user why judging went quiet. Not set for a mere writer failure
    *  (a fallback-template nag still fires) or when the route has no keys (deliberate
@@ -230,6 +232,7 @@ export async function tier2Confirm(
   goalText: string,
   page: { title: string; urlHost: string; score: number },
   ctx: Tier2Context = { nagCount: 1, naggingContext: {}, recentTitles: [], excerpt: null, timeContext: null },
+  shouldContinue: () => Promise<boolean> = async () => true,
 ): Promise<Tier2Outcome> {
   const p = await providers()
   if (!p.tier2) return { flow: "ok", message: null }
@@ -244,6 +247,7 @@ export async function tier2Confirm(
   }
   let decision
   try {
+    if (!(await shouldContinue())) return { flow: "ok", message: null, cancelled: true }
     const reviewPayload = buildTier2ReviewPayload(
       { rawText: goalText },
       observation,
@@ -261,6 +265,7 @@ export async function tier2Confirm(
   }
   klog(`tier2 judge: ${decision.decision} (${decision.reasonCode}, basis=${decision.basis})`)
   if (decision.decision !== "notify") return { flow: "ok", message: null }
+  if (!(await shouldContinue())) return { flow: "ok", message: null, cancelled: true }
   // Notify confirmed → write the nag in the selected persona's voice.
   const persona = await activePersona()
   const maxSentences = persona.maxSentences ?? DEFAULT_MAX_SENTENCES
@@ -272,6 +277,7 @@ export async function tier2Confirm(
     ctx.naggingContext,
   )
   try {
+    if (!(await shouldContinue())) return { flow: "ok", message: null, cancelled: true }
     const message = await p.tier2.writeTier2Message(messagePayload, composeWriterPrompt(persona))
     void recordProviderOk()
     return { flow: "drift", message: clampSentences(message, maxSentences) }

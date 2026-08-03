@@ -9,7 +9,9 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { DwellScheduler, PENDING_DWELL_KEY } from "./dwellScheduler.ts"
-import { kvGet } from "./db.ts"
+import { PENDING_DWELL_VERSION, type DwellCandidate } from "./dwell.ts"
+import { kvGet, kvSet } from "./db.ts"
+import { describeObservableUrl } from "./url.ts"
 
 const noTimer = { setTimer: () => 0, clearTimer: () => {} }
 
@@ -21,6 +23,18 @@ async function checkpoint(): Promise<{ obsKey: string; dueAt: number } | undefin
   return kvGet(PENDING_DWELL_KEY)
 }
 
+function candidate(url: string, title: string, obsKey: string, localPdfPolicyRevision = 1): DwellCandidate {
+  const descriptor = describeObservableUrl(url)
+  assert.ok(descriptor)
+  return {
+    version: PENDING_DWELL_VERSION,
+    ...descriptor,
+    title,
+    obsKey,
+    localPdfPolicyRevision: descriptor.kind === "local_pdf" ? localPdfPolicyRevision : null,
+  }
+}
+
 test("resumes a dwell scheduled by a torn-down worker (restart restore)", async () => {
   const clock = makeClock(1000)
   const judged: string[] = []
@@ -28,7 +42,7 @@ test("resumes a dwell scheduled by a torn-down worker (restart restore)", async 
 
   // Worker 1 schedules, then is torn down (its in-memory timer is gone).
   const w1 = new DwellScheduler({ dwellMs: 5000, judge, now: () => clock.t, ...noTimer })
-  await w1.schedule("https://a/x", "X", "a/x\nX")
+  await w1.schedule(candidate("https://a/x", "X", "a/x\nX"))
   assert.equal((await checkpoint())?.dueAt, 6000)
 
   // Worker 2 wakes before the dwell elapsed → re-arm, no judge yet.
@@ -48,13 +62,39 @@ test("resumes a dwell scheduled by a torn-down worker (restart restore)", async 
 test("schedule replaces the checkpoint in place — no cancel-then-schedule gap", async () => {
   const clock = makeClock(1000)
   const s = new DwellScheduler({ dwellMs: 5000, judge: async () => {}, now: () => clock.t, ...noTimer })
-  await s.schedule("https://a/x", "X", "a/x\nX")
+  await s.schedule(candidate("https://a/x", "X", "a/x\nX"))
   assert.equal((await checkpoint())?.obsKey, "a/x\nX")
   // A new candidate overwrites atomically (single durable write); the checkpoint is never
   // absent, so a teardown can't land in a gap with nothing to recover. (background.observe
   // relies on this instead of cancel()+schedule().)
-  await s.schedule("https://b/y", "Y", "b/y\nY")
+  await s.schedule(candidate("https://b/y", "Y", "b/y\nY"))
   assert.equal((await checkpoint())?.obsKey, "b/y\nY")
+})
+
+test("checkpoint stores no raw URL, including for a local PDF", async () => {
+  const clock = makeClock(1000)
+  const s = new DwellScheduler({ dwellMs: 5000, judge: async () => {}, now: () => clock.t, ...noTimer })
+  const rawUrl = "file:///C:/Users/alice/Private/secret-paper.pdf"
+  await s.schedule(candidate(rawUrl, "Paper title", "local-pdf#opaque\nPaper title"))
+  const raw = await kvGet<Record<string, unknown>>(PENDING_DWELL_KEY)
+  assert.ok(raw)
+  assert.equal(raw.url, undefined)
+  assert.equal(raw.urlHost, "local-pdf")
+  assert.ok(!JSON.stringify(raw).includes("alice") && !JSON.stringify(raw).includes("secret-paper"))
+})
+
+test("reconcile deletes a legacy raw-URL checkpoint without judging it", async () => {
+  let judged = 0
+  await kvSet(PENDING_DWELL_KEY, {
+    url: "file:///C:/Users/alice/Private/legacy.pdf",
+    title: "Legacy",
+    obsKey: "legacy\nLegacy",
+    dueAt: 1,
+  })
+  const s = new DwellScheduler({ dwellMs: 5000, judge: async () => void (judged += 1), now: () => 6000, ...noTimer })
+  await s.reconcile()
+  assert.equal(judged, 0)
+  assert.equal(await checkpoint(), undefined)
 })
 
 test("duplicate events for the IDENTICAL obsKey don't push the deadline out — the page still gets judged", async () => {
@@ -66,9 +106,9 @@ test("duplicate events for the IDENTICAL obsKey don't push the deadline out — 
     now: () => clock.t,
     ...noTimer,
   })
-  await s.schedule("https://x.com/home", "Home", "x.com/home\nHome") // dueAt = 6000
+  await s.schedule(candidate("https://x.com/home", "Home", "x.com/home\nHome")) // dueAt = 6000
   clock.t = 3000
-  await s.schedule("https://x.com/home", "Home", "x.com/home\nHome") // duplicate onUpdated storm
+  await s.schedule(candidate("https://x.com/home", "Home", "x.com/home\nHome")) // duplicate onUpdated storm
   assert.equal((await checkpoint())?.dueAt, 6000, "identical candidate keeps the deadline")
   clock.t = 6000
   await s.fire("x.com/home\nHome")
@@ -84,40 +124,50 @@ test("same-page title churn (same pageKey, new title) keeps the deadline — sti
     now: () => clock.t,
     ...noTimer,
   })
-  await s.schedule("https://x.com/home", "(1) Home", "x.com#h\n(1) Home") // dueAt = 6000
+  await s.schedule(candidate("https://x.com/home", "(1) Home", "x.com#h\n(1) Home")) // dueAt = 6000
   clock.t = 3000
-  await s.schedule("https://x.com/home", "(2) Home", "x.com#h\n(2) Home") // notification counter
+  await s.schedule(candidate("https://x.com/home", "(2) Home", "x.com#h\n(2) Home")) // notification counter
   assert.equal((await checkpoint())?.dueAt, 6000, "same pageKey keeps the deadline through churn")
   clock.t = 6000
   await s.fire("x.com#h\n(2) Home")
   assert.deepEqual(judged, ["x.com#h\n(2) Home"], "judged with the latest title at the original deadline")
 })
 
+test("a new local-PDF policy revision gets a fresh full dwell", async () => {
+  const clock = makeClock(1000)
+  const s = new DwellScheduler({ dwellMs: 5000, judge: async () => {}, now: () => clock.t, ...noTimer })
+  const url = "file:///C:/papers/a.pdf"
+  await s.schedule(candidate(url, "A", "local-pdf#x\nA\npolicy:1", 1))
+  clock.t = 3000
+  await s.schedule(candidate(url, "A", "local-pdf#x\nA\npolicy:3", 3))
+  assert.equal((await checkpoint())?.dueAt, 8000, "OFF→ON starts a new full dwell")
+})
+
 test("SPA content change (distinct pageKey via query, B4) starts a FRESH dwell — no under-dwell", async () => {
   const clock = makeClock(1000)
   const s = new DwellScheduler({ dwellMs: 5000, judge: async () => {}, now: () => clock.t, ...noTimer })
   // Under B4 youtube ?v=A and ?v=B hash to different pageKeys, so their obsKeys differ.
-  await s.schedule("https://youtube.com/watch?v=A", "Video A", "youtube.com#hA\nVideo A") // dueAt 6000
+  await s.schedule(candidate("https://youtube.com/watch?v=A", "Video A", "youtube.com#hA\nVideo A")) // dueAt 6000
   clock.t = 4000
-  await s.schedule("https://youtube.com/watch?v=B", "Video B", "youtube.com#hB\nVideo B")
+  await s.schedule(candidate("https://youtube.com/watch?v=B", "Video B", "youtube.com#hB\nVideo B"))
   assert.equal((await checkpoint())?.dueAt, 9000, "B gets its own full 5s dwell")
 })
 
 test("a genuinely different page (path) starts a fresh dwell", async () => {
   const clock = makeClock(1000)
   const s = new DwellScheduler({ dwellMs: 5000, judge: async () => {}, now: () => clock.t, ...noTimer })
-  await s.schedule("https://a/x", "X", "a/x\nX") // dueAt 6000
+  await s.schedule(candidate("https://a/x", "X", "a/x\nX")) // dueAt 6000
   clock.t = 3000
-  await s.schedule("https://b/y", "Y", "b/y\nY") // different path → reset
+  await s.schedule(candidate("https://b/y", "Y", "b/y\nY")) // different path → reset
   assert.equal((await checkpoint())?.dueAt, 8000)
 })
 
 test("a stale past-deadline checkpoint is re-dwelt, not judged instantly (no zero-dwell)", async () => {
   const clock = makeClock(1000)
   const s = new DwellScheduler({ dwellMs: 5000, judge: async () => {}, now: () => clock.t, ...noTimer })
-  await s.schedule("https://a/x", "X", "a/x\nX") // dueAt 6000
+  await s.schedule(candidate("https://a/x", "X", "a/x\nX")) // dueAt 6000
   clock.t = 100000 // worker was gone for a long time; the checkpoint's deadline is far past
-  await s.schedule("https://a/x", "X", "a/x\nX") // same obsKey but stale → fresh dwell, not dueAt=6000
+  await s.schedule(candidate("https://a/x", "X", "a/x\nX")) // same obsKey but stale → fresh dwell, not dueAt=6000
   assert.equal((await checkpoint())?.dueAt, 105000, "fresh 5s dwell, not an instant judge")
 })
 
@@ -130,8 +180,8 @@ test("a superseding candidate cancels the stale dwell", async () => {
     now: () => clock.t,
     ...noTimer,
   })
-  await s.schedule("https://a/x", "X", "a/x\nX")
-  await s.schedule("https://b/y", "Y", "b/y\nY") // overwrites the checkpoint
+  await s.schedule(candidate("https://a/x", "X", "a/x\nX"))
+  await s.schedule(candidate("https://b/y", "Y", "b/y\nY")) // overwrites the checkpoint
 
   clock.t = 7000
   await s.fire("a/x\nX") // the old timer fires with the stale obsKey → skip
@@ -143,7 +193,7 @@ test("cancel() drops the pending dwell (idle / focus-loss)", async () => {
   const clock = makeClock(1000)
   let judged = 0
   const s = new DwellScheduler({ dwellMs: 5000, judge: async () => void (judged += 1), now: () => clock.t, ...noTimer })
-  await s.schedule("https://a/x", "X", "a/x\nX")
+  await s.schedule(candidate("https://a/x", "X", "a/x\nX"))
   await s.cancel()
   clock.t = 9000
   await s.reconcile()
@@ -159,7 +209,7 @@ test("a mid-judge teardown leaves the checkpoint; a later reconcile retries it",
     if (attempts === 1) throw new Error("worker torn down mid-judge")
   }
   const s = new DwellScheduler({ dwellMs: 5000, judge, now: () => clock.t, ...noTimer })
-  await s.schedule("https://a/x", "X", "a/x\nX")
+  await s.schedule(candidate("https://a/x", "X", "a/x\nX"))
 
   clock.t = 6000
   await s.reconcile() // judge throws → checkpoint survives
@@ -185,7 +235,7 @@ test("duplicate concurrent fires run the judge once (single-flight)", async () =
   }
   const s = new DwellScheduler({ dwellMs: 5000, judge, now: () => clock.t, ...noTimer })
   // Schedule at t=6000 with a 0 dwell-equivalent by advancing past dueAt.
-  await s.schedule("https://a/x", "X", "a/x\nX")
+  await s.schedule(candidate("https://a/x", "X", "a/x\nX"))
   clock.t = 12000
   await Promise.all([s.fire("a/x\nX"), s.fire("a/x\nX")])
   assert.equal(calls, 1, "judged exactly once")
@@ -208,11 +258,11 @@ test("CAS delete never clobbers a newer dwell scheduled during a slow judge", as
     now: () => clock.t,
     ...noTimer,
   })
-  await s.schedule("https://a/x", "X", "a/x\nX")
+  await s.schedule(candidate("https://a/x", "X", "a/x\nX"))
   clock.t = 12000
   const judging = s.fire("a/x\nX") // begins judging A, awaiting the gate
   await inJudge
-  await s.schedule("https://b/y", "Y", "b/y\nY") // a new dwell lands mid-judge
+  await s.schedule(candidate("https://b/y", "Y", "b/y\nY")) // a new dwell lands mid-judge
   release()
   await judging
   assert.equal((await checkpoint())?.obsKey, "b/y\nY", "A's completion must not delete B")
