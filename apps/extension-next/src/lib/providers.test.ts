@@ -82,6 +82,23 @@ test("saved manual routes disable all later key-based suggestions", async () => 
   assert.equal(settings.routes.tier2.provider, "gemini")
 })
 
+test("concurrent route save and key add preserve both mutations", async () => {
+  reset()
+  await Promise.all([
+    setRoutes({
+      tier1: { provider: "openai", model: "gpt-5.4-nano" },
+      tier2: { provider: "openai", model: "gpt-5.6-luna" },
+    }),
+    addProviderKey("gemini", "", "gemini-key"),
+  ])
+
+  const settings = await getJudgeSettings()
+  assert.equal(settings.routesManuallyConfigured, true)
+  assert.equal(settings.routes.tier1.provider, "openai")
+  assert.equal(settings.routes.tier2.provider, "openai")
+  assert.equal(settings.accounts.gemini?.keys[0]?.value, "gemini-key")
+})
+
 test("stored routes from before the manual flag preserve non-default user choices", async () => {
   reset()
   store["kibitzer:providers:v1"] = {
