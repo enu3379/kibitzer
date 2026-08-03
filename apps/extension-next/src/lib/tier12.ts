@@ -241,7 +241,7 @@ export async function enrichGoal(goalText: string): Promise<string[]> {
  *  "오늘 N번째" flavor and the fallback template index). */
 export async function tier2Confirm(
   goalText: string,
-  page: { title: string; urlHost: string; score: number },
+  page: { title: string; urlHost: string; score: number; kind?: "web" | "local_pdf" },
   ctx: Tier2Context = { nagCount: 1, naggingContext: {}, recentTitles: [], excerpt: null, timeContext: null },
   shouldContinue: () => Promise<boolean> = async () => true,
 ): Promise<Tier2Outcome> {
@@ -295,10 +295,11 @@ export async function tier2Confirm(
   } catch (error) {
     void recordProviderError(error)
     klog(`tier2 writer error (persona fallback template): ${String(error)}`)
+    const fallbackTitle = page.title || page.urlHost || "현재 페이지"
     const message = pickFallback(persona, ctx.nagCount, {
       goal: goalText,
-      title: page.title || page.urlHost || "현재 페이지",
-      host: page.urlHost || "현재 페이지",
+      title: fallbackTitle,
+      host: page.kind === "local_pdf" ? fallbackTitle : (page.urlHost || "현재 페이지"),
     })
     return { flow: "drift", message: message ? clampSentences(message, maxSentences) : message }
   }

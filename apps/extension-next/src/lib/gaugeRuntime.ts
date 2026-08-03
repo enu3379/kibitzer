@@ -424,10 +424,15 @@ async function deliver(
     if (!message) {
       const persona = await activePersona()
       const nagCount = (await nagCountToday(ts)) + 1
+      const pageTitle = page?.title || page?.urlHost || "현재 페이지"
+      // `local-pdf` is an opaque identity/host label, not user-facing copy. A local PDF's
+      // allowed Chrome tab title should fill both template slots so host-based personas do
+      // not tell the user they are looking at a page literally named "local-pdf".
+      const pageHost = page?.kind === "local_pdf" ? pageTitle : (page?.urlHost || "현재 페이지")
       const fallback = pickFallback(persona, nagCount, {
         goal: goalText,
-        title: page?.title || page?.urlHost || "현재 페이지",
-        host: page?.urlHost || "현재 페이지",
+        title: pageTitle,
+        host: pageHost,
       })
       message = fallback
         ? clampSentences(fallback, persona.maxSentences ?? DEFAULT_MAX_SENTENCES)
@@ -619,11 +624,9 @@ async function showToast(
   // queued before the user navigated there. A queued effect can be delivered by a freshly
   // woken worker, so wait for the user lists (memoized) before consulting the gate.
   await initDomainLists()
-  if (tab?.url) {
-    const descriptor = describeObservableUrl(tab.url)
-    if (descriptor?.kind === "local_pdf" && !(await getSettings()).observeLocalPdfs) return null
-    if (descriptor?.kind === "web" && shouldDropUrl(tab.url)) return null
-  }
+  const activeDescriptor = tab?.url ? describeObservableUrl(tab.url) : null
+  if (activeDescriptor?.kind === "local_pdf" && !(await getSettings()).observeLocalPdfs) return null
+  if (activeDescriptor?.kind === "web" && tab?.url && shouldDropUrl(tab.url)) return null
   // Delivery invariant: never surface a nudge (toast, its OS-notification fallback, or the
   // chime) while Chrome isn't being looked at — the user explicitly never wants an OS
   // notification popping over another app. Drop it here (ACKed, no retry — the drift is already
@@ -635,9 +638,23 @@ async function showToast(
     return null
   }
   if (!(await effectSourceAllowed(source))) return null
-  void playChime(kind) // audible cue via the offscreen document (works off-screen)
   const token = await nextToastToken()
-  if (tab?.id) {
+  // Re-read after the async presence/policy/token work. The user may have navigated the same
+  // tab (or switched tabs) since the first snapshot; in particular, never inject into a PDF
+  // viewer that became active while delivery was being prepared.
+  const [deliveryTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+  const deliveryDescriptor = deliveryTab?.url ? describeObservableUrl(deliveryTab.url) : null
+  if (deliveryDescriptor?.kind === "local_pdf" && !(await getSettings()).observeLocalPdfs) return null
+  if (deliveryDescriptor?.kind === "web" && deliveryTab?.url && shouldDropUrl(deliveryTab.url)) return null
+  void playChime(kind) // audible cue via the offscreen document (works off-screen)
+  // Chrome's built-in PDF viewer may report executeScript success without rendering an
+  // overlay in its visible plugin surface. With file access OFF it is not a reliable toast
+  // host at all, so route local PDFs directly to the existing OS-notification surface.
+  if (deliveryDescriptor?.kind === "local_pdf") {
+    if (!(await effectSourceAllowed(source))) return null
+    return (await showSystemNotification(token, message, kind)) ? token : null
+  }
+  if (deliveryTab?.id) {
     // The first-ever intervention toast renders as a one-time explainer variant (the
     // response buttons and the bubble-click="잘 잡았어요" are not self-evident). Same
     // atomic-kv pattern as the display token; counted at injection so an OS-notification
@@ -656,31 +673,42 @@ async function showToast(
       firstRun,
     }
     if (!(await effectSourceAllowed(source))) return null
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: showKibitzerToast,
-        args: [payload],
-      })
-      return token
-    } catch {
-      // Injection blocked (chrome://, web store, PDF) — fall through to a notification.
+    // `firstRun` persistence above is asynchronous, so take one last active-tab snapshot
+    // immediately before injection. If the tab became a PDF meanwhile, never trust a
+    // superficially successful executeScript result from Chrome's PDF viewer.
+    const [injectionTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+    const injectionDescriptor = injectionTab?.url ? describeObservableUrl(injectionTab.url) : null
+    if (injectionDescriptor?.kind === "local_pdf" && !(await getSettings()).observeLocalPdfs) return null
+    if (injectionDescriptor?.kind === "web" && injectionTab?.url && shouldDropUrl(injectionTab.url)) return null
+    if (injectionDescriptor?.kind === "local_pdf") {
+      return (await showSystemNotification(token, message, kind)) ? token : null
+    }
+    if (injectionTab?.id) {
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: injectionTab.id },
+          func: showKibitzerToast,
+          args: [payload],
+        })
+        return token
+      } catch {
+        // Injection blocked (chrome://, web store, PDF) — fall through to a notification.
+      }
     }
   }
   if (!(await effectSourceAllowed(source))) return null
-  showSystemNotification(token, message, kind)
-  return token
+  return (await showSystemNotification(token, message, kind)) ? token : null
 }
 
 /** OS-notification fallback for pages that can't host the in-page toast. Buttons feed the
  *  same feedback path as the toast (see background's notifications.onButtonClicked). */
-function showSystemNotification(
+async function showSystemNotification(
   token: number,
   message: string,
   kind: "intervention" | "celebration",
-): void {
+): Promise<boolean> {
   try {
-    chrome.notifications.create(`kbz-${token}`, {
+    await chrome.notifications.create(`kbz-${token}`, {
       type: "basic",
       iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
       title: "Kibitzer",
@@ -688,7 +716,9 @@ function showSystemNotification(
       buttons:
         kind === "intervention" ? [{ title: "목표와 관련 있어요" }, { title: "5분만" }] : [],
     })
+    return true
   } catch {
     // No notifications permission / platform limit — nothing more we can do.
+    return false
   }
 }

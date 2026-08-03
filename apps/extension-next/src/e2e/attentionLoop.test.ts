@@ -10,7 +10,7 @@ import test, { mock } from "node:test"
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
-import { kvGet } from "../lib/db.ts"
+import { kvDelete, kvGet } from "../lib/db.ts"
 import { PENDING_DWELL_KEY } from "../lib/dwellScheduler.ts"
 import type { PendingDwell } from "../lib/dwell.ts"
 
@@ -36,7 +36,9 @@ const evt = (name: string) => {
 }
 const store = new Map<string, unknown>() // backs chrome.storage.local
 const createdTabs: string[] = [] // URLs opened via chrome.tabs.create (onboarding assertions)
-let activeTab: { id: number; url: string; title: string; active: boolean; windowId: number } | null = null
+type MockTab = { id: number; url: string; title: string; active: boolean; windowId: number }
+let activeTab: MockTab | null = null
+let tabQuerySequence: Array<MockTab | null> = []
 const toasts: Array<Record<string, unknown>> = [] // captured injected toast payloads
 const notifications: Array<{ id: string; opts: Record<string, unknown> }> = []
 let executeScriptCalls = 0
@@ -50,7 +52,10 @@ const chrome = {
   tabs: {
     onUpdated: evt("tabs.onUpdated"),
     onActivated: evt("tabs.onActivated"),
-    query: async () => (activeTab ? [activeTab] : []),
+    query: async () => {
+      const tab = tabQuerySequence.length > 0 ? tabQuerySequence.shift() : activeTab
+      return tab ? [tab] : []
+    },
     get: async () => activeTab,
     create: async (opts: { url?: string } = {}) => {
       createdTabs.push(opts.url ?? "")
@@ -114,7 +119,8 @@ console.debug = () => {}
 
 // Import the real SW (registers its listeners on the mock above).
 await import("../background.ts")
-const { extractActiveExcerpt } = await import("../lib/gaugeRuntime.ts")
+const { extractActiveExcerpt, setActivePage, testNag } = await import("../lib/gaugeRuntime.ts")
+const { getGoal } = await import("../lib/session.ts")
 
 // --- drivers -----------------------------------------------------------------------------
 const send = (msg: unknown): Promise<Record<string, unknown>> =>
@@ -168,6 +174,7 @@ test("E2E: local PDFs are opt-in and their dwell checkpoint never stores the fil
   assert.ok(first)
   assert.equal(first.kind, "local_pdf")
   assert.equal(first.urlHost, "local-pdf")
+  assert.equal(first.title, "secret-paper.pdf", "Chrome's filename title is used when PDF metadata has no title")
   assert.equal((first as PendingDwell & { url?: string }).url, undefined)
   assert.ok(!JSON.stringify(first).includes("alice") && !JSON.stringify(first).includes("file:///"))
   const beforeExcerpt = executeScriptCalls
@@ -201,6 +208,43 @@ test("E2E: local PDFs are opt-in and their dwell checkpoint never stores the fil
   release()
   await settle(50)
   assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "stale ON observe cannot rewrite after OFF")
+
+  // Chrome's built-in PDF viewer is not a reliable surface for an injected overlay. A local
+  // PDF nudge must use the OS-notification fallback, while persona templates see the allowed
+  // Chrome tab title instead of the opaque `local-pdf` identity.
+  const enabledSettings = await send({ type: "set-settings", settings: { observeLocalPdfs: true } })
+  activeTab.title = "PDF metadata title"
+  await setActivePage({
+    pageKey: first.pageKey,
+    title: activeTab.title,
+    urlHost: "local-pdf",
+    score: 0.2,
+    kind: "local_pdf",
+    localPdfPolicyRevision: enabledSettings.localPdfPolicyRevision as number,
+  })
+  toasts.length = 0
+  notifications.length = 0
+  await send({ type: "set-persona", persona: "yandere" })
+  tabQuerySequence = [
+    { id: 12, url: "https://example.test/before-pdf", title: "Previous web page", active: true, windowId: 1 },
+    { id: 12, url: "https://example.test/during-delivery", title: "Interim web page", active: true, windowId: 1 },
+    activeTab,
+  ]
+  const random = mock.method(Math, "random", () => 0)
+  try {
+    await testNag(await getGoal())
+  } finally {
+    random.mock.restore()
+  }
+  assert.equal(toasts.length, 0, "local PDFs never pretend an injected overlay was visible")
+  assert.equal(notifications.length, 1, "local PDF nags use the OS notification fallback")
+  const notificationMessage = String(notifications[0]?.opts.message ?? "")
+  assert.ok(notificationMessage.includes("PDF metadata title"), "the nudge uses the Chrome tab title")
+  assert.ok(!notificationMessage.includes("local-pdf"), "the opaque identity is never user-facing copy")
+  await kvDelete("first-nag-count") // keep the suite's lifetime-first toast scenario isolated
+  notifications.length = 0
+  toasts.length = 0
+  await send({ type: "set-persona", persona: "dry_kibitzer" })
 
   await send({ type: "set-goal", goal: "", minutes: null })
   activeTab = { id: 1, url: "https://example.test/neutral", title: "중립 페이지", active: true, windowId: 1 }
