@@ -202,11 +202,21 @@
       .tier.on b { color: var(--ok-fg); }
       .tier small { font-size: 11px; color: var(--page-ink-2); line-height: 1.45; display: block; }
       .aistatus {
-        display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 700;
+        display: grid; grid-template-rows: auto 0fr; align-items: start; gap: 0; overflow: hidden;
+        font-size: 12.5px; font-weight: 700;
         border: 1px dashed var(--line); border-radius: 10px; padding: 10px 13px; margin-bottom: 12px;
-        color: var(--page-ink-3);
+        color: var(--page-ink-3); transition: grid-template-rows .22s ease, gap .22s ease;
       }
       .aistatus.on { color: var(--ok-fg); border-color: var(--accent); border-style: solid; background: var(--accent-soft); }
+      .aistatus.has-detail { grid-template-rows: auto 1fr; gap: 5px; }
+      .ai-test-detail {
+        min-height: 0; overflow: hidden; white-space: pre-line; line-height: 1.55;
+        font-size: 12px; font-weight: 650; color: var(--page-ink-2); opacity: 0;
+        transition: opacity .18s ease;
+      }
+      .aistatus.has-detail .ai-test-detail { opacity: 1; }
+      .aistatus.on .ai-test-detail.ok { color: var(--ok-fg); }
+      .ai-test-detail.err { color: var(--err-fg); }
       .keysteps { margin: 0 0 12px; padding-left: 20px; font-size: 12.5px; color: var(--page-ink-2); display: flex; flex-direction: column; gap: 5px; }
       .keysteps small { color: var(--page-ink-3); font-size: 11px; }
       a.ext { color: var(--accent); font-weight: 650; text-decoration: none; }
@@ -220,10 +230,9 @@
       .field textarea { resize: vertical; min-height: 58px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
       .field textarea:focus-visible, .field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
       .field .two { display: flex; gap: 8px; }
-      .btnrow { display: flex; gap: 8px; align-items: center; }
-      .result { font-size: 12px; margin: 10px 0 0; min-height: 18px; color: var(--page-ink-3); }
-      .result.ok { color: var(--ok-fg); font-weight: 700; }
-      .result.err { color: var(--err-fg); }
+      .key-connect-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: stretch; }
+      .key-connect-row .field { margin-bottom: 0; }
+      .key-connect-row .btn { box-sizing: border-box; height: 100%; padding-block: 8px; white-space: nowrap; }
       .skip { display: inline-block; margin-top: 10px; font-size: 12px; color: var(--page-ink-3); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
       .skip:hover { color: var(--page-ink-2); }
       .privacy { font-size: 11px; color: var(--page-ink-3); margin: 14px 0 0; line-height: 1.6; border-top: 1px solid var(--line-soft); padding-top: 10px; }
@@ -414,27 +423,43 @@
           <section class="step" id="s3" hidden>
             <p class="eyebrow">AI 판정</p>
             <h1>판정의 눈을 밝혀 주세요.</h1>
-            <p class="lede">키 없이도 동작하지만 페이지 <b>제목</b>만 봅니다. AI 키를 연결하면 페이지 내용까지 읽고 훨씬 정확해집니다 — 훈수 문장도 AI가 씁니다.</p>
+            <p class="lede">LLM API 키 없이도 작동하지만, 이때는 페이지 <b>제목</b>만 분석합니다. API 키를 연결하면 페이지 내용까지 읽고 훨씬 정확해지며, AI의 위트 있는 훈수도 받아볼 수 있습니다.</p>
             <div class="tiers">
-              <div class="tier"><b>키 없이 · Tier-0</b><small>제목 유사도만으로 판정. 대략은 맞지만 뉘앙스를 놓칩니다.</small></div>
-              <div class="tier on"><b>키 연결 · Tier-1/2</b><small>페이지 내용을 읽고 판정. 훈수도 말투에 맞춰 생성합니다.</small></div>
+              <div class="tier">
+                <b>API 키 없이 · Tier-0</b>
+                <small>페이지 제목 유사도만으로 판정합니다. 대략적인 흐름은 잡지만 상세한 뉘앙스는 놓칠 수 있습니다.</small>
+              </div>
+              <div class="tier on">
+                <b>API 키 연결 · Tier-1/2</b>
+                <small>페이지 내용을 읽고 정밀 분석합니다. 다양한 컨셉의 AI가 상황에 맞는 말투로 훈수를 던집니다.</small>
+              </div>
             </div>
-            <div class="aistatus" id="aiStatus"><span id="aiStatusText">지금은 제목 판정만 동작 중 (Tier-0)</span></div>
+            <div class="aistatus" id="aiStatus" role="status" aria-live="polite">
+              <span id="aiStatusText">지금은 페이지 제목만 분석 중 (Tier-0)</span>
+              <span class="ai-test-detail" id="keysResult" aria-hidden="true"></span>
+            </div>
             <ol class="keysteps">
-              <li><a class="ext" href="https://ollama.com/settings/keys" target="_blank" rel="noreferrer">ollama.com에서 키 발급 →</a> <small>계정이 없으면 로그인 화면에서 가입까지 1분이면 됩니다.</small></li>
-              <li>발급된 키를 아래에 붙여넣고 <b>연결 테스트</b> — 키는 즉시 저장되고, 두 판정 모델을 실제로 호출해 확인합니다.</li>
+              <li><a class="ext" href="https://ollama.com/settings/keys" target="_blank" rel="noreferrer">ollama.com에서 무료 API 키 발급 →</a> <small>가입부터 발급까지 1분이면 충분합니다</small></li>
+              <li>발급된 키를 아래에 붙여넣고 <b>연결 테스트</b></li>
             </ol>
-            <label class="field">
-              <span>Ollama Cloud API 키</span>
-              <input type="password" id="key" placeholder="ollama.com API 키" autocomplete="off" />
-            </label>
-            <div class="btnrow">
+            <div class="key-connect-row">
+              <label class="field">
+                <input type="password" id="key" placeholder="Ollama Cloud API 키" autocomplete="off" />
+              </label>
               <button class="btn primary" id="testKeys">연결 테스트</button>
             </div>
-            <p class="result" id="keysResult"></p>
-            <span class="skip" id="skip" role="button" tabindex="0">나중에 할게요 — 우선 제목 판정만으로 시작 →</span>
-            <p class="footnote">여러 키 로테이션, Claude·OpenAI 등 다른 제공자, 판정 모델 변경은 <span class="skip" id="openSettingsAi" role="button" tabindex="0">설정 → AI 판정</span>에서.</p>
-            <p class="privacy">키를 연결하면: 목표, 페이지 제목·호스트, 페이지 요약(최대 3,000자)이 판정을 위해 전송될 수 있습니다. 원본 URL과 저장된 기록 전체는 전송하지 않습니다. 설정에서 언제든 바꿀 수 있습니다.</p>
+            <span class="skip" id="skip" role="button" tabindex="0">나중에 할게요. 우선 제목 분석만으로 시작</span>
+            <p class="footnote" style="font-size: 12px; margin-top: 10;">
+              Claude·OpenAI 등 다른 AI 서비스도 지원합니다. 모델 변경이나 API 키 로테이션 설정은 <span class="skip" id="openSettingsAi" role="button" tabindex="0" style="margin-top: 0;">설정 → AI 판정</span>에서 하실 수 있습니다.
+            </p>
+            <div class="privacy">
+              <p style="margin-bottom: 0;">API 키 연결 시 판정을 위해 아래 정보만 최소한으로 전송됩니다.</p>
+              <ul style="padding-left: 18px; margin: 3px 0 8px 0;">
+                <li><b>전송 항목:</b> 목표, 페이지 제목·호스트, 페이지 요약(최대 3,000자)</li>
+                <li><b>보안 방침:</b> 은행·메일 등 민감 도메인 미탐지, 원본 URL 및 전체 기록 전송 불가</li>
+              </ul>
+              <small>※ 관련 설정은 언제든 변경할 수 있습니다.</small>
+            </div>
           </section>
 
           <!-- ⑤ 말투 + 핀 -->
