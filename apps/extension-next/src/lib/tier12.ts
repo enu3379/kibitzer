@@ -151,6 +151,17 @@ export interface RouteTestResult {
   detail: string
 }
 
+/** Treat a failed policy/state read as cancellation at provider boundaries. */
+export async function safeShouldContinue(
+  shouldContinue: () => Promise<boolean>,
+): Promise<boolean> {
+  try {
+    return await shouldContinue()
+  } catch {
+    return false
+  }
+}
+
 function errorText(error: unknown): string {
   if (error && typeof error === "object") {
     const record = error as { message?: unknown; stage?: unknown; status?: unknown }
@@ -247,7 +258,7 @@ export async function tier2Confirm(
   }
   let decision
   try {
-    if (!(await shouldContinue())) return { flow: "ok", message: null, cancelled: true }
+    if (!(await safeShouldContinue(shouldContinue))) return { flow: "ok", message: null, cancelled: true }
     const reviewPayload = buildTier2ReviewPayload(
       { rawText: goalText },
       observation,
@@ -265,7 +276,7 @@ export async function tier2Confirm(
   }
   klog(`tier2 judge: ${decision.decision} (${decision.reasonCode}, basis=${decision.basis})`)
   if (decision.decision !== "notify") return { flow: "ok", message: null }
-  if (!(await shouldContinue())) return { flow: "ok", message: null, cancelled: true }
+  if (!(await safeShouldContinue(shouldContinue))) return { flow: "ok", message: null, cancelled: true }
   // Notify confirmed → write the nag in the selected persona's voice.
   const persona = await activePersona()
   const maxSentences = persona.maxSentences ?? DEFAULT_MAX_SENTENCES
@@ -277,7 +288,7 @@ export async function tier2Confirm(
     ctx.naggingContext,
   )
   try {
-    if (!(await shouldContinue())) return { flow: "ok", message: null, cancelled: true }
+    if (!(await safeShouldContinue(shouldContinue))) return { flow: "ok", message: null, cancelled: true }
     const message = await p.tier2.writeTier2Message(messagePayload, composeWriterPrompt(persona))
     void recordProviderOk()
     return { flow: "drift", message: clampSentences(message, maxSentences) }
