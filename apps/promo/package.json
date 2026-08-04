@@ -1,0 +1,27 @@
+{
+  "name": "@kibitzer/promo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Remotion demo/promo video for Kibitzer",
+  "scripts": {
+    "studio": "remotion studio",
+    "build": "tsc --noEmit",
+    "compositions": "remotion compositions",
+    "render": "remotion render KibitzerPromo out/kibitzer-promo.mp4 --codec=h264 --crf=17",
+    "stills": "node scripts/render-stills.mjs"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.505",
+    "@remotion/fonts": "4.0.505",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.505"
+  },
+  "devDependencies": {
+    "@remotion/bundler": "^4.0.505",
+    "@remotion/renderer": "^4.0.505",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "typescript": "~5.5.4"
+  }
+}
