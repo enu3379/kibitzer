@@ -10,6 +10,7 @@ import {
   rotated,
 } from "./chatTransport.ts"
 import { ProviderResponseError } from "./errors.ts"
+import { withResponseDebug } from "./responseDebug.ts"
 import {
   parseTier1Json,
   parseTier2DecisionJson,
@@ -76,7 +77,7 @@ export class ClaudeChatJudgeProvider implements JudgeProvider {
       maxTokens: GOAL_ENRICHMENT_MAX_TOKENS,
       timeoutMs,
     })
-    return claudeContent(response)
+    return withResponseDebug(response, "claude goal enrichment", () => claudeContent(response))
   }
 
   async confirmTier2(
@@ -105,17 +106,19 @@ export class ClaudeChatJudgeProvider implements JudgeProvider {
       user: JSON.stringify(payload),
       maxTokens: this.writerMaxOutputTokens,
     })
-    const content = claudeContent(response).trim()
-    if (claudeExhausted(response)) {
-      throw new ProviderResponseError(
-        "output_exhausted",
-        "tier2 writer response exhausted output budget",
-      )
-    }
-    if (!content) {
-      throw new ProviderResponseError("writer_empty", "tier2 writer response was empty")
-    }
-    return truncateCodePoints(content, 320)
+    return withResponseDebug(response, "claude tier2 writer", () => {
+      const content = claudeContent(response).trim()
+      if (claudeExhausted(response)) {
+        throw new ProviderResponseError(
+          "output_exhausted",
+          "tier2 writer response exhausted output budget",
+        )
+      }
+      if (!content) {
+        throw new ProviderResponseError("writer_empty", "tier2 writer response was empty")
+      }
+      return truncateCodePoints(content, 320)
+    })
   }
 
   private async judgeCall<T>(
@@ -128,7 +131,9 @@ export class ClaudeChatJudgeProvider implements JudgeProvider {
       user: JSON.stringify(payload),
       maxTokens: this.maxOutputTokens,
     })
-    return parseJudgeContent(claudeContent(response), claudeExhausted(response), parser)
+    return withResponseDebug(response, "claude judge", () => (
+      parseJudgeContent(claudeContent(response), claudeExhausted(response), parser)
+    ))
   }
 
   private async postMessages(options: {
@@ -146,6 +151,7 @@ export class ClaudeChatJudgeProvider implements JudgeProvider {
     const response = await postJsonRotating({
       url: this.chatUrl,
       body,
+      debugContext: "claude transport",
       keys: rotated(this.apiKeys, this.rotation++),
       // Extension service workers with host_permissions bypass CORS, but the browser-access
       // header keeps this working under plain CORS too (e.g. the replay page).

@@ -15,7 +15,10 @@ import {
   type RecentTitle,
   type TopDriftHost,
 } from "../providers/payloads.ts"
+import { withRawResponseDebug } from "../providers/responseDebug.ts"
 import type { JudgeProvider, JudgeVerdict } from "../providers/types.ts"
+import { buildEnrichmentPrompt, ENRICH_TIMEOUT_MS, MAX_PHRASES, parseEnrichmentResponse } from "./goalEnrichment.ts"
+import { klog } from "./klog.ts"
 import {
   getJudgeSettings,
   profileFor,
@@ -35,9 +38,7 @@ import {
 } from "./personas.ts"
 import { detectSpecial, type SessionStats } from "./sessionStats.ts"
 import type { SummaryDice } from "./summaryDice.ts"
-import { klog } from "./klog.ts"
 import { classifyProviderError, recordProviderError, recordProviderOk } from "./providerHealth.ts"
-import { buildEnrichmentPrompt, ENRICH_TIMEOUT_MS, MAX_PHRASES, parseEnrichmentResponse } from "./goalEnrichment.ts"
 
 /** History-derived context for the Tier-2 writer (built by gaugeRuntime from the nag /
  *  visit logs). `nagCount` is the 1-based ordinal of the nag about to be produced.
@@ -211,7 +212,9 @@ export async function enrichGoal(goalText: string): Promise<string[]> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const content = await p.tier1.completeGoalEnrichment(prompt, ENRICH_TIMEOUT_MS)
-      return parseEnrichmentResponse(content, MAX_PHRASES)
+      return withRawResponseDebug(content, "goal enrichment", "content_json", () => (
+        parseEnrichmentResponse(content, MAX_PHRASES)
+      ))
     } catch (error) {
       lastError = error
     }

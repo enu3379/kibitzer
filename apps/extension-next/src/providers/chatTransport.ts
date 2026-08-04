@@ -5,12 +5,14 @@
 // and is covered by its own tests).
 
 import { ProviderHttpError, ProviderResponseError } from "./errors.ts"
+import { readProviderJson } from "./responseDebug.ts"
 
 const RETRYABLE_KEY_STATUSES = new Set([401, 403, 429])
 
 export interface RotatingPostOptions {
   url: string
   body: Record<string, unknown>
+  debugContext: string
   keys: readonly string[]
   headersFor: (key: string) => Record<string, string>
   timeoutMs: number
@@ -41,25 +43,12 @@ export async function postJsonRotating(
         continue
       }
       if (!response.ok) throw new ProviderHttpError(response.status)
-      return await responseJson(response)
+      return await readProviderJson(response, options.debugContext)
     } finally {
       clearTimeout(timeout)
     }
   }
   throw new ProviderHttpError(lastStatus ?? 500)
-}
-
-export async function responseJson(response: Response): Promise<Record<string, unknown>> {
-  let data: unknown
-  try {
-    data = await response.json()
-  } catch {
-    throw new ProviderResponseError("http_json", "provider HTTP body was not JSON")
-  }
-  if (!data || typeof data !== "object" || Array.isArray(data)) {
-    throw new ProviderResponseError("envelope", "provider response was not a JSON object")
-  }
-  return data as Record<string, unknown>
 }
 
 /** Run the JSON-verdict parser; when the output budget was exhausted, surface parse
