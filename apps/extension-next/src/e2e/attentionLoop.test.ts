@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 import { kvDelete, kvGet } from "../lib/db.ts"
 import { PENDING_DWELL_KEY } from "../lib/dwellScheduler.ts"
 import { LOCAL_PDF_PROMPT_DELAY_MS, LOCAL_PDF_PROMPT_SHOWN_KEY } from "../lib/localPdfPrompt.ts"
+import { getVisits, type SessionVisits } from "../lib/visits.ts"
 import type { PendingDwell } from "../lib/dwell.ts"
 
 // Serve the real embedding assets off disk so the KoEn-E5 WASM session loads (the extension
@@ -94,6 +95,7 @@ const chrome = {
   // window carry windowId 2 and must be ignored by the observation surface (Fix 4).
   windows: {
     onFocusChanged: evt("win"),
+    onRemoved: evt("windows.onRemoved"),
     getLastFocused: async () => ({ focused: winFocused, id: 1 }),
     get: async () => ({ id: 1, left: 100, top: 40, width: 1400, height: 900 }),
     getAll: async () => promptWindowOpen
@@ -170,6 +172,13 @@ const fireStartup = async () => {
 const fireHeartbeat = async () => {
   for (const fn of listeners["alarms.onAlarm"]) await fn({ name: "kibitzer-next-heartbeat" })
 }
+const fireWindowRemoved = async (windowId: number) => {
+  for (const fn of listeners["windows.onRemoved"]) await fn(windowId)
+}
+// Total recorded dwell across the session's entries. The tracker's open interval is credited
+// only when it CLOSES, so this is exactly "time already attributed to real pages".
+const attributedMs = (visits: SessionVisits | null): number =>
+  Object.values(visits?.entries ?? {}).reduce((sum, e) => sum + e.ms, 0)
 const settle = (ms = 0) => new Promise((r) => setTimeout(r, ms)) // real timer (only Date is mocked)
 const settleUntil = async (until: () => boolean, steps = 100): Promise<boolean> => {
   for (let i = 0; i < steps; i += 1) {
@@ -714,6 +723,92 @@ test("E2E: title churn in an UNFOCUSED window's active tab cannot steal the focu
     }
     const s = (await send({ type: "get-state" })).s as number
     assert.ok(s < 100, `the focused page's judgement landed and S drains (S=${s}) — the side window did not steal the dwell`)
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+// The destroyed window's id is deliberately unused by the handler: no tabId/windowId is stored
+// in the visit or gauge state, so ownership is settled by re-querying which tab is active NOW.
+// The mock's getLastFocused is a constant — it stands for "whichever window has focus", which
+// after the close is the survivor.
+test("E2E: destroying the focused window stops all attribution to its page (Fix 5)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 21, url: "https://video.test/watch?v=owl", title: "귀여운 부엉이 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "쿠버네티스 배포 설정 정리", minutes: null })
+    await settle(50)
+
+    // Judge the off-goal page → DRIFT, which opens its visit interval and drains S.
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+
+    let drained = 100
+    for (let i = 0; i < 60 && drained > 50; i += 1) {
+      await beat()
+      drained = (await send({ type: "get-state" })).s as number
+    }
+    assert.ok(drained > 0 && drained < 100, `the drift drained S off full but not to 0 (S=${drained})`)
+    assert.ok((await getVisits())?.open, "the drifting page owns the open visit interval")
+
+    // Its window is destroyed. Chrome fires NO tab event for that, and the surviving window shows
+    // an internal page — so no observation will EVER arrive to correct the attribution. Pre-fix
+    // the minute heartbeats kept crediting dwell to the vanished page AND kept integrating its
+    // stale DRIFT into S (up to gapCap each beat); only windows.onRemoved can stop it.
+    activeTab = { id: 22, url: "chrome://newtab/", title: "New Tab", active: true, windowId: 1 }
+    await fireWindowRemoved(1)
+    await settle(50)
+
+    const atClose = await getVisits()
+    assert.equal(atClose?.open, null, "the destroyed page's interval is closed on the spot")
+    const msAtClose = attributedMs(atClose)
+    const sAtClose = (await send({ type: "get-state" })).s as number
+
+    for (let i = 0; i < 15; i += 1) await beat()
+    assert.equal(attributedMs(await getVisits()), msAtClose, "no dwell accrues to the destroyed page")
+    assert.equal(
+      (await send({ type: "get-state" })).s as number,
+      sAtClose,
+      "S no longer integrates the destroyed page's verdict",
+    )
+    assert.equal(toasts.length + notifications.length, 0, "and no nag fires off a page that no longer exists")
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: a window close hands the session to the surviving window's page (Fix 5)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 31, url: "https://video.test/watch?v=bee", title: "귀여운 벌 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "테라폼 모듈 리팩터링", minutes: null })
+    await settle(50)
+
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+    await beat() // accrue a minute of dwell on the judged page
+    assert.ok((await getVisits())?.open, "the judged page owns the open visit interval")
+
+    // Same close, but the surviving window shows a REAL page: the session must continue there
+    // rather than sitting wedged in the hold.
+    await kvDelete(PENDING_DWELL_KEY)
+    activeTab = { id: 32, url: "https://registry.terraform.io/modules", title: "테라폼 모듈 레지스트리", active: true, windowId: 1 }
+    await fireWindowRemoved(1)
+    await settle(50)
+
+    assert.equal((await getVisits())?.open, null, "the destroyed page's interval is still closed out")
+    const pending = (await kvGet(PENDING_DWELL_KEY)) as PendingDwell | undefined
+    assert.equal(
+      pending?.title,
+      "테라폼 모듈 레지스트리",
+      "the surviving window's page starts its own dwell — the session is handed over, not stalled",
+    )
   } finally {
     mock.timers.reset()
   }

@@ -33,7 +33,7 @@ import { clearStore, kvGet, kvSet, OBS_STORE } from "./lib/db.ts"
 import { DwellScheduler } from "./lib/dwellScheduler.ts"
 import { PENDING_DWELL_VERSION, type PendingDwell } from "./lib/dwell.ts"
 import { markNagActed, recentTitles, recordObservation } from "./lib/history.ts"
-import { clearVisits, noteHeartbeat, noteInactive, noteJudged, noteObserve, noteVerdict } from "./lib/visits.ts"
+import { clearVisits, getVisits, noteHeartbeat, noteInactive, noteJudged, noteObserve, noteVerdict } from "./lib/visits.ts"
 import { clearSessionSummary, dismissSessionSummary, finalizeSession, generateSummaryComment, getSessionSummary } from "./lib/sessionSummary.ts"
 import { clearSessionHistory } from "./lib/sessionHistory.ts"
 import { clearLog, exportLog, klog, logText } from "./lib/klog.ts"
@@ -409,6 +409,11 @@ void dwell.reconcile()
 chrome.runtime.onStartup.addListener(() => {
   void flushOutbox()
   void dwell.reconcile()
+  // Closing the LAST window quits Chrome on Windows, so windows.onRemoved can lose its race with
+  // the teardown and the open interval / active verdict survive on disk pointing at a page from
+  // the previous run. Re-sync once here: a restored session showing the same page matches and
+  // no-ops, anything else is closed out before the first heartbeat can resume crediting it.
+  void resyncActivePage().catch(() => klog("startup resync skipped"))
 })
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -452,6 +457,50 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
     }
     return observeActiveTab()
   })
+})
+
+// Closing a whole window DESTROYS the page the visit tracker and the gauge are still
+// attributing time to, and Chrome fires no observation for it: tabs.onActivated only covers
+// closing a tab, and the surviving window's active tab may never produce an observe (it can be
+// an internal page, or a restored tab that never reloads). Left alone, the 1-min heartbeat kept
+// crediting dwell to a page that no longer exists and kept integrating its stale verdict into S.
+//
+// No tabId/windowId is stored in the visit or gauge state (both key on pageKey alone), so
+// ownership of the open interval can't be tested by id. Instead re-query which tab is active NOW
+// and act only on a MISMATCH — closing a background window then stays a true no-op, where an
+// unconditional pause would rebase the gauge clock and silently forgive a minute of real drift.
+async function resyncActivePage(): Promise<void> {
+  const goal = await getGoal()
+  if (!goal) return
+  let tab: chrome.tabs.Tab | undefined
+  try {
+    ;[tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+  } catch {
+    // The last window closing races Chrome's teardown — treat it as "no surviving page".
+  }
+  const survivorKey = tab?.url ? (describeObservableUrl(tab.url)?.pageKey ?? null) : null
+  const visits = await getVisits()
+  const openOrphaned =
+    visits?.epoch === goal.epoch && visits.open != null && visits.open.pageKey !== survivorKey
+  // Close the interval at once: the destroyed page must not be credited one more second.
+  if (openOrphaned) await noteInactive(Date.now(), goal.epoch)
+  const state = await currentState()
+  const gaugeOrphaned = state.activeVerdict != null && state.activePageKey !== survivorKey
+  // NEUTRAL, not `inactive`: the user was looking at that page right up to the close, so the
+  // tail still counts (`neutral` integrates to now, then drops the verdict) — `inactive` would
+  // discard up to a minute of real drift. The key is opaque on purpose: the survivor may be a
+  // sensitive page, and the hold's pageKey is echoed by the klog trace and the exportable `tick`
+  // event (same reason the internal / sensitive drops in observe() use opaque constants).
+  if (gaugeOrphaned) await enterNeutral("window#closed", goal)
+  // Hand the session over to the surviving window so it is never wedged; observe() runs its own
+  // privacy / internal-page / local-PDF gates on whatever is there.
+  if ((openOrphaned || gaugeOrphaned) && tab) await observe(tab.url, tab.title)
+}
+
+chrome.windows.onRemoved.addListener(() => {
+  // Best-effort: the last window's close races Chrome's teardown, and this must never take the
+  // pipeline down with it (visits.note is already best-effort for the same reason).
+  void resyncActivePage().catch(() => klog("window-close resync skipped"))
 })
 
 // Feedback from the OS-notification fallback (buttons: 0=related, 1=break), routed
