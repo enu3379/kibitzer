@@ -508,17 +508,21 @@ async function resyncActivePage(reason: "window-close" | "startup", closedWindow
       ` visits=${openOrphaned ? "closed" : trackedOpen == null ? "none" : "match"}` +
       ` gauge=${gaugeOrphaned ? "neutral" : state.activeVerdict == null ? "none" : "match"}`,
   )
+  // One question decides both halves below: was the user actually there for the time we are about
+  // to account for? Unknown → present, per presence.ts.
+  const present = await browserPresent()
   if (gaugeOrphaned) {
-    // On a window CLOSE the user was looking at that page right up to the moment it went away, so
-    // the tail is real attention: `neutral` integrates up to now and only then drops the verdict
-    // (plain `inactive` would rebase the clock and discard up to a minute of true drift).
+    // `neutral` integrates up to now and only THEN drops the verdict. That is right for a window
+    // the user closed while watching it — the tail is real attention, and plain `inactive` would
+    // discard up to a minute of true drift.
     //
-    // At STARTUP the gap is the browser having been shut, which is the textbook `inactive` — so
-    // rebase the clock FIRST and let the neutral hold that follows integrate nothing. Otherwise
-    // gapCap's worth (90s) of the PREVIOUS run's DRIFT is applied at launch and can nag the user
-    // about a page from the last session. (The 1-min heartbeat did exactly that before this
-    // handler existed; the rebase is what stops it.)
-    if (reason === "startup") await dispatch({ type: "inactive", ts: Date.now() }, goal)
+    // It is wrong whenever the user was not there for that tail, and there are two such cases.
+    // At STARTUP the gap is the browser having been shut. And a window can be closed from the
+    // taskbar long after the user walked away, in which case the tail is away-time. Both would
+    // otherwise bill gapCap's worth (90s) of DRIFT the user never spent — at launch that can even
+    // nag about a page from the last session. Rebase the clock first so the hold integrates
+    // nothing. (The 1-min heartbeat already pauses the same way while away.)
+    if (reason === "startup" || !present) await dispatch({ type: "inactive", ts: Date.now() }, goal)
     // The hold key is opaque on purpose: the survivor may be a sensitive page, and the hold's
     // pageKey is echoed by the klog trace and the exportable `tick` event (same reason the
     // internal / sensitive drops in observe() use opaque constants).
@@ -528,9 +532,8 @@ async function resyncActivePage(reason: "window-close" | "startup", closedWindow
   // Hand the session over to the surviving window so it is never wedged. Never start a dwell for
   // attention that isn't happening, though: a window can be closed from the taskbar (or by
   // window.close()) while Chrome is unfocused, and every other observe() entry point is
-  // focus/presence gated. Unknown → present, per presence.ts. A later focus/idle-active edge
-  // re-observes through the existing paths.
-  if (!(await browserPresent())) return
+  // focus/presence gated. A later focus/idle-active edge re-observes through the existing paths.
+  if (!present) return
   // Re-read rather than reusing the snapshot above: several awaits have passed, and handing a
   // stale tab to observe() would overwrite a fresher dwell checkpoint with a reset deadline.
   const current = await survivor()

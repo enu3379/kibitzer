@@ -896,6 +896,43 @@ test("E2E: a tab belonging to the window being closed is not mistaken for a surv
   }
 })
 
+test("E2E: a window closed while Chrome is unfocused does not bill the away time as drift (Fix 5)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 71, url: "https://video.test/watch?v=moth", title: "귀여운 나방 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "선형대수 복습", minutes: null })
+    await settle(50)
+
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+    await beat()
+    assert.ok((await getVisits())?.open, "the judged page owns the open interval")
+    const sBefore = (await send({ type: "get-state" })).s as number // present: rebases the clock
+
+    // The user switches to another app and only THEN closes the Chrome window from the taskbar.
+    // The minute in between is away-time. `neutral` integrates the tail before dropping the
+    // verdict — right for a window closed while watching it, wrong here: it would bill drift the
+    // user never spent. No tab survives, matching a taskbar close of the last window.
+    winFocused = false
+    mock.timers.tick(60_000)
+    activeTab = null
+    await fireWindowRemoved(2)
+    await settleUntilStored(async () => ((await getVisits())?.open ?? null) === null)
+
+    assert.equal(
+      (await send({ type: "get-state" })).s as number,
+      sBefore,
+      "the minute spent in another app is rebased away, not integrated as drift",
+    )
+  } finally {
+    winFocused = true
+    mock.timers.reset()
+  }
+})
+
 test("E2E: a restart closes the previous run's interval without integrating the shutdown gap (Fix 5)", async () => {
   mock.timers.enable({ apis: ["Date"] })
   try {
