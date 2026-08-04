@@ -132,6 +132,13 @@ async function observe(url: string | undefined, title: string | undefined): Prom
     // kill the dwell of the page just left, or that dwell fires against this chrome:// tab,
     // is dropped, and the gauge freezes on the abandoned page with nothing armed.
     await dwell.cancel() // drop any prior page's pending dwell; this page never counts
+    // Close the visit interval of the page just left — also before the debounce, mirroring
+    // holdLocalPdfDisabled. This branch returns before the noteObserve below, so without an
+    // explicit close the tracker still believed the judged page was being attended and the
+    // 1-min heartbeat kept crediting it dwell for as long as the user sat on this chrome://
+    // page — inflating the session summary's valid time and longest-dwell page. (The gauge
+    // was already safe: the enterNeutral below holds it.)
+    await noteInactive(Date.now(), goal.epoch)
     if (obsKey === lastObservedKey) return // same internal page storming — already held
     lastObservedKey = obsKey
     klog(`drop (internal) ${protocol}`)
