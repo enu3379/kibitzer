@@ -43,14 +43,19 @@ export const scene = {
   s4Shopping: { from: 643, duration: 226 },
   /** Everything stops. The only slow thing left in the middle of the film. */
   s5Freeze: { from: 869, duration: 60 },
-  /** Clear the mess, look at the document, pick a new research thread. */
-  s6Reset: { from: 929, duration: 96 },
+  /**
+   * Clear the mess, look at the document, pick a new research thread — and only then get
+   * praised. The scene is 18 frames longer than the cut before it purely to hold the praise
+   * back: it used to fire two frames after the research page finished loading, which reads
+   * as the extension congratulating a page load rather than a return to work.
+   */
+  s6Reset: { from: 929, duration: 114 },
   /** Praise carries over, the report is finished, the mail goes out, session ends. */
-  s7WrapUp: { from: 1025, duration: 162 },
-  s8EndCard: { from: 1187, duration: 70 },
+  s7WrapUp: { from: 1043, duration: 162 },
+  s8EndCard: { from: 1205, duration: 70 },
 } as const;
 
-export const TOTAL_FRAMES = scene.s8EndCard.from + scene.s8EndCard.duration; // 1257 = 41.9s
+export const TOTAL_FRAMES = scene.s8EndCard.from + scene.s8EndCard.duration; // 1275 = 42.5s
 
 /**
  * How long the Cmd-Tab switcher stays up. Short: at this tempo there are ten app
@@ -207,57 +212,61 @@ export const beat = {
 
   /* --------------------------------------------------------- S4 drift #2/#3: mall (226f)
    *
-   * The mall gets a twenty-frame landing on the listing grid, scrolling, before anything is
-   * clicked. It has to read as "this is a shopping site" before the spree can mean anything.
+   * A browsing SESSION, not a loop, and — since the last pass — not a fast one either.
    *
-   * What follows is a browsing SESSION, not a loop. The old cut alternated between one
-   * button and one rail row for seven straight additions, which is not what being kept by a
-   * mall looks like — it looks like a machine. So the same window now carries the four ways
-   * a person actually moves through a shop, and no two consecutive items are reached the
-   * same way:
+   * The routes were already varied: grid, rail, Back, the mall's own search. What was still
+   * wrong was the DWELL. A product page opened and `장바구니` was clicked eight frames
+   * later; the next page lasted six. Nobody shops like that. Reading a page, choosing a
+   * size and deciding takes longer than reaching for the button, and when every visit costs
+   * the same quarter second the whole scene plays like a macro no matter how many different
+   * buttons it presses.
    *
-   *   `shopPick`      off the listing grid, after the scroll
-   *   `hop1` `hop2`   the 함께 본 상품 rail — the mall's own suggestion
-   *   `backClick`     the browser Back button, onto the product page from two steps ago,
-   *                   and out of it again down a different rail row (`hop3`)
-   *   `shopSearch`    the mall's own search box: 캠핑 의자 typed, results, a card off them
-   *   `hop4`          the rail again, once, to close it out
+   * So the same 226 frames now buy FIVE items instead of six, and every visit gets 8–14
+   * frames of somebody actually looking at what they opened:
    *
-   * Six items, not seven — the seventh existed to fill a rhythm that no longer needs
-   * filling, and the frames it used to take now belong to the search and the backtrack.
+   *   `shopEnter`     18 frames of listing grid — scrolled in two goes, with a pause, and a
+   *                   card that gets looked at and NOT clicked
+   *   `shopPick`      the 러닝화 the portal query was about, off the first card
+   *   `optionPick`    사이즈 265 — the one step that says "this is being bought", not browsed
+   *   `hop1`          the rail, and then FOURTEEN frames of the next page before anything
+   *                   happens to it, because that is where the nudge lands
+   *   `backClick`     Back onto the first product page, out down a different rail row
+   *   `shopSearch`    캠핑 의자 typed into the mall's own search box
    *
-   * Nudge #2 lands *after* the spree has started, not on the messages before it. A nudge
-   * can only name what is on screen, and what is on screen here is someone researching
-   * customer acquisition while being acquired. It also gives the beat a shape: two items
-   * go in the cart, the nudge stops it, the snooze restarts it, four more go in.
+   * Nudge #2 now interrupts a page being READ rather than landing after a click, and the
+   * item under it goes into the cart on the other side of the snooze. That is a better beat
+   * than the old one — the nag stops a decision in progress, and `5분만` restarts it — and
+   * it is what buys the fourteen frames.
    */
-  portalEnter: 649,
-  portalQuery: 655,
+  portalEnter: 645,
+  portalQuery: 649,
   /** The mall opens on its listing page; the pick happens after a long, readable scroll. */
-  shopEnter: 669,
-  shopPick: 689,
-  cart1: 697,
-  hop1: 705,
-  cart2: 711,
+  shopEnter: 661,
+  shopPick: 679,
+  /** 사이즈 265. A product page is not a button, and this is what says so. */
+  optionPick: 687,
+  cart1: 695,
+  hop1: 703,
   nudge2In: 717,
   snoozeClick: 747,
-  hop2: 755,
-  cart3: 761,
-  /** Back — onto the product page two steps ago, then out of it down another rail row. */
-  backClick: 767,
-  hop3: 775,
-  cart4: 781,
-  dmPeek1: 787,
-  dmPeek1End: 799,
+  /** The item that was on screen when the nudge stopped everything. */
+  cart2: 757,
+  /** Back — onto the first product page, then out of it down another rail row. */
+  backClick: 765,
+  hop2: 775,
+  cart3: 785,
+  dmPeek1: 791,
+  dmPeek1End: 803,
+  hop3: 809,
+  cart4: 817,
+  dmPeek2: 821,
+  dmPeek2End: 831,
   /** The mall's own search box: focused, typed into, submitted. */
-  shopSearch: 803,
-  searchResults: 813,
-  searchPick: 821,
-  cart5: 827,
-  dmPeek2: 833,
-  dmPeek2End: 845,
-  hop4: 851,
-  cart6: 857,
+  shopSearch: 835,
+  /** The page turns on the frame the Enter is heard, not before it. */
+  searchResults: 844,
+  searchPick: 851,
+  cart5: 859,
   cartViewEnter: 863,
   nudge3In: 867,
 
@@ -278,40 +287,49 @@ export const beat = {
   /** off camera — §3.4, the soft conclusion the drift interrupted mid-thought. */
   writeSynthesis: 1006,
   researchLoad: 1013,
-  praiseIn: 1015,
+  /**
+   * The celebration, held back 18 frames.
+   *
+   * S crosses cCelebrate = 80 here, and where that crossing SITS is a claim about what the
+   * extension noticed. Two frames after `researchLoad` it lands on a page that has only
+   * just finished painting — the reading has not happened yet, so the praise is for opening
+   * a tab. Twenty frames in, the article has been scrolled and read, and the same toast
+   * reads as a judgement about work rather than about navigation.
+   */
+  praiseIn: 1033,
   /** off camera — §4, the size-band analysis, and the figure that closes it. */
-  writeRetention: 1019,
+  writeRetention: 1037,
 
   /* --------------------------------------------------------- S7 finish + wrap up (162f) */
-  praiseOut: 1047,
-  switchToEditor6: 1051,
+  praiseOut: 1065,
+  switchToEditor6: 1069,
   /** §5 heading — the conclusion, and the last thing typed on camera. */
-  writeH3: 1059,
-  writeP12: 1067,
-  writeP13: 1077,
-  writeP14: 1089,
+  writeH3: 1077,
+  writeP12: 1085,
+  writeP13: 1095,
+  writeP14: 1107,
   /**
    * The bibliography lands, and the document is finished. The figure it refers to was
    * already written into §4 off camera — a figure belongs in the section that analyses
    * it, and putting the reference list last is what makes the closing frame read as a
    * paper rather than as a slide.
    */
-  chartIn: 1101,
-  switchToBrowser6: 1117,
-  mailOpen: 1123,
-  sendClick: 1137,
-  mailSent: 1145,
+  chartIn: 1119,
+  switchToBrowser6: 1135,
+  mailOpen: 1141,
+  sendClick: 1155,
+  mailSent: 1163,
   /*
    * The closing look at the popup: the immersion bar back at the top with the sundial's
    * shadow at its longest, then 종료하기 into the session summary — the one screen that
    * reports on the whole two hours.
    */
-  popupOpen2: 1151,
-  endSessionClick: 1163,
-  summaryShown: 1165,
+  popupOpen2: 1169,
+  endSessionClick: 1181,
+  summaryShown: 1183,
 
   /* --------------------------------------------------------- S8 (70f) */
-  endCardIn: 1187,
+  endCardIn: 1205,
 } as const;
 
 /**
@@ -335,7 +353,7 @@ export const beat = {
  *     boil hard: `writeP11` is four times slower than the block before it, and the caret
  *     void after it is the quietest frame in the first half.
  *   · S3 opens low and builds as the thread takes over.
- *   · S4 stops dead at `nudge2In`, restarts on the snooze, and tops out at `cart6`.
+ *   · S4 stops dead at `nudge2In`, restarts on the snooze, and tops out at `cart5`.
  *   · S5 is zero. Nothing moves in the freeze, including the sound.
  *
  * Anchors interpolate linearly and must stay in ascending frame order.
@@ -368,12 +386,12 @@ const DRIVE: ReadonlyArray<readonly [frame: number, v: number]> = [
   /* S4 — the spree */
   [beat.portalQuery, 0.5],
   [beat.shopPick, 0.65],
-  [beat.cart2, 0.8],
+  [beat.cart1, 0.8],
   [beat.nudge2In, 0.55],
   [beat.snoozeClick, 0.6],
-  [beat.cart4, 0.85],
-  [beat.cart5, 0.95],
-  [beat.cart6, 1],
+  [beat.cart3, 0.85],
+  [beat.cart4, 0.95],
+  [beat.cart5, 1],
   [beat.nudge3In, 0.9],
   /* S5 — everything stops */
   [beat.freezeStart, 0],
@@ -469,9 +487,9 @@ export const clockAnchors: readonly ClockAnchor[] = [
   { at: beat.nudge2In, min: 74 },
   /** 3:15 — the minute nudge #3 counts fourteen from. */
   { at: beat.snoozeClick, min: 75 },
-  { at: beat.cart3, min: 76 },
-  { at: beat.cart5, min: 81 },
-  { at: beat.cart6, min: 88 },
+  { at: beat.cart2, min: 76 },
+  { at: beat.cart4, min: 81 },
+  { at: beat.cart5, min: 88 },
   { at: beat.cartViewEnter, min: 89 },
   /** S5 — everything stops, the clock included. */
   { at: beat.freezeEnd, min: 89 },

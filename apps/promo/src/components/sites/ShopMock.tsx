@@ -16,20 +16,22 @@ export type Product = {
   art: string;
   glyph: string;
   slug: string;
+  /** The 옵션 row every product page carries: what is being chosen, and the choices. */
+  opt: { label: string; values: readonly string[] };
 };
 
 /** The first seven are the ones that end up in the cart; the rest pad out the listing. */
 export const PRODUCTS: readonly Product[] = [
-  { name: "에어쿠션 러닝화 3세대", brand: "STRIDE", price: "89,000", was: "129,000", art: "linear-gradient(140deg,#0ea5e9,#4f46e5)", glyph: "👟", slug: "stride-air-3" },
-  { name: "노이즈캔슬링 무선 이어버드", brand: "AUDIO/N", price: "119,000", was: "159,000", art: "linear-gradient(140deg,#64748b,#1e293b)", glyph: "🎧", slug: "audio-n-buds-anc" },
-  { name: "경량 캠핑 체어 (2color)", brand: "OUTLINE", price: "54,900", was: "72,000", art: "linear-gradient(140deg,#22c55e,#0f766e)", glyph: "🪑", slug: "outline-camp-chair" },
-  { name: "이중 진공 보온 텀블러 500ml", brand: "DAYLOOP", price: "27,500", was: "38,000", art: "linear-gradient(140deg,#f59e0b,#dc2626)", glyph: "🥤", slug: "dayloop-tumbler-500" },
-  { name: "오버핏 코튼 후디", brand: "PLAINWEAR", price: "45,000", was: "59,000", art: "linear-gradient(140deg,#a855f7,#ec4899)", glyph: "🧥", slug: "plainwear-cotton-hoodie" },
-  { name: "접이식 블루투스 키보드", brand: "TYPEBOX", price: "62,000", was: "84,000", art: "linear-gradient(140deg,#14b8a6,#0369a1)", glyph: "⌨️", slug: "typebox-fold-keyboard" },
-  { name: "간편 원두 드립백 30개입", brand: "MORNING CO.", price: "18,900", was: "24,000", art: "linear-gradient(140deg,#b45309,#78350f)", glyph: "☕", slug: "morning-co-dripbag-30" },
-  { name: "저소음 미니 가습기 4L", brand: "AIRLEAF", price: "39,000", was: "52,000", art: "linear-gradient(140deg,#38bdf8,#0369a1)", glyph: "💧", slug: "airleaf-humidifier-4l" },
-  { name: "인체공학 무선 마우스", brand: "TYPEBOX", price: "47,000", was: "61,000", art: "linear-gradient(140deg,#475569,#0f172a)", glyph: "🖱️", slug: "typebox-ergo-mouse" },
-  { name: "극세사 워시 담요 (싱글)", brand: "PLAINWEAR", price: "33,000", was: "44,000", art: "linear-gradient(140deg,#fb7185,#9f1239)", glyph: "🧣", slug: "plainwear-wash-blanket" },
+  { name: "에어쿠션 러닝화 3세대", brand: "STRIDE", price: "89,000", was: "129,000", art: "linear-gradient(140deg,#0ea5e9,#4f46e5)", glyph: "👟", slug: "stride-air-3", opt: { label: "사이즈", values: ["250", "255", "260", "265", "270"] } },
+  { name: "노이즈캔슬링 무선 이어버드", brand: "AUDIO/N", price: "119,000", was: "159,000", art: "linear-gradient(140deg,#64748b,#1e293b)", glyph: "🎧", slug: "audio-n-buds-anc", opt: { label: "컬러", values: ["블랙", "화이트"] } },
+  { name: "경량 캠핑 체어 (2color)", brand: "OUTLINE", price: "54,900", was: "72,000", art: "linear-gradient(140deg,#22c55e,#0f766e)", glyph: "🪑", slug: "outline-camp-chair", opt: { label: "컬러", values: ["카키", "베이지"] } },
+  { name: "이중 진공 보온 텀블러 500ml", brand: "DAYLOOP", price: "27,500", was: "38,000", art: "linear-gradient(140deg,#f59e0b,#dc2626)", glyph: "🥤", slug: "dayloop-tumbler-500", opt: { label: "용량", values: ["500ml", "700ml"] } },
+  { name: "오버핏 코튼 후디", brand: "PLAINWEAR", price: "45,000", was: "59,000", art: "linear-gradient(140deg,#a855f7,#ec4899)", glyph: "🧥", slug: "plainwear-cotton-hoodie", opt: { label: "사이즈", values: ["M", "L", "XL"] } },
+  { name: "접이식 블루투스 키보드", brand: "TYPEBOX", price: "62,000", was: "84,000", art: "linear-gradient(140deg,#14b8a6,#0369a1)", glyph: "⌨️", slug: "typebox-fold-keyboard", opt: { label: "컬러", values: ["블랙", "화이트"] } },
+  { name: "간편 원두 드립백 30개입", brand: "MORNING CO.", price: "18,900", was: "24,000", art: "linear-gradient(140deg,#b45309,#78350f)", glyph: "☕", slug: "morning-co-dripbag-30", opt: { label: "수량", values: ["30개입", "60개입"] } },
+  { name: "저소음 미니 가습기 4L", brand: "AIRLEAF", price: "39,000", was: "52,000", art: "linear-gradient(140deg,#38bdf8,#0369a1)", glyph: "💧", slug: "airleaf-humidifier-4l", opt: { label: "컬러", values: ["화이트", "그레이"] } },
+  { name: "인체공학 무선 마우스", brand: "TYPEBOX", price: "47,000", was: "61,000", art: "linear-gradient(140deg,#475569,#0f172a)", glyph: "🖱️", slug: "typebox-ergo-mouse", opt: { label: "컬러", values: ["블랙", "실버"] } },
+  { name: "극세사 워시 담요 (싱글)", brand: "PLAINWEAR", price: "33,000", was: "44,000", art: "linear-gradient(140deg,#fb7185,#9f1239)", glyph: "🧣", slug: "plainwear-wash-blanket", opt: { label: "사이즈", values: ["싱글", "퀸"] } },
 ];
 
 const CartIcon: React.FC<{ count: number; pulse: number }> = ({ count, pulse }) => (
@@ -280,12 +282,55 @@ const RecRail: React.FC<{ items: readonly number[]; hot: number | null }> = ({ i
   </div>
 );
 
-const ProductDetail: React.FC<{ product: Product; addHot: boolean; rec: readonly number[]; recHot: number | null }> = ({
-  product,
-  addHot,
-  rec,
-  recHot,
-}) => (
+/**
+ * The 옵션 row — size, colour, capacity, whichever the product has.
+ *
+ * This is the step that separates looking at a product page from buying off one, and the
+ * film spends eight frames on exactly one of them (the shoe). Every other page arrives with
+ * its first option already selected, the way a mall that pre-picks the most-ordered variant
+ * behaves, so nothing is ever added to a cart without a choice having been made.
+ */
+const OptionRow: React.FC<{ opt: Product["opt"]; selected: number; hot: number | null }> = ({ opt, selected, hot }) => (
+  <div style={{ marginBottom: 18 }}>
+    <div style={{ fontSize: 11.5, color: "#8c8c8c", marginBottom: 7 }}>{opt.label}</div>
+    <div style={{ display: "flex", gap: 7 }}>
+      {opt.values.map((v, i) => {
+        const on = selected === i;
+        return (
+          <span
+            key={v}
+            style={{
+              minWidth: 46,
+              height: 28,
+              padding: "0 12px",
+              display: "grid",
+              placeItems: "center",
+              boxSizing: "border-box",
+              borderRadius: 6,
+              border: `1.5px solid ${on || hot === i ? "#ff4d4f" : "#d9d9d9"}`,
+              background: on ? "#fff1f0" : "#fff",
+              color: on || hot === i ? "#ff4d4f" : "#595959",
+              fontSize: 12,
+              fontWeight: on ? 700 : 500,
+              transform: hot === i ? "scale(0.97)" : "none",
+            }}
+          >
+            {v}
+          </span>
+        );
+      })}
+    </div>
+  </div>
+);
+
+const ProductDetail: React.FC<{
+  product: Product;
+  addHot: boolean;
+  option: number;
+  optionHot: number | null;
+  rec: readonly number[];
+  recHot: number | null;
+}> = ({ product, addHot, option, optionHot, rec, recHot }) => (
   <div style={{ display: "flex", height: "100%" }}>
     <div style={{ flex: 1, minWidth: 0, display: "flex", gap: 26, padding: "22px 26px" }}>
       <div style={{ width: 300, height: 300, borderRadius: 10, background: product.art, display: "grid", placeItems: "center", fontSize: 92, flexShrink: 0 }}>
@@ -304,11 +349,10 @@ const ProductDetail: React.FC<{ product: Product; addHot: boolean; rec: readonly
           {product.price}
           <span style={{ fontSize: 17, fontWeight: 600 }}>원</span>
         </div>
-        <div style={{ borderTop: "1px solid #f0f0f0", paddingTop: 12, marginBottom: 20 }}>
+        <div style={{ borderTop: "1px solid #f0f0f0", paddingTop: 12, marginBottom: 16 }}>
           {[
             ["배송", "내일(수) 도착 보장"],
             ["적립", "구매 시 890P"],
-            ["혜택", "카드 즉시할인 5%"],
           ].map(([k, v]) => (
             <div key={k} style={{ display: "flex", gap: 14, fontSize: 11.5, padding: "5px 0" }}>
               <span style={{ color: "#8c8c8c", width: 40 }}>{k}</span>
@@ -316,6 +360,7 @@ const ProductDetail: React.FC<{ product: Product; addHot: boolean; rec: readonly
             </div>
           ))}
         </div>
+        <OptionRow opt={product.opt} selected={option} hot={optionHot} />
         <div style={{ display: "flex", gap: 10 }}>
           <span
             style={{
@@ -423,6 +468,9 @@ export const ShopMock: React.FC<{
   /** detail */
   productIndex?: number;
   addHot?: boolean;
+  /** detail — the 옵션 row: which chip is selected, and which is about to be clicked */
+  option?: number;
+  optionHot?: number | null;
   /** detail — the 함께 본 상품 rail, and which of its three rows is about to be clicked */
   recItems?: readonly number[];
   recHot?: number | null;
@@ -441,6 +489,8 @@ export const ShopMock: React.FC<{
   searchFocus = false,
   productIndex = 0,
   addHot = false,
+  option = 0,
+  optionHot = null,
   recItems = [],
   recHot = null,
   cartCount,
@@ -453,7 +503,14 @@ export const ShopMock: React.FC<{
       {view === "list" ? <ListView scroll={listScroll} hot={listHot} /> : null}
       {view === "results" ? <ResultsView items={results} query={query} hot={listHot} /> : null}
       {view === "detail" ? (
-        <ProductDetail product={PRODUCTS[productIndex % PRODUCTS.length]} addHot={addHot} rec={recItems} recHot={recHot} />
+        <ProductDetail
+          product={PRODUCTS[productIndex % PRODUCTS.length]}
+          addHot={addHot}
+          option={option}
+          optionHot={optionHot}
+          rec={recItems}
+          recHot={recHot}
+        />
       ) : null}
       {view === "cart" ? <CartView items={cartItems} /> : null}
       <AddedChip pulse={cartPulse} />

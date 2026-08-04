@@ -111,6 +111,18 @@ const TREMOR = 0.9;
 const SETTLE = { frames: 18, px: 0.8 } as const;
 
 /**
+ * A hand does not leave a button on the frame it presses it.
+ *
+ * Press, release, THEN move — and the eye checks what the click did before the arm starts
+ * the next reach. Without this the pointer is already a third of the way to the next target
+ * while its own click ring is still expanding, which is the single most robotic thing a
+ * synthetic cursor does. Three frames, or half the gap if the gap is shorter, taken off the
+ * front of the crossing rather than off the arrival — the click and the landing both stay
+ * pinned to their beats and only the travel gets tighter.
+ */
+const CLICK_HOLD = 3;
+
+/**
  * Interpolates a cursor along an ordered waypoint list.
  *
  * The shape of a single move: park on `prev`, then cross to `next` over the last `travel`
@@ -141,7 +153,9 @@ export const cursorAt = (frame: number, path: readonly Waypoint[]): CursorState 
   const dx = next.x - prev.x;
   const dy = next.y - prev.y;
   const dist = Math.hypot(dx, dy);
-  const travel = Math.min(next.frame - prev.frame, travelFrames(dist));
+  const gap = next.frame - prev.frame;
+  const hold = prev.click ? Math.min(CLICK_HOLD, gap / 2) : 0;
+  const travel = Math.min(gap - hold, travelFrames(dist));
   const depart = next.frame - travel;
   const still = prev === next || travel <= 0 || frame <= depart;
 

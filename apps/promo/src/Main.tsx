@@ -67,6 +67,8 @@ const Page: React.FC<{ page: PageKind }> = ({ page }) => {
           query={page.query}
           searchFocus={page.searchFocus}
           productIndex={page.product}
+          option={page.option}
+          optionHot={page.optionHot}
           cartCount={page.cart}
           cartPulse={page.cartPulse}
           cartItems={page.cartItems}

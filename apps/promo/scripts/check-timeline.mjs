@@ -112,14 +112,13 @@ const shopAt = (f) => {
   const p = stageAt(f).page;
   return p.k === "shop" ? p : null;
 };
-const carts = [beat.cart1, beat.cart2, beat.cart3, beat.cart4, beat.cart5, beat.cart6];
+const carts = [beat.cart1, beat.cart2, beat.cart3, beat.cart4, beat.cart5];
 const hops = [
   { at: beat.hop1, k: "rail" },
-  { at: beat.hop2, k: "rail" },
   { at: beat.backClick, k: "back" },
+  { at: beat.hop2, k: "rail" },
   { at: beat.hop3, k: "rail" },
   { at: beat.searchPick, k: "card" },
-  { at: beat.hop4, k: "rail" },
 ];
 const before = bad;
 carts.forEach((f, i) => {
@@ -161,12 +160,33 @@ carts.forEach((f, i) => {
     else if (!seen.includes(to.product)) fail(`back @${f}: 방문한 적 없는 ${to.product}로 돌아감`);
   }
 });
+// Dwell: the whole point of this pass. A product page that is opened and added to inside
+// half a dozen frames plays as a macro no matter how varied the routes are, so every visit
+// has to be able to show its working — landing, look, decide.
+const opens = [beat.shopPick, beat.hop1, beat.backClick, beat.hop2, beat.hop3, beat.searchPick];
+const DWELL_MIN = 8;
+opens.forEach((f) => {
+  const add = carts.find((c) => c > f);
+  const nextOpen = opens.find((o) => o > f) ?? Infinity;
+  const leaves = Math.min(add ?? Infinity, nextOpen);
+  if (leaves - f < DWELL_MIN) fail(`@${f}: 상품 페이지에 ${leaves - f}프레임 — 최소 ${DWELL_MIN}`);
+});
+
+// The option row: the shoe is the one page where a size is chosen, and it has to be chosen
+// BEFORE it is added, or the cart takes a product nobody picked a variant of.
+const optBefore = shopAt(beat.optionPick - 2);
+const optAfter = shopAt(beat.optionPick + 2);
+if (!optBefore || optBefore.optionHot === null) fail("옵션: 클릭 직전에 밝아진 칩이 없음");
+if (!optAfter || optAfter.option === 0) fail("옵션: 클릭 뒤에도 기본값 그대로");
+if (beat.optionPick >= beat.cart1) fail("옵션 선택이 담기보다 늦음");
+
 // The search: focus, a query that grows, results, and a URL that carries it.
 const typing = shopAt(beat.searchResults - 4);
 const results = shopAt(beat.searchResults + 2);
 if (!typing || !typing.searchFocus || !typing.query) fail("검색: 입력 중인 질의가 검색창에 없음");
 if (!results || results.view !== "results") fail(`검색: 결과 격자가 뜨지 않음 (${results ? results.view : "not shop"})`);
-if (bad === before) console.log("  ✓ mall: 담기 6회 · 격자/레일/뒤로/검색 네 경로, 클릭한 것이 언제나 열린 것");
+if (bad === before)
+  console.log("  ✓ mall: 담기 5회 · 격자/레일/뒤로/검색 네 경로 · 모든 상품 페이지 8프레임 이상 체류");
 
 /* 7 — input sound
  *

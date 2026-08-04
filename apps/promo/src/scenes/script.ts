@@ -71,6 +71,9 @@ export type PageKind =
       query: string;
       searchFocus: boolean;
       product: number;
+      /** Selected option chip on a product page, and the one about to be clicked. */
+      option: number;
+      optionHot: number | null;
       cart: number;
       cartPulse: number;
       cartItems: number[];
@@ -853,20 +856,31 @@ type MallPage = {
 
 const MALL: readonly MallPage[] = [
   { at: beat.shopEnter, via: "portal", view: "list" },
+  // The running shoe the portal query was about — first card, first row.
   { at: beat.shopPick, via: "card", view: "detail", product: 0, card: 0 },
   { at: beat.hop1, via: "rail", view: "detail", product: 5, row: 0 },
+  // Back. Not to the listing — to the page that was on screen before this one, which is
+  // what a browser's history actually holds and the only thing this button may do.
+  { at: beat.backClick, via: "back", view: "detail", product: 0 },
   { at: beat.hop2, via: "rail", view: "detail", product: 1, row: 2 },
-  // Back. Not to the listing — to the page that was on screen two stops ago, which is what
-  // a browser's history actually holds and the only thing this button is allowed to do.
-  { at: beat.backClick, via: "back", view: "detail", product: 5 },
   { at: beat.hop3, via: "rail", view: "detail", product: 8, row: 1 },
   { at: beat.searchResults, via: "search", view: "results" },
   { at: beat.searchPick, via: "result", view: "detail", product: 2, card: 0 },
-  { at: beat.hop4, via: "rail", view: "detail", product: 4, row: 2 },
   { at: beat.cartViewEnter, via: "cart", view: "cart" },
 ];
 
-const CART_STEPS = [beat.cart1, beat.cart2, beat.cart3, beat.cart4, beat.cart5, beat.cart6] as const;
+const CART_STEPS = [beat.cart1, beat.cart2, beat.cart3, beat.cart4, beat.cart5] as const;
+
+/**
+ * The option row on a product page, and the one time it is used.
+ *
+ * A mall product page is not a button with a picture above it: there is a size or a colour
+ * to choose, and choosing it is the moment browsing turns into buying. The film does it
+ * once, on the shoe, and every other page carries the row with its first option already
+ * selected — which is what the pages that pre-select the most-ordered variant look like.
+ * Doing it on all five would cost forty frames and say the same thing five times.
+ */
+const OPTION_PICKED = 3;
 
 /**
  * What ends up in the cart: whatever product page was on screen at each 담기, in order.
@@ -919,16 +933,31 @@ const mallAt = (frame: number) => {
     count: added,
     items: CART_ITEMS.slice(0, added),
     pulse: range(frame, [lastAdd, lastAdd + 8], [1, 0], Easing.out(Easing.quad)),
+    // The shoe keeps the size it was given; every other page sits on its default.
+    option: page.at === beat.shopPick && frame >= beat.optionPick ? OPTION_PICKED : 0,
+    optionHot:
+      page.at === beat.shopPick && frame >= beat.optionPick - 5 && frame < beat.optionPick + 3 ? OPTION_PICKED : null,
     addHot: page.view === "detail" && frame >= nextAdd - 5 && frame < nextAdd + 2,
     rec: page.view === "detail" ? railFor(product, rail?.product ?? null, rail?.row ?? 0) : [],
     recHot: rail && frame >= rail.at - 6 && frame < rail.at + 2 ? (rail.row ?? 0) : null,
-    cardHot: card && frame >= card.at - 8 && frame < card.at + 2 ? (card.card ?? 0) : null,
+    cardHot: card && frame >= card.at - 6 && frame < card.at + 2 ? (card.card ?? 0) : null,
   };
 };
 
 /**
+ * The listing scroll: 0 → 48, a pause, 48 → 96.
+ *
+ * Two summed ramps rather than one, because the pause is the point — the grid stops where
+ * the second row has just come into view, which is where the pointer wanders onto a card it
+ * does not click.
+ */
+const listScrollAt = (frame: number): number =>
+  range(frame, [beat.shopEnter + 3, beat.shopEnter + 9], [0, 52], Easing.linear) +
+  range(frame, [beat.shopEnter + 13, beat.shopPick - 2], [0, 44], Easing.linear);
+
+/**
  * The cart as it stands after the last 담기 — the page the freeze holds on and the one the
- * cleanup closes. Written once because S4, S5 and S6 all have to show the same six items.
+ * cleanup closes. Written once because S4, S5 and S6 all have to show the same five items.
  */
 const CART_PAGE: PageKind = {
   k: "shop",
@@ -939,6 +968,8 @@ const CART_PAGE: PageKind = {
   query: SHOP_QUERY,
   searchFocus: false,
   product: CART_ITEMS[CART_ITEMS.length - 1],
+  option: 0,
+  optionHot: null,
   cart: CART_ITEMS.length,
   cartPulse: 0,
   cartItems: [...CART_ITEMS],
@@ -1006,14 +1037,20 @@ const s4 = (frame: number, st: Stage): void => {
     st.page = {
       k: "shop",
       view: mall.view,
-      // A long, readable scroll: this is the landing, and the grid earns its twenty frames.
-      listScroll: mall.view === "list" ? range(frame, [beat.shopEnter + 3, beat.shopPick - 4], [0, 96], Easing.linear) : 0,
-      listHot: mall.cardHot,
+      // The landing, scrolled in two goes with a pause between them. One even scroll across
+      // eighteen frames is a page being panned; two with a stop in the middle is somebody
+      // looking at what came into view and then deciding to keep going.
+      listScroll: mall.view === "list" ? listScrollAt(frame) : 0,
+      // A card that gets looked at during the pause and left alone. Window shopping is
+      // mostly the things you do not click, and one hover is enough to say so.
+      listHot: mall.cardHot ?? (between(frame, beat.shopEnter + 6, beat.shopEnter + 12) ? 2 : null),
       results: [...SHOP_RESULTS],
       // The query stays in the box once it has been submitted, the way a real one does.
       query: frame < beat.shopSearch ? "" : typed(SHOP_QUERY, frame, beat.shopSearch + 1, SHOP_QUERY_RATE),
       searchFocus: between(frame, beat.shopSearch, beat.searchResults),
       product: mall.product,
+      option: mall.option,
+      optionHot: mall.optionHot,
       cart: mall.count,
       cartPulse: mall.view === "cart" ? 0 : mall.pulse,
       cartItems: [...mall.items],
@@ -1332,8 +1369,15 @@ const HIT = {
     { x: 791, y: 426 },
     { x: 1005, y: 426 },
   ],
-  /** "장바구니" button on a product page, and the cart icon in the mall header. */
-  shopAdd: { x: 455, y: 468 },
+  /**
+   * The 옵션 row and the "장바구니" button under it, plus the cart icon in the header.
+   *
+   * The option row pushed the buttons down about 42px, so `shopAdd` moved with it. Both are
+   * measured off `s4-shop-option` at half scale (image px × 1.6), not computed — the column
+   * is auto-height and the chip widths depend on how 12px renders each label.
+   */
+  shopOption: { x: 570, y: 458 },
+  shopAdd: { x: 424, y: 510 },
   shopCart: { x: 1096, y: 147 },
   /** The mall's own search box: 420 wide, after the 26px mark and an 18px gap. */
   shopSearch: { x: 300, y: 147 },
@@ -1482,7 +1526,7 @@ export const CURSOR_PATH: readonly Waypoint[] = [
   idle(beat.dmReturn + 10, 820, 700),
   { frame: beat.nudge1Dismiss - 9, x: HIT.toastClose.x, y: HIT.toastClose.y },
   { frame: beat.nudge1Dismiss, x: HIT.toastClose.x, y: HIT.toastClose.y, click: true },
-  idle(beat.nudge1Dismiss + 10, 820, 700),
+  idle(beat.nudge1Dismiss + 6, 820, 700),
 
   /* ---------------------------------------------------------------- S4 (643–869)
    * The landing is the slow part: the listing grid is scrolled for the best part of a
@@ -1492,43 +1536,56 @@ export const CURSOR_PATH: readonly Waypoint[] = [
    */
   { frame: beat.portalEnter - 4, x: newTabX(6), y: TAB_Y },
   { frame: beat.portalEnter, x: newTabX(6), y: TAB_Y, click: true },
-  { frame: beat.shopEnter - 8, x: HIT.portalAd.x, y: HIT.portalAd.y },
+  // The eye goes down the organic results first; the ad panel is what it settles on.
+  idle(beat.portalQuery + 6, 470, 330),
+  { frame: beat.shopEnter - 6, x: HIT.portalAd.x, y: HIT.portalAd.y },
   { frame: beat.shopEnter - 2, x: HIT.portalAd.x, y: HIT.portalAd.y, click: true },
-  idle(beat.shopEnter + 8, 640, 520),
-  idle(beat.shopEnter + 14, 600, 380),
-  { frame: beat.shopPick - 5, x: mallHit(beat.shopPick).x, y: mallHit(beat.shopPick).y },
+  idle(beat.shopEnter + 3, 640, 500),
+  // The pause in the scroll: a card in the middle of the grid gets looked at and left.
+  { frame: beat.shopEnter + 6, x: HIT.shopCard[2].x, y: HIT.shopCard[2].y },
+  idle(beat.shopEnter + 10, HIT.shopCard[2].x - 9, HIT.shopCard[2].y + 8),
+  { frame: beat.shopPick - 3, x: mallHit(beat.shopPick).x, y: mallHit(beat.shopPick).y },
   { frame: beat.shopPick, x: mallHit(beat.shopPick).x, y: mallHit(beat.shopPick).y, click: true },
+  // On the product page: down the spec block, onto the size row, and only then the button.
+  idle(beat.shopPick + 4, 470, 400),
+  { frame: beat.optionPick - 3, x: HIT.shopOption.x, y: HIT.shopOption.y },
+  { frame: beat.optionPick, x: HIT.shopOption.x, y: HIT.shopOption.y, click: true },
   { frame: beat.cart1, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
   { frame: beat.hop1, x: mallHit(beat.hop1).x, y: mallHit(beat.hop1).y, click: true },
-  { frame: beat.cart2, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
-  // Nudge #2 arrives; the hand hesitates on the button before going for `5분만`.
-  idle(beat.nudge2In + 8, HIT.shopAdd.x, HIT.shopAdd.y),
+  // Fourteen frames on the keyboard's page — reading it, not buying it. Then the nudge.
+  idle(beat.hop1 + 5, 520, 300),
+  idle(beat.hop1 + 11, 470, 420),
+  idle(beat.nudge2In + 8, 470, 430),
   { frame: beat.snoozeClick - 12, x: HIT.toastBreak.x, y: HIT.toastBreak.y },
   { frame: beat.snoozeClick, x: HIT.toastBreak.x, y: HIT.toastBreak.y, click: true },
-  { frame: beat.hop2, x: mallHit(beat.hop2).x, y: mallHit(beat.hop2).y, click: true },
-  { frame: beat.cart3, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
+  // Snoozed, and the thing that was on screen when the nag landed goes in the cart.
+  { frame: beat.cart2, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
   // All the way back across the window to the Back button, and out again down the rail.
   { frame: beat.backClick, x: HIT.navBack.x, y: HIT.navBack.y, click: true },
-  { frame: beat.hop3, x: mallHit(beat.hop3).x, y: mallHit(beat.hop3).y, click: true },
-  { frame: beat.cart4, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
+  idle(beat.backClick + 5, 700, 300),
+  { frame: beat.hop2 - 4, x: mallHit(beat.hop2).x, y: mallHit(beat.hop2).y },
+  { frame: beat.hop2, x: mallHit(beat.hop2).x, y: mallHit(beat.hop2).y, click: true },
+  idle(beat.hop2 + 5, 520, 330),
+  { frame: beat.cart3, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
   { frame: beat.dmPeek1 - 4, x: tabX(4, 8), y: TAB_Y },
   { frame: beat.dmPeek1, x: tabX(4, 8), y: TAB_Y, click: true },
   idle(beat.dmPeek1 + 8, 700, 620),
   { frame: beat.dmPeek1End - 4, x: tabX(7, 8), y: TAB_Y },
   { frame: beat.dmPeek1End, x: tabX(7, 8), y: TAB_Y, click: true },
+  { frame: beat.hop3, x: mallHit(beat.hop3).x, y: mallHit(beat.hop3).y, click: true },
+  idle(beat.hop3 + 5, 520, 330),
+  { frame: beat.cart4, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
+  { frame: beat.dmPeek2 - 4, x: tabX(4, 8), y: TAB_Y },
+  { frame: beat.dmPeek2, x: tabX(4, 8), y: TAB_Y, click: true },
+  idle(beat.dmPeek2 + 6, 700, 620),
+  { frame: beat.dmPeek2End - 4, x: tabX(7, 8), y: TAB_Y },
+  { frame: beat.dmPeek2End, x: tabX(7, 8), y: TAB_Y, click: true },
   // Into the mall's own search box — the hand leaves it alone while the query is typed.
   { frame: beat.shopSearch, x: HIT.shopSearch.x, y: HIT.shopSearch.y, click: true },
   idle(beat.searchResults + 2, HIT.shopSearch.x + 26, HIT.shopSearch.y + 14),
   { frame: beat.searchPick - 5, x: mallHit(beat.searchPick).x, y: mallHit(beat.searchPick).y },
   { frame: beat.searchPick, x: mallHit(beat.searchPick).x, y: mallHit(beat.searchPick).y, click: true },
   { frame: beat.cart5, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
-  { frame: beat.dmPeek2 - 4, x: tabX(4, 8), y: TAB_Y },
-  { frame: beat.dmPeek2, x: tabX(4, 8), y: TAB_Y, click: true },
-  idle(beat.dmPeek2 + 8, 700, 620),
-  { frame: beat.dmPeek2End - 4, x: tabX(7, 8), y: TAB_Y },
-  { frame: beat.dmPeek2End, x: tabX(7, 8), y: TAB_Y, click: true },
-  { frame: beat.hop4, x: mallHit(beat.hop4).x, y: mallHit(beat.hop4).y, click: true },
-  { frame: beat.cart6, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
   { frame: beat.cartViewEnter, x: HIT.shopCart.x, y: HIT.shopCart.y, click: true },
   { frame: beat.cartViewEnter + 10, x: 700, y: 430 },
   // Dead still across the freeze — any drift undercuts the pause.
