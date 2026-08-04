@@ -11,142 +11,192 @@
 import { FPS } from "./theme";
 
 export const scene = {
-  s1Setup: { from: 0, duration: 140 },
-  /** Research loop — read, switch, write, copy, paste, repeat — then attention fades. */
-  s2Research: { from: 140, duration: 406 },
+  /** Two seconds flat: new tab on screen, cursor crosses to the icon, goal declared. */
+  s1Setup: { from: 0, duration: 60 },
+  /** Search → read → write, three times over. Paced as a parabola (see below). */
+  s2Research: { from: 60, duration: 210 },
   /** Drift #1 — direct messages, plus the music link that arrives inside them. */
-  s3Messages: { from: 546, duration: 272 },
+  s3Messages: { from: 270, duration: 190 },
   /** Drift #2/#3 — portal → mall, interleaved with the messages piling up. */
-  s4Shopping: { from: 818, duration: 286 },
-  /** Everything stops. */
-  s5Freeze: { from: 1104, duration: 72 },
+  s4Shopping: { from: 460, duration: 185 },
+  /** Everything stops. The only slow thing left in the middle of the film. */
+  s5Freeze: { from: 645, duration: 45 },
   /** Clear the mess, look at the document, pick a new research thread. */
-  s6Reset: { from: 1176, duration: 154 },
+  s6Reset: { from: 690, duration: 80 },
   /** Praise carries over, the report is finished, the mail goes out, session ends. */
-  s7WrapUp: { from: 1330, duration: 222 },
-  s8EndCard: { from: 1552, duration: 60 },
+  s7WrapUp: { from: 770, duration: 130 },
+  s8EndCard: { from: 900, duration: 60 },
 } as const;
 
-export const TOTAL_FRAMES = scene.s8EndCard.from + scene.s8EndCard.duration; // 1612 ≈ 53.7s
+export const TOTAL_FRAMES = scene.s8EndCard.from + scene.s8EndCard.duration; // 960 = 32.0s
 
-/** How long the Cmd-Tab switcher stays up. */
-export const SWITCHER_FRAMES = 9;
+/**
+ * How long the Cmd-Tab switcher stays up. Short: at this tempo there are ten app
+ * switches, and a nine-frame overlay each time would eat a fifth of the research scene.
+ */
+export const SWITCHER_FRAMES = 6;
 
 export const beat = {
-  /* --------------------------------------------------------- S1 goal declaration */
-  popupOpen: 32,
-  goalTypeStart: 52,
-  goalTypeEnd: 106,
-  startClick: 122,
-  popupClose: 136,
-
-  /* --------------------------------------------------------- S2 the research loop
-   * Three round trips between the browser and the writing app. Each trip is faster
-   * than the last; the third one is where the copy-paste happens and where the
-   * document visibly outgrows the page. Then it all decelerates.
+  /* --------------------------------------------------------- S1 goal declaration (60f)
+   * Opens on the new-tab page with the pointer parked mid-screen; the first thing that
+   * happens in the film is the cursor crossing to the Kibitzer icon.
    */
-  newsEnter: 146,
-  switchToEditor1: 182,
-  writeH1: 192,
-  writeP1: 214,
+  popupOpen: 14,
+  goalTypeStart: 21,
+  goalTypeEnd: 43,
+  startClick: 50,
+  popupClose: 56,
 
-  switchToBrowser1: 258,
-  statsEnter: 264,
-  select1: 276,
-  copy1: 290,
-  switchToEditor2: 298,
-  paste1: 308,
-  writeH2: 320,
-  writeP2: 342,
+  /* --------------------------------------------------------- S2 the research loop (210f)
+   *
+   * Three search-and-read cycles, not three visits to the same two tabs: each one goes
+   * back to the results page, picks a *different* source, opens it, and comes back to the
+   * document. Three distinct pages get opened this way.
+   *
+   * Paced as a parabola. Roughly a second at each end runs at a speed you can follow; the
+   * five seconds between them ramp up, blur, and come back down. At the peak a source page
+   * is on screen for ten frames and a paragraph lands in twelve — 0.1s per dozen
+   * characters, which is not typing so much as the memory of having typed.
+   *
+   * The long method-and-findings blocks run at 0.02 frames per character inside the
+   * stretches where the browser covers the writing app. That is the fifteen minutes the
+   * menu-bar clock jumps over: off camera, the writer kept writing.
+   */
 
-  switchToBrowser2: 380,
-  newsReturn: 386,
-  select2: 396,
-  copy2: 408,
-  switchToEditor3: 416,
-  paste2: 426,
-  /** Deliberately slower than the earlier blocks — the pace comes off the boil here. */
-  writeP3: 438,
-  enter1: 488,
-  enter2: 496,
-  /** 496 → 546: nothing on screen but a blinking caret. */
+  /* --- opening: find the first source properly (readable speed) */
+  searchEnter1: 62,
+  result1Click: 70,
+  newsEnter: 72,
 
-  /* --------------------------------------------------------- S3 drift #1: messages */
-  switchToBrowser3: 546,
-  newTabClick: 562,
-  omniType: 572,
-  omniSuggest: 580,
-  omniTab: 590,
-  igEnter: 598,
-  igDmEnter: 626,
-  dmReply1: 640,
-  dmSwitch2: 660,
-  dmReply2: 676,
+  /* --- cycle A: write, then go find the numbers */
+  switchToEditor1: 84,
+  writeH1: 90,
+  writeP1: 97,
+  writeP2: 108,
+  switchToBrowser1: 114,
+  writeP3: 120, // off camera
+  searchEnter2: 120,
+  writeP4: 124, // off camera
+  result2Click: 126,
+  statsEnter: 128,
+
+  /* --- cycle B: copy the channel table into the report */
+  select1: 133,
+  writeP5: 136, // off camera
+  copy1: 139,
+  switchToEditor2: 143,
+  paste1: 149,
+  writeH2: 154,
+  writeP6: 161,
+
+  /* --- cycle C: the peak. A third source, up for ten frames. */
+  switchToBrowser2: 170,
+  writeP7: 174, // off camera
+  searchEnter3: 176,
+  result3Click: 180,
+  cohortsEnter: 181,
+  switchToEditor3: 190,
+  /** Typed at the fastest rate in the film, and abandoned when the cut leaves. */
+  writeP8: 195,
+
+  /* --- coming back down: the pull quote, then the boil comes off */
+  switchToBrowser3: 202,
+  newsReturn: 205,
+  select2: 209,
+  writeP9: 212, // off camera
+  copy2: 215,
+  switchToEditor4: 218,
+  paste2: 224,
+  writeP10: 230,
+  /** Four times slower than the block before it. This is where attention goes. */
+  writeP11: 236,
+  enter1: 255,
+  enter2: 259,
+  /** 259 → 270: nothing on screen but a blinking caret. */
+
+  /* --------------------------------------------------------- S3 drift #1: messages (190f)
+   * The landing keeps a readable pace; the chat run is where the tempo picks up again.
+   */
+  switchToBrowser4: 270,
+  newTabClick: 280,
+  omniType: 286,
+  omniSuggest: 291,
+  omniTab: 297,
+  igEnter: 302,
+  igDmEnter: 322,
+  dmReply1: 330,
+  dmSwitch2: 340,
+  dmReply2: 349,
   /** A third thread lights up mid-reply and wins. */
-  dmInterrupt: 690,
-  dmSwitch3: 698,
-  musicLink: 714,
-  musicOpen: 726,
-  dmReturn: 752,
-  dotRed1: 768,
-  nudge1In: 774,
-  nudge1Dismiss: 808,
+  dmInterrupt: 356,
+  dmSwitch3: 361,
+  musicLink: 370,
+  musicOpen: 378,
+  dmReturn: 394,
+  dotRed1: 398,
+  nudge1In: 402,
+  nudge1Dismiss: 440,
 
-  /* --------------------------------------------------------- S4 drift #2/#3: the mall */
-  nudge2In: 828,
-  snoozeClick: 864,
-  portalEnter: 876,
-  portalQuery: 882,
-  /** The mall opens on its listing page; the pick happens after a scroll. */
-  shopEnter: 910,
-  shopPick: 942,
-  cart1: 950,
-  cart2: 964,
-  dmPeek1: 976,
-  dmPeek1End: 1000,
-  cart3: 1008,
-  cart4: 1018,
-  cart5: 1028,
-  dmPeek2: 1036,
-  dmPeek2End: 1056,
-  cart6: 1064,
-  cart7: 1074,
-  cartViewEnter: 1082,
-  nudge3In: 1094,
+  /* --------------------------------------------------------- S4 drift #2/#3: mall (185f)
+   * Page loads and scrolls are cut to the bone; what is left is the cart climbing and the
+   * two trips back to the messages.
+   */
+  nudge2In: 470,
+  snoozeClick: 496,
+  portalEnter: 502,
+  portalQuery: 505,
+  /** The mall opens on its listing page; the pick happens after a short scroll. */
+  shopEnter: 516,
+  shopPick: 528,
+  cart1: 533,
+  cart2: 541,
+  dmPeek1: 547,
+  dmPeek1End: 560,
+  cart3: 565,
+  cart4: 571,
+  cart5: 577,
+  dmPeek2: 583,
+  dmPeek2End: 595,
+  cart6: 601,
+  cart7: 607,
+  cartViewEnter: 611,
+  nudge3In: 624,
 
-  /* --------------------------------------------------------- S5 the stop */
-  freezeStart: 1104,
-  freezeEnd: 1152,
+  /* --------------------------------------------------------- S5 the stop (45f) */
+  freezeStart: 645,
+  freezeEnd: 675,
 
-  /* --------------------------------------------------------- S6 clear + restart */
-  closeTab1: 1184, // shop
-  closeTab2: 1196, // portal
-  closeTab3: 1208, // music
-  closeTab4: 1220, // messages
-  returnToGoalTab: 1234,
+  /* --------------------------------------------------------- S6 clear + restart (80f) */
+  closeTab1: 694, // shop
+  closeTab2: 701, // portal
+  closeTab3: 708, // music
+  closeTab4: 715, // messages
+  returnToGoalTab: 724,
   /** Open the document once — long enough to see the empty line it was left on. */
-  switchToEditor4: 1248,
-  switchToBrowser4: 1290,
-  newResearchTab: 1300,
-  researchLoad: 1314,
-  praiseIn: 1320,
+  switchToEditor5: 732,
+  switchToBrowser5: 748,
+  newResearchTab: 754,
+  researchLoad: 762,
+  praiseIn: 764,
 
-  /* --------------------------------------------------------- S7 finish + wrap up */
-  praiseOut: 1352,
-  switchToEditor5: 1358,
-  writeH3: 1370,
-  writeP4: 1392,
-  chartIn: 1434,
-  switchToBrowser5: 1446,
-  mailOpen: 1458,
-  sendClick: 1486,
-  mailSent: 1496,
-  popupOpen2: 1504,
-  endSessionClick: 1524,
-  summaryShown: 1526,
+  /* --------------------------------------------------------- S7 finish + wrap up (130f) */
+  praiseOut: 788,
+  switchToEditor6: 792,
+  writeH3: 798,
+  writeP12: 804,
+  writeP13: 812,
+  writeP14: 822,
+  chartIn: 832,
+  switchToBrowser6: 840,
+  mailOpen: 846,
+  sendClick: 858,
+  mailSent: 864,
+  popupOpen2: 868,
+  endSessionClick: 878,
+  summaryShown: 880,
 
-  /* --------------------------------------------------------- S8 */
-  endCardIn: 1552,
+  /* --------------------------------------------------------- S8 (60f) */
+  endCardIn: 900,
 } as const;
 
 /** Audio cues — file + absolute frame of the visual it must land on. */
@@ -170,9 +220,9 @@ export const clockSteps: ReadonlyArray<{ from: number; label: string }> = [
   { from: beat.switchToEditor1, label: "오후 2:11" },
   { from: beat.statsEnter, label: "오후 2:26" },
   { from: beat.paste1, label: "오후 2:33" },
-  { from: beat.switchToBrowser2, label: "오후 2:47" },
-  { from: beat.paste2, label: "오후 2:55" },
-  { from: beat.writeP3, label: "오후 2:58" },
+  { from: beat.cohortsEnter, label: "오후 2:41" },
+  { from: beat.switchToEditor4, label: "오후 2:55" },
+  { from: beat.writeP11, label: "오후 2:58" },
   { from: beat.enter2, label: "오후 3:02" },
   { from: beat.igEnter, label: "오후 3:04" },
   { from: beat.igDmEnter, label: "오후 3:06" },
@@ -186,7 +236,7 @@ export const clockSteps: ReadonlyArray<{ from: number; label: string }> = [
   { from: beat.cartViewEnter, label: "오후 3:29" },
   { from: beat.returnToGoalTab, label: "오후 3:30" },
   { from: beat.praiseIn, label: "오후 3:31" },
-  { from: beat.switchToEditor5, label: "오후 3:38" },
+  { from: beat.switchToEditor6, label: "오후 3:38" },
   { from: beat.mailOpen, label: "오후 3:52" },
   { from: beat.popupOpen2, label: "오후 3:55" },
 ];

@@ -4,6 +4,8 @@ import { beat, clockAt, scene, sfx } from "./timeline";
 import { CURSOR_PATH, EditorState, PageKind, stageAt } from "./scenes/script";
 import { cursorAt } from "./lib/cursor";
 import { range } from "./lib/anim";
+/** The writing app's window rect lives with the page-break maths that is derived from it. */
+import { EDITOR_RECT } from "./lib/doclayout";
 import { editorApp, report, summary as summaryCopy } from "./copy";
 import { MacDesktop } from "./components/desktop/MacDesktop";
 import { AppWindow } from "./components/desktop/AppWindow";
@@ -17,6 +19,7 @@ import { EndCard } from "./components/EndCard";
 import { NewTabMock } from "./components/sites/NewTabMock";
 import { NewsMock } from "./components/sites/NewsMock";
 import { StatsMock } from "./components/sites/StatsMock";
+import { SearchMock } from "./components/sites/SearchMock";
 import { TubeMock } from "./components/sites/TubeMock";
 import { EditorMock } from "./components/sites/EditorMock";
 import { MailMock } from "./components/sites/MailMock";
@@ -24,17 +27,16 @@ import { InstagramDM, InstagramFeed } from "./components/sites/InstagramMock";
 import { PortalMock } from "./components/sites/PortalMock";
 import { ShopMock } from "./components/sites/ShopMock";
 
-/** The writing app's window rect, in logical px — offset so the browser stays readable behind it. */
-const EDITOR_RECT = { x: 88, y: 68, width: 930, height: 742 } as const;
-
 const Page: React.FC<{ page: PageKind }> = ({ page }) => {
   switch (page.k) {
     case "newtab":
       return <NewTabMock />;
     case "news":
       return <NewsMock scroll={page.scroll} variant={page.variant} selectQuote={page.select} />;
+    case "search":
+      return <SearchMock set={page.set} query={page.query} hot={page.hot} />;
     case "stats":
-      return <StatsMock reveal={page.reveal} select={page.select} />;
+      return <StatsMock reveal={page.reveal} select={page.select} view={page.view} />;
     case "tube":
       return <TubeMock videoIndex={page.video} progress={page.progress} />;
     case "igFeed":

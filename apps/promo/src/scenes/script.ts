@@ -24,19 +24,22 @@ import {
 import { SWITCHER_FRAMES, beat, clockAt, scene } from "../timeline";
 import { between, progress, range, toastEase } from "../lib/anim";
 import { typed } from "../lib/typewriter";
+import { layout, scrollFor } from "../lib/doclayout";
 import { Waypoint } from "../lib/cursor";
 import { OmniState, TabSpec, tabBaseWidth, tabCloseX } from "../components/browser/BrowserWindow";
 import { PopupState } from "../components/extension/ExtensionPopup";
 import { HotButton } from "../components/toast/Toast";
 import { AppKey } from "../components/desktop/AppSwitcher";
 import { KeyHintState } from "../components/KeyHint";
+import { SEARCHES } from "../components/sites/SearchMock";
 
 /* ------------------------------------------------------------------ types */
 
 export type PageKind =
   | { k: "newtab" }
   | { k: "news"; scroll: number; variant: number; select: number }
-  | { k: "stats"; reveal: number; select: number }
+  | { k: "search"; set: number; query: string; hot: number | null }
+  | { k: "stats"; reveal: number; select: number; view: "acquisition" | "cohorts" }
   | { k: "tube"; video: number; progress: number }
   | { k: "igFeed"; scroll: number }
   | {
@@ -105,8 +108,11 @@ export type Stage = {
 
 const TAB = {
   newtab: { id: "newtab", site: "newtab", title: "새 탭" },
+  /** The results page the research keeps coming back to. */
+  search: { id: "search", site: "search", title: tabTitles.search },
   news: { id: "news", site: "news", title: tabTitles.news },
   stats: { id: "stats", site: "stats", title: tabTitles.stats },
+  cohorts: { id: "cohorts", site: "stats", title: tabTitles.cohorts },
   insta: { id: "insta", site: "insta", title: tabTitles.insta },
   /** Opened from a link inside a message thread, not chosen off a homepage. */
   music: { id: "music", site: "tube", title: tabTitles.music },
@@ -118,8 +124,10 @@ const TAB = {
 
 const URL = {
   newtab: "새 탭",
+  search: "search.norra.com/?q=",
   news: "commerceweekly.com/analysis/how-marketplaces-buy-their-first-million-customers",
   stats: "app.marketpulse.io/acquisition/channels",
+  cohorts: "app.marketpulse.io/cohorts/retention",
   igFeed: "gramline.com/",
   igDm: "gramline.com/direct/inbox",
   music: "metube.com/watch?v=8kR2vQ",
@@ -188,78 +196,124 @@ const applySwitch = (frame: number, st: Stage, start: number, to: AppKey): void 
 const B = report.blocks;
 const GAP: DocBlock = { t: "gap" };
 
-type WriteEvent = { at: number; fpc?: number; paste?: boolean; block: DocBlock };
-
-/**
- * The whole report, as a schedule. Two of the twelve entries are pastes — they land
- * whole, which is what makes them read as pastes rather than as very fast typing.
- * `writeP3` is deliberately the slowest block: it is where the momentum runs out.
- */
-const WRITING: readonly WriteEvent[] = [
-  { at: beat.writeH1, fpc: 0.9, block: B.h1 },
-  { at: beat.writeP1, fpc: 0.5, block: B.p1 },
-  { at: beat.paste1, paste: true, block: B.q1 },
-  { at: beat.writeH2, fpc: 0.9, block: B.h2 },
-  { at: beat.writeP2, fpc: 0.5, block: B.p2 },
-  { at: beat.paste2, paste: true, block: B.q2 },
-  { at: beat.writeP3, fpc: 0.8, block: B.p3 },
-  { at: beat.enter1, block: GAP },
-  { at: beat.enter2, block: GAP },
-  { at: beat.writeH3, fpc: 0.9, block: B.h3 },
-  { at: beat.writeP4, fpc: 0.5, block: B.p4 },
-  { at: beat.chartIn, block: B.chart },
-];
-
-/** Rough laid-out height of a block, used only to decide when the page has to scroll. */
-const blockH = (b: DocBlock): number => {
-  switch (b.t) {
-    case "h":
-      return 38;
-    case "p":
-      return 4 + Math.max(1, Math.ceil(Array.from(b.text).length / 33)) * 24;
-    case "quote":
-      return 59 + b.text.split("\n").length * 20;
-    case "gap":
-      return 24;
-    case "chart":
-      return 163;
-  }
+type WriteEvent = {
+  at: number;
+  block: DocBlock;
+  /** Lands whole: a paste, or a block written behind the browser window. */
+  whole?: boolean;
+  /** Pastes flash blue for a few frames; plain off-camera writing does not. */
+  paste?: boolean;
+  /** Spend the entire gap before the next block, however slow that turns out to be. */
+  linger?: boolean;
 };
 
-/** Title + subtitle, and the text height the editor window can show at once. */
-const DOC_HEAD = 70;
-const DOC_VIEW = 622;
+/**
+ * The whole report, as a schedule.
+ *
+ * One hard constraint shapes all of it: the writing app is frontmost for well under two
+ * hundred frames in the entire film, nowhere near enough to type three pages. So blocks
+ * come in two kinds.
+ *
+ * TYPED — written while the writing app is on screen. Each one gets exactly the gap
+ * before the next block, so the rate is *derived* rather than tuned (see `rateFor`).
+ * That matters because this timeline gets re-paced: a hard-coded 0.25 that was right at
+ * 54 seconds silently overruns its cut at 32, and the paragraph after it starts growing
+ * on top of the one still being written. Deriving the rate cannot drift out of sync.
+ *
+ * WHOLE — `whole: true`. Its beat sits inside a stretch where the browser covers the
+ * writing app, so it simply exists again by the time the next Cmd-Tab lands. That is the
+ * fifteen minutes the menu-bar clock jumps over: off camera, the writer kept writing.
+ * These carry the volume — five blocks of 200–370 characters against eight short typed
+ * ones — and because they land whole rather than at some very fast rate, no retime can
+ * make one of them spill into view half-finished.
+ *
+ * The result is two to four new paragraphs per editor cut, and a document that has
+ * reached three pages by the time attention goes.
+ *
+ * `writeP11` lingers: it is where the momentum runs out, so it is given the whole gap
+ * before the two Enters no matter how long that gap is.
+ */
+const WRITING: readonly WriteEvent[] = [
+  /* cycle A — the document starts empty */
+  { at: beat.writeH1, block: B.h1 },
+  { at: beat.writeP1, block: B.p1 },
+  { at: beat.writeP2, block: B.p2 },
+  /* off camera */
+  { at: beat.writeP3, whole: true, block: B.p3 },
+  { at: beat.writeP4, whole: true, block: B.p4 },
+  { at: beat.writeP5, whole: true, block: B.p5 },
+  /* cycle B */
+  { at: beat.paste1, whole: true, paste: true, block: B.q1 },
+  { at: beat.writeH2, block: B.h2 },
+  { at: beat.writeP6, block: B.p6 },
+  /* off camera */
+  { at: beat.writeP7, whole: true, block: B.p7 },
+  /* cycle C — typed on camera, abandoned mid-paragraph, finished behind the browser */
+  { at: beat.writeP8, block: B.p8 },
+  /* off camera */
+  { at: beat.writeP9, whole: true, block: B.p9 },
+  /* coming back down — and then the pace comes off the boil */
+  { at: beat.paste2, whole: true, paste: true, block: B.q2 },
+  { at: beat.writeP10, block: B.p10 },
+  { at: beat.writeP11, linger: true, block: B.p11 },
+  { at: beat.enter1, whole: true, block: GAP },
+  { at: beat.enter2, whole: true, block: GAP },
+  /* S7 — after the return */
+  { at: beat.writeH3, block: B.h3 },
+  { at: beat.writeP12, block: B.p12 },
+  { at: beat.writeP13, block: B.p13 },
+  { at: beat.writeP14, block: B.p14 },
+  { at: beat.chartIn, whole: true, block: B.chart },
+];
+
+/**
+ * Frames per character for a typed block: its whole gap, spread over its characters.
+ *
+ * The clamp is the only judgement in here. Below RATE_MIN the text stops reading as
+ * writing and starts reading as a paste — which the pasted blocks already own, and which
+ * would make the ⌘V beat meaningless. Above RATE_MAX a short block would crawl. A
+ * `linger` block ignores the ceiling, because being slow is the whole point of it.
+ */
+const RATE_MIN = 0.1; // ≈300 chars/s — dozens of characters per tenth of a second
+const RATE_MAX = 0.45; // ≈65 chars/s
+const TAIL = 90; // gap assumed for the last block in the list
+
+const rateFor = (i: number): number => {
+  const ev = WRITING[i];
+  const chars = Array.from(ev.block.t === "h" || ev.block.t === "p" ? ev.block.text : "").length;
+  if (chars === 0) return RATE_MAX;
+  const gap = (WRITING[i + 1]?.at ?? ev.at + TAIL) - ev.at - 1;
+  const fitted = gap / chars;
+  if (ev.linger) return Math.max(RATE_MIN, fitted);
+  return Math.max(RATE_MIN, Math.min(RATE_MAX, fitted));
+};
 
 const docAt = (frame: number): EditorState => {
   const blocks: DocBlock[] = [];
   let typing = false;
   let pasteFlash = 0;
 
-  for (const ev of WRITING) {
+  for (let i = 0; i < WRITING.length; i++) {
+    const ev = WRITING[i];
     if (frame < ev.at) break;
     typing = false;
-    if (ev.paste) {
-      blocks.push(ev.block);
-      pasteFlash = range(frame, [ev.at, ev.at + 10], [1, 0], Easing.linear);
-      continue;
-    }
-    if (ev.block.t === "gap" || ev.block.t === "chart") {
+    if (ev.paste) pasteFlash = range(frame, [ev.at, ev.at + 10], [1, 0], Easing.linear);
+    if (ev.whole || (ev.block.t !== "h" && ev.block.t !== "p")) {
       blocks.push(ev.block);
       continue;
     }
     const full = ev.block.text;
-    const shown = typed(full, frame, ev.at - 1, ev.fpc ?? 0.6);
+    const shown = typed(full, frame, ev.at - 1, rateFor(i));
     blocks.push({ ...ev.block, text: shown });
     typing = Array.from(shown).length < Array.from(full).length;
   }
 
-  const height = DOC_HEAD + blocks.reduce((sum, b) => sum + blockH(b), 0);
   return {
     blocks,
     // Solid while typing; a plain blinking caret once the writing stops.
     caret: typing || Math.floor(frame / 16) % 2 === 0,
     pasteFlash,
-    scroll: Math.max(0, height + 40 - DOC_VIEW),
+    scroll: scrollFor(layout(blocks).caretY),
   };
 };
 
@@ -275,12 +329,18 @@ const KEY_HINTS: ReadonlyArray<{ at: number; label: string }> = [
   { at: beat.omniTab, label: "Tab" },
 ];
 
+/**
+ * The newest chip wins. ⌘C and ⌘V now land nine frames apart, so returning the first
+ * match would leave the copy chip fading over the paste it is supposed to have caused —
+ * and the paste is the one beat that needs its key named.
+ */
 const keyHintAt = (frame: number): KeyHintState | null => {
+  let hint: KeyHintState | null = null;
   for (const k of KEY_HINTS) {
     const opacity = Math.min(range(frame, [k.at - 3, k.at], [0, 1]), range(frame, [k.at + 10, k.at + 18], [1, 0]));
-    if (opacity > 0.02) return { label: k.label, opacity };
+    if (opacity > 0.02) hint = { label: k.label, opacity };
   }
-  return null;
+  return hint;
 };
 
 /* ------------------------------------------------------------------ S1 — goal declaration */
@@ -308,7 +368,7 @@ const s1 = (frame: number, st: Stage): void => {
       frame < beat.startClick + 2
         ? {
             kind: "setup",
-            goal: typed(GOAL, frame, beat.goalTypeStart),
+            goal: typed(GOAL, frame, beat.goalTypeStart, 1.55),
             budget: frame >= beat.goalTypeEnd + 4 ? GOAL_BUDGET_MIN : "",
             typingGoal: between(frame, beat.goalTypeStart - 4, beat.startClick),
             startPressed: between(frame, beat.startClick, beat.startClick + 5),
@@ -331,61 +391,106 @@ const s1 = (frame: number, st: Stage): void => {
 /* ------------------------------------------------------------------ S2 — the research loop */
 
 /**
- * Three round trips between the browser and the writing app, each tighter than the last.
- * Trip 2 and 3 carry the copy-paste; the clock jumps ~15 minutes per trip, which is what
- * turns eleven seconds of screen time into an hour of work.
+ * Four round trips between the browser and the writing app, across three source tabs.
  *
- * Then it decelerates: the last paragraph is typed at almost half speed, two Enters, and
- * fifty frames of nothing but a caret. That gap is the whole reason the next scene works.
+ * Paced as a parabola. Trip 1 reads at a speed you can follow; trips 2–4 tighten until
+ * the cohorts page is on screen for fifteen frames, which is exactly what the middle of
+ * a long working stretch feels like from the outside. Then it comes back down: the last
+ * paragraph is typed four times slower than the ones before it, two Enters, and a third
+ * of a second short of a full second with nothing on screen but a caret.
+ *
+ * The clock jumps ~15 minutes per trip. Only the trips are on camera; the writing that
+ * fills those jumps happens behind the browser window (see WRITING).
  */
+/**
+ * One search-and-open cycle: results page up, a row goes hot, it is clicked, the source
+ * opens in its own tab. Three of these run in S2, each landing a different page.
+ */
+type Cycle = { searchAt: number; clickAt: number; openAt: number; set: number };
+
+const CYCLES: readonly Cycle[] = [
+  { searchAt: beat.searchEnter1, clickAt: beat.result1Click, openAt: beat.newsEnter, set: 0 },
+  { searchAt: beat.searchEnter2, clickAt: beat.result2Click, openAt: beat.statsEnter, set: 1 },
+  { searchAt: beat.searchEnter3, clickAt: beat.result3Click, openAt: beat.cohortsEnter, set: 2 },
+];
+
+/** The results page, with the query typed and the row about to be picked highlighted. */
+const searchPage = (frame: number, c: Cycle): PageKind => ({
+  k: "search",
+  set: c.set,
+  query: typed(SEARCHES[c.set].query, frame, c.searchAt - 6, 0.16),
+  hot: frame >= c.clickAt - 5 ? SEARCHES[c.set].pick : null,
+});
+
 const s2 = (frame: number, st: Stage): void => {
-  st.tabs = [{ ...TAB.news }, { ...TAB.stats }];
   st.dot = "none";
   st.focus = "browser";
 
-  if (frame < beat.statsEnter) {
+  // Tabs accumulate as sources are opened — the strip fills up the way real research does.
+  st.tabs = [{ ...TAB.search }];
+  if (frame >= beat.newsEnter) st.tabs.push({ ...TAB.news });
+  if (frame >= beat.statsEnter) st.tabs.push({ ...TAB.stats });
+  if (frame >= beat.cohortsEnter) st.tabs.push({ ...TAB.cohorts });
+
+  // Whichever cycle we are inside decides what the browser is showing.
+  if (between(frame, beat.searchEnter1, beat.newsEnter)) {
+    st.activeId = "search";
+    st.url = URL.search;
+    st.page = searchPage(frame, CYCLES[0]);
+  } else if (between(frame, beat.searchEnter2, beat.statsEnter)) {
+    st.activeId = "search";
+    st.url = URL.search;
+    st.page = searchPage(frame, CYCLES[1]);
+  } else if (between(frame, beat.searchEnter3, beat.cohortsEnter)) {
+    st.activeId = "search";
+    st.url = URL.search;
+    st.page = searchPage(frame, CYCLES[2]);
+  } else if (frame < beat.statsEnter) {
     st.activeId = "news";
     st.url = URL.news;
-    st.page = {
-      k: "news",
-      variant: 0,
-      scroll: range(frame, [beat.newsEnter + 6, beat.switchToEditor1], [0, 430]),
-      select: 0,
-    };
-  } else if (frame < beat.newsReturn) {
+    st.page = { k: "news", variant: 0, scroll: range(frame, [beat.newsEnter + 3, beat.switchToEditor1], [0, 430]), select: 0 };
+  } else if (frame < beat.cohortsEnter) {
     st.activeId = "stats";
     st.url = URL.stats;
     st.page = {
       k: "stats",
-      reveal: progress(frame, beat.statsEnter, 18),
-      select: range(frame, [beat.select1, beat.select1 + 9], [0, 1]),
+      view: "acquisition",
+      reveal: progress(frame, beat.statsEnter, 10),
+      select: range(frame, [beat.select1, beat.select1 + 6], [0, 1]),
     };
+  } else if (frame < beat.newsReturn) {
+    st.activeId = "cohorts";
+    st.url = URL.cohorts;
+    st.page = { k: "stats", view: "cohorts", reveal: progress(frame, beat.cohortsEnter, 8), select: 0 };
   } else {
+    // Back to the first source for the pull quote.
     st.activeId = "news";
     st.url = URL.news;
     st.page = {
       k: "news",
       variant: 0,
-      scroll: range(frame, [beat.newsReturn, beat.select2 - 4], [430, 820]),
-      select: range(frame, [beat.select2, beat.select2 + 9], [0, 1]),
+      scroll: range(frame, [beat.newsReturn, beat.select2 - 1], [430, 820]),
+      select: range(frame, [beat.select2, beat.select2 + 6], [0, 1]),
     };
   }
 
   // The writing app opens on the first Cmd-Tab and stays open for the rest of the video.
-  if (frame >= beat.switchToEditor1 - 6) st.editor = docAt(frame);
+  if (frame >= beat.switchToEditor1 - 4) st.editor = docAt(frame);
 
   applySwitch(frame, st, beat.switchToEditor1, "editor");
   applySwitch(frame, st, beat.switchToBrowser1, "browser");
   applySwitch(frame, st, beat.switchToEditor2, "editor");
   applySwitch(frame, st, beat.switchToBrowser2, "browser");
   applySwitch(frame, st, beat.switchToEditor3, "editor");
+  applySwitch(frame, st, beat.switchToBrowser3, "browser");
+  applySwitch(frame, st, beat.switchToEditor4, "editor");
 };
 
 /* ------------------------------------------------------------------ S3 — drift #1: messages */
 
 /** Unread count and list state keep climbing whether or not the tab is on screen. */
-const dmBadge = (frame: number): number => Math.min(28, 3 + Math.floor((frame - beat.igDmEnter) / 16));
-const dmUnread = (frame: number): number => Math.min(8, 1 + Math.floor((frame - beat.igDmEnter) / 40));
+const dmBadge = (frame: number): number => Math.min(28, 3 + Math.floor((frame - beat.igDmEnter) / 11));
+const dmUnread = (frame: number): number => Math.min(8, 1 + Math.floor((frame - beat.igDmEnter) / 27));
 
 /** Reply → reply → interrupted mid-reply → the interrupter wins. Three threads, fast. */
 type DmSegment = { from: number; thread: number; first: number; last: number; composeAt: number; compose: string };
@@ -406,7 +511,9 @@ const dmSegments: readonly DmSegment[] = [
 const dmPage = (frame: number): PageKind => {
   let seg = dmSegments[0];
   for (const s of dmSegments) if (frame >= s.from) seg = s;
-  const step = Math.floor((frame - seg.from) / 9);
+  // A message every 6 frames — fast enough that the log is visibly filling rather than
+  // being read. Replies are typed at 1.1 frames per character, for the same reason.
+  const step = Math.floor((frame - seg.from) / 6);
   const msgs = Math.min(seg.last, seg.first + step);
   return {
     k: "igDm",
@@ -417,7 +524,7 @@ const dmPage = (frame: number): PageKind => {
     unreadRows: dmUnread(frame),
     // The row that lights up mid-reply, right before it steals the cursor.
     flashThread: between(frame, beat.dmInterrupt, beat.dmSwitch3) ? 2 : null,
-    composing: seg.composeAt >= 0 ? typed(seg.compose, frame, seg.composeAt, 2.2) : "",
+    composing: seg.composeAt >= 0 ? typed(seg.compose, frame, seg.composeAt, 1.1) : "",
     linkHot: between(frame, beat.musicOpen - 6, beat.musicOpen + 3),
   };
 };
@@ -425,12 +532,12 @@ const dmPage = (frame: number): PageKind => {
 const s3 = (frame: number, st: Stage): void => {
   st.editor = docAt(frame);
   st.focus = "editor";
-  applySwitch(frame, st, beat.switchToBrowser3, "browser");
+  applySwitch(frame, st, beat.switchToBrowser4, "browser");
 
-  st.tabs = [{ ...TAB.news }, { ...TAB.stats }];
-  st.activeId = "stats";
-  st.url = URL.stats;
-  st.page = { k: "stats", reveal: 1, select: 0 };
+  st.tabs = [{ ...TAB.search }, { ...TAB.news }, { ...TAB.stats }, { ...TAB.cohorts }];
+  st.activeId = "news";
+  st.url = URL.news;
+  st.page = { k: "news", variant: 0, scroll: 820, select: 0 };
   st.dot = "none";
 
   // New tab, one keystroke, autocomplete, Tab. Nobody types a whole hostname any more.
@@ -455,7 +562,7 @@ const s3 = (frame: number, st: Stage): void => {
 
   if (frame < beat.igDmEnter) {
     st.url = URL.igFeed;
-    st.page = { k: "igFeed", scroll: range(frame, [beat.igEnter + 6, beat.igDmEnter], [0, 230], Easing.linear) };
+    st.page = { k: "igFeed", scroll: range(frame, [beat.igEnter + 4, beat.igDmEnter], [0, 230], Easing.linear) };
   } else {
     st.url = URL.igDm;
     st.page = dmPage(frame);
@@ -505,7 +612,7 @@ const onDmPeek = (frame: number): boolean =>
 const s4 = (frame: number, st: Stage): void => {
   st.editor = docAt(frame);
   st.focus = "browser";
-  st.tabs = [{ ...TAB.news }, { ...TAB.stats }, { ...TAB.insta }, { ...TAB.music }];
+  st.tabs = [{ ...TAB.search }, { ...TAB.news }, { ...TAB.stats }, { ...TAB.cohorts }, { ...TAB.insta }, { ...TAB.music }];
   st.activeId = "insta";
   st.url = URL.igDm;
   st.page = dmPage(frame);
@@ -530,8 +637,8 @@ const s4 = (frame: number, st: Stage): void => {
     st.url = URL.portal;
     st.page = {
       k: "portal",
-      query: typed("러닝화 추천", frame, beat.portalQuery, 2.4),
-      adHot: between(frame, beat.shopEnter - 14, beat.shopEnter) ? 0 : null,
+      query: typed("러닝화 추천", frame, beat.portalQuery, 1.1),
+      adHot: between(frame, beat.shopEnter - 8, beat.shopEnter) ? 0 : null,
     };
     return;
   }
@@ -556,8 +663,8 @@ const s4 = (frame: number, st: Stage): void => {
     st.page = {
       k: "shop",
       view: cartView ? "cart" : listing ? "list" : "detail",
-      listScroll: range(frame, [beat.shopEnter + 6, beat.shopPick - 4], [0, 96], Easing.linear),
-      listHot: between(frame, beat.shopPick - 10, beat.shopPick + 2) ? 3 : null,
+      listScroll: range(frame, [beat.shopEnter + 2, beat.shopPick - 3], [0, 96], Easing.linear),
+      listHot: between(frame, beat.shopPick - 7, beat.shopPick + 2) ? 3 : null,
       product: cart.product,
       cart: cart.count,
       cartPulse: cartView ? 0 : cart.pulse,
@@ -599,7 +706,16 @@ const PRODUCT_SLUG = [
 const s5 = (frame: number, st: Stage): void => {
   st.editor = docAt(frame);
   st.focus = "browser";
-  st.tabs = [{ ...TAB.news }, { ...TAB.stats }, { ...TAB.insta }, { ...TAB.music }, { ...TAB.portal }, { ...TAB.shop }];
+  st.tabs = [
+    { ...TAB.search },
+    { ...TAB.news },
+    { ...TAB.stats },
+    { ...TAB.cohorts },
+    { ...TAB.insta },
+    { ...TAB.music },
+    { ...TAB.portal },
+    { ...TAB.shop },
+  ];
   st.activeId = "shop";
   st.url = URL.shopCart;
   st.dot = "red";
@@ -652,11 +768,11 @@ const s6 = (frame: number, st: Stage): void => {
 
   // Everything the session was not about, closed right to left.
   const cleared = frame >= beat.closeTab4 + 8;
+  const RESEARCH = [{ ...TAB.search }, { ...TAB.news }, { ...TAB.stats }, { ...TAB.cohorts }];
   st.tabs = cleared
-    ? [{ ...TAB.news }, { ...TAB.stats }]
+    ? RESEARCH
     : [
-        { ...TAB.news },
-        { ...TAB.stats },
+        ...RESEARCH,
         { ...TAB.insta, width: collapse(frame, beat.closeTab4) },
         { ...TAB.music, width: collapse(frame, beat.closeTab3) },
         { ...TAB.portal, width: collapse(frame, beat.closeTab2) },
@@ -698,12 +814,12 @@ const s6 = (frame: number, st: Stage): void => {
   } else {
     st.activeId = "stats";
     st.url = URL.stats;
-    st.page = { k: "stats", reveal: 1, select: 0 };
+    st.page = { k: "stats", view: "acquisition", reveal: 1, select: 0 };
   }
 
-  // Open the document — long enough to see the blank line it was abandoned on.
-  applySwitch(frame, st, beat.switchToEditor4, "editor");
-  applySwitch(frame, st, beat.switchToBrowser4, "browser");
+  // Open the document — long enough to see the blank page it was abandoned on.
+  applySwitch(frame, st, beat.switchToEditor5, "editor");
+  applySwitch(frame, st, beat.switchToBrowser5, "browser");
 
   // Back in the browser, a new question rather than the old page.
   if (frame >= beat.newResearchTab) {
@@ -712,7 +828,9 @@ const s6 = (frame: number, st: Stage): void => {
     st.activeId = loaded ? "research" : "newtab";
     if (loaded) {
       st.url = URL.research;
-      st.page = { k: "news", variant: 1, scroll: range(frame, [beat.researchLoad + 8, scene.s7WrapUp.from], [0, 190]), select: 0 };
+      // The scroll has to finish inside S6; +8 collided with s7WrapUp.from after the
+      // retime, and interpolate() throws on a zero-width input range.
+      st.page = { k: "news", variant: 1, scroll: range(frame, [beat.researchLoad + 2, scene.s7WrapUp.from], [0, 190]), select: 0 };
     } else {
       st.url = URL.newtab;
       st.page = { k: "newtab" };
@@ -730,7 +848,7 @@ const s6 = (frame: number, st: Stage): void => {
 const s7 = (frame: number, st: Stage): void => {
   st.editor = docAt(frame);
   st.focus = "browser";
-  st.tabs = [{ ...TAB.news }, { ...TAB.stats }, { ...TAB.research }];
+  st.tabs = [{ ...TAB.search }, { ...TAB.news }, { ...TAB.stats }, { ...TAB.cohorts }, { ...TAB.research }];
   st.activeId = "research";
   st.url = URL.research;
   st.page = { k: "news", variant: 1, scroll: 190, select: 0 };
@@ -738,9 +856,9 @@ const s7 = (frame: number, st: Stage): void => {
 
   st.toast = praiseToast(frame);
 
-  applySwitch(frame, st, beat.switchToEditor5, "editor");
-  applySwitch(frame, st, beat.switchToBrowser5, "browser");
-  if (frame < SWITCH_AT(beat.switchToBrowser5)) return;
+  applySwitch(frame, st, beat.switchToEditor6, "editor");
+  applySwitch(frame, st, beat.switchToBrowser6, "browser");
+  if (frame < SWITCH_AT(beat.switchToBrowser6)) return;
 
   st.tabs.push({ ...TAB.mail });
   st.activeId = "mail";
@@ -832,8 +950,9 @@ const toastHit = (dx: number, dy: number) => ({
  * stills rather than computed, because most of these boxes are auto-height.
  */
 const HIT = {
-  goalInput: { x: 928, y: 208 },
-  startBtn: { x: 928, y: 330 },
+  // The popup is a child of the page viewport, so POPUP.top is measured from y=122.
+  goalInput: { x: 930, y: 301 },
+  startBtn: { x: 930, y: 417 },
   endSessionBtn: { x: 1003, y: 606 },
   toastClose: toastHit(-24, -118), // 1.5× → (1076, 647)
   toastBreak: toastHit(-144, -28), // 1.5× → (896, 782)
@@ -857,6 +976,12 @@ const HIT = {
   /** "장바구니" button on a product page, and the cart icon in the mall header. */
   shopAdd: { x: 455, y: 468 },
   shopCart: { x: 1096, y: 147 },
+  /** Result rows on the search page — title lines, measured off the render. */
+  searchResult: [
+    { x: 250, y: 295 },
+    { x: 250, y: 405 },
+    { x: 250, y: 515 },
+  ],
   /** Roughly the middle of the article column, for reading scrolls. */
   read: { x: 600, y: 470 },
 } as const;
@@ -864,123 +989,144 @@ const HIT = {
 /** Nudges the pointer a few px so parked stretches do not look frozen. */
 const idle = (frame: number, x: number, y: number): Waypoint => ({ frame, x, y });
 
+/**
+ * When the pointer comes back after a Cmd-Tab: a few frames past the switch, but never
+ * past whatever it has to be somewhere else for. CURSOR_PATH has to stay in ascending
+ * frame order, and a fixed `+5` inverts the moment a retime pulls the next beat closer.
+ */
+const reappear = (afterSwitch: number, before: number): number =>
+  Math.min(afterSwitch + 5, before - 5);
+
 export const CURSOR_PATH: readonly Waypoint[] = [
-  { frame: 0, x: 620, y: 520 },
-  { frame: 18, x: 620, y: 520 },
-  { frame: 30, x: EXT.x, y: EXT.y },
+  /* ---------------------------------------------------------------- S1 (0–60)
+   * Opens with the pointer parked mid-screen on the new-tab page. The first movement in
+   * the film is the crossing to the Kibitzer icon.
+   */
+  { frame: 0, x: 576, y: 432 },
+  { frame: 5, x: 576, y: 432 },
+  { frame: 12, x: EXT.x, y: EXT.y },
   { frame: beat.popupOpen, x: EXT.x, y: EXT.y, click: true },
-  { frame: 46, x: HIT.goalInput.x, y: HIT.goalInput.y },
-  { frame: 50, x: HIT.goalInput.x, y: HIT.goalInput.y, click: true },
+  { frame: 19, x: HIT.goalInput.x, y: HIT.goalInput.y },
+  { frame: 20, x: HIT.goalInput.x, y: HIT.goalInput.y, click: true },
   { frame: beat.goalTypeEnd, x: HIT.goalInput.x, y: HIT.goalInput.y },
-  { frame: 116, x: HIT.startBtn.x, y: HIT.startBtn.y },
+  { frame: 47, x: HIT.startBtn.x, y: HIT.startBtn.y },
   { frame: beat.startClick, x: HIT.startBtn.x, y: HIT.startBtn.y, click: true },
-  { frame: 142, x: 640, y: 430 },
+  { frame: 58, x: 640, y: 430 },
 
-  /* ---------------------------------------------------------------- S2 research loop */
-  { frame: beat.newsEnter - 8, x: tabX(0, 2), y: TAB_Y },
-  { frame: beat.newsEnter, x: tabX(0, 2), y: TAB_Y, click: true },
-  idle(beat.newsEnter + 14, HIT.read.x, HIT.read.y),
-  { frame: beat.switchToEditor1 + 6, x: HIT.read.x, y: HIT.read.y, hidden: true },
+  /* ---------------------------------------------------------------- S2 (60–270)
+   * Three search-and-open cycles. Each one returns to the results tab, picks a different
+   * row and opens it, so three distinct sources end up in the strip.
+   */
+  { frame: beat.searchEnter1 + 2, x: 300, y: 340 },
+  { frame: beat.result1Click - 4, x: HIT.searchResult[0].x, y: HIT.searchResult[0].y },
+  { frame: beat.result1Click, x: HIT.searchResult[0].x, y: HIT.searchResult[0].y, click: true },
+  idle(beat.newsEnter + 6, HIT.read.x, HIT.read.y),
+  { frame: beat.switchToEditor1 + 4, x: HIT.read.x, y: HIT.read.y, hidden: true },
 
-  { frame: beat.switchToBrowser1 + 7, x: tabX(1, 2), y: TAB_Y, hidden: false },
-  { frame: beat.statsEnter, x: tabX(1, 2), y: TAB_Y, click: true },
-  // Drag-select the two rows that get pasted, then copy. Endpoints measured off the
-  // rendered dashboard: the table rows sit at y≈384 and y≈480.
-  { frame: beat.select1 - 4, x: 676, y: 376 },
-  { frame: beat.select1 + 9, x: 1092, y: 488 },
+  { frame: beat.switchToBrowser1 + 5, x: tabX(0, 2), y: TAB_Y, hidden: false },
+  { frame: beat.searchEnter2, x: tabX(0, 2), y: TAB_Y, click: true },
+  { frame: beat.result2Click - 3, x: HIT.searchResult[1].x, y: HIT.searchResult[1].y },
+  { frame: beat.result2Click, x: HIT.searchResult[1].x, y: HIT.searchResult[1].y, click: true },
+  // Drag-select the channel table, then copy.
+  { frame: beat.select1, x: 676, y: 376 },
   { frame: beat.copy1, x: 1092, y: 488 },
-  { frame: beat.switchToEditor2 + 6, x: 1092, y: 488, hidden: true },
+  { frame: beat.switchToEditor2 + 4, x: 1092, y: 488, hidden: true },
 
-  { frame: beat.switchToBrowser2 + 7, x: tabX(0, 2), y: TAB_Y, hidden: false },
-  { frame: beat.newsReturn, x: tabX(0, 2), y: TAB_Y, click: true },
-  // The pull quote sits at y≈291–322 once the article is scrolled to 820.
-  { frame: beat.select2 - 4, x: 295, y: 288 },
-  { frame: beat.select2 + 9, x: 855, y: 322 },
+  { frame: beat.switchToBrowser2 + 5, x: tabX(0, 3), y: TAB_Y, hidden: false },
+  { frame: beat.searchEnter3, x: tabX(0, 3), y: TAB_Y, click: true },
+  { frame: beat.result3Click - 2, x: HIT.searchResult[2].x, y: HIT.searchResult[2].y },
+  { frame: beat.result3Click, x: HIT.searchResult[2].x, y: HIT.searchResult[2].y, click: true },
+  { frame: beat.switchToEditor3 + 4, x: HIT.searchResult[2].x, y: HIT.searchResult[2].y, hidden: true },
+
+  { frame: reappear(beat.switchToBrowser3, beat.newsReturn), x: tabX(1, 4), y: TAB_Y, hidden: false },
+  { frame: beat.newsReturn, x: tabX(1, 4), y: TAB_Y, click: true },
+  // The pull quote, selected and copied.
+  { frame: beat.select2, x: 295, y: 288 },
   { frame: beat.copy2, x: 855, y: 322 },
-  { frame: beat.switchToEditor3 + 6, x: 855, y: 322, hidden: true },
+  { frame: beat.switchToEditor4 + 4, x: 855, y: 322, hidden: true },
 
-  /* ---------------------------------------------------------------- S3 messages */
-  { frame: beat.switchToBrowser3 + 7, x: 620, y: 300, hidden: false },
-  { frame: beat.newTabClick - 6, x: newTabX(2), y: TAB_Y },
-  { frame: beat.newTabClick, x: newTabX(2), y: TAB_Y, click: true },
-  idle(beat.igEnter + 10, 660, 430),
-  { frame: beat.igDmEnter - 6, x: HIT.igDmIcon.x, y: HIT.igDmIcon.y },
+  /* ---------------------------------------------------------------- S3 (270–460) */
+  { frame: beat.switchToBrowser4 + 5, x: 620, y: 300, hidden: false },
+  { frame: beat.newTabClick - 4, x: newTabX(4), y: TAB_Y },
+  { frame: beat.newTabClick, x: newTabX(4), y: TAB_Y, click: true },
+  idle(beat.igEnter + 6, 660, 430),
+  { frame: beat.igDmEnter - 5, x: HIT.igDmIcon.x, y: HIT.igDmIcon.y },
   { frame: beat.igDmEnter, x: HIT.igDmIcon.x, y: HIT.igDmIcon.y, click: true },
-  { frame: beat.dmReply1 - 4, x: HIT.dmCompose.x, y: HIT.dmCompose.y },
+  { frame: beat.dmReply1 - 3, x: HIT.dmCompose.x, y: HIT.dmCompose.y },
   { frame: beat.dmReply1, x: HIT.dmCompose.x, y: HIT.dmCompose.y, click: true },
-  { frame: beat.dmSwitch2 - 5, x: HIT.dmRow[1].x, y: HIT.dmRow[1].y },
+  { frame: beat.dmSwitch2 - 4, x: HIT.dmRow[1].x, y: HIT.dmRow[1].y },
   { frame: beat.dmSwitch2, x: HIT.dmRow[1].x, y: HIT.dmRow[1].y, click: true },
   { frame: beat.dmReply2, x: HIT.dmCompose.x, y: HIT.dmCompose.y, click: true },
   // Interrupted mid-reply: the third row lights up and wins.
-  { frame: beat.dmSwitch3 - 5, x: HIT.dmRow[2].x, y: HIT.dmRow[2].y },
+  { frame: beat.dmSwitch3 - 4, x: HIT.dmRow[2].x, y: HIT.dmRow[2].y },
   { frame: beat.dmSwitch3, x: HIT.dmRow[2].x, y: HIT.dmRow[2].y, click: true },
-  { frame: beat.musicOpen - 8, x: HIT.dmLink.x, y: HIT.dmLink.y },
+  { frame: beat.musicOpen - 6, x: HIT.dmLink.x, y: HIT.dmLink.y },
   { frame: beat.musicOpen, x: HIT.dmLink.x, y: HIT.dmLink.y, click: true },
-  idle(beat.musicOpen + 20, 640, 470),
-  { frame: beat.dmReturn - 6, x: tabX(2, 4), y: TAB_Y },
-  { frame: beat.dmReturn, x: tabX(2, 4), y: TAB_Y, click: true },
-  idle(beat.dmReturn + 16, 820, 700),
-  { frame: beat.nudge1Dismiss - 10, x: HIT.toastClose.x, y: HIT.toastClose.y },
+  idle(beat.musicOpen + 10, 640, 470),
+  { frame: beat.dmReturn - 5, x: tabX(4, 6), y: TAB_Y },
+  { frame: beat.dmReturn, x: tabX(4, 6), y: TAB_Y, click: true },
+  idle(beat.dmReturn + 12, 820, 700),
+  { frame: beat.nudge1Dismiss - 8, x: HIT.toastClose.x, y: HIT.toastClose.y },
   { frame: beat.nudge1Dismiss, x: HIT.toastClose.x, y: HIT.toastClose.y, click: true },
-  idle(beat.nudge1Dismiss + 14, 820, 700),
+  idle(beat.nudge1Dismiss + 10, 820, 700),
 
-  /* ---------------------------------------------------------------- S4 the mall */
-  { frame: beat.snoozeClick - 12, x: HIT.toastBreak.x, y: HIT.toastBreak.y },
+  /* ---------------------------------------------------------------- S4 (460–645) */
+  { frame: beat.snoozeClick - 10, x: HIT.toastBreak.x, y: HIT.toastBreak.y },
   { frame: beat.snoozeClick, x: HIT.toastBreak.x, y: HIT.toastBreak.y, click: true },
-  { frame: beat.portalEnter - 6, x: newTabX(4), y: TAB_Y },
-  { frame: beat.portalEnter, x: newTabX(4), y: TAB_Y, click: true },
-  { frame: beat.shopEnter - 12, x: HIT.portalAd.x, y: HIT.portalAd.y },
+  { frame: beat.portalEnter - 3, x: newTabX(6), y: TAB_Y },
+  { frame: beat.portalEnter, x: newTabX(6), y: TAB_Y, click: true },
+  { frame: beat.shopEnter - 8, x: HIT.portalAd.x, y: HIT.portalAd.y },
   { frame: beat.shopEnter - 2, x: HIT.portalAd.x, y: HIT.portalAd.y, click: true },
-  { frame: beat.shopEnter + 16, x: 640, y: 500 },
-  { frame: beat.shopPick - 8, x: HIT.shopCard.x, y: HIT.shopCard.y },
+  { frame: beat.shopEnter + 3, x: 640, y: 500 },
+  { frame: beat.shopPick - 7, x: HIT.shopCard.x, y: HIT.shopCard.y },
   { frame: beat.shopPick, x: HIT.shopCard.x, y: HIT.shopCard.y, click: true },
-  // Parked on "장바구니" through the spree — the badge does the talking.
+  // Parked on the add-to-cart button through the spree — the badge does the talking.
   { frame: beat.cart1, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
   { frame: beat.cart2, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
-  { frame: beat.dmPeek1 - 5, x: tabX(2, 6), y: TAB_Y },
-  { frame: beat.dmPeek1, x: tabX(2, 6), y: TAB_Y, click: true },
-  idle(beat.dmPeek1 + 16, 700, 620),
-  { frame: beat.dmPeek1End - 5, x: tabX(5, 6), y: TAB_Y },
-  { frame: beat.dmPeek1End, x: tabX(5, 6), y: TAB_Y, click: true },
+  { frame: beat.dmPeek1 - 3, x: tabX(4, 8), y: TAB_Y },
+  { frame: beat.dmPeek1, x: tabX(4, 8), y: TAB_Y, click: true },
+  idle(beat.dmPeek1 + 8, 700, 620),
+  { frame: beat.dmPeek1End - 3, x: tabX(7, 8), y: TAB_Y },
+  { frame: beat.dmPeek1End, x: tabX(7, 8), y: TAB_Y, click: true },
   { frame: beat.cart3, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
   { frame: beat.cart4, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
   { frame: beat.cart5, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
-  { frame: beat.dmPeek2 - 5, x: tabX(2, 6), y: TAB_Y },
-  { frame: beat.dmPeek2, x: tabX(2, 6), y: TAB_Y, click: true },
-  idle(beat.dmPeek2 + 14, 700, 620),
-  { frame: beat.dmPeek2End - 5, x: tabX(5, 6), y: TAB_Y },
-  { frame: beat.dmPeek2End, x: tabX(5, 6), y: TAB_Y, click: true },
+  { frame: beat.dmPeek2 - 3, x: tabX(4, 8), y: TAB_Y },
+  { frame: beat.dmPeek2, x: tabX(4, 8), y: TAB_Y, click: true },
+  idle(beat.dmPeek2 + 7, 700, 620),
+  { frame: beat.dmPeek2End - 3, x: tabX(7, 8), y: TAB_Y },
+  { frame: beat.dmPeek2End, x: tabX(7, 8), y: TAB_Y, click: true },
   { frame: beat.cart6, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
   { frame: beat.cart7, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
   { frame: beat.cartViewEnter, x: HIT.shopCart.x, y: HIT.shopCart.y, click: true },
-  { frame: beat.cartViewEnter + 14, x: 700, y: 430 },
+  { frame: beat.cartViewEnter + 10, x: 700, y: 430 },
   // Dead still across the freeze — any drift undercuts the pause.
   { frame: beat.freezeEnd, x: 700, y: 430 },
 
-  /* ---------------------------------------------------------------- S6 clear + restart */
-  { frame: beat.closeTab1 - 8, x: tabCloseX(5, 6), y: TAB_Y },
-  { frame: beat.closeTab1, x: tabCloseX(5, 6), y: TAB_Y, click: true },
-  { frame: beat.closeTab2, x: tabCloseX(4, 6), y: TAB_Y, click: true },
-  { frame: beat.closeTab3, x: tabCloseX(3, 6), y: TAB_Y, click: true },
-  { frame: beat.closeTab4, x: tabCloseX(2, 6), y: TAB_Y, click: true },
-  // No click needed — closing the last stray tab already lands on the goal-related one.
-  { frame: beat.returnToGoalTab, x: tabX(1, 2), y: TAB_Y },
-  { frame: beat.switchToEditor4 + 6, x: 600, y: 430, hidden: true },
-  { frame: beat.switchToBrowser4 + 7, x: 620, y: 300, hidden: false },
-  { frame: beat.newResearchTab - 6, x: newTabX(2), y: TAB_Y },
-  { frame: beat.newResearchTab, x: newTabX(2), y: TAB_Y, click: true },
-  idle(beat.researchLoad + 12, HIT.read.x, HIT.read.y),
+  /* ---------------------------------------------------------------- S6 (690–770) */
+  { frame: beat.closeTab1 - 5, x: tabCloseX(7, 8), y: TAB_Y },
+  { frame: beat.closeTab1, x: tabCloseX(7, 8), y: TAB_Y, click: true },
+  { frame: beat.closeTab2, x: tabCloseX(6, 8), y: TAB_Y, click: true },
+  { frame: beat.closeTab3, x: tabCloseX(5, 8), y: TAB_Y, click: true },
+  { frame: beat.closeTab4, x: tabCloseX(4, 8), y: TAB_Y, click: true },
+  // No click needed — closing the last stray tab already lands on a goal-related one.
+  { frame: beat.returnToGoalTab, x: tabX(1, 4), y: TAB_Y },
+  { frame: beat.switchToEditor5 + 4, x: 600, y: 430, hidden: true },
+  { frame: reappear(beat.switchToBrowser5, beat.newResearchTab), x: 620, y: 300, hidden: false },
+  { frame: beat.newResearchTab - 4, x: newTabX(4), y: TAB_Y },
+  { frame: beat.newResearchTab, x: newTabX(4), y: TAB_Y, click: true },
+  idle(beat.researchLoad + 6, HIT.read.x, HIT.read.y),
 
-  /* ---------------------------------------------------------------- S7 wrap up */
-  { frame: beat.switchToEditor5 + 6, x: HIT.read.x, y: HIT.read.y, hidden: true },
-  { frame: beat.switchToBrowser5 + 7, x: 620, y: 300, hidden: false },
-  { frame: beat.mailOpen - 8, x: newTabX(3), y: TAB_Y },
-  { frame: beat.mailOpen - 2, x: newTabX(3), y: TAB_Y, click: true },
-  { frame: beat.sendClick - 10, x: HIT.mailSend.x, y: HIT.mailSend.y },
+  /* ---------------------------------------------------------------- S7 (770–900) */
+  { frame: beat.switchToEditor6 + 4, x: HIT.read.x, y: HIT.read.y, hidden: true },
+  { frame: reappear(beat.switchToBrowser6, beat.mailOpen), x: 620, y: 300, hidden: false },
+  { frame: beat.mailOpen - 4, x: newTabX(5), y: TAB_Y },
+  { frame: beat.mailOpen, x: newTabX(5), y: TAB_Y, click: true },
+  { frame: beat.sendClick - 7, x: HIT.mailSend.x, y: HIT.mailSend.y },
   { frame: beat.sendClick, x: HIT.mailSend.x, y: HIT.mailSend.y, click: true },
-  { frame: beat.popupOpen2 - 6, x: EXT.x, y: EXT.y },
+  { frame: beat.popupOpen2 - 4, x: EXT.x, y: EXT.y },
   { frame: beat.popupOpen2, x: EXT.x, y: EXT.y, click: true },
-  { frame: beat.endSessionClick - 6, x: HIT.endSessionBtn.x, y: HIT.endSessionBtn.y },
+  { frame: beat.endSessionClick - 5, x: HIT.endSessionBtn.x, y: HIT.endSessionBtn.y },
   { frame: beat.endSessionClick, x: HIT.endSessionBtn.x, y: HIT.endSessionBtn.y, click: true },
   { frame: beat.endCardIn - 6, x: HIT.endSessionBtn.x, y: HIT.endSessionBtn.y },
 ];

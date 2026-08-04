@@ -1,6 +1,6 @@
 import React from "react";
 
-export type SiteKey = "news" | "stats" | "tube" | "mail" | "newtab" | "insta" | "portal" | "shop";
+export type SiteKey = "news" | "stats" | "tube" | "mail" | "newtab" | "insta" | "portal" | "shop" | "search";
 
 /**
  * Generic favicons. Deliberately abstract shapes + colours — no real wordmarks or logos
@@ -61,6 +61,15 @@ export const Favicon: React.FC<{ site: SiteKey; size?: number }> = ({ site, size
           <svg width={size * 0.62} height={size * 0.62} viewBox="0 0 14 14" aria-hidden>
             <path d="M3 5h8l-.9 5.6H3.9z" fill="#fff" />
             <path d="M5 5a2 2 0 0 1 4 0" stroke="#fff" strokeWidth="1.3" fill="none" strokeLinecap="round" />
+          </svg>
+        </div>
+      );
+    case "search":
+      return (
+        <div style={{ ...box, background: "#fff", border: "1px solid #dfe1e5" }}>
+          <svg width={size * 0.68} height={size * 0.68} viewBox="0 0 14 14" aria-hidden>
+            <circle cx="5.8" cy="5.8" r="3.9" stroke="#4285f4" strokeWidth="1.8" fill="none" />
+            <path d="M8.8 8.8L12.2 12.2" stroke="#34a853" strokeWidth="2" strokeLinecap="round" />
           </svg>
         </div>
       );
