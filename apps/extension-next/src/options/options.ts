@@ -369,8 +369,25 @@ function applyJudge(view: JudgeView): void {
   renderJudge()
 }
 
-/** Account change (connect/key add/remove) — keep unsaved routing drafts, reset chips. */
+/** Account change (connect/key add/remove) — adopt automatic saved-route changes only
+ *  when that tier's draft was untouched, and otherwise preserve the user's draft. */
 function applyAccounts(view: JudgeView): void {
+  const previous = judge
+  if (previous) {
+    for (const tier of TIERS) {
+      const oldRoute = previous.routes[tier]
+      const d = draft[tier]
+      const draftWasUntouched = d.provider === oldRoute.provider && d.model === oldRoute.model
+      const route = view.routes[tier]
+      if (draftWasUntouched && (route.provider !== oldRoute.provider || route.model !== oldRoute.model)) {
+        draft[tier] = {
+          provider: route.provider,
+          model: route.model,
+          custom: !presetsFor(route.provider, tier).includes(route.model),
+        }
+      }
+    }
+  }
   judge = view
   for (const tier of TIERS) chips[tier] = staleChip()
   renderJudge()
