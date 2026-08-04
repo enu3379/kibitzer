@@ -230,6 +230,7 @@ async function saveEnteredKey(): Promise<boolean> {
 }
 
 testKeys.addEventListener("click", async () => {
+  if (testKeys.disabled) return
   if (!keyInput.value.trim()) {
     showKeyTestResult("API 키가 비어 있어요. 위 링크에서 발급한 키를 붙여넣어 주세요.", "err")
     return
