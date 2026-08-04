@@ -656,6 +656,41 @@ test("E2E: opening an internal page (chrome://newtab) holds S — no drain on th
   }
 })
 
+test("E2E: navigating the SAME tab to an internal page also closes the visit interval — no phantom dwell", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 81, url: "https://video.test/watch?v=lynx", title: "귀여운 스라소니 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "운영체제 스케줄러 공부", minutes: null })
+    await settle(50)
+
+    // Judge the off-goal page → DRIFT, which opens its visit interval.
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+    await beat() // one minute of genuine dwell on the judged page
+    assert.ok((await getVisits())?.open, "the judged page owns the open visit interval")
+
+    // Navigate the SAME tab to chrome://newtab. The internal branch returns before noteObserve,
+    // so pre-fix the tracker still believed the judged page was attended: `open` stayed on it and
+    // every heartbeat closed+reopened the interval, crediting dwell for as long as the user sat
+    // on the internal page (Fix 1 held the GAUGE here — the visit tracker was the missing half).
+    activeTab = { id: 81, url: "chrome://newtab/", title: "New Tab", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(81, { status: "complete" }, activeTab)
+    await settle(50)
+
+    assert.equal((await getVisits())?.open ?? null, null, "the interval closes the moment the internal page is observed")
+    const msAtNav = attributedMs(await getVisits())
+
+    // Ten minutes on the internal page — not one more second lands on the page the user left.
+    for (let i = 0; i < 10; i += 1) await beat()
+    assert.equal(attributedMs(await getVisits()), msAtNav, "no phantom dwell accrues while sitting on the internal page")
+  } finally {
+    mock.timers.reset()
+  }
+})
+
 test("E2E: a nag is never surfaced while Chrome is unfocused, but delivers once focused (Fix 3)", async () => {
   mock.timers.enable({ apis: ["Date"] })
   try {
@@ -828,42 +863,46 @@ test("E2E: a pending dwell never survives returning to a held internal page or d
   // left Y's checkpoint alive; it then fired against the held page, was dropped, and the gauge
   // froze on Y with nothing armed. The cancel must run even on the debounced path.
   const newtab = { id: 16, url: "chrome://newtab/", title: "New Tab", active: true, windowId: 1 }
-  activeTab = newtab
-  await send({ type: "set-goal", goal: "재무 보고서 검토", minutes: null })
-  await settle(50) // set-goal observes the newtab → internal hold, lastObservedKey = internal key
+  try {
+    activeTab = newtab
+    await send({ type: "set-goal", goal: "재무 보고서 검토", minutes: null })
+    await settle(50) // set-goal observes the newtab → internal hold, lastObservedKey = internal key
 
-  // Open a real page in that tab: its dwell is armed.
-  activeTab = { id: 16, url: "https://blog.test/third-essay", title: "세 번째 잡담 에세이", active: true, windowId: 1 }
-  for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
-  await settle(50)
-  assert.ok(await kvGet<PendingDwell>(PENDING_DWELL_KEY), "the real page armed a dwell")
+    // Open a real page in that tab: its dwell is armed.
+    activeTab = { id: 16, url: "https://blog.test/third-essay", title: "세 번째 잡담 에세이", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
+    await settle(50)
+    assert.ok(await kvGet<PendingDwell>(PENDING_DWELL_KEY), "the real page armed a dwell")
 
-  // Back to the identical newtab within the dwell — the debounced internal path must still cancel.
-  activeTab = newtab
-  for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
-  await settle(50)
-  assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "returning to the held internal page cancels the abandoned dwell")
+    // Back to the identical newtab within the dwell — the debounced internal path must still cancel.
+    activeTab = newtab
+    for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
+    await settle(50)
+    assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "returning to the held internal page cancels the abandoned dwell")
 
-  // Same shape through holdLocalPdfDisabled: all disabled PDFs share one debounce key.
-  await send({ type: "set-settings", settings: { observeLocalPdfs: false } })
-  activeTab = { id: 16, url: "file:///C:/docs/one.pdf", title: "one.pdf", active: true, windowId: 1 }
-  for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
-  await settle(50) // → lastObservedKey = "local-pdf#disabled"
+    // Same shape through holdLocalPdfDisabled: all disabled PDFs share one debounce key.
+    await send({ type: "set-settings", settings: { observeLocalPdfs: false } })
+    activeTab = { id: 16, url: "file:///C:/docs/one.pdf", title: "one.pdf", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
+    await settle(50) // → lastObservedKey = "local-pdf#disabled"
 
-  activeTab = { id: 16, url: "https://blog.test/fourth-essay", title: "네 번째 잡담 에세이", active: true, windowId: 1 }
-  for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
-  await settle(50)
-  assert.ok(await kvGet<PendingDwell>(PENDING_DWELL_KEY), "the real page armed a dwell (PDF phase)")
+    activeTab = { id: 16, url: "https://blog.test/fourth-essay", title: "네 번째 잡담 에세이", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
+    await settle(50)
+    assert.ok(await kvGet<PendingDwell>(PENDING_DWELL_KEY), "the real page armed a dwell (PDF phase)")
 
-  activeTab = { id: 16, url: "file:///C:/docs/two.pdf", title: "two.pdf", active: true, windowId: 1 }
-  for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
-  await settle(50)
-  assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "a second disabled PDF (same debounce key) still cancels the abandoned dwell")
-
-  // Clear the goal BEFORE re-enabling PDFs: the ON edge reobserves the active tab, and with a
-  // live goal that would arm a real 5s dwell that outlives this test (a trap for later tests).
-  await send({ type: "set-goal", goal: "", minutes: null })
-  await send({ type: "set-settings", settings: { observeLocalPdfs: true } })
+    activeTab = { id: 16, url: "file:///C:/docs/two.pdf", title: "two.pdf", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
+    await settle(50)
+    assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "a second disabled PDF (same debounce key) still cancels the abandoned dwell")
+  } finally {
+    // Cleanup must run even when an assertion above throws, or the leftover goal / disabled-PDF
+    // setting changes what later tests observe. Clear the goal BEFORE re-enabling PDFs: the ON
+    // edge reobserves the active tab, and with a live goal that would arm a real 5s dwell that
+    // outlives this test (a trap for later tests).
+    await send({ type: "set-goal", goal: "", minutes: null })
+    await send({ type: "set-settings", settings: { observeLocalPdfs: true } })
+  }
 })
 
 // The destroyed window's id is deliberately unused by the handler: no tabId/windowId is stored
