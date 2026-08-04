@@ -55,12 +55,3 @@ export function describeObservableUrl(url: string): ObservablePageDescriptor | n
     return null
   }
 }
-
-/** Stable per-page key for an observable web page or opted-in local PDF. */
-export function pageKeyOf(url: string): string | null {
-  return describeObservableUrl(url)?.pageKey ?? null
-}
-
-export function hostOf(url: string): string {
-  return describeObservableUrl(url)?.urlHost ?? ""
-}

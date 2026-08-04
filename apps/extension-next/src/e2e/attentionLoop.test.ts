@@ -241,6 +241,14 @@ test("E2E: local PDFs are opt-in and their dwell checkpoint never stores the fil
   const notificationMessage = String(notifications[0]?.opts.message ?? "")
   assert.ok(notificationMessage.includes("PDF metadata title"), "the nudge uses the Chrome tab title")
   assert.ok(!notificationMessage.includes("local-pdf"), "the opaque identity is never user-facing copy")
+  // The one-time explainer variant only renders inside an injected toast, so a delivery that
+  // routes to the OS notification must leave the lifetime slot unspent — otherwise a user
+  // whose first-ever nag lands on a PDF loses the explainer without ever seeing it.
+  assert.equal(
+    await kvGet("first-nag-count"),
+    undefined,
+    "the OS-notification fallback must not consume the one-time explainer slot",
+  )
   await kvDelete("first-nag-count") // keep the suite's lifetime-first toast scenario isolated
   notifications.length = 0
   toasts.length = 0

@@ -555,7 +555,9 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
   if (message?.type === "set-settings") {
     const before = await getSettings()
     const next = await setSettings(message.settings ?? {})
-    if (before.observeLocalPdfs !== next.observeLocalPdfs) {
+    // Compare the revision, not the boolean: it is minted inside setSettings' write queue and
+    // bumped once per edge, so an OFF→ON pair that lands between these two reads still counts.
+    if (before.localPdfPolicyRevision !== next.localPdfPolicyRevision) {
       // A setting change supersedes both a checkpointed and an already-running PDF judge.
       // Re-observe the current tab so OFF holds it neutral and ON begins a fresh full dwell.
       await dwell.cancel()

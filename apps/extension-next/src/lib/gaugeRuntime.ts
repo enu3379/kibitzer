@@ -655,27 +655,10 @@ async function showToast(
     return (await showSystemNotification(token, message, kind)) ? token : null
   }
   if (deliveryTab?.id) {
-    // The first-ever intervention toast renders as a one-time explainer variant (the
-    // response buttons and the bubble-click="잘 잡았어요" are not self-evident). Same
-    // atomic-kv pattern as the display token; counted at injection so an OS-notification
-    // fallback (which has no room to explain) doesn't normally consume the slot — only
-    // an injection FAILURE below can, which we accept for one-shot simplicity.
-    const firstRun =
-      kind === "intervention" &&
-      (await kvUpdate<number>(FIRST_NAG_KEY, (c) => (typeof c === "number" ? c : 0) + 1)) === 1
-    const payload: ToastPayload = {
-      notificationId: `kbz-${token}`,
-      displayToken: token,
-      message,
-      contextLabel,
-      autoDismissMs: 12_000,
-      kind,
-      firstRun,
-    }
     if (!(await effectSourceAllowed(source))) return null
-    // `firstRun` persistence above is asynchronous, so take one last active-tab snapshot
-    // immediately before injection. If the tab became a PDF meanwhile, never trust a
-    // superficially successful executeScript result from Chrome's PDF viewer.
+    // Take one last active-tab snapshot immediately before injection. If the tab became a
+    // PDF meanwhile, never trust a superficially successful executeScript result from
+    // Chrome's PDF viewer.
     const [injectionTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
     const injectionDescriptor = injectionTab?.url ? describeObservableUrl(injectionTab.url) : null
     if (injectionDescriptor?.kind === "local_pdf" && !(await getSettings()).observeLocalPdfs) return null
@@ -684,6 +667,23 @@ async function showToast(
       return (await showSystemNotification(token, message, kind)) ? token : null
     }
     if (injectionTab?.id) {
+      // The first-ever intervention toast renders as a one-time explainer variant (the
+      // response buttons and the bubble-click="잘 잡았어요" are not self-evident). Same
+      // atomic-kv pattern as the display token. Consumed HERE, past every bail-out above,
+      // so an OS-notification fallback (which has no room to explain) doesn't consume the
+      // slot — only an injection FAILURE below can, which we accept for one-shot simplicity.
+      const firstRun =
+        kind === "intervention" &&
+        (await kvUpdate<number>(FIRST_NAG_KEY, (c) => (typeof c === "number" ? c : 0) + 1)) === 1
+      const payload: ToastPayload = {
+        notificationId: `kbz-${token}`,
+        displayToken: token,
+        message,
+        contextLabel,
+        autoDismissMs: 12_000,
+        kind,
+        firstRun,
+      }
       try {
         await chrome.scripting.executeScript({
           target: { tabId: injectionTab.id },
