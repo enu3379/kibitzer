@@ -1,14 +1,27 @@
 import { klog } from "../lib/klog.ts"
 import { ProviderResponseError, type ProviderResponseStage } from "./errors.ts"
+import { truncateCodePoints } from "./judgeParsing.ts"
 
 const rawResponses = new WeakMap<Record<string, unknown>, string>()
+
+// Entries live in chrome.storage.local (10MB, no unlimitedStorage) and are exported through
+// a data: URL, so an oversized body must not go in verbatim. The http_json stage is the real
+// risk: that body is a proxy/gateway page rather than bounded model output.
+const RAW_LOG_LIMIT = 8000
+
+function truncateForLog(rawResponse: string): string {
+  // UTF-16 length >= code-point count, so this skips the scan for the common small body.
+  if (rawResponse.length <= RAW_LOG_LIMIT) return rawResponse
+  const kept = truncateCodePoints(rawResponse, RAW_LOG_LIMIT)
+  return `${kept}… (truncated, ${rawResponse.length} chars total)`
+}
 
 function logRawResponse(
   context: string,
   stage: ProviderResponseStage,
   rawResponse: string,
 ): void {
-  klog(`llm response raw (${context}, ${stage}): ${rawResponse}`)
+  klog(`llm response raw (${context}, ${stage}): ${truncateForLog(rawResponse)}`)
 }
 
 /** Read and retain the HTTP body so a format failure can include the exact provider

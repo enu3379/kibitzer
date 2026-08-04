@@ -37,11 +37,14 @@ export async function readLog(): Promise<LogEntry[]> {
 export async function clearLog(): Promise<void> {
   // Keep clearing in the same ordering chain as appends. Otherwise a pending raw
   // response write can land after remove() and resurrect content the user cleared.
-  queue = queue.then(
+  const pending = queue.then(
     () => chrome.storage.local.remove(LOG_KEY),
     () => chrome.storage.local.remove(LOG_KEY),
   )
-  await queue
+  // The shared chain must stay settled: readLog() awaits it, so a failed remove would
+  // otherwise reject every later read. The caller still sees the original failure.
+  queue = pending.catch(() => undefined)
+  await pending
 }
 
 function hhmmss(t: number): string {
