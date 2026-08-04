@@ -30,8 +30,8 @@ import { clearBadge } from "./lib/badge.ts"
 import { clearEvents, exportEvents, logEvent } from "./lib/events.ts"
 import { getSettings, localPdfPolicyMatches, setSettings, type Settings } from "./lib/settings.ts"
 import { clearStore, kvGet, kvSet, OBS_STORE } from "./lib/db.ts"
-import { DwellScheduler } from "./lib/dwellScheduler.ts"
-import { PENDING_DWELL_VERSION, type PendingDwell } from "./lib/dwell.ts"
+import { DwellScheduler, PENDING_DWELL_KEY } from "./lib/dwellScheduler.ts"
+import { isPendingDwell, PENDING_DWELL_VERSION, type PendingDwell } from "./lib/dwell.ts"
 import { markNagActed, recentTitles, recordObservation } from "./lib/history.ts"
 import { clearVisits, getVisits, noteHeartbeat, noteInactive, noteJudged, noteObserve, noteVerdict } from "./lib/visits.ts"
 import { clearSessionSummary, dismissSessionSummary, finalizeSession, generateSummaryComment, getSessionSummary } from "./lib/sessionSummary.ts"
@@ -69,11 +69,29 @@ async function holdLocalPdfDisabled(goal: SessionGoal): Promise<void> {
   // A judged PDF may have an open visit interval. OFF means observation stops now, even if
   // the gauge was already neutral or a stale observe later tries to resume the interval.
   await noteInactive(Date.now(), goal.epoch)
-  if (lastObservedKey === disabledKey) return
+  // Cancel BEFORE the debounce below: the page just left may still have a dwell pending, and
+  // an early return here would let it fire against this PDF and be dropped — leaving the
+  // gauge frozen on that page with nothing armed (same defect as the main observe debounce).
   await dwell.cancel()
+  if (lastObservedKey === disabledKey) return
   lastObservedKey = disabledKey
   klog("drop (local-pdf disabled)")
   await enterNeutral(disabledKey, goal)
+}
+
+/** True iff the gauge pipeline already accounts for this observation: it is integrating
+ *  this very page's verdict, or this exact observation's dwell is still pending. Only those
+ *  states make the lastObservedKey debounce safe to honor — lastObservedKey is written by
+ *  judgeAndDispatch, not by observe, so after judged-X → unjudged-Y → back-to-X within Y's
+ *  dwell the key still names X while the gauge holds Y with a null verdict; Y's dwell then
+ *  fires against the wrong active tab and is dropped, leaving NOTHING armed. An early return
+ *  on the bare key match in that state froze S indefinitely (no drain, no recovery, no drift
+ *  detection) until some unrelated event happened to observe a different key. */
+async function gaugeAccountsFor(pageKey: string, obsKey: string): Promise<boolean> {
+  const state = await currentState()
+  if (state.activePageKey === pageKey && state.activeVerdict != null) return true
+  const pending = await kvGet<unknown>(PENDING_DWELL_KEY)
+  return isPendingDwell(pending) && pending.obsKey === obsKey
 }
 
 /** Entry for every observation trigger (nav / activate / SPA). Debounces per page, pauses
@@ -110,8 +128,11 @@ async function observe(url: string | undefined, title: string | undefined): Prom
     }
     const internalPageKey = `internal#${protocol}`
     const obsKey = `${internalPageKey}\n${title}`
-    if (obsKey === lastObservedKey) return // same internal page storming — already held
+    // Cancel BEFORE the storm debounce: returning to an already-held internal page must still
+    // kill the dwell of the page just left, or that dwell fires against this chrome:// tab,
+    // is dropped, and the gauge freezes on the abandoned page with nothing armed.
     await dwell.cancel() // drop any prior page's pending dwell; this page never counts
+    if (obsKey === lastObservedKey) return // same internal page storming — already held
     lastObservedKey = obsKey
     klog(`drop (internal) ${protocol}`)
     await enterNeutral(internalPageKey, goal)
@@ -125,10 +146,16 @@ async function observe(url: string | undefined, title: string | undefined): Prom
   await noteObserve(pageKey, Date.now(), goal.epoch)
   // Debounce on pageKey+title, not pageKey alone: an SPA route change that keeps the
   // path but swaps the title (YouTube video → video) still re-judges, while an update
-  // storm on the identical page is collapsed (the old S 0↔30 yo-yo guard).
+  // storm on the identical page is collapsed (the old S 0↔30 yo-yo guard). The key match
+  // alone is NOT proof the gauge still reflects this page (see gaugeAccountsFor) — a tab/
+  // window bounce back to a judged page within another page's dwell used to early-return
+  // here and freeze the gauge on the abandoned page. Honor the debounce only while the
+  // gauge demonstrably accounts for this observation; otherwise re-enter the pipeline
+  // (enterNeutral no-ops for a page whose verdict we still hold, and schedule() replaces
+  // the stale checkpoint atomically, so re-entry is idempotent).
   const localPdfPolicyRevision = localPdfSettings?.localPdfPolicyRevision ?? null
   const obsKey = `${pageKey}\n${title}${localPdfPolicyRevision == null ? "" : `\npolicy:${localPdfPolicyRevision}`}`
-  if (obsKey === lastObservedKey) return
+  if (obsKey === lastObservedKey && (await gaugeAccountsFor(pageKey, obsKey))) return
   // Privacy gate: sensitive pages pause the gauge immediately — no dwell, no judging.
   // The user lists load once per worker lifetime; awaiting the memoized init here keeps the
   // synchronous gate accurate from the very first observation after a wake.

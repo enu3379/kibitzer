@@ -736,6 +736,136 @@ test("E2E: title churn in an UNFOCUSED window's active tab cannot steal the focu
   }
 })
 
+test("E2E: bouncing back to a judged page within another page's dwell re-enters the pipeline — no indefinite freeze", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    // Fresh session on a clearly off-goal page; set-goal schedules its 5s dwell.
+    const pageX = { id: 13, url: "https://video.test/watch?v=owl", title: "귀여운 올빼미 영상 몰아보기", active: true, windowId: 1 }
+    activeTab = pageX
+    await send({ type: "set-goal", goal: "선형대수 고유값 증명 공부", minutes: null })
+    await settle(50)
+
+    // Judge X → DRIFT (advance past the dwell, reconcile does the judge).
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+
+    // Prove integration is live (S drains under X's DRIFT), then remember where S sits.
+    let sMid = 100
+    for (let i = 0; i < 30 && sMid >= 100; i += 1) {
+      await beat()
+      sMid = (await send({ type: "get-state" })).s as number
+    }
+    assert.ok(sMid < 100, `X was judged DRIFT and S is draining (S=${sMid})`)
+
+    // Tab-switch to an unjudged page Y: NEUTRAL hold, Y's dwell armed.
+    activeTab = { id: 14, url: "https://blog.test/daily-essay", title: "일상 잡담 에세이", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onActivated"]) await fn({ tabId: 14, windowId: 1 })
+    await settle(50)
+
+    // Bounce BACK to X within Y's dwell. lastObservedKey still names X (only judgeAndDispatch
+    // writes it), so pre-fix observe(X) early-returned on the bare key match: nothing was
+    // re-armed, Y's dwell later fired against the wrong active tab and was dropped, and the
+    // gauge froze on Y with a null verdict — no drain, no recovery, no drift detection.
+    activeTab = pageX
+    for (const fn of listeners["tabs.onActivated"]) await fn({ tabId: 13, windowId: 1 })
+    await settle(50)
+    const rearmed = await kvGet<PendingDwell>(PENDING_DWELL_KEY)
+    assert.equal(rearmed?.title, pageX.title, "the bounce-back re-armed the dwell for X, not Y")
+
+    // X re-judges after its dwell → DRIFT again → S RESUMES draining below sMid.
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200)
+    let sResumed = sMid
+    for (let i = 0; i < 30 && sResumed >= sMid; i += 1) {
+      await beat()
+      sResumed = (await send({ type: "get-state" })).s as number
+    }
+    assert.ok(sResumed < sMid, `the gauge resumed integrating after the bounce (S ${sMid} → ${sResumed})`)
+
+    // The storm guard survives the fix: an identical onUpdated for the judged, ACCOUNTED page
+    // is still debounced — no new dwell is armed (the checkpoint was consumed by the judge).
+    for (const fn of listeners["tabs.onUpdated"]) await fn(13, { title: pageX.title }, pageX)
+    await settle(50)
+    assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "identical-page churn on an accounted page schedules nothing")
+
+    // Variant: the return goes THROUGH another app. Switch to unjudged Z, lose focus entirely
+    // (WINDOW_ID_NONE cancels Z's dwell — the judge that would reset lastObservedKey never
+    // runs), then regain focus on X. Pre-fix the stale key froze the gauge with NOTHING
+    // pending to ever recover it.
+    activeTab = { id: 15, url: "https://blog.test/second-essay", title: "두 번째 잡담 에세이", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onActivated"]) await fn({ tabId: 15, windowId: 1 })
+    await settle(50)
+    for (const fn of listeners["win"]) await fn(chrome.windows.WINDOW_ID_NONE)
+    await settle(50)
+    assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "focus loss cancelled Z's dwell")
+    activeTab = pageX
+    for (const fn of listeners["win"]) await fn(1)
+    await settle(50)
+    const reobserved = await kvGet<PendingDwell>(PENDING_DWELL_KEY)
+    assert.equal(reobserved?.title, pageX.title, "focus regain re-armed X's dwell despite the stale debounce key")
+
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200)
+    let sFinal = sResumed
+    for (let i = 0; i < 30 && sFinal >= sResumed; i += 1) {
+      await beat()
+      sFinal = (await send({ type: "get-state" })).s as number
+    }
+    assert.ok(sFinal < sResumed, `the gauge resumed after the through-another-app bounce (S ${sResumed} → ${sFinal})`)
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: a pending dwell never survives returning to a held internal page or disabled PDF", async () => {
+  // The internal-page and disabled-PDF branches debounce on lastObservedKey too. Pre-fix their
+  // early return sat ABOVE dwell.cancel(), so held-page → real page Y → back within Y's dwell
+  // left Y's checkpoint alive; it then fired against the held page, was dropped, and the gauge
+  // froze on Y with nothing armed. The cancel must run even on the debounced path.
+  const newtab = { id: 16, url: "chrome://newtab/", title: "New Tab", active: true, windowId: 1 }
+  activeTab = newtab
+  await send({ type: "set-goal", goal: "재무 보고서 검토", minutes: null })
+  await settle(50) // set-goal observes the newtab → internal hold, lastObservedKey = internal key
+
+  // Open a real page in that tab: its dwell is armed.
+  activeTab = { id: 16, url: "https://blog.test/third-essay", title: "세 번째 잡담 에세이", active: true, windowId: 1 }
+  for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
+  await settle(50)
+  assert.ok(await kvGet<PendingDwell>(PENDING_DWELL_KEY), "the real page armed a dwell")
+
+  // Back to the identical newtab within the dwell — the debounced internal path must still cancel.
+  activeTab = newtab
+  for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
+  await settle(50)
+  assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "returning to the held internal page cancels the abandoned dwell")
+
+  // Same shape through holdLocalPdfDisabled: all disabled PDFs share one debounce key.
+  await send({ type: "set-settings", settings: { observeLocalPdfs: false } })
+  activeTab = { id: 16, url: "file:///C:/docs/one.pdf", title: "one.pdf", active: true, windowId: 1 }
+  for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
+  await settle(50) // → lastObservedKey = "local-pdf#disabled"
+
+  activeTab = { id: 16, url: "https://blog.test/fourth-essay", title: "네 번째 잡담 에세이", active: true, windowId: 1 }
+  for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
+  await settle(50)
+  assert.ok(await kvGet<PendingDwell>(PENDING_DWELL_KEY), "the real page armed a dwell (PDF phase)")
+
+  activeTab = { id: 16, url: "file:///C:/docs/two.pdf", title: "two.pdf", active: true, windowId: 1 }
+  for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
+  await settle(50)
+  assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "a second disabled PDF (same debounce key) still cancels the abandoned dwell")
+
+  // Clear the goal BEFORE re-enabling PDFs: the ON edge reobserves the active tab, and with a
+  // live goal that would arm a real 5s dwell that outlives this test (a trap for later tests).
+  await send({ type: "set-goal", goal: "", minutes: null })
+  await send({ type: "set-settings", settings: { observeLocalPdfs: true } })
+})
+
 // The destroyed window's id is deliberately unused by the handler: no tabId/windowId is stored
 // in the visit or gauge state, so ownership is settled by re-querying which tab is active NOW.
 // The mock's getLastFocused is a constant — it stands for "whichever window has focus", which
