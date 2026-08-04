@@ -187,6 +187,14 @@ const settleUntil = async (until: () => boolean, steps = 100): Promise<boolean> 
   }
   return until()
 }
+// Same, for conditions that must be read back out of the SSOT (visits, dwell checkpoint).
+const settleUntilStored = async (until: () => Promise<boolean>, steps = 100): Promise<boolean> => {
+  for (let i = 0; i < steps; i += 1) {
+    if (await until()) return true
+    await settle(5)
+  }
+  return until()
+}
 
 // A heartbeat's alarm listener is fire-and-forget (`void getGoal().then(async () => … dispatch)`),
 // so `await fireHeartbeat()` returns BEFORE the work it triggers finishes: dispatch → outbox drain
@@ -760,7 +768,9 @@ test("E2E: destroying the focused window stops all attribution to its page (Fix 
     // stale DRIFT into S (up to gapCap each beat); only windows.onRemoved can stop it.
     activeTab = { id: 22, url: "chrome://newtab/", title: "New Tab", active: true, windowId: 1 }
     await fireWindowRemoved(1)
-    await settle(50)
+    // The listener is fire-and-forget, so poll the SSOT rather than racing it with a bare settle.
+    await settleUntilStored(async () => ((await getVisits())?.open ?? null) === null)
+    await settle(30) // let the trailing hand-over observe() finish too
 
     const atClose = await getVisits()
     assert.equal(atClose?.open, null, "the destroyed page's interval is closed on the spot")
@@ -800,7 +810,8 @@ test("E2E: a window close hands the session to the surviving window's page (Fix 
     await kvDelete(PENDING_DWELL_KEY)
     activeTab = { id: 32, url: "https://registry.terraform.io/modules", title: "테라폼 모듈 레지스트리", active: true, windowId: 1 }
     await fireWindowRemoved(1)
-    await settle(50)
+    // Poll the checkpoint: the hand-over sits at the very end of the listener's async chain.
+    await settleUntilStored(async () => (await kvGet(PENDING_DWELL_KEY)) !== undefined)
 
     assert.equal((await getVisits())?.open, null, "the destroyed page's interval is still closed out")
     const pending = (await kvGet(PENDING_DWELL_KEY)) as PendingDwell | undefined
@@ -808,6 +819,89 @@ test("E2E: a window close hands the session to the surviving window's page (Fix 
       pending?.title,
       "테라폼 모듈 레지스트리",
       "the surviving window's page starts its own dwell — the session is handed over, not stalled",
+    )
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: closing a BACKGROUND window changes nothing — the drift keeps being measured (Fix 5)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 41, url: "https://video.test/watch?v=elk", title: "귀여운 사슴 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "그래프 알고리즘 정리", minutes: null })
+    await settle(50)
+
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+    await beat()
+
+    const openBefore = (await getVisits())?.open
+    assert.ok(openBefore, "the judged page owns the open interval")
+    const sBefore = (await send({ type: "get-state" })).s as number
+    assert.ok(sBefore > 5, `S has room left to drain (S=${sBefore})`)
+    await kvDelete(PENDING_DWELL_KEY)
+
+    // A window the user was NOT looking at closes: the active tab is unchanged, so the page being
+    // measured still exists and the handler must not touch a thing. This is the invariant the
+    // whole mismatch test is built around — pausing unconditionally here would rebase the gauge
+    // clock and silently forgive every bit of drift since the last beat.
+    await fireWindowRemoved(2)
+    await settle(50)
+
+    assert.deepEqual((await getVisits())?.open, openBefore, "the open interval is left exactly as it was")
+    assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "and no redundant re-dwell is scheduled")
+    await beat()
+    assert.ok(
+      ((await send({ type: "get-state" })).s as number) < sBefore,
+      "the verdict is still live, so the drift keeps integrating — it was not dropped into a hold",
+    )
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: a restart closes the previous run's interval without integrating the shutdown gap (Fix 5)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 51, url: "https://video.test/watch?v=seal", title: "귀여운 물범 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "타입스크립트 제네릭 공부", minutes: null })
+    await settle(50)
+
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+    await beat()
+    assert.ok((await getVisits())?.open, "the judged page owns the open interval")
+    const sBeforeQuit = (await send({ type: "get-state" })).s as number
+
+    // Chrome quits with that interval still open — on Windows the last window's close races the
+    // teardown, so windows.onRemoved may never run — and is relaunched ten minutes later on a page
+    // that has nothing to do with the previous run. NO tab event describes that transition, and
+    // session restore has not committed yet, so the startup re-sync is the only thing that can
+    // settle it before the first heartbeat resumes crediting the vanished page.
+    mock.timers.tick(10 * 60_000)
+    activeTab = { id: 52, url: "chrome://newtab/", title: "New Tab", active: true, windowId: 1 }
+    await kvDelete(PENDING_DWELL_KEY)
+    await fireStartup()
+    await settleUntilStored(async () => ((await getVisits())?.open ?? null) === null)
+    await settle(30)
+
+    assert.equal((await getVisits())?.open ?? null, null, "the previous run's interval is closed out")
+    assert.equal(
+      (await send({ type: "get-state" })).s as number,
+      sBeforeQuit,
+      "the ten minutes Chrome spent shut are rebased away, not integrated as drift",
+    )
+    assert.equal(
+      toasts.length + notifications.length,
+      0,
+      "so no nag fires at launch about a page from the last session",
     )
   } finally {
     mock.timers.reset()
