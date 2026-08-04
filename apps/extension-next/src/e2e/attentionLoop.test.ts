@@ -12,6 +12,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { kvDelete, kvGet } from "../lib/db.ts"
 import { PENDING_DWELL_KEY } from "../lib/dwellScheduler.ts"
+import { LOCAL_PDF_PROMPT_DELAY_MS, LOCAL_PDF_PROMPT_SHOWN_KEY } from "../lib/localPdfPrompt.ts"
 import type { PendingDwell } from "../lib/dwell.ts"
 
 // Serve the real embedding assets off disk so the KoEn-E5 WASM session loads (the extension
@@ -39,6 +40,11 @@ const createdTabs: string[] = [] // URLs opened via chrome.tabs.create (onboardi
 type MockTab = { id: number; url: string; title: string; active: boolean; windowId: number }
 let activeTab: MockTab | null = null
 let tabQuerySequence: Array<MockTab | null> = []
+const createdWindows: Array<Record<string, unknown>> = []
+const updatedTabs: Array<{ tabId: number; props: Record<string, unknown> }> = []
+let promptWindowOpen = false
+let windowFocusFails = false
+let navigateOnActivateUrl: string | null = null
 const toasts: Array<Record<string, unknown>> = [] // captured injected toast payloads
 const notifications: Array<{ id: string; opts: Record<string, unknown> }> = []
 let executeScriptCalls = 0
@@ -52,11 +58,20 @@ const chrome = {
   tabs: {
     onUpdated: evt("tabs.onUpdated"),
     onActivated: evt("tabs.onActivated"),
-    query: async () => {
+    query: async (query: Record<string, unknown> = {}) => {
       const tab = tabQuerySequence.length > 0 ? tabQuerySequence.shift() : activeTab
+      if (query.windowId != null && tab?.windowId !== query.windowId) return []
       return tab ? [tab] : []
     },
-    get: async () => activeTab,
+    get: async (tabId: number) => activeTab?.id === tabId ? activeTab : undefined,
+    update: async (tabId: number, props: Record<string, unknown>) => {
+      updatedTabs.push({ tabId, props })
+      if (navigateOnActivateUrl && activeTab?.id === tabId) {
+        activeTab.url = navigateOnActivateUrl
+        navigateOnActivateUrl = null
+      }
+      return activeTab
+    },
     create: async (opts: { url?: string } = {}) => {
       createdTabs.push(opts.url ?? "")
       return {}
@@ -77,7 +92,29 @@ const chrome = {
   idle: { onStateChanged: evt("idle"), setDetectionInterval() {}, queryState: async () => (idleActive ? "active" : "idle") },
   // The focused window is always id 1 in these scenarios; tabs of a second (unfocused) side
   // window carry windowId 2 and must be ignored by the observation surface (Fix 4).
-  windows: { onFocusChanged: evt("win"), getLastFocused: async () => ({ focused: winFocused, id: 1 }), WINDOW_ID_NONE: -1 },
+  windows: {
+    onFocusChanged: evt("win"),
+    getLastFocused: async () => ({ focused: winFocused, id: 1 }),
+    get: async () => ({ id: 1, left: 100, top: 40, width: 1400, height: 900 }),
+    getAll: async () => promptWindowOpen
+      ? [{
+          id: 9,
+          type: "popup",
+          // Immediately after windows.create resolves the target can exist only as pendingUrl.
+          tabs: [{ id: 99, pendingUrl: `${pathToFileURL(assetDisk("localPdfPrompt/localPdfPrompt.html")).href}?tabId=12` }],
+        }]
+      : [],
+    create: async (opts: Record<string, unknown>) => {
+      createdWindows.push(opts)
+      promptWindowOpen = true
+      return { id: 9 }
+    },
+    update: async () => {
+      if (windowFocusFails) throw new Error("focus refused")
+      return { id: 1, focused: true }
+    },
+    WINDOW_ID_NONE: -1,
+  },
   notifications: {
     onButtonClicked: evt("nb"),
     onClicked: evt("nc"),
@@ -134,6 +171,13 @@ const fireHeartbeat = async () => {
   for (const fn of listeners["alarms.onAlarm"]) await fn({ name: "kibitzer-next-heartbeat" })
 }
 const settle = (ms = 0) => new Promise((r) => setTimeout(r, ms)) // real timer (only Date is mocked)
+const settleUntil = async (until: () => boolean, steps = 100): Promise<boolean> => {
+  for (let i = 0; i < steps; i += 1) {
+    if (until()) return true
+    await settle(5)
+  }
+  return until()
+}
 
 // A heartbeat's alarm listener is fire-and-forget (`void getGoal().then(async () => … dispatch)`),
 // so `await fireHeartbeat()` returns BEFORE the work it triggers finishes: dispatch → outbox drain
@@ -163,13 +207,83 @@ test("E2E: local PDFs are opt-in and their dwell checkpoint never stores the fil
   activeTab = { id: 12, url: rawUrl, title: "secret-paper.pdf", active: true, windowId: 1 }
   await send({ type: "set-settings", settings: { observeLocalPdfs: false } })
   await send({ type: "set-goal", goal: "논문 읽기", minutes: null })
-  await settle(30)
+  await settle(Math.floor(LOCAL_PDF_PROMPT_DELAY_MS / 2))
+  assert.equal(createdWindows.length, 0, "the prompt waits for the PDF viewer to appear")
+  assert.ok(
+    await settleUntil(
+      () => createdWindows.length === 1,
+      Math.ceil((LOCAL_PDF_PROMPT_DELAY_MS + 1000) / 5),
+    ),
+    "the first OFF local PDF opens one opt-in popup",
+  )
 
   assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "OFF local PDF never creates a dwell")
   assert.equal((await send({ type: "get-state" })).s, 100, "OFF local PDF holds the gauge neutral")
+  assert.equal(createdWindows.length, 1)
+  assert.equal(createdWindows[0]?.type, "popup")
+  assert.equal(createdWindows[0]?.left, 1102)
+  assert.equal(createdWindows[0]?.top, 642)
+  assert.ok(String(createdWindows[0]?.url).includes("localPdfPrompt.html?tabId=12"))
+  assert.ok(
+    !JSON.stringify(createdWindows[0]).includes("alice") && !JSON.stringify(createdWindows[0]).includes("secret-paper"),
+    "prompt URL carries no source local path",
+  )
 
-  await send({ type: "set-settings", settings: { observeLocalPdfs: true } })
+  for (const fn of listeners["tabs.onUpdated"]) await fn(12, { title: activeTab.title }, activeTab)
   await settle(30)
+  assert.equal(createdWindows.length, 1, "title storms never duplicate the one-time popup")
+
+  store.delete(LOCAL_PDF_PROMPT_SHOWN_KEY)
+  for (const fn of listeners["tabs.onUpdated"]) await fn(12, { title: activeTab.title }, activeTab)
+  assert.ok(
+    await settleUntil(() => store.has(LOCAL_PDF_PROMPT_SHOWN_KEY)),
+    "restart recovery repairs the missing shown marker",
+  )
+  assert.equal(createdWindows.length, 1, "restart recovery recognizes an already-created prompt")
+  assert.ok(store.has(LOCAL_PDF_PROMPT_SHOWN_KEY))
+
+  assert.deepEqual(
+    await send({ type: "enable-local-pdf-observation", sourceTabId: 12 }),
+    { ok: true, settingEnabled: true },
+  )
+  await settle(30)
+  assert.ok(updatedTabs.some((entry) => entry.tabId === 12 && entry.props.active === true))
+  const initial = await kvGet<PendingDwell>(PENDING_DWELL_KEY)
+  assert.ok(initial)
+
+  await settle(10)
+  assert.deepEqual(
+    await send({ type: "enable-local-pdf-observation", sourceTabId: 12 }),
+    { ok: true, settingEnabled: true },
+    "an already-ON race still focuses and starts a fresh dwell",
+  )
+  const refreshed = await kvGet<PendingDwell>(PENDING_DWELL_KEY)
+  assert.ok(refreshed && refreshed.dueAt > initial.dueAt, "the already-ON retry never inherits the old deadline")
+
+  windowFocusFails = true
+  assert.deepEqual(
+    await send({ type: "enable-local-pdf-observation", sourceTabId: 12 }),
+    { ok: false, settingEnabled: true },
+    "focus refusal is reported as partial failure, not success",
+  )
+  windowFocusFails = false
+
+  navigateOnActivateUrl = "https://example.com/not-the-pdf"
+  assert.deepEqual(
+    await send({ type: "enable-local-pdf-observation", sourceTabId: 12 }),
+    { ok: false, settingEnabled: true },
+    "navigation during activation cannot observe the stale PDF snapshot",
+  )
+  assert.deepEqual(
+    await send({ type: "enable-local-pdf-observation", sourceTabId: 12 }),
+    { ok: false, settingEnabled: true },
+    "an already-navigated source still reports the actual enabled setting",
+  )
+  activeTab.url = rawUrl
+  assert.deepEqual(
+    await send({ type: "enable-local-pdf-observation", sourceTabId: 12 }),
+    { ok: true, settingEnabled: true },
+  )
   const first = await kvGet<PendingDwell>(PENDING_DWELL_KEY)
   assert.ok(first)
   assert.equal(first.kind, "local_pdf")

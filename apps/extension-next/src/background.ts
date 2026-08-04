@@ -41,6 +41,7 @@ import { isUserAllowedUrl, isUserBlockedUrl, shouldDropUrl } from "./lib/domainF
 import { getDomainLists, initDomainLists, setDomainLists } from "./lib/domainLists.ts"
 import { truncateCodePoints } from "./providers/judgeParsing.ts"
 import { describeObservableUrl } from "./lib/url.ts"
+import { maybeOpenLocalPdfPrompt } from "./lib/localPdfPrompt.ts"
 import { browserPresent, isFocusedWindow } from "./lib/presence.ts"
 
 const HEARTBEAT_ALARM = "kibitzer-next-heartbeat"
@@ -82,8 +83,15 @@ async function observe(url: string | undefined, title: string | undefined): Prom
   const goal = await getGoal()
   if (!goal || !url) return
   const descriptor = describeObservableUrl(url)
-  const localPdfSettings = descriptor?.kind === "local_pdf" ? await getSettings() : null
-  if (localPdfSettings && !localPdfSettings.observeLocalPdfs) return void (await holdLocalPdfDisabled(goal))
+  let localPdfSettings: Settings | null = null
+  if (descriptor?.kind === "local_pdf") {
+    localPdfSettings = await getSettings()
+    if (!localPdfSettings.observeLocalPdfs) {
+      await holdLocalPdfDisabled(goal)
+      void maybeOpenLocalPdfPrompt(descriptor.pageKey).catch(() => klog("local-pdf prompt unavailable"))
+      return
+    }
+  }
   if (!title) return
   title = truncateCodePoints(title, TITLE_MAX_CHARS)
   if (!descriptor) {
@@ -477,6 +485,7 @@ interface PopupMessage {
   kind?: string
   persona?: string
   displayToken?: number
+  sourceTabId?: number
   settings?: Partial<Settings>
   // provider settings (options AI 판정 pane)
   provider?: ProviderId
@@ -489,6 +498,66 @@ interface PopupMessage {
   days?: number
   // user domain lists (options 사이트 pane)
   lists?: { block?: string[]; allow?: string[] }
+}
+
+async function applySettingsPatch(
+  patch: Partial<Settings>,
+  reobserveActiveTab = true,
+): Promise<Settings> {
+  const before = await getSettings()
+  const next = await setSettings(patch)
+  // Compare the revision, not the boolean: it is minted inside setSettings' write queue and
+  // bumped once per edge, so an OFF→ON pair that lands between these two reads still counts.
+  if (before.localPdfPolicyRevision !== next.localPdfPolicyRevision) {
+    // A setting change supersedes both a checkpointed and an already-running PDF judge.
+    // Re-observe the current tab so OFF holds it neutral and ON begins a fresh full dwell.
+    await dwell.cancel()
+    lastObservedKey = null
+    if (reobserveActiveTab && await getGoal()) void observeActiveTab()
+  }
+  return next
+}
+
+interface EnableLocalPdfResult {
+  ok: boolean
+  settingEnabled: boolean
+}
+
+async function enableLocalPdfObservation(sourceTabId: number): Promise<EnableLocalPdfResult> {
+  let settingEnabled = false
+  try {
+    settingEnabled = (await getSettings()).observeLocalPdfs
+    const initialTab = await chrome.tabs.get(sourceTabId)
+    const initialDescriptor = initialTab.url ? describeObservableUrl(initialTab.url) : null
+    if (initialDescriptor?.kind !== "local_pdf") return { ok: false, settingEnabled }
+
+    const next = await applySettingsPatch({ observeLocalPdfs: true }, false)
+    settingEnabled = next.observeLocalPdfs
+    if (!settingEnabled) return { ok: false, settingEnabled }
+
+    // This click establishes a fresh source-PDF observation even if another settings event
+    // won the OFF→ON race first. Do not inherit an earlier dwell deadline.
+    await dwell.cancel()
+    lastObservedKey = null
+    await chrome.windows.update(initialTab.windowId, { focused: true })
+    await chrome.tabs.update(sourceTabId, { active: true })
+
+    // Navigation can race the window switch. Re-read both identity and active state before
+    // observing so an old PDF snapshot can never schedule dwell for the wrong page.
+    const currentTab = await chrome.tabs.get(sourceTabId)
+    const currentDescriptor = currentTab.url ? describeObservableUrl(currentTab.url) : null
+    const [activeTab] = await chrome.tabs.query({ active: true, windowId: currentTab.windowId })
+    if (
+      currentDescriptor?.kind !== "local_pdf" ||
+      activeTab?.id !== sourceTabId ||
+      !currentTab.url
+    ) return { ok: false, settingEnabled }
+
+    await observe(currentTab.url, currentTab.title)
+    return { ok: true, settingEnabled }
+  } catch {
+    return { ok: false, settingEnabled }
+  }
 }
 
 async function handleMessage(message: PopupMessage): Promise<unknown> {
@@ -553,18 +622,11 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     return await getSettings()
   }
   if (message?.type === "set-settings") {
-    const before = await getSettings()
-    const next = await setSettings(message.settings ?? {})
-    // Compare the revision, not the boolean: it is minted inside setSettings' write queue and
-    // bumped once per edge, so an OFF→ON pair that lands between these two reads still counts.
-    if (before.localPdfPolicyRevision !== next.localPdfPolicyRevision) {
-      // A setting change supersedes both a checkpointed and an already-running PDF judge.
-      // Re-observe the current tab so OFF holds it neutral and ON begins a fresh full dwell.
-      await dwell.cancel()
-      lastObservedKey = null
-      if (await getGoal()) void observeActiveTab()
-    }
-    return next
+    return await applySettingsPatch(message.settings ?? {})
+  }
+  if (message?.type === "enable-local-pdf-observation") {
+    if (!Number.isSafeInteger(message.sourceTabId)) return { ok: false }
+    return await enableLocalPdfObservation(message.sourceTabId as number)
   }
   // User domain lists (options 사이트 pane). set-domain-lists normalizes/dedupes, persists,
   // and refreshes the synchronous privacy gate in this worker; rejected (non-host) entries
