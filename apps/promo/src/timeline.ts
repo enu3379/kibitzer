@@ -10,25 +10,39 @@
  */
 import { FPS } from "./theme";
 
+/**
+ * PACING RULE — landings are slow, runs are fast.
+ *
+ * Every scene opens on a page nobody has seen before, and the film used to cut away from
+ * it at the same speed it cut between two pages the audience already knew. So each arrival
+ * now gets a hold at roughly 0.7× before the tempo comes back up: half a second on the
+ * social feed before the messages open, most of a second on the mall's listing grid before
+ * anything is clicked. What follows the hold keeps the old speed.
+ *
+ * The runs themselves are budgeted rather than counted: a DM segment or a typed block gets
+ * a FIXED window and derives its own rate from however much content it has to deliver (see
+ * `rateFor` and `dmSegments` in scenes/script.ts). Adding three more messages to a thread
+ * makes the thread faster, never longer.
+ */
 export const scene = {
-  /** Two seconds flat: new tab on screen, cursor crosses to the icon, goal declared. */
-  s1Setup: { from: 0, duration: 60 },
+  /** New tab on screen, cursor crosses to the icon, goal declared. */
+  s1Setup: { from: 0, duration: 66 },
   /** Search → read → write, three times over. Paced as a parabola (see below). */
-  s2Research: { from: 60, duration: 210 },
+  s2Research: { from: 66, duration: 240 },
   /** Drift #1 — direct messages, plus the music link that arrives inside them. */
-  s3Messages: { from: 270, duration: 190 },
+  s3Messages: { from: 306, duration: 232 },
   /** Drift #2/#3 — portal → mall, interleaved with the messages piling up. */
-  s4Shopping: { from: 460, duration: 185 },
+  s4Shopping: { from: 538, duration: 226 },
   /** Everything stops. The only slow thing left in the middle of the film. */
-  s5Freeze: { from: 645, duration: 45 },
+  s5Freeze: { from: 764, duration: 60 },
   /** Clear the mess, look at the document, pick a new research thread. */
-  s6Reset: { from: 690, duration: 80 },
+  s6Reset: { from: 824, duration: 96 },
   /** Praise carries over, the report is finished, the mail goes out, session ends. */
-  s7WrapUp: { from: 770, duration: 130 },
-  s8EndCard: { from: 900, duration: 60 },
+  s7WrapUp: { from: 920, duration: 162 },
+  s8EndCard: { from: 1082, duration: 70 },
 } as const;
 
-export const TOTAL_FRAMES = scene.s8EndCard.from + scene.s8EndCard.duration; // 960 = 32.0s
+export const TOTAL_FRAMES = scene.s8EndCard.from + scene.s8EndCard.duration; // 1152 = 38.4s
 
 /**
  * How long the Cmd-Tab switcher stays up. Short: at this tempo there are ten app
@@ -37,26 +51,26 @@ export const TOTAL_FRAMES = scene.s8EndCard.from + scene.s8EndCard.duration; // 
 export const SWITCHER_FRAMES = 6;
 
 export const beat = {
-  /* --------------------------------------------------------- S1 goal declaration (60f)
+  /* --------------------------------------------------------- S1 goal declaration (66f)
    * Opens on the new-tab page with the pointer parked mid-screen; the first thing that
    * happens in the film is the cursor crossing to the Kibitzer icon.
    */
-  popupOpen: 14,
-  goalTypeStart: 21,
-  goalTypeEnd: 43,
-  startClick: 50,
-  popupClose: 56,
+  popupOpen: 16,
+  goalTypeStart: 23,
+  goalTypeEnd: 47,
+  startClick: 55,
+  popupClose: 61,
 
-  /* --------------------------------------------------------- S2 the research loop (210f)
+  /* --------------------------------------------------------- S2 the research loop (240f)
    *
    * Three search-and-read cycles, not three visits to the same two tabs: each one goes
    * back to the results page, picks a *different* source, opens it, and comes back to the
    * document. Three distinct pages get opened this way.
    *
-   * Paced as a parabola. Roughly a second at each end runs at a speed you can follow; the
-   * five seconds between them ramp up, blur, and come back down. At the peak a source page
-   * is on screen for ten frames and a paragraph lands in twelve — 0.1s per dozen
-   * characters, which is not typing so much as the memory of having typed.
+   * Paced as a parabola. The opening runs at a speed you can follow — twelve frames on the
+   * results page, twenty reading the article — then the five seconds in the middle ramp up,
+   * blur, and come back down. At the peak a source page is on screen for eleven frames and
+   * a paragraph lands in twelve, which is not typing so much as the memory of having typed.
    *
    * The long method-and-findings blocks run at 0.02 frames per character inside the
    * stretches where the browser covers the writing app. Those are the stretches the
@@ -64,177 +78,202 @@ export const beat = {
    */
 
   /* --- opening: find the first source properly (readable speed) */
-  searchEnter1: 62,
-  result1Click: 70,
-  newsEnter: 72,
+  searchEnter1: 68,
+  result1Click: 80,
+  newsEnter: 82,
 
   /* --- cycle A: write, then go find the numbers
    * The off-camera beats are named for the section they deliver, because that is the only
    * thing that identifies them — none of them is ever seen landing.
    */
-  switchToEditor1: 84,
+  switchToEditor1: 102,
   /** §1 heading. */
-  writeH1: 90,
-  writeP1: 97,
-  writeP2: 108,
-  switchToBrowser1: 114,
+  writeH1: 108,
+  writeP1: 115,
+  writeP2: 125,
+  switchToBrowser1: 133,
   /** off camera — rest of §1: the LTV/CAC critique, prior work, the research questions. */
-  writeIntroBody: 120,
-  searchEnter2: 120,
+  writeIntroBody: 139,
+  searchEnter2: 139,
   /** off camera — §2.1–2.3: sample, operational definitions, caveats. */
-  writeMethod: 124,
-  result2Click: 126,
-  statsEnter: 128,
+  writeMethod: 143,
+  result2Click: 146,
+  statsEnter: 148,
 
   /* --- cycle B: copy the channel table into the report */
-  select1: 133,
+  select1: 154,
   /** off camera — §2.4 descriptive statistics, ending on the line [자료 1] lands under. */
-  writeStats: 136,
-  copy1: 139,
-  switchToEditor2: 143,
-  paste1: 149,
+  writeStats: 157,
+  copy1: 160,
+  switchToEditor2: 164,
+  paste1: 170,
   /** §3 heading. */
-  writeH2: 154,
-  writeP6: 161,
+  writeH2: 175,
+  writeP6: 182,
 
-  /* --- cycle C: the peak. A third source, up for ten frames. */
-  switchToBrowser2: 170,
+  /* --- cycle C: the peak. A third source, up for eleven frames. */
+  switchToBrowser2: 191,
   /** off camera — §3.1 coupons, and the §3.2 sub-head the next typed block opens under. */
-  writeCoupon: 174,
-  searchEnter3: 176,
-  result3Click: 180,
-  cohortsEnter: 181,
-  switchToEditor3: 190,
+  writeCoupon: 195,
+  searchEnter3: 197,
+  result3Click: 201,
+  cohortsEnter: 202,
+  switchToEditor3: 213,
   /** Typed at the fastest rate in the film, and abandoned when the cut leaves. */
-  writeP8: 195,
+  writeP8: 218,
 
   /* --- coming back down: the pull quote, then the boil comes off */
-  switchToBrowser3: 202,
-  newsReturn: 205,
-  select2: 209,
+  switchToBrowser3: 226,
+  newsReturn: 229,
+  select2: 233,
   /** off camera — rest of §3.2, the cohort table [자료 2], and §3.3 curation. */
-  writeCuration: 212,
-  copy2: 215,
-  switchToEditor4: 218,
-  paste2: 224,
-  writeP10: 230,
+  writeCuration: 236,
+  copy2: 239,
+  switchToEditor4: 242,
+  paste2: 248,
+  writeP10: 254,
   /** Four times slower than the block before it. This is where attention goes. */
-  writeP11: 236,
-  enter1: 255,
-  enter2: 259,
-  /** 259 → 270: nothing on screen but a blinking caret. */
+  writeP11: 260,
+  enter1: 283,
+  enter2: 288,
+  /** 288 → 306: six tenths of a second with nothing on screen but a blinking caret. */
 
-  /* --------------------------------------------------------- S3 drift #1: messages (190f)
-   * The landing keeps a readable pace; the chat run is where the tempo picks up again.
+  /* --------------------------------------------------------- S3 drift #1: messages (232f)
+   *
+   * Two landings and then a run. The social feed gets a full second before the messages
+   * are opened, and the thread that opens gets half a second of sitting there before
+   * anything moves — that is the 0.7× hold, and it is what makes the run afterwards read
+   * as fast instead of as the same speed as everything else.
+   *
+   * The run is one long conversation and two errands. 민아 is the friend: a real
+   * back-and-forth that starts here, keeps going while the tab is elsewhere, and is still
+   * going at the end of the film. 준호 and 다영 are piles — four unread, read at a glance,
+   * one reply out, done. The segment windows are fixed (see `dmSegments`); the message
+   * rate inside each is derived from them, so more chat never costs more screen time.
    */
-  switchToBrowser4: 270,
-  newTabClick: 280,
-  omniType: 286,
-  omniSuggest: 291,
-  omniTab: 297,
-  igEnter: 302,
-  igDmEnter: 322,
-  dmReply1: 330,
-  dmSwitch2: 340,
-  dmReply2: 349,
+  switchToBrowser4: 306,
+  newTabClick: 318,
+  omniType: 325,
+  omniSuggest: 331,
+  omniTab: 338,
+  igEnter: 344,
+  /** Landing: the feed holds for a second before the messages are opened. */
+  igDmEnter: 374,
+  /** Landing: the open thread sits still for half a second before it starts moving. */
+  dmRun1: 388,
+  dmReply1: 402,
+  dmSwitch2: 424,
+  dmReply2: 432,
   /** A third thread lights up mid-reply and wins. */
-  dmInterrupt: 356,
-  dmSwitch3: 361,
-  musicLink: 370,
-  musicOpen: 378,
-  dmReturn: 394,
+  dmInterrupt: 438,
+  dmSwitch3: 444,
+  musicLink: 464,
+  musicOpen: 474,
+  dmReturn: 488,
   /*
    * The badge no longer needs a beat of its own: it is a continuous read of the gauge
    * (GAUGE in scenes/script.ts), so it has already gone amber and then red on its own by
    * the time the first nudge fires. S is spent exactly here, which is what triggers it —
    * the first nag is the downward crossing into zero.
    */
-  nudge1In: 402,
-  nudge1Dismiss: 440,
+  nudge1In: 496,
+  nudge1Dismiss: 528,
 
-  /* --------------------------------------------------------- S4 drift #2/#3: mall (185f)
-   * Page loads and scrolls are cut to the bone; what is left is the cart climbing and the
-   * two trips back to the messages.
+  /* --------------------------------------------------------- S4 drift #2/#3: mall (226f)
+   *
+   * The mall gets the longest landing in the film: twenty-four frames on the listing grid,
+   * scrolling, before anything is clicked. It has to read as "this is a shopping site"
+   * before the spree can mean anything — and once it has, the page changes are cut to the
+   * bone.
+   *
+   * The spree itself is a loop, not a montage: product page → 장바구니 → the badge pops
+   * top right → click something off the 함께 본 상품 rail → the next product page. Each
+   * `hop` is that click. It is how a mall actually keeps somebody, which is the point the
+   * report being neglected is literally about.
    *
    * Nudge #2 lands *after* the spree has started, not on the messages before it. A nudge
    * can only name what is on screen, and what is on screen here is someone researching
-   * customer acquisition while being acquired — which is the joke the whole film is built
-   * on. It also gives the beat a shape: two items go in the cart, the nudge stops it, the
-   * snooze restarts it, five more go in.
+   * customer acquisition while being acquired. It also gives the beat a shape: two items
+   * go in the cart, the nudge stops it, the snooze restarts it, five more go in.
    */
-  portalEnter: 466,
-  portalQuery: 470,
-  /** The mall opens on its listing page; the pick happens after a short scroll. */
-  shopEnter: 480,
-  shopPick: 492,
-  cart1: 497,
-  cart2: 505,
-  nudge2In: 512,
-  snoozeClick: 538,
-  cart3: 546,
-  cart4: 552,
-  dmPeek1: 558,
-  dmPeek1End: 570,
-  cart5: 576,
-  cart6: 584,
-  dmPeek2: 590,
-  dmPeek2End: 600,
-  cart7: 606,
-  cartViewEnter: 611,
-  nudge3In: 624,
+  portalEnter: 546,
+  portalQuery: 552,
+  /** The mall opens on its listing page; the pick happens after a long, readable scroll. */
+  shopEnter: 566,
+  shopPick: 590,
+  cart1: 598,
+  hop1: 606,
+  cart2: 612,
+  nudge2In: 618,
+  snoozeClick: 648,
+  hop2: 656,
+  cart3: 662,
+  hop3: 668,
+  cart4: 674,
+  dmPeek1: 680,
+  dmPeek1End: 696,
+  hop4: 702,
+  cart5: 708,
+  hop5: 714,
+  cart6: 720,
+  dmPeek2: 726,
+  dmPeek2End: 740,
+  hop6: 746,
+  cart7: 752,
+  cartViewEnter: 758,
+  nudge3In: 762,
 
-  /* --------------------------------------------------------- S5 the stop (45f) */
-  freezeStart: 645,
-  freezeEnd: 675,
+  /* --------------------------------------------------------- S5 the stop (60f) */
+  freezeStart: 774,
+  freezeEnd: 810,
 
-  /* --------------------------------------------------------- S6 clear + restart (80f) */
-  closeTab1: 694, // shop
-  closeTab2: 701, // portal
-  closeTab3: 708, // music
-  closeTab4: 715, // messages
-  returnToGoalTab: 724,
+  /* --------------------------------------------------------- S6 clear + restart (96f) */
+  closeTab1: 830, // shop
+  closeTab2: 838, // portal
+  closeTab3: 846, // music
+  closeTab4: 854, // messages
+  returnToGoalTab: 864,
   /** Open the document once — long enough to see the empty line it was left on. */
-  switchToEditor5: 732,
-  switchToBrowser5: 748,
-  newResearchTab: 754,
+  switchToEditor5: 872,
+  switchToBrowser5: 892,
+  newResearchTab: 899,
   /** off camera — §3.4, the soft conclusion the drift interrupted mid-thought. */
-  writeSynthesis: 756,
-  researchLoad: 762,
-  praiseIn: 764,
+  writeSynthesis: 901,
+  researchLoad: 908,
+  praiseIn: 910,
   /** off camera — §4, the size-band analysis, and the figure that closes it. */
-  writeRetention: 768,
+  writeRetention: 914,
 
-  /* --------------------------------------------------------- S7 finish + wrap up (130f) */
-  praiseOut: 788,
-  switchToEditor6: 792,
+  /* --------------------------------------------------------- S7 finish + wrap up (162f) */
+  praiseOut: 942,
+  switchToEditor6: 946,
   /** §5 heading — the conclusion, and the last thing typed on camera. */
-  writeH3: 798,
-  writeP12: 804,
-  writeP13: 812,
-  writeP14: 822,
+  writeH3: 954,
+  writeP12: 962,
+  writeP13: 972,
+  writeP14: 984,
   /**
    * The bibliography lands, and the document is finished. The figure it refers to was
    * already written into §4 off camera — a figure belongs in the section that analyses
    * it, and putting the reference list last is what makes the closing frame read as a
    * paper rather than as a slide.
    */
-  chartIn: 832,
-  switchToBrowser6: 840,
-  mailOpen: 846,
-  sendClick: 858,
-  mailSent: 864,
+  chartIn: 996,
+  switchToBrowser6: 1012,
+  mailOpen: 1018,
+  sendClick: 1032,
+  mailSent: 1040,
   /*
-   * The closing look at the popup, and the last beat before the end card.
-   *
-   * There is no 세션 종료 button and no summary screen to open behind it — the extension
-   * holds one goal until it is replaced, and its popup has only the setup and active
-   * views. So this beat is not a click into anything; it is the gauge, read once, back at
-   * the top. The 32 frames it now holds are what the summary screen used to spend.
+   * The closing look at the popup: the immersion bar back at the top with the sundial's
+   * shadow at its longest, then 종료하기 into the session summary — the one screen that
+   * reports on the whole two hours.
    */
-  popupOpen2: 868,
+  popupOpen2: 1046,
+  endSessionClick: 1058,
+  summaryShown: 1060,
 
-  /* --------------------------------------------------------- S8 (60f) */
-  endCardIn: 900,
+  /* --------------------------------------------------------- S8 (70f) */
+  endCardIn: 1082,
 } as const;
 
 /** Audio cues — file + absolute frame of the visual it must land on. */
@@ -264,7 +303,9 @@ export const sfx = [
  * Two spans carry copy that has to be literally true on screen:
  *   snoozeClick 3:15 → nudge3In 3:29   = "벌써 14분째"
  *   igEnter 3:04 → returnToGoalTab 3:30 = "26분 만의 복귀"
- * Both endpoints are anchors, so they display exactly, whatever the easing does between.
+ * Three of those four frames are anchors. nudge3In is not, but it sits inside the flat
+ * cartViewEnter → freezeEnd segment, so it reads 3:29 exactly and stays there through the
+ * freeze — which is the one moment in the film the audience has time to read the clock.
  */
 type ClockAnchor = { at: number; min: number };
 

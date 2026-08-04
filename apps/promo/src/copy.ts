@@ -11,7 +11,19 @@
 
 /** FIXED */
 export const GOAL = "쇼핑 플랫폼의 고객 유인 전략 분석 보고서 작성";
-export const GOAL_BUDGET_MIN = "120";
+/**
+ * The budget the writer declares — the `2시간` rung of the 사용 시간 select, and its
+ * shipping default.
+ *
+ * It is load-bearing twice over. The film's clock runs 2:00 → 3:55, so 1시간 55분 of an
+ * exactly two-hour budget is spent by the closing shot: the sundial's sun is at the far
+ * edge of its dome with the shadow at its longest, which is how that frame says "the
+ * afternoon is gone" without a number. Picking 3시간 would leave the sun at midday and
+ * 8시간 would leave it barely risen — either one contradicts a story about losing 26
+ * minutes. Anything under 1시간 55분 tips into overtime and raises the moon, which is a
+ * different film.
+ */
+export const GOAL_BUDGET_LABEL = "2시간";
 
 export const nudge = {
   /** DRAFT — dry-spectator tone. Drift #1: direct messages. */
@@ -380,8 +392,34 @@ export const mail = {
  * dry_kibitzer is PERSONA_DEFAULT, and it is the voice all four toasts are written in.
  */
 export const popupLines = {
-  mode: "LLM 판정: minimax-m3 · 키 1개",
-  persona: "말투 · 건조한 훈수꾼",
+  persona: "건조한 훈수꾼",
+} as const;
+
+/**
+ * The session summary, composed exactly as showSummary() in
+ * apps/extension-next/src/popup/popup.ts composes it.
+ *
+ *   유효 페이지 비율 — `${pagesOk}/${pagesTotal} · ${pct}%`, meter coloured by band.
+ *   유효 방문 시간  — `${validMs} / ${activeMs} · ${pct}%`. The denominator is ACTIVE
+ *                     browsing time, not wall clock, so a goal left open overnight cannot
+ *                     read as "54분 / 2012분". Durations use formatDurationKo.
+ *   받은 훈수      — nagCount. Three, and the film shows all three.
+ *   가장 오래 머문 페이지 — title, then `유효|이탈 · host · duration` under a verdict dot.
+ *
+ * Both percentages land in the 흔들림 band, which is the honest reading of an afternoon
+ * with 26 minutes of drift in it — and it keeps the closing frame from claiming a
+ * perfection the story never earned.
+ */
+export const summary = {
+  goal: GOAL,
+  okPages: "37/63",
+  okRatioPct: 59,
+  validTime: "1시간 12분 / 1시간 55분",
+  timePct: 63,
+  nags: "3회",
+  topTitle: "장바구니 · DAYLIGHT",
+  topMeta: "이탈 · shop.daylight.co.kr · 14분",
+  topOk: false,
 } as const;
 
 /* ------------------------------------------------------------------ browser tabs */

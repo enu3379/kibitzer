@@ -1,30 +1,26 @@
 import React from "react";
-import { BadgeKind, badgeColor } from "../../theme";
+import { DotKind, dotColor } from "../../theme";
 import { KibitzerLogo } from "../brand/KibitzerLogo";
 
 /**
  * The Kibitzer action icon in the Chrome toolbar.
  *
- * updateBadge in apps/extension-next/src/lib/badge.ts drives Chrome's *native* badge —
- * `setBadgeText({ text: "●" })` plus a background colour — rather than compositing a dot
- * onto the icon bitmap the way the retired build did. Chrome draws that as a rounded
- * rectangle across the bottom of the icon slot with the glyph centred in it, so this is a
- * plate with a white dot rather than a dot pinned to the icon's corner.
+ * updateBadge in apps/extension-next/src/lib/badge.ts composites a bare dot onto the icon
+ * bitmap (OffscreenCanvas → setIcon) rather than using Chrome's native badge, because the
+ * native badge always draws a rounded box behind its text. drawStatusDot puts it at the
+ * top-right with r = max(3, size * 0.2) and no outline; the native "●" survives only as a
+ * fallback when canvas drawing is unavailable.
  *
- * The badge is present for the whole session and only its colour moves; `none` means no
- * goal is declared, which is the one state that clears it (`clearBadge`).
+ * The dot is present for the whole session and only its colour moves — `none` means no
+ * goal is declared, which is the one state that clears it.
  */
-export const ExtensionIcon: React.FC<{ badge: BadgeKind; size?: number; highlight?: boolean }> = ({
-  badge,
+export const ExtensionIcon: React.FC<{ dot: DotKind; size?: number; highlight?: boolean }> = ({
+  dot,
   size = 19,
   highlight = false,
 }) => {
-  const color = badgeColor[badge];
-  // Chrome's badge plate is about half the icon wide and a third of it tall, sitting on
-  // the icon's bottom edge and bleeding a little past its right.
-  const plateW = Math.round(size * 0.62);
-  const plateH = Math.round(size * 0.42);
-  const dot = Math.max(2.6, plateH * 0.42);
+  const color = dotColor[dot];
+  const r = Math.max(3, size * 0.2);
   return (
     <div
       style={{
@@ -43,19 +39,16 @@ export const ExtensionIcon: React.FC<{ badge: BadgeKind; size?: number; highligh
         <span
           style={{
             position: "absolute",
-            bottom: (11 - 1) / 2,
-            right: (11 - 1) / 2 - 1,
-            width: plateW,
-            height: plateH,
-            borderRadius: 2.5,
+            // drawStatusDot centres the dot on (size - r, r) inside the icon box, so it
+            // sits flush with the icon's top-right corner rather than outside it.
+            top: (11 - 1) / 2,
+            right: (11 - 1) / 2,
+            width: r * 2,
+            height: r * 2,
+            borderRadius: "50%",
             background: color,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
           }}
-        >
-          <span style={{ width: dot, height: dot, borderRadius: "50%", background: "#fff" }} />
-        </span>
+        />
       ) : null}
     </div>
   );

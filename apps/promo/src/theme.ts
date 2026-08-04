@@ -72,40 +72,71 @@ export const ext = {
 /**
  * Popup palette — mirrors the <style> block of apps/extension-next/src/popup/popup.html.
  *
- * The shipping popup declares `color-scheme: light dark` and then names exactly two
- * colours of its own: one grey for every secondary line, one green for the start button.
- * Everything else is UA default, which is why `bg`/`text` below are plain white and black
- * rather than the zinc ramp the retired popup carried.
+ * The `--sd-*` group is the popup's own "sundial" palette: monochrome ink with a single
+ * leaf green, and the only colour in the sundial drawing is on the leaves. `color-scheme:
+ * light dark` supplies the page background and body text, which is why `bg`/`text` are
+ * plain white and black rather than a named ramp.
  */
 export const popup = {
   bg: "#ffffff",
   text: "#000000",
-  muted: "#979797",
-  /** `#8884` — the 27%-alpha grey every border in the popup is drawn with. */
+  /** --sd-ink / --sd-ink3 / --sd-line, consumed by the sundial SVG as CSS variables. */
+  sdInk: "#6e6960",
+  sdInk3: "#9b968c",
+  sdLine: "#e6e3dc",
+  sdLeaf: "#5aa63c",
+  /** The popup's greys, which are per-rule literals rather than variables. */
+  h1: "#888888",
+  label: "#999999",
+  muted: "#888888",
+  /** `#8884` / `#8883` — the alpha greys every border in the popup is drawn with. */
   border: "rgba(136,136,136,0.267)",
+  border3: "rgba(136,136,136,0.2)",
   start: "#1e7a4c",
+  judgeOn: "#1f9d6b",
   err: "#d1495b",
 } as const;
 
 /**
- * Toolbar badge colours — mirrors updateBadge in apps/extension-next/src/lib/badge.ts.
+ * Immersion-band colours — the `--m` custom property on `.agauge` / `.meter`.
  *
- * Note the inversion from the retired build: this badge is present for the whole session
- * and only its colour moves, so "no badge" now means "no goal declared" rather than
- * "nothing wrong". The bands are S < 33 red, S < 66 amber, else green; a live snooze
- * outranks all three.
+ * bandOf in lib/sessionStats.ts: ≥66 집중, 33–65 흔들림, <33 이탈. A live pause overrides
+ * the band outright. The track is the same hue at 18% via color-mix.
  */
-export const badgeColor = {
+export const band = {
+  ok: { m: "#2b9e57", word: "집중" },
+  warn: { m: "#ad7d15", word: "흔들림" },
+  bad: { m: "#c94f4f", word: "이탈" },
+  paused: { m: "#8e8b84", word: "일시정지" },
+} as const;
+export type BandKind = keyof typeof band;
+
+export const bandOf = (s: number, paused = false): BandKind =>
+  paused ? "paused" : s >= 66 ? "ok" : s >= 33 ? "warn" : "bad";
+
+/** color-mix(in srgb, <m> 18%, transparent) — the meter track, resolved for the render. */
+export const trackOf = (m: string): string => `${m}2e`;
+
+/**
+ * Toolbar status dot — mirrors drawStatusDot in apps/extension-next/src/lib/badge.ts.
+ *
+ * This is composited onto the action icon (OffscreenCanvas → setIcon), NOT Chrome's
+ * native badge: the native badge always draws a rounded box behind its text, so a bare
+ * dot has to be painted into the bitmap. Top-right corner, r = max(3, size * 0.2), no
+ * outline. The dot is present for the whole session and only its colour moves, so "none"
+ * means no goal declared (clearBadge) rather than "nothing wrong".
+ */
+export const dotColor = {
   none: null,
   focused: "#1f9d6b",
   slipping: "#e0a100",
   drifting: "#d1495b",
   snoozed: "#8a8a90",
 } as const;
-export type BadgeKind = keyof typeof badgeColor;
+export type DotKind = keyof typeof dotColor;
 
-/** Which band a gauge reading falls in, so scenes can name S and let the badge follow. */
-export const badgeForGauge = (s: number, snoozed = false): BadgeKind =>
+/** Which dot a gauge reading earns, so scenes can name S and let the icon follow. */
+export const dotForGauge = (s: number, snoozed = false): DotKind =>
   snoozed ? "snoozed" : s < 33 ? "drifting" : s < 66 ? "slipping" : "focused";
 
 /** Chrome browser chrome (macOS light) */
@@ -121,12 +152,13 @@ export const chrome = {
   divider: "#dadce0",
 } as const;
 
-/**
- * KNOWN DEVIATION. The shipping UI asks for `system-ui` first and therefore renders in
- * Apple SD Gothic Neo on macOS and Malgun Gothic on Windows; this bundles Pretendard
- * ahead of both. That is deliberate — `remotion render` runs in a headless Chrome with no
- * Korean system face, so a faithful stack would fall back mid-render and the output would
- * not match the Studio preview (see fonts.ts). Korean stroke weight is a little lighter
- * here than in the real popup; everything else about the type is the shipping value.
- */
+/** The set — browser chrome, mock websites, the writing app. Not the product. */
 export const FONT = "PretendardPromo, -apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif";
+
+/**
+ * The product. The extension bundles Gowun Dodum and declares it ahead of every system
+ * face, so this stack is the shipping one with the bundled family renamed — see the
+ * `@font-face` and `body` rules in apps/extension-next/src/popup/popup.html.
+ */
+export const POPUP_FONT =
+  "GowunDodumPromo, -apple-system, 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', system-ui, sans-serif";

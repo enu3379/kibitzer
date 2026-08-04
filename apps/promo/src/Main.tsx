@@ -67,6 +67,8 @@ const Page: React.FC<{ page: PageKind }> = ({ page }) => {
           cartPulse={page.cartPulse}
           cartItems={page.cartItems}
           addHot={page.addHot}
+          recItems={page.rec}
+          recHot={page.recHot}
         />
       );
     case "mail":
@@ -94,7 +96,7 @@ export const Main: React.FC = () => {
       activeId={st.activeId}
       url={st.url}
       omni={st.omni}
-      badge={st.badge}
+      dot={st.dot}
       extHighlight={st.popup !== null}
       active={browserFocused}
     >

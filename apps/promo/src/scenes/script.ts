@@ -1,22 +1,23 @@
 import { Easing } from "remotion";
 import {
-  BadgeKind,
   CONTENT_H,
+  DotKind,
   TABSTRIP_H,
   TABSTRIP_LEFT,
   TOAST,
   TOAST_SCALE,
   TOOLBAR_H,
   WINDOW,
-  badgeForGauge,
+  dotForGauge,
 } from "../theme";
 import {
   DocBlock,
   GOAL,
-  GOAL_BUDGET_MIN,
+  GOAL_BUDGET_LABEL,
   nudge,
   omniSocial,
   popupLines,
+  summary as summaryCopy,
   praise,
   report,
   researchQuery,
@@ -33,6 +34,8 @@ import { HotButton } from "../components/toast/Toast";
 import { AppKey } from "../components/desktop/AppSwitcher";
 import { KeyHintState } from "../components/KeyHint";
 import { SEARCHES } from "../components/sites/SearchMock";
+import { CHATS } from "../components/sites/InstagramMock";
+import { PRODUCTS } from "../components/sites/ShopMock";
 
 /* ------------------------------------------------------------------ types */
 
@@ -65,6 +68,9 @@ export type PageKind =
       cartPulse: number;
       cartItems: number[];
       addHot: boolean;
+      /** The 함께 본 상품 rail, and which of its rows is about to be clicked. */
+      rec: number[];
+      recHot: number | null;
     }
   | { k: "mail"; reveal: number; sendHot: boolean; sent: boolean };
 
@@ -97,7 +103,7 @@ export type Stage = {
   activeId: string;
   url: string;
   omni: OmniState | null;
-  badge: BadgeKind;
+  dot: DotKind;
   page: PageKind;
   popup: { state: PopupState; reveal: number } | null;
   toast: ToastState | null;
@@ -154,9 +160,18 @@ export const gaugeAt = (frame: number): number => {
 /** The 5-minute break taken off nudge #2 — a live snooze outranks every colour band. */
 const snoozedAt = (frame: number): boolean => between(frame, beat.snoozeClick, beat.nudge3In);
 
-/** No goal declared yet means no badge at all, not a neutral one (clearBadge). */
-const badgeAt = (frame: number): BadgeKind =>
-  frame < beat.startClick ? "none" : badgeForGauge(gaugeAt(frame), snoozedAt(frame));
+/** No goal declared yet means no dot at all, not a neutral one (clearBadge). */
+const dotAt = (frame: number): DotKind =>
+  frame < beat.startClick ? "none" : dotForGauge(gaugeAt(frame), snoozedAt(frame));
+
+/**
+ * Share of the declared time budget spent, which is what the sundial draws.
+ *
+ * The film's clock runs 2:00 → 3:55 against a 120-minute budget, so the sprout's shadow
+ * swings almost exactly one traversal across the piece and never reaches the moon.
+ */
+const elapsedAt = (frame: number): number =>
+  Math.max(0, Math.min(1, (frame - beat.startClick) / (beat.popupOpen2 - beat.startClick)));
 
 /* ------------------------------------------------------------------ fixtures */
 
@@ -308,10 +323,10 @@ type WriteEvent = {
  * are invisible either way, and grouping them keeps the schedule readable.
  *
  * Off-camera windows, i.e. every stretch where a `whole` block may be scheduled:
- *   114–143   §1 body, §2.1–2.4      (clock 2:11 → 2:33)
- *   170–190   §3.1, and the §3.2 head (clock 2:33 → 2:55)
- *   202–218   §3.2 tail, [자료 2], §3.3
- *   751–795   §3.4, §4                (clock 3:31 → 3:38, after the return)
+ *   133–164   §1 body, §2.1–2.4       (clock 2:13 → 2:33)
+ *   191–213   §3.1, and the §3.2 head  (clock 2:36 → 2:42)
+ *   226–242   §3.2 tail, [자료 2], §3.3
+ *   895–946   §3.4, §4                 (clock 3:31 → 3:38, after the return)
  * Anything scheduled outside one of those pops onto a visible document.
  *
  * The result is a page or more of new text per editor cut, and a document that has
@@ -485,17 +500,23 @@ const s1 = (frame: number, st: Stage): void => {
         ? {
             kind: "setup",
             goal: typed(GOAL, frame, beat.goalTypeStart, 1.55),
-            minutes: frame >= beat.goalTypeEnd + 4 ? GOAL_BUDGET_MIN : "",
+            // The budget is a select now, so it reads its default from the first frame —
+            // there is nothing to type and the pointer never goes near it.
+            duration: GOAL_BUDGET_LABEL,
+            // Nothing has ever been declared on this profile, so the setup view leads
+            // with the specificity hint and the three example chips.
+            firstRun: true,
             typingGoal: between(frame, beat.goalTypeStart - 4, beat.startClick),
             startPressed: between(frame, beat.startClick, beat.startClick + 5),
           }
         : {
             // A fresh session opens at a full gauge — initGaugeState puts S at 100 and
-            // nothing has been judged yet.
+            // nothing has been judged yet. The sundial is at first light.
             kind: "active",
             s: Math.round(gaugeAt(frame)),
             goal: GOAL,
-            mode: popupLines.mode,
+            elapsed: elapsedAt(frame),
+            judgeOn: true,
             persona: popupLines.persona,
           },
   };
@@ -506,11 +527,12 @@ const s1 = (frame: number, st: Stage): void => {
 /**
  * Four round trips between the browser and the writing app, across three source tabs.
  *
- * Paced as a parabola. Trip 1 reads at a speed you can follow; trips 2–4 tighten until
- * the cohorts page is on screen for fifteen frames, which is exactly what the middle of
- * a long working stretch feels like from the outside. Then it comes back down: the last
- * paragraph is typed four times slower than the ones before it, two Enters, and a third
- * of a second short of a full second with nothing on screen but a caret.
+ * Paced as a parabola. Trip 1 reads at a speed you can follow — twelve frames on the
+ * results page and twenty on the article, which is the landing; trips 2–4 tighten until
+ * the cohorts page is on screen for eleven frames, which is exactly what the middle of a
+ * long working stretch feels like from the outside. Then it comes back down: the last
+ * paragraph is typed four times slower than the ones before it, two Enters, and six
+ * tenths of a second with nothing on screen but a caret.
  *
  * The clock runs ~15 minutes per trip, and it runs rather than snapping: each Cmd-Tab
  * into the browser sets the minutes spinning for about half a second before they settle.
@@ -602,43 +624,104 @@ const s2 = (frame: number, st: Stage): void => {
 
 /* ------------------------------------------------------------------ S3 — drift #1: messages */
 
-/** Unread count and list state keep climbing whether or not the tab is on screen. */
-const dmBadge = (frame: number): number => Math.min(28, 3 + Math.floor((frame - beat.igDmEnter) / 11));
-const dmUnread = (frame: number): number => Math.min(8, 1 + Math.floor((frame - beat.igDmEnter) / 27));
+/**
+ * The message logs, flattened to what the schedule needs: direction, text, length.
+ *
+ * Character counts are precomputed because the compose box derives its typing rate from
+ * them on every frame, and the words themselves stay where they belong — with the
+ * component that draws the bubbles.
+ */
+const DM_LOGS = CHATS.map((log) =>
+  log.map((m) => ({ out: m.out, text: m.text ?? "", chars: Array.from(m.text ?? "").length })),
+);
 
-/** Reply → reply → interrupted mid-reply → the interrupter wins. Three threads, fast. */
-type DmSegment = { from: number; thread: number; first: number; last: number; composeAt: number; compose: string };
+/** Unread count and list state keep climbing whether or not the tab is on screen. */
+const dmBadge = (frame: number): number => Math.min(28, 3 + Math.floor((frame - beat.igDmEnter) / 14));
+const dmUnread = (frame: number): number => Math.min(8, 1 + Math.floor((frame - beat.igDmEnter) / 48));
+
+/**
+ * The messages, as a schedule of FIXED windows.
+ *
+ * Every segment declares the frames it owns and how many messages it has to deliver in
+ * them; the rate falls out of the division. That is the whole point of writing it this
+ * way — adding four lines to a thread makes the thread faster, never longer, so the film
+ * cannot be re-paced by editing chat copy. It is the same contract `rateFor` gives the
+ * document.
+ *
+ * The segments are also two different KINDS of conversation, because that is what an
+ * afternoon actually looks like:
+ *
+ *   민아 (thread 0) is the friend. She opens the drift, she is still going when the tab
+ *   is somewhere else, and the film comes back to her three times — first, after the
+ *   player, and again mid-spree. Her log runs both ways.
+ *
+ *   준호 (1), 다영 (2) and the study group (3) are errands. Each opens on a pile that has
+ *   clearly been sitting there, gets read at a glance, gets one reply, and is left.
+ *
+ * The first segment is a hold, not a run: `first === last`, so the thread that just opened
+ * sits perfectly still for half a second. That is the 0.7× landing.
+ */
+type DmSegment = {
+  from: number;
+  /** The frame the segment's last message lands on. Its length is fixed; its rate is not. */
+  to: number;
+  thread: number;
+  /** Messages already on screen when the segment opens. */
+  first: number;
+  /** Messages on screen when it ends. */
+  last: number;
+};
 
 const dmSegments: readonly DmSegment[] = [
-  { from: beat.igDmEnter, thread: 0, first: 4, last: 7, composeAt: beat.dmReply1, compose: "ㅋㅋㅋㅋ 그래서" },
-  { from: beat.dmSwitch2, thread: 1, first: 3, last: 6, composeAt: beat.dmReply2, compose: "나 포함 넷?" },
-  // The link lands as message 4, a beat after this thread is opened — it has to arrive
-  // on screen, not already be sitting there.
-  { from: beat.dmSwitch3, thread: 2, first: 3, last: 6, composeAt: beat.dmSwitch3 + 7, compose: "오 뭔데" },
-  { from: beat.dmReturn, thread: 2, first: 6, last: 6, composeAt: -1, compose: "" },
-  // The two trips back mid-spree. A different thread is open each time — look away for
-  // three minutes and it is somebody else you are now mid-conversation with.
-  { from: beat.dmPeek1, thread: 3, first: 5, last: 8, composeAt: -1, compose: "" },
-  { from: beat.dmPeek2, thread: 5, first: 3, last: 6, composeAt: -1, compose: "" },
+  { from: beat.igDmEnter, to: beat.dmRun1, thread: 0, first: 3, last: 3 },
+  { from: beat.dmRun1, to: beat.dmSwitch2, thread: 0, first: 3, last: 10 },
+  { from: beat.dmSwitch2, to: beat.dmSwitch3, thread: 1, first: 4, last: 6 },
+  // The link is message 4 and lands a beat after this thread opens — it has to arrive on
+  // screen, not already be sitting there.
+  { from: beat.dmSwitch3, to: beat.musicOpen, thread: 2, first: 2, last: 5 },
+  // Back from the player: she kept going without you.
+  { from: beat.dmReturn, to: beat.nudge1In + 20, thread: 0, first: 11, last: 14 },
+  // The two trips back mid-spree — the long thread, then a pile.
+  { from: beat.dmPeek1, to: beat.dmPeek1End, thread: 0, first: 15, last: 18 },
+  { from: beat.dmPeek2, to: beat.dmPeek2End, thread: 3, first: 5, last: 7 },
 ];
 
 const dmPage = (frame: number): PageKind => {
   let seg = dmSegments[0];
   for (const s of dmSegments) if (frame >= s.from) seg = s;
-  // A message every 6 frames — fast enough that the log is visibly filling rather than
-  // being read. Replies are typed at 1.1 frames per character, for the same reason.
-  const step = Math.floor((frame - seg.from) / 6);
-  const msgs = Math.min(seg.last, seg.first + step);
+
+  const step = (seg.to - seg.from) / Math.max(1, seg.last - seg.first);
+  const msgs = Math.min(seg.last, seg.first + Math.max(0, Math.floor((frame - seg.from) / step)));
+
+  /*
+   * The compose box types whatever the next outgoing message is, finishing exactly as that
+   * message lands. Deriving it means the reply in the box is always the bubble that
+   * appears next — the old fixed strings drifted out of sync with the log the moment
+   * either one was edited.
+   */
+  const log = DM_LOGS[seg.thread] ?? [];
+  const nextOut = log.findIndex((m, i) => i >= msgs && m.out);
+  let composing = "";
+  if (nextOut >= 0 && nextOut < seg.last) {
+    const lands = seg.from + (nextOut - seg.first + 1) * step;
+    if (frame < lands) composing = typed(log[nextOut].text, frame, lands - step, step / Math.max(1, log[nextOut].chars));
+  }
+
+  // Dots for the back half of each wait, so they read as "…and here it comes" rather than
+  // as a decoration that is simply always on.
+  const sinceLast = (frame - seg.from) % step;
+  const nextIsIn = msgs < log.length && !log[msgs].out;
+
   return {
     k: "igDm",
     thread: seg.thread,
     messages: msgs,
-    typing: msgs < seg.last && step % 3 === 2,
+    typing: msgs < seg.last && !composing && nextIsIn && sinceLast > step * 0.5,
     badge: dmBadge(frame),
     unreadRows: dmUnread(frame),
     // The row that lights up mid-reply, right before it steals the cursor.
     flashThread: between(frame, beat.dmInterrupt, beat.dmSwitch3) ? 2 : null,
-    composing: seg.composeAt >= 0 ? typed(seg.compose, frame, seg.composeAt, 1.1) : "",
+    composing,
     linkHot: between(frame, beat.musicOpen - 6, beat.musicOpen + 3),
   };
 };
@@ -699,21 +782,64 @@ const s3 = (frame: number, st: Stage): void => {
 
 /* ------------------------------------------------------------------ S4 — drift #2/#3: the mall */
 
-/** Which product goes in the cart, in the order it is added. Scattered on purpose. */
+/**
+ * The spree, as a loop rather than a montage.
+ *
+ * product page → 장바구니 → the badge pops and a chip says so → a click on the 함께 본
+ * 상품 rail → the next product page. Nobody walks back to a listing grid seven times; they
+ * take whatever the mall puts beside the thing they just added, which is the mechanism the
+ * report being neglected is literally about.
+ *
+ * SPREE is the order the products are visited in and CART_STEPS the frames they are added
+ * on, so the cart count and the product on screen are two reads of the same list: the k-th
+ * hop puts SPREE[k] on screen, and cart_k+1 adds it.
+ */
 const SPREE = [3, 5, 1, 8, 6, 0, 4] as const;
 const CART_STEPS = [beat.cart1, beat.cart2, beat.cart3, beat.cart4, beat.cart5, beat.cart6, beat.cart7] as const;
+/** Each hop is a click on the rail; the first product comes off the listing grid instead. */
+const HOP_STEPS = [beat.hop1, beat.hop2, beat.hop3, beat.hop4, beat.hop5, beat.hop6] as const;
+/** Which rail row each hop takes — varied so seven clicks do not land on one pixel. */
+const REC_ROWS = [0, 2, 1, 2, 0, 1] as const;
+/** Rows drawn by RecRail in ShopMock, and hit points HIT.shopRec in the cursor path. */
+const REC_RAIL_ROWS = 3;
+
+/**
+ * Three rail rows, filled from the product on screen and then overwritten at the row the
+ * next hop will click. The fillers only have to look plausible; the hot row has to be the
+ * product the cursor is about to open, or the click lies about what it did.
+ */
+const railFor = (product: number, next: number | null, row: number): number[] => {
+  const rail: number[] = [];
+  for (let k = 1; rail.length < REC_RAIL_ROWS; k += 1) {
+    const idx = (product + k * 4) % PRODUCTS.length;
+    if (idx !== product && idx !== next && !rail.includes(idx)) rail.push(idx);
+  }
+  if (next !== null) rail[row] = next;
+  return rail;
+};
 
 const cartAt = (frame: number) => {
   let added = 0;
   for (const at of CART_STEPS) if (frame >= at) added += 1;
-  const last = added > 0 ? CART_STEPS[added - 1] : -999;
-  const next = added < CART_STEPS.length ? CART_STEPS[added] : Infinity;
+  let hops = 0;
+  for (const at of HOP_STEPS) if (frame >= at) hops += 1;
+
+  const lastAdd = added > 0 ? CART_STEPS[added - 1] : -999;
+  const nextAdd = added < CART_STEPS.length ? CART_STEPS[added] : Infinity;
+  const nextHop = hops < HOP_STEPS.length ? HOP_STEPS[hops] : Infinity;
+
+  const product = SPREE[Math.min(SPREE.length - 1, hops)];
+  const upNext = hops + 1 < SPREE.length ? SPREE[hops + 1] : null;
+  const row = REC_ROWS[Math.min(REC_ROWS.length - 1, hops)];
+
   return {
     count: added,
     items: SPREE.slice(0, added),
-    pulse: range(frame, [last, last + 8], [1, 0], Easing.out(Easing.quad)),
-    addHot: frame >= next - 5 && frame < next + 2,
-    product: SPREE[Math.min(SPREE.length - 1, added)],
+    pulse: range(frame, [lastAdd, lastAdd + 8], [1, 0], Easing.out(Easing.quad)),
+    addHot: frame >= nextAdd - 5 && frame < nextAdd + 2,
+    product,
+    rec: railFor(product, upNext, row),
+    recHot: frame >= nextHop - 6 && frame < nextHop + 2 ? row : null,
   };
 };
 
@@ -735,6 +861,10 @@ const s4 = (frame: number, st: Stage): void => {
    * "time passed" more concretely than any scroll, and it is the payoff of the report's
    * own subject matter. The two trips back to the messages are what make the badge jump:
    * you look away, and both counters have moved.
+   *
+   * The listing grid is on screen for the twenty-four frames after `shopEnter` and never
+   * again: it exists to say "this is a shopping site" before the loop starts, because the
+   * spree means nothing if the audience is still working out what page it is on.
    */
   st.tabs.push({ ...TAB.portal });
   if (frame < beat.shopEnter) {
@@ -764,17 +894,20 @@ const s4 = (frame: number, st: Stage): void => {
       ? URL.shopCart
       : listing
         ? URL.shopList
-        : `shop.daylight.co.kr/products/${PRODUCT_SLUG[cart.product]}`;
+        : `shop.daylight.co.kr/products/${PRODUCTS[cart.product].slug}`;
     st.page = {
       k: "shop",
       view: cartView ? "cart" : listing ? "list" : "detail",
-      listScroll: range(frame, [beat.shopEnter + 2, beat.shopPick - 3], [0, 96], Easing.linear),
-      listHot: between(frame, beat.shopPick - 7, beat.shopPick + 2) ? 3 : null,
+      // A long, readable scroll: this is the landing, and it is the only time the grid is up.
+      listScroll: range(frame, [beat.shopEnter + 3, beat.shopPick - 4], [0, 96], Easing.linear),
+      listHot: between(frame, beat.shopPick - 8, beat.shopPick + 2) ? SPREE[0] : null,
       product: cart.product,
       cart: cart.count,
       cartPulse: cartView ? 0 : cart.pulse,
       cartItems: [...cart.items],
       addHot: !cartView && !listing && cart.addHot,
+      rec: cart.rec,
+      recHot: cartView || listing ? null : cart.recHot,
     };
   }
 
@@ -800,20 +933,6 @@ const s4 = (frame: number, st: Stage): void => {
     };
   }
 };
-
-/** Address bar has to agree with the product on screen. */
-const PRODUCT_SLUG = [
-  "stride-air-3",
-  "audio-n-buds-anc",
-  "outline-camp-chair",
-  "dayloop-tumbler-500",
-  "plainwear-cotton-hoodie",
-  "typebox-fold-keyboard",
-  "morning-co-dripbag-30",
-  "airleaf-humidifier-4l",
-  "typebox-ergo-mouse",
-  "plainwear-wash-blanket",
-] as const;
 
 /* ------------------------------------------------------------------ S5 — everything stops */
 
@@ -842,6 +961,8 @@ const s5 = (frame: number, st: Stage): void => {
     cartPulse: 0,
     cartItems: [...SPREE],
     addHot: false,
+    rec: [],
+    recHot: null,
   };
 
   // Everything holds and the frame pushes in 4%. The menu bar stays put.
@@ -910,6 +1031,8 @@ const s6 = (frame: number, st: Stage): void => {
       cartPulse: 0,
       cartItems: [...SPREE],
       addHot: false,
+      rec: [],
+      recHot: null,
     };
   } else if (closed === 1) {
     st.activeId = "portal";
@@ -987,20 +1110,24 @@ const s7 = (frame: number, st: Stage): void => {
   };
 
   /*
-   * The closing look at the popup. There is no session-end button and no summary screen to
-   * reach — the extension keeps one goal until it is replaced, so the last thing the film
-   * can honestly show is the gauge itself, back at the top after the return.
+   * The closing look at the popup: the bar back at the top, then 종료하기 opens the
+   * session summary — the one screen that reports on the whole two hours.
    */
   if (frame >= beat.popupOpen2) {
     st.popup = {
       reveal: progress(frame, beat.popupOpen2, 8),
-      state: {
-        kind: "active",
-        s: Math.round(gaugeAt(frame)),
-        goal: GOAL,
-        mode: popupLines.mode,
-        persona: popupLines.persona,
-      },
+      state:
+        frame >= beat.summaryShown
+          ? { kind: "summary", summary: summaryCopy }
+          : {
+              kind: "active",
+              s: Math.round(gaugeAt(frame)),
+              goal: GOAL,
+              elapsed: elapsedAt(frame),
+              judgeOn: true,
+              persona: popupLines.persona,
+              endPressed: between(frame, beat.endSessionClick - 4, beat.endSessionClick + 2),
+            },
     };
   }
 };
@@ -1017,7 +1144,7 @@ export const stageAt = (frame: number): Stage => {
     activeId: "",
     url: "",
     omni: null,
-    badge: badgeAt(frame),
+    dot: dotAt(frame),
     page: { k: "newtab" },
     popup: null,
     toast: null,
@@ -1067,8 +1194,10 @@ const HIT = {
    * 14px pad. The goal field shares its row with the fixed 82px 시간(분) column, which is
    * why it centres left of the button below it rather than under it.
    */
-  goalInput: { x: 897, y: 302 },
-  startBtn: { x: 942, y: 352 },
+  goalInput: { x: 897, y: 418 },
+  startBtn: { x: 942, y: 466 },
+  /** 종료하기 — the rightmost of the three flex:1 buttons in the active view's row. */
+  endSessionBtn: { x: 1034, y: 521 },
   toastClose: toastHit(-24, -118), // 1.5× → (1076, 647)
   toastBreak: toastHit(-144, -28), // 1.5× → (896, 782)
   mailSend: { x: 706, y: 817 },
@@ -1091,6 +1220,17 @@ const HIT = {
   /** "장바구니" button on a product page, and the cart icon in the mall header. */
   shopAdd: { x: 455, y: 468 },
   shopCart: { x: 1096, y: 147 },
+  /**
+   * The three 함께 본 상품 rows, which is where every hop after the first one is clicked.
+   * Derived from RecRail's own geometry: the rail is 236 wide against the window's right
+   * edge, its rows are 84 tall on a 10px gap, and the first one starts under a 22px pad
+   * plus the section title. Check with `node scripts/render-stills.mjs s4-shop-rec`.
+   */
+  shopRec: [
+    { x: 1012, y: 288 },
+    { x: 1012, y: 382 },
+    { x: 1012, y: 476 },
+  ],
   /** Result rows on the search page — title lines, measured off the render. */
   searchResult: [
     { x: 250, y: 295 },
@@ -1104,31 +1244,46 @@ const HIT = {
 /** Nudges the pointer a few px so parked stretches do not look frozen. */
 const idle = (frame: number, x: number, y: number): Waypoint => ({ frame, x, y });
 
+/** Where the k-th hop clicks: the rail row that hop's next product was planted in. */
+const recHit = (k: number) => HIT.shopRec[REC_ROWS[k]];
+
 /**
  * When the pointer comes back after a Cmd-Tab: a few frames past the switch, but never
- * past whatever it has to be somewhere else for. CURSOR_PATH has to stay in ascending
- * frame order, and a fixed `+5` inverts the moment a retime pulls the next beat closer.
+ * past whatever it has to be somewhere else for, and never before the switch itself.
+ * CURSOR_PATH has to stay in ascending frame order, and a fixed `+5` inverts the moment a
+ * retime pulls the next beat closer — while the `before - 5` that fixes that can hand back
+ * a frame at which the browser is still behind the writing app, and the pointer would
+ * reappear on a window it is not pointing at.
  */
 const reappear = (afterSwitch: number, before: number): number =>
-  Math.min(afterSwitch + 5, before - 5);
+  Math.max(afterSwitch + 2, Math.min(afterSwitch + 5, before - 5));
 
+/**
+ * The pointer, as an ordered list of arrivals.
+ *
+ * Every frame here is when the cursor GETS somewhere, not when it sets off: `cursorAt`
+ * schedules the crossing backwards from the arrival at a speed set by the distance, so a
+ * waypoint five frames before a click is a hand settling on a button, not a hand that has
+ * been drifting towards it for the whole cut. That is what lets the same list survive a
+ * retime — stretching a beat lengthens the pause, not the reach.
+ */
 export const CURSOR_PATH: readonly Waypoint[] = [
-  /* ---------------------------------------------------------------- S1 (0–60)
+  /* ---------------------------------------------------------------- S1 (0–66)
    * Opens with the pointer parked mid-screen on the new-tab page. The first movement in
    * the film is the crossing to the Kibitzer icon.
    */
   { frame: 0, x: 576, y: 432 },
-  { frame: 5, x: 576, y: 432 },
-  { frame: 12, x: EXT.x, y: EXT.y },
+  { frame: 6, x: 576, y: 432 },
+  { frame: 13, x: EXT.x, y: EXT.y },
   { frame: beat.popupOpen, x: EXT.x, y: EXT.y, click: true },
-  { frame: 19, x: HIT.goalInput.x, y: HIT.goalInput.y },
-  { frame: 20, x: HIT.goalInput.x, y: HIT.goalInput.y, click: true },
+  { frame: 21, x: HIT.goalInput.x, y: HIT.goalInput.y },
+  { frame: 22, x: HIT.goalInput.x, y: HIT.goalInput.y, click: true },
   { frame: beat.goalTypeEnd, x: HIT.goalInput.x, y: HIT.goalInput.y },
-  { frame: 47, x: HIT.startBtn.x, y: HIT.startBtn.y },
+  { frame: 51, x: HIT.startBtn.x, y: HIT.startBtn.y },
   { frame: beat.startClick, x: HIT.startBtn.x, y: HIT.startBtn.y, click: true },
-  { frame: 58, x: 640, y: 430 },
+  { frame: 64, x: 640, y: 430 },
 
-  /* ---------------------------------------------------------------- S2 (60–270)
+  /* ---------------------------------------------------------------- S2 (66–306)
    * Three search-and-open cycles. Each one returns to the results tab, picks a different
    * row and opens it, so three distinct sources end up in the strip.
    */
@@ -1160,16 +1315,21 @@ export const CURSOR_PATH: readonly Waypoint[] = [
   { frame: beat.copy2, x: 855, y: 322 },
   { frame: beat.switchToEditor4 + 4, x: 855, y: 322, hidden: true },
 
-  /* ---------------------------------------------------------------- S3 (270–460) */
+  /* ---------------------------------------------------------------- S3 (306–538)
+   * Two landings before the run: the feed is browsed for a full second before the messages
+   * are opened, and the thread that opens is looked at before anything is typed into it.
+   */
   { frame: beat.switchToBrowser4 + 5, x: 620, y: 300, hidden: false },
   { frame: beat.newTabClick - 4, x: newTabX(4), y: TAB_Y },
   { frame: beat.newTabClick, x: newTabX(4), y: TAB_Y, click: true },
-  idle(beat.igEnter + 6, 660, 430),
+  idle(beat.igEnter + 7, 660, 430),
+  idle(beat.igEnter + 17, 700, 560),
   { frame: beat.igDmEnter - 5, x: HIT.igDmIcon.x, y: HIT.igDmIcon.y },
   { frame: beat.igDmEnter, x: HIT.igDmIcon.x, y: HIT.igDmIcon.y, click: true },
-  { frame: beat.dmReply1 - 3, x: HIT.dmCompose.x, y: HIT.dmCompose.y },
+  idle(beat.dmRun1 + 4, 700, 560),
+  { frame: beat.dmReply1 - 4, x: HIT.dmCompose.x, y: HIT.dmCompose.y },
   { frame: beat.dmReply1, x: HIT.dmCompose.x, y: HIT.dmCompose.y, click: true },
-  { frame: beat.dmSwitch2 - 4, x: HIT.dmRow[1].x, y: HIT.dmRow[1].y },
+  { frame: beat.dmSwitch2 - 5, x: HIT.dmRow[1].x, y: HIT.dmRow[1].y },
   { frame: beat.dmSwitch2, x: HIT.dmRow[1].x, y: HIT.dmRow[1].y, click: true },
   { frame: beat.dmReply2, x: HIT.dmCompose.x, y: HIT.dmCompose.y, click: true },
   // Interrupted mid-reply: the third row lights up and wins.
@@ -1177,53 +1337,61 @@ export const CURSOR_PATH: readonly Waypoint[] = [
   { frame: beat.dmSwitch3, x: HIT.dmRow[2].x, y: HIT.dmRow[2].y, click: true },
   { frame: beat.musicOpen - 6, x: HIT.dmLink.x, y: HIT.dmLink.y },
   { frame: beat.musicOpen, x: HIT.dmLink.x, y: HIT.dmLink.y, click: true },
-  idle(beat.musicOpen + 10, 640, 470),
-  { frame: beat.dmReturn - 5, x: tabX(4, 6), y: TAB_Y },
+  idle(beat.musicOpen + 8, 640, 470),
+  { frame: beat.dmReturn - 4, x: tabX(4, 6), y: TAB_Y },
   { frame: beat.dmReturn, x: tabX(4, 6), y: TAB_Y, click: true },
-  idle(beat.dmReturn + 12, 820, 700),
-  { frame: beat.nudge1Dismiss - 8, x: HIT.toastClose.x, y: HIT.toastClose.y },
+  idle(beat.dmReturn + 10, 820, 700),
+  { frame: beat.nudge1Dismiss - 9, x: HIT.toastClose.x, y: HIT.toastClose.y },
   { frame: beat.nudge1Dismiss, x: HIT.toastClose.x, y: HIT.toastClose.y, click: true },
   idle(beat.nudge1Dismiss + 10, 820, 700),
 
-  /* ---------------------------------------------------------------- S4 (460–645)
-   * The spree comes first and the nudge interrupts it, so the pointer leaves the
-   * add-to-cart button for the toast and comes straight back to it.
+  /* ---------------------------------------------------------------- S4 (538–764)
+   * The landing is the slow part: the listing grid is scrolled for the best part of a
+   * second before anything is picked. Then the loop — 장바구니, rail, 장바구니, rail —
+   * and the pointer crosses the page every time, which is what makes seven additions read
+   * as seven decisions rather than as one button being held down.
    */
-  { frame: beat.portalEnter - 3, x: newTabX(6), y: TAB_Y },
+  { frame: beat.portalEnter - 4, x: newTabX(6), y: TAB_Y },
   { frame: beat.portalEnter, x: newTabX(6), y: TAB_Y, click: true },
   { frame: beat.shopEnter - 8, x: HIT.portalAd.x, y: HIT.portalAd.y },
   { frame: beat.shopEnter - 2, x: HIT.portalAd.x, y: HIT.portalAd.y, click: true },
-  { frame: beat.shopEnter + 3, x: 640, y: 500 },
-  { frame: beat.shopPick - 7, x: HIT.shopCard.x, y: HIT.shopCard.y },
+  idle(beat.shopEnter + 9, 640, 520),
+  idle(beat.shopEnter + 17, 600, 380),
+  { frame: beat.shopPick - 5, x: HIT.shopCard.x, y: HIT.shopCard.y },
   { frame: beat.shopPick, x: HIT.shopCard.x, y: HIT.shopCard.y, click: true },
-  // Parked on the add-to-cart button through the spree — the counter does the talking.
   { frame: beat.cart1, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
+  { frame: beat.hop1, x: recHit(0).x, y: recHit(0).y, click: true },
   { frame: beat.cart2, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
   // Nudge #2 arrives; the hand hesitates on the button before going for `5분만`.
-  idle(beat.nudge2In + 6, HIT.shopAdd.x, HIT.shopAdd.y),
-  { frame: beat.snoozeClick - 10, x: HIT.toastBreak.x, y: HIT.toastBreak.y },
+  idle(beat.nudge2In + 8, HIT.shopAdd.x, HIT.shopAdd.y),
+  { frame: beat.snoozeClick - 12, x: HIT.toastBreak.x, y: HIT.toastBreak.y },
   { frame: beat.snoozeClick, x: HIT.toastBreak.x, y: HIT.toastBreak.y, click: true },
+  { frame: beat.hop2, x: recHit(1).x, y: recHit(1).y, click: true },
   { frame: beat.cart3, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
+  { frame: beat.hop3, x: recHit(2).x, y: recHit(2).y, click: true },
   { frame: beat.cart4, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
-  { frame: beat.dmPeek1 - 3, x: tabX(4, 8), y: TAB_Y },
+  { frame: beat.dmPeek1 - 4, x: tabX(4, 8), y: TAB_Y },
   { frame: beat.dmPeek1, x: tabX(4, 8), y: TAB_Y, click: true },
-  idle(beat.dmPeek1 + 8, 700, 620),
-  { frame: beat.dmPeek1End - 3, x: tabX(7, 8), y: TAB_Y },
+  idle(beat.dmPeek1 + 9, 700, 620),
+  { frame: beat.dmPeek1End - 4, x: tabX(7, 8), y: TAB_Y },
   { frame: beat.dmPeek1End, x: tabX(7, 8), y: TAB_Y, click: true },
+  { frame: beat.hop4, x: recHit(3).x, y: recHit(3).y, click: true },
   { frame: beat.cart5, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
+  { frame: beat.hop5, x: recHit(4).x, y: recHit(4).y, click: true },
   { frame: beat.cart6, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
-  { frame: beat.dmPeek2 - 3, x: tabX(4, 8), y: TAB_Y },
+  { frame: beat.dmPeek2 - 4, x: tabX(4, 8), y: TAB_Y },
   { frame: beat.dmPeek2, x: tabX(4, 8), y: TAB_Y, click: true },
-  idle(beat.dmPeek2 + 7, 700, 620),
-  { frame: beat.dmPeek2End - 3, x: tabX(7, 8), y: TAB_Y },
+  idle(beat.dmPeek2 + 8, 700, 620),
+  { frame: beat.dmPeek2End - 4, x: tabX(7, 8), y: TAB_Y },
   { frame: beat.dmPeek2End, x: tabX(7, 8), y: TAB_Y, click: true },
+  { frame: beat.hop6, x: recHit(5).x, y: recHit(5).y, click: true },
   { frame: beat.cart7, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
   { frame: beat.cartViewEnter, x: HIT.shopCart.x, y: HIT.shopCart.y, click: true },
   { frame: beat.cartViewEnter + 10, x: 700, y: 430 },
   // Dead still across the freeze — any drift undercuts the pause.
   { frame: beat.freezeEnd, x: 700, y: 430 },
 
-  /* ---------------------------------------------------------------- S6 (690–770) */
+  /* ---------------------------------------------------------------- S6 (824–920) */
   { frame: beat.closeTab1 - 5, x: tabCloseX(7, 8), y: TAB_Y },
   { frame: beat.closeTab1, x: tabCloseX(7, 8), y: TAB_Y, click: true },
   { frame: beat.closeTab2, x: tabCloseX(6, 8), y: TAB_Y, click: true },
@@ -1237,16 +1405,16 @@ export const CURSOR_PATH: readonly Waypoint[] = [
   { frame: beat.newResearchTab, x: newTabX(4), y: TAB_Y, click: true },
   idle(beat.researchLoad + 6, HIT.read.x, HIT.read.y),
 
-  /* ---------------------------------------------------------------- S7 (770–900) */
+  /* ---------------------------------------------------------------- S7 (920–1082) */
   { frame: beat.switchToEditor6 + 4, x: HIT.read.x, y: HIT.read.y, hidden: true },
   { frame: reappear(beat.switchToBrowser6, beat.mailOpen), x: 620, y: 300, hidden: false },
-  { frame: beat.mailOpen - 4, x: newTabX(5), y: TAB_Y },
+  { frame: beat.mailOpen - 3, x: newTabX(5), y: TAB_Y },
   { frame: beat.mailOpen, x: newTabX(5), y: TAB_Y, click: true },
   { frame: beat.sendClick - 7, x: HIT.mailSend.x, y: HIT.mailSend.y },
   { frame: beat.sendClick, x: HIT.mailSend.x, y: HIT.mailSend.y, click: true },
   { frame: beat.popupOpen2 - 4, x: EXT.x, y: EXT.y },
   { frame: beat.popupOpen2, x: EXT.x, y: EXT.y, click: true },
-  // Nothing left to click: no session-end button, no summary. The pointer rests on the
-  // icon it just opened and the film ends on the gauge reading.
-  { frame: beat.endCardIn - 6, x: EXT.x, y: EXT.y },
+  { frame: beat.endSessionClick - 5, x: HIT.endSessionBtn.x, y: HIT.endSessionBtn.y },
+  { frame: beat.endSessionClick, x: HIT.endSessionBtn.x, y: HIT.endSessionBtn.y, click: true },
+  { frame: beat.endCardIn - 6, x: HIT.endSessionBtn.x, y: HIT.endSessionBtn.y },
 ];

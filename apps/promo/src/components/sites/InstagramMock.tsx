@@ -226,26 +226,47 @@ export const THREADS: readonly Thread[] = [
 export type Msg = { out: boolean; text?: string; link?: { title: string; channel: string } };
 
 /**
- * One log per thread. Thread 2 is the one that carries the music link — that is how the
- * video gets to the player without the player itself being a distraction the user chose.
+ * One log per thread — and the threads are deliberately two different kinds.
+ *
+ * 민아 (0) is THE conversation: a real back-and-forth that opens the drift, keeps running
+ * while the tab is somewhere else, and is still running when the film cuts away from it.
+ * That is what actually eats an afternoon — not eight notifications, one friend who is
+ * also free right now. Its log is long because the run comes back to it three times.
+ *
+ * 준호 (1), 다영 (2) and the study group (3) are the other kind: a pile of unread that has
+ * been sitting there, read at a glance, one reply out, done. Their logs open on messages
+ * that have clearly been waiting, and the only outgoing line is the last one.
+ *
+ * Thread 2 carries the music link — that is how the video gets to the player without the
+ * player itself being a distraction the user went looking for.
  */
-const CHATS: ReadonlyArray<readonly Msg[]> = [
+export const CHATS: ReadonlyArray<readonly Msg[]> = [
   [
     { out: false, text: "야 그래서 어제 그거 어떻게 됐어" },
     { out: true, text: "아 그거ㅋㅋ 완전 난리났지" },
     { out: false, text: "헐 뭔데뭔데" },
     { out: true, text: "일단 걔가 먼저 얘기를 꺼냈는데" },
-    { out: true, text: "다들 표정이 굳어버림" },
+    { out: false, text: "응응" },
+    { out: true, text: "근데 다들 표정이 굳어버림" },
     { out: false, text: "ㅋㅋㅋㅋㅋㅋㅋㅋ 상상된다" },
     { out: false, text: "그래서 걔가 뭐랬는데?" },
     { out: true, text: "그게 진짜 웃긴게" },
+    { out: true, text: "아무 말도 안 하고 그냥 나감" },
+    { out: false, text: "ㅋㅋㅋㅋㅋ 미친" },
+    { out: false, text: "그래서 지금 어떻게 됐는데" },
+    { out: true, text: "몰라 아직 연락도 없어" },
+    { out: false, text: "와 진짜 대박이다" },
+    { out: false, text: "야 근데 그때 사진 있어?" },
+    { out: true, text: "있지 잠깐만" },
+    { out: false, text: "빨리빨리" },
+    { out: false, text: "아 이거 진짜 못 참겠네ㅋㅋㅋ" },
   ],
   [
     { out: false, text: "형 주말에 시간 됨?" },
-    { out: true, text: "토요일? 될 듯" },
-    { out: false, text: "ㅇㅋ 그럼 예약 걸어둔다" },
-    { out: false, text: "근데 인원 몇 명이지" },
-    { out: true, text: "나 포함 넷?" },
+    { out: false, text: "토요일 저녁쯤 생각중" },
+    { out: false, text: "인원은 넷 정도" },
+    { out: false, text: "가능하면 예약 미리 걸어두려고" },
+    { out: true, text: "ㅇㅋ 나 됨" },
     { out: false, text: "ㅇㅋㅇㅋ 예약 걸어둘게" },
   ],
   [
@@ -255,6 +276,15 @@ const CHATS: ReadonlyArray<readonly Msg[]> = [
     { out: false, link: { title: "Paperlight — Neon Alley (Official MV)", channel: "metube.com" } },
     { out: false, text: "무조건 들어야 됨 ㅋㅋ" },
     { out: true, text: "일단 틀어볼게" },
+  ],
+  [
+    { out: false, text: "김: 주말에 되는사람~" },
+    { out: false, text: "박: 저는 토요일만 됩니다" },
+    { out: false, text: "이: 저도 토요일이요" },
+    { out: false, text: "김: 그럼 토요일로 갈까요" },
+    { out: false, text: "김: 재원님은요?" },
+    { out: true, text: "저도 토요일 됩니다" },
+    { out: false, text: "김: ㅇㅋ 그럼 토요일 2시!" },
   ],
 ];
 
@@ -425,7 +455,18 @@ export const InstagramDM: React.FC<{
               <div style={{ fontSize: 10.5, color: "#8e8e8e" }}>활동 중</div>
             </div>
           </div>
-          <div style={{ flex: 1, padding: "14px 18px", display: "flex", flexDirection: "column", justifyContent: "flex-end", minHeight: 0 }}>
+          {/* Pinned to the bottom and clipped at the top: a log this long has scrolled. */}
+          <div
+            style={{
+              flex: 1,
+              padding: "14px 18px",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "flex-end",
+              minHeight: 0,
+              overflow: "hidden",
+            }}
+          >
             {shown.map((m, i) => (
               <Bubble key={i} msg={m} linkHot={linkHot && Boolean(m.link)} />
             ))}

@@ -2,9 +2,14 @@ import React from "react";
 import { FONT, TOAST, TOAST_SCALE, ext } from "../../theme";
 
 /**
- * React port of the injected overlay in apps/extension/src/content/toastOverlay.ts.
+ * React port of the injected overlay in apps/extension-next/src/content/toastOverlay.ts.
  * Every measurement below is lifted from that file's shadow-root stylesheet (light
  * scheme branch), including the peek/hands SVG geometry — keep them in sync.
+ *
+ * The shipping overlay also has a `firstRun` branch — a `첫 훈수` badge beside the brand
+ * and a dashed box explaining the four responses — which fires on the first intervention
+ * a profile ever receives. The film deliberately shows the plain card instead: the
+ * explainer doubles the card's height and buries the message the shot is built around.
  */
 
 const MUTED = "#6b7280"; // textMuted

@@ -167,56 +167,119 @@ const ListView: React.FC<{ scroll: number; hot: number | null }> = ({ scroll, ho
 
 /* ------------------------------------------------------------------ detail */
 
-const ProductDetail: React.FC<{ product: Product; addHot: boolean }> = ({ product, addHot }) => (
-  <div style={{ display: "flex", gap: 26, padding: "22px 26px" }}>
-    <div style={{ width: 300, height: 300, borderRadius: 10, background: product.art, display: "grid", placeItems: "center", fontSize: 92, flexShrink: 0 }}>
-      {product.glyph}
-    </div>
-    <div style={{ flex: 1, minWidth: 0, paddingTop: 6 }}>
-      <div style={{ fontSize: 11, color: "#8c8c8c", marginBottom: 6, letterSpacing: "0.6px" }}>{product.brand}</div>
-      <div style={{ fontSize: 20, fontWeight: 650, color: "#262626", marginBottom: 14, letterSpacing: "-0.3px", wordBreak: "keep-all" }}>
-        {product.name}
-      </div>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
-        <span style={{ fontSize: 13, color: "#bfbfbf", textDecoration: "line-through" }}>{product.was}원</span>
-        <span style={{ fontSize: 13, fontWeight: 700, color: "#ff4d4f" }}>31%</span>
-      </div>
-      <div style={{ fontSize: 28, fontWeight: 800, color: "#262626", marginBottom: 18, letterSpacing: "-1px" }}>
-        {product.price}
-        <span style={{ fontSize: 17, fontWeight: 600 }}>원</span>
-      </div>
-      <div style={{ borderTop: "1px solid #f0f0f0", paddingTop: 12, marginBottom: 20 }}>
-        {[
-          ["배송", "내일(수) 도착 보장"],
-          ["적립", "구매 시 890P"],
-          ["혜택", "카드 즉시할인 5%"],
-        ].map(([k, v]) => (
-          <div key={k} style={{ display: "flex", gap: 14, fontSize: 11.5, padding: "5px 0" }}>
-            <span style={{ color: "#8c8c8c", width: 40 }}>{k}</span>
-            <span style={{ color: "#262626" }}>{v}</span>
-          </div>
-        ))}
-      </div>
-      <div style={{ display: "flex", gap: 10 }}>
-        <span
+/**
+ * "함께 본 상품" — the rail that keeps the spree going.
+ *
+ * This is the mechanism the whole scene turns on: nobody goes back to a listing page seven
+ * times, they take whatever the mall puts next to the thing they just bought. So the loop
+ * on screen is product → 장바구니 → rail → product, and the rail is where every hop after
+ * the first one starts. Three rows at fixed heights, because the pointer has to be able to
+ * hit them from scenes/script.ts by coordinate.
+ */
+const REC_ROW_H = 84;
+const REC_ROW_GAP = 10;
+
+const RecRail: React.FC<{ items: readonly number[]; hot: number | null }> = ({ items, hot }) => (
+  <div style={{ width: 236, borderLeft: "1px solid #f0f0f0", padding: "22px 18px", flexShrink: 0 }}>
+    <div style={{ fontSize: 12.5, fontWeight: 700, color: "#262626", marginBottom: 12 }}>함께 본 상품</div>
+    {items.map((idx, row) => {
+      const p = PRODUCTS[idx % PRODUCTS.length];
+      const on = hot === row;
+      return (
+        <div
+          key={p.slug}
           style={{
-            padding: "11px 26px",
-            borderRadius: 7,
-            border: `1.5px solid ${addHot ? "#ff4d4f" : "#d9d9d9"}`,
-            background: addHot ? "#fff1f0" : "#fff",
-            color: addHot ? "#ff4d4f" : "#262626",
-            fontSize: 13,
-            fontWeight: 650,
-            transform: addHot ? "scale(0.98)" : "none",
+            height: REC_ROW_H,
+            marginBottom: REC_ROW_GAP,
+            boxSizing: "border-box",
+            display: "flex",
+            alignItems: "center",
+            gap: 11,
+            padding: "0 9px",
+            borderRadius: 8,
+            border: `1px solid ${on ? "#ff4d4f" : "transparent"}`,
+            background: on ? "#fff7f7" : "transparent",
+            transform: on ? "translateX(-3px)" : "none",
+            boxShadow: on ? "0 5px 14px rgba(0,0,0,0.12)" : "none",
           }}
         >
-          장바구니
-        </span>
-        <span style={{ padding: "11px 34px", borderRadius: 7, background: "#ff4d4f", color: "#fff", fontSize: 13, fontWeight: 700 }}>
-          바로 구매
-        </span>
+          <span style={{ width: 58, height: 58, borderRadius: 7, background: p.art, display: "grid", placeItems: "center", fontSize: 27, flexShrink: 0 }}>
+            {p.glyph}
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 9.5, color: "#8c8c8c", marginBottom: 2 }}>{p.brand}</div>
+            <div style={{ fontSize: 10.5, color: "#262626", lineHeight: 1.3, height: 27, overflow: "hidden", wordBreak: "keep-all" }}>
+              {p.name}
+            </div>
+            <div style={{ fontSize: 11.5, fontWeight: 800, color: "#262626", marginTop: 3 }}>
+              {p.price}
+              <span style={{ fontSize: 9.5, fontWeight: 500 }}>원</span>
+            </div>
+          </div>
+        </div>
+      );
+    })}
+  </div>
+);
+
+const ProductDetail: React.FC<{ product: Product; addHot: boolean; rec: readonly number[]; recHot: number | null }> = ({
+  product,
+  addHot,
+  rec,
+  recHot,
+}) => (
+  <div style={{ display: "flex", height: "100%" }}>
+    <div style={{ flex: 1, minWidth: 0, display: "flex", gap: 26, padding: "22px 26px" }}>
+      <div style={{ width: 300, height: 300, borderRadius: 10, background: product.art, display: "grid", placeItems: "center", fontSize: 92, flexShrink: 0 }}>
+        {product.glyph}
+      </div>
+      <div style={{ flex: 1, minWidth: 0, paddingTop: 6 }}>
+        <div style={{ fontSize: 11, color: "#8c8c8c", marginBottom: 6, letterSpacing: "0.6px" }}>{product.brand}</div>
+        <div style={{ fontSize: 20, fontWeight: 650, color: "#262626", marginBottom: 14, letterSpacing: "-0.3px", wordBreak: "keep-all" }}>
+          {product.name}
+        </div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
+          <span style={{ fontSize: 13, color: "#bfbfbf", textDecoration: "line-through" }}>{product.was}원</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#ff4d4f" }}>31%</span>
+        </div>
+        <div style={{ fontSize: 28, fontWeight: 800, color: "#262626", marginBottom: 18, letterSpacing: "-1px" }}>
+          {product.price}
+          <span style={{ fontSize: 17, fontWeight: 600 }}>원</span>
+        </div>
+        <div style={{ borderTop: "1px solid #f0f0f0", paddingTop: 12, marginBottom: 20 }}>
+          {[
+            ["배송", "내일(수) 도착 보장"],
+            ["적립", "구매 시 890P"],
+            ["혜택", "카드 즉시할인 5%"],
+          ].map(([k, v]) => (
+            <div key={k} style={{ display: "flex", gap: 14, fontSize: 11.5, padding: "5px 0" }}>
+              <span style={{ color: "#8c8c8c", width: 40 }}>{k}</span>
+              <span style={{ color: "#262626" }}>{v}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <span
+            style={{
+              padding: "11px 26px",
+              borderRadius: 7,
+              border: `1.5px solid ${addHot ? "#ff4d4f" : "#d9d9d9"}`,
+              background: addHot ? "#fff1f0" : "#fff",
+              color: addHot ? "#ff4d4f" : "#262626",
+              fontSize: 13,
+              fontWeight: 650,
+              transform: addHot ? "scale(0.98)" : "none",
+            }}
+          >
+            장바구니
+          </span>
+          <span style={{ padding: "11px 34px", borderRadius: 7, background: "#ff4d4f", color: "#fff", fontSize: 13, fontWeight: 700 }}>
+            바로 구매
+          </span>
+        </div>
       </div>
     </div>
+    <RecRail items={rec} hot={recHot} />
   </div>
 );
 
@@ -258,6 +321,37 @@ const CartView: React.FC<{ items: readonly number[] }> = ({ items }) => {
   );
 };
 
+/**
+ * Confirmation chip under the cart icon — the "담겼다" the badge alone cannot say.
+ *
+ * The badge pops and settles in eight frames, which at this tempo is easy to miss; the
+ * chip lands in the same corner and holds the claim in words for as long as the pop lasts.
+ * Driven by the same 1→0 pulse, so there is nothing extra to schedule.
+ */
+const AddedChip: React.FC<{ pulse: number }> = ({ pulse }) =>
+  pulse <= 0 ? null : (
+    <div
+      style={{
+        position: "absolute",
+        top: 12,
+        right: 20,
+        padding: "7px 14px",
+        borderRadius: 8,
+        background: "#1f2937",
+        color: "#fff",
+        fontSize: 11.5,
+        fontWeight: 600,
+        letterSpacing: "-0.2px",
+        opacity: Math.min(1, pulse * 2.4),
+        transform: `translateY(${(1 - pulse) * -7}px)`,
+        boxShadow: "0 6px 18px rgba(0,0,0,0.22)",
+        whiteSpace: "nowrap",
+      }}
+    >
+      장바구니에 담았습니다
+    </div>
+  );
+
 export const ShopMock: React.FC<{
   view: "list" | "detail" | "cart";
   /** list */
@@ -266,6 +360,9 @@ export const ShopMock: React.FC<{
   /** detail */
   productIndex?: number;
   addHot?: boolean;
+  /** detail — the 함께 본 상품 rail, and which of its three rows is about to be clicked */
+  recItems?: readonly number[];
+  recHot?: number | null;
   /** header */
   cartCount: number;
   /** 0→1 pop on the badge when an item lands in the cart. */
@@ -278,6 +375,8 @@ export const ShopMock: React.FC<{
   listHot = null,
   productIndex = 0,
   addHot = false,
+  recItems = [],
+  recHot = null,
   cartCount,
   cartPulse = 0,
   cartItems = [],
@@ -286,8 +385,11 @@ export const ShopMock: React.FC<{
     <Header cart={cartCount} pulse={cartPulse} />
     <div style={{ position: "relative", flex: 1, minHeight: 0, overflow: "hidden" }}>
       {view === "list" ? <ListView scroll={listScroll} hot={listHot} /> : null}
-      {view === "detail" ? <ProductDetail product={PRODUCTS[productIndex % PRODUCTS.length]} addHot={addHot} /> : null}
+      {view === "detail" ? (
+        <ProductDetail product={PRODUCTS[productIndex % PRODUCTS.length]} addHot={addHot} rec={recItems} recHot={recHot} />
+      ) : null}
       {view === "cart" ? <CartView items={cartItems} /> : null}
+      <AddedChip pulse={cartPulse} />
     </div>
   </div>
 );

@@ -56,7 +56,10 @@ const BEATS = [
 
   { id: "s3-omni-autocomplete", frame: beat.omniTab + 2, caption: "S3 · 새 탭 → 'g' → 자동완성 → Tab" },
   { id: "s3-ig-feed", frame: beat.igEnter + 10, caption: "S3 · 딴짓① 소셜 피드" },
-  { id: "s3-dm-reply", frame: beat.dmReply1 + 6, caption: "S3 · DM 답장" },
+  // +13, not +6: the compose box only carries text in the frames before a reply lands, and
+  // +6 falls in the gap between two of them.
+  { id: "s3-dm-reply", frame: beat.dmReply1 + 13, caption: "S3 · 민아 — 긴 티키타카" },
+  { id: "s3-dm-pile", frame: beat.dmSwitch2 + 12, caption: "S3 · 준호 — 쌓인 알림 읽고 한 번 답장" },
   { id: "s3-dm-interrupt", frame: beat.dmInterrupt + 2, caption: "S3 · 다른 사람이 끼어듦" },
   { id: "s3-music-link", frame: beat.musicOpen - 4, caption: "S3 · 링크로 받은 뮤직비디오" },
   { id: "s3-music", frame: beat.musicOpen + 8, caption: "S3 · 노래 재생" },
@@ -64,8 +67,9 @@ const BEATS = [
 
   { id: "s4-nudge-2", frame: beat.nudge2In + 14, caption: "S4 · 두 번째 훈수 + 5분만" },
   { id: "s4-portal", frame: beat.portalQuery + 6, caption: "S4 · 딴짓② 포털 검색" },
-  { id: "s4-shop-list", frame: beat.shopPick - 6, caption: "S4 · 쇼핑몰 목록 스크롤" },
-  { id: "s4-shop-detail", frame: beat.cart2 - 4, caption: "S4 · 상품 클릭 · 장바구니" },
+  { id: "s4-shop-list", frame: beat.shopPick - 10, caption: "S4 · 쇼핑몰 착지 — 목록 스크롤" },
+  { id: "s4-shop-detail", frame: beat.cart1 + 3, caption: "S4 · 장바구니 담김 — 배지 + 확인 칩" },
+  { id: "s4-shop-rec", frame: beat.hop2 - 3, caption: "S4 · 함께 본 상품 — 다음 상품으로" },
   { id: "s4-dm-peek", frame: beat.dmPeek1 + 6, caption: "S4 · DM 왕복 — 그새 쌓인 알림" },
   { id: "s4-cart-7", frame: beat.cart7 + 3, caption: "S4 · 장바구니 7개" },
   { id: "s4-nudge-3", frame: beat.nudge3In + 12, caption: "S4 · 스누즈 콜백" },
@@ -78,7 +82,8 @@ const BEATS = [
 
   { id: "s7-report-done", frame: beat.chartIn + 4, caption: "S7 · 보고서 완성 — 6페이지 · 6,146자 · 참고 자료까지" },
   { id: "s7-mail-send", frame: beat.sendClick + 3, caption: "S7 · 메일 전송" },
-  { id: "s7-gauge-back", frame: beat.popupOpen2 + 12, caption: "S7 · 팝업 — 게이지 복귀" },
+  { id: "s7-active", frame: beat.popupOpen2 + 8, caption: "S7 · 팝업 — 몰입 복귀" },
+  { id: "s7-summary", frame: beat.summaryShown + 8, caption: "S7 · 세션 요약" },
   { id: "s8-endcard", frame: beat.endCardIn + 30, caption: "S8 · 엔드카드" },
 ].map((b) => ({ ...b, frame: Math.min(b.frame, TOTAL_FRAMES - 1) }));
 
