@@ -843,6 +843,9 @@ test("E2E: a pending dwell never survives returning to a held internal page or d
   await settle(50)
   assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "a second disabled PDF (same debounce key) still cancels the abandoned dwell")
 
+  // Clear the goal BEFORE re-enabling PDFs: the ON edge reobserves the active tab, and with a
+  // live goal that would arm a real 5s dwell that outlives this test (a trap for later tests).
+  await send({ type: "set-goal", goal: "", minutes: null })
   await send({ type: "set-settings", settings: { observeLocalPdfs: true } })
 })
 
