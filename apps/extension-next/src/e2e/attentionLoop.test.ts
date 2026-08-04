@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 import { kvDelete, kvGet } from "../lib/db.ts"
 import { PENDING_DWELL_KEY } from "../lib/dwellScheduler.ts"
 import { LOCAL_PDF_PROMPT_DELAY_MS, LOCAL_PDF_PROMPT_SHOWN_KEY } from "../lib/localPdfPrompt.ts"
+import { getVisits, type SessionVisits } from "../lib/visits.ts"
 import type { PendingDwell } from "../lib/dwell.ts"
 
 // Serve the real embedding assets off disk so the KoEn-E5 WASM session loads (the extension
@@ -94,6 +95,7 @@ const chrome = {
   // window carry windowId 2 and must be ignored by the observation surface (Fix 4).
   windows: {
     onFocusChanged: evt("win"),
+    onRemoved: evt("windows.onRemoved"),
     getLastFocused: async () => ({ focused: winFocused, id: 1 }),
     get: async () => ({ id: 1, left: 100, top: 40, width: 1400, height: 900 }),
     getAll: async () => promptWindowOpen
@@ -170,10 +172,25 @@ const fireStartup = async () => {
 const fireHeartbeat = async () => {
   for (const fn of listeners["alarms.onAlarm"]) await fn({ name: "kibitzer-next-heartbeat" })
 }
+const fireWindowRemoved = async (windowId: number) => {
+  for (const fn of listeners["windows.onRemoved"]) await fn(windowId)
+}
+// Total recorded dwell across the session's entries. The tracker's open interval is credited
+// only when it CLOSES, so this is exactly "time already attributed to real pages".
+const attributedMs = (visits: SessionVisits | null): number =>
+  Object.values(visits?.entries ?? {}).reduce((sum, e) => sum + e.ms, 0)
 const settle = (ms = 0) => new Promise((r) => setTimeout(r, ms)) // real timer (only Date is mocked)
 const settleUntil = async (until: () => boolean, steps = 100): Promise<boolean> => {
   for (let i = 0; i < steps; i += 1) {
     if (until()) return true
+    await settle(5)
+  }
+  return until()
+}
+// Same, for conditions that must be read back out of the SSOT (visits, dwell checkpoint).
+const settleUntilStored = async (until: () => Promise<boolean>, steps = 100): Promise<boolean> => {
+  for (let i = 0; i < steps; i += 1) {
+    if (await until()) return true
     await settle(5)
   }
   return until()
@@ -847,6 +864,247 @@ test("E2E: a pending dwell never survives returning to a held internal page or d
   // live goal that would arm a real 5s dwell that outlives this test (a trap for later tests).
   await send({ type: "set-goal", goal: "", minutes: null })
   await send({ type: "set-settings", settings: { observeLocalPdfs: true } })
+})
+
+// The destroyed window's id is deliberately unused by the handler: no tabId/windowId is stored
+// in the visit or gauge state, so ownership is settled by re-querying which tab is active NOW.
+// The mock's getLastFocused is a constant — it stands for "whichever window has focus", which
+// after the close is the survivor.
+test("E2E: destroying the focused window stops all attribution to its page (Fix 5)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 21, url: "https://video.test/watch?v=owl", title: "귀여운 부엉이 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "쿠버네티스 배포 설정 정리", minutes: null })
+    await settle(50)
+
+    // Judge the off-goal page → DRIFT, which opens its visit interval and drains S.
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+
+    let drained = 100
+    for (let i = 0; i < 60 && drained > 50; i += 1) {
+      await beat()
+      drained = (await send({ type: "get-state" })).s as number
+    }
+    assert.ok(drained > 0 && drained < 100, `the drift drained S off full but not to 0 (S=${drained})`)
+    assert.ok((await getVisits())?.open, "the drifting page owns the open visit interval")
+
+    // Its window is destroyed. Chrome fires NO tab event for that, and the surviving window shows
+    // an internal page — so no observation will EVER arrive to correct the attribution. Pre-fix
+    // the minute heartbeats kept crediting dwell to the vanished page AND kept integrating its
+    // stale DRIFT into S (up to gapCap each beat); only windows.onRemoved can stop it.
+    activeTab = { id: 22, url: "chrome://newtab/", title: "New Tab", active: true, windowId: 1 }
+    await fireWindowRemoved(2)
+    // The listener is fire-and-forget, so poll the SSOT rather than racing it with a bare settle.
+    await settleUntilStored(async () => ((await getVisits())?.open ?? null) === null)
+    await settle(30) // let the trailing hand-over observe() finish too
+
+    const atClose = await getVisits()
+    assert.equal(atClose?.open, null, "the destroyed page's interval is closed on the spot")
+    const msAtClose = attributedMs(atClose)
+    const sAtClose = (await send({ type: "get-state" })).s as number
+
+    for (let i = 0; i < 15; i += 1) await beat()
+    assert.equal(attributedMs(await getVisits()), msAtClose, "no dwell accrues to the destroyed page")
+    assert.equal(
+      (await send({ type: "get-state" })).s as number,
+      sAtClose,
+      "S no longer integrates the destroyed page's verdict",
+    )
+    assert.equal(toasts.length + notifications.length, 0, "and no nag fires off a page that no longer exists")
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: a window close hands the session to the surviving window's page (Fix 5)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 31, url: "https://video.test/watch?v=bee", title: "귀여운 벌 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "테라폼 모듈 리팩터링", minutes: null })
+    await settle(50)
+
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+    await beat() // accrue a minute of dwell on the judged page
+    assert.ok((await getVisits())?.open, "the judged page owns the open visit interval")
+
+    // Same close, but the surviving window shows a REAL page: the session must continue there
+    // rather than sitting wedged in the hold.
+    await kvDelete(PENDING_DWELL_KEY)
+    activeTab = { id: 32, url: "https://registry.terraform.io/modules", title: "테라폼 모듈 레지스트리", active: true, windowId: 1 }
+    await fireWindowRemoved(2)
+    // Poll the checkpoint: the hand-over sits at the very end of the listener's async chain.
+    await settleUntilStored(async () => (await kvGet(PENDING_DWELL_KEY)) !== undefined)
+
+    assert.equal((await getVisits())?.open, null, "the destroyed page's interval is still closed out")
+    const pending = (await kvGet(PENDING_DWELL_KEY)) as PendingDwell | undefined
+    assert.equal(
+      pending?.title,
+      "테라폼 모듈 레지스트리",
+      "the surviving window's page starts its own dwell — the session is handed over, not stalled",
+    )
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: closing a BACKGROUND window changes nothing — the drift keeps being measured (Fix 5)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 41, url: "https://video.test/watch?v=elk", title: "귀여운 사슴 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "그래프 알고리즘 정리", minutes: null })
+    await settle(50)
+
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+    await beat()
+
+    const openBefore = (await getVisits())?.open
+    assert.ok(openBefore, "the judged page owns the open interval")
+    const sBefore = (await send({ type: "get-state" })).s as number
+    assert.ok(sBefore > 5, `S has room left to drain (S=${sBefore})`)
+    await kvDelete(PENDING_DWELL_KEY)
+
+    // A window the user was NOT looking at closes: the active tab is unchanged, so the page being
+    // measured still exists and the handler must not touch a thing. This is the invariant the
+    // whole mismatch test is built around — pausing unconditionally here would rebase the gauge
+    // clock and silently forgive every bit of drift since the last beat.
+    await fireWindowRemoved(2)
+    await settle(50)
+
+    assert.deepEqual((await getVisits())?.open, openBefore, "the open interval is left exactly as it was")
+    assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "and no redundant re-dwell is scheduled")
+    await beat()
+    assert.ok(
+      ((await send({ type: "get-state" })).s as number) < sBefore,
+      "the verdict is still live, so the drift keeps integrating — it was not dropped into a hold",
+    )
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: a tab belonging to the window being closed is not mistaken for a survivor (Fix 5)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 61, url: "https://video.test/watch?v=crab", title: "귀여운 게 영상 몰아보기", active: true, windowId: 3 }
+    await send({ type: "set-goal", goal: "회계 원리 정리", minutes: null })
+    await settle(50)
+
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+    await beat()
+    assert.ok((await getVisits())?.open, "the judged page owns the open interval")
+
+    // Clicking the X on an UNFOCUSED window focuses it first, so `lastFocusedWindow` can still
+    // resolve to the window being torn down and hand back its own doomed tab. Matching that key
+    // would look like "the page still exists" and turn the whole re-sync into a no-op — the exact
+    // leak this handler exists to close. The tab's windowId is what disqualifies it.
+    await fireWindowRemoved(3)
+    await settleUntilStored(async () => ((await getVisits())?.open ?? null) === null)
+
+    assert.equal(
+      (await getVisits())?.open ?? null,
+      null,
+      "the doomed window's own tab is not treated as the surviving page",
+    )
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: a window closed while Chrome is unfocused does not bill the away time as drift (Fix 5)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 71, url: "https://video.test/watch?v=moth", title: "귀여운 나방 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "선형대수 복습", minutes: null })
+    await settle(50)
+
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+    await beat()
+    assert.ok((await getVisits())?.open, "the judged page owns the open interval")
+    const sBefore = (await send({ type: "get-state" })).s as number // present: rebases the clock
+
+    // The user switches to another app and only THEN closes the Chrome window from the taskbar.
+    // The minute in between is away-time. `neutral` integrates the tail before dropping the
+    // verdict — right for a window closed while watching it, wrong here: it would bill drift the
+    // user never spent. No tab survives, matching a taskbar close of the last window.
+    winFocused = false
+    mock.timers.tick(60_000)
+    activeTab = null
+    await fireWindowRemoved(2)
+    await settleUntilStored(async () => ((await getVisits())?.open ?? null) === null)
+
+    assert.equal(
+      (await send({ type: "get-state" })).s as number,
+      sBefore,
+      "the minute spent in another app is rebased away, not integrated as drift",
+    )
+  } finally {
+    winFocused = true
+    mock.timers.reset()
+  }
+})
+
+test("E2E: a restart closes the previous run's interval without integrating the shutdown gap (Fix 5)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 51, url: "https://video.test/watch?v=seal", title: "귀여운 물범 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "타입스크립트 제네릭 공부", minutes: null })
+    await settle(50)
+
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+    await beat()
+    assert.ok((await getVisits())?.open, "the judged page owns the open interval")
+    const sBeforeQuit = (await send({ type: "get-state" })).s as number
+
+    // Chrome quits with that interval still open — on Windows the last window's close races the
+    // teardown, so windows.onRemoved may never run — and is relaunched ten minutes later on a page
+    // that has nothing to do with the previous run. NO tab event describes that transition, and
+    // session restore has not committed yet, so the startup re-sync is the only thing that can
+    // settle it before the first heartbeat resumes crediting the vanished page.
+    mock.timers.tick(10 * 60_000)
+    activeTab = { id: 52, url: "chrome://newtab/", title: "New Tab", active: true, windowId: 1 }
+    await kvDelete(PENDING_DWELL_KEY)
+    await fireStartup()
+    await settleUntilStored(async () => ((await getVisits())?.open ?? null) === null)
+    await settle(30)
+
+    assert.equal((await getVisits())?.open ?? null, null, "the previous run's interval is closed out")
+    assert.equal(
+      (await send({ type: "get-state" })).s as number,
+      sBeforeQuit,
+      "the ten minutes Chrome spent shut are rebased away, not integrated as drift",
+    )
+    assert.equal(
+      toasts.length + notifications.length,
+      0,
+      "so no nag fires at launch about a page from the last session",
+    )
+  } finally {
+    mock.timers.reset()
+  }
 })
 
 test("E2E: first install opens the onboarding tab once — updates and re-fires never re-open it", async () => {

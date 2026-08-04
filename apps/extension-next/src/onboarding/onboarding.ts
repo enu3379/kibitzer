@@ -284,15 +284,41 @@ const keyInput = $<HTMLInputElement>("key")
 const testKeys = $<HTMLButtonElement>("testKeys")
 const keysResult = $("keysResult")
 const addedKeys = new Set<string>() // key values already saved this session (no double-add)
+type AiTestState = "idle" | "testing" | "success" | "failure"
+let aiTestState: AiTestState = "idle"
+let judgeConfigured = false
+
+function renderAiStatus(): void {
+  const highlighted = judgeConfigured || aiTestState === "testing" || aiTestState === "success"
+  aiStatus.classList.toggle("on", highlighted)
+  aiStatus.classList.toggle("failed", aiTestState === "failure")
+  if (aiTestState === "testing") {
+    aiStatusText.textContent = "AI 연결 확인 중… 첫 호출은 느릴 수 있어요"
+  } else if (aiTestState === "failure") {
+    aiStatusText.textContent = "AI 연결 테스트에 실패했습니다. API 키와 모델 설정을 확인하거나 잠시 후 다시 시도해 주세요."
+  } else if (aiTestState === "success" || judgeConfigured) {
+    aiStatusText.textContent = "AI 연결됨 ✓  페이지 내용까지 읽고 판정합니다"
+  } else {
+    aiStatusText.textContent = "지금은 페이지 제목만 분석 중"
+  }
+}
+
+function showKeyTestResult(text: string, kind?: "ok" | "err"): void {
+  keysResult.textContent = text
+  keysResult.className = `ai-test-detail${kind ? ` ${kind}` : ""}`
+  keysResult.setAttribute("aria-hidden", String(!text))
+  aiStatus.classList.toggle("has-detail", Boolean(text))
+}
+
+function withoutTestVerdict(detail: string): string {
+  return detail.replace(/\s+\((?:OK|DRIFT)\)(?=\s*(?:·|$))/u, "")
+}
 
 async function refreshAiStatus(): Promise<void> {
   const st = await send<WizardState>({ type: "get-state" })
   if (!st) return
-  const on = Boolean(st.judgeEnabled)
-  aiStatus.classList.toggle("on", on)
-  aiStatusText.textContent = on
-    ? "AI 판정 연결됨 ✓ — 페이지 내용까지 읽고 판정합니다"
-    : "지금은 제목 판정만 동작 중 (Tier-0)"
+  judgeConfigured = Boolean(st.judgeEnabled)
+  renderAiStatus()
 }
 
 // add-provider-key persists immediately (options-page semantics); rotation/extra
@@ -303,49 +329,61 @@ async function saveEnteredKey(): Promise<boolean> {
   if (!addedKeys.has(value)) {
     await send({ type: "add-provider-key", provider: "ollama", name: "", value })
     addedKeys.add(value)
-    void refreshAiStatus()
+    await refreshAiStatus()
   }
   return true
 }
 
 testKeys.addEventListener("click", async () => {
-  if (!(await saveEnteredKey())) {
-    keysResult.className = "result err"
-    keysResult.textContent = "키가 비어 있어요. 위 링크에서 발급한 키를 붙여넣어 주세요."
+  if (testKeys.disabled) return
+  if (!keyInput.value.trim()) {
+    showKeyTestResult("API 키가 비어 있어요. 위 링크에서 발급한 키를 붙여넣어 주세요.", "err")
     return
   }
-  keysResult.className = "result"
-  keysResult.textContent = "테스트 중… (첫 호출은 느릴 수 있어요)"
+  aiTestState = "testing"
+  showKeyTestResult("")
+  renderAiStatus()
+  aiStatus.setAttribute("aria-busy", "true")
   testKeys.disabled = true
-  // Exercise the ACTUAL routes (provider+model per tier) the pipeline will use.
-  const judge = await send<JudgeView>({ type: "get-judge-settings" })
-  const tiers = [
-    { tier: "tier1", route: judge?.routes?.tier1 },
-    { tier: "tier2", route: judge?.routes?.tier2 },
-  ]
-  const [r1, r2] = await Promise.all(
-    tiers.map(({ tier, route }) =>
-      send<RouteTestResult>({
-        type: "test-route",
-        tier,
-        provider: route?.provider ?? "ollama",
-        model: route?.model ?? "",
-      }),
-    ),
-  )
-  testKeys.disabled = false
-  if (r1?.ok && r2?.ok) {
-    keysResult.className = "result ok"
-    keysResult.textContent = `연결 OK — Tier 1 ${r1.detail} · Tier 2 ${r2.detail}`
-  } else {
-    const failures = [r1?.ok ? null : `Tier 1: ${r1?.detail ?? "응답 없음"}`, r2?.ok ? null : `Tier 2: ${r2?.detail ?? "응답 없음"}`]
-    keysResult.className = "result err"
-    keysResult.textContent = `실패 — ${failures.filter(Boolean).join(" · ")}`
+  try {
+    await saveEnteredKey()
+    // Exercise the ACTUAL routes (provider+model per tier) the pipeline will use.
+    const judge = await send<JudgeView>({ type: "get-judge-settings" })
+    const tiers = [
+      { tier: "tier1", route: judge?.routes?.tier1 },
+      { tier: "tier2", route: judge?.routes?.tier2 },
+    ]
+    const [r1, r2] = await Promise.all(
+      tiers.map(({ tier, route }) =>
+        send<RouteTestResult>({
+          type: "test-route",
+          tier,
+          provider: route?.provider ?? "ollama",
+          model: route?.model ?? "",
+        }),
+      ),
+    )
+    if (r1?.ok && r2?.ok) {
+      aiTestState = "success"
+      showKeyTestResult(`Tier 1 · ${withoutTestVerdict(r1.detail)}\nTier 2 · ${r2.detail}`, "ok")
+    } else {
+      aiTestState = "failure"
+      const failures = [r1?.ok ? null : `Tier 1: ${r1?.detail ?? "응답 없음"}`, r2?.ok ? null : `Tier 2: ${r2?.detail ?? "응답 없음"}`]
+      showKeyTestResult(`실패 — ${failures.filter(Boolean).join(" · ")}`, "err")
+    }
+    renderAiStatus()
+  } catch {
+    aiTestState = "failure"
+    showKeyTestResult("실패 — 응답을 받지 못했습니다.", "err")
+    renderAiStatus()
+  } finally {
+    testKeys.disabled = false
+    aiStatus.removeAttribute("aria-busy")
   }
 })
 
 $("openSettingsAi").addEventListener("click", () => {
-  if (extension) void chrome.runtime.openOptionsPage()
+  if (extension) void chrome.tabs.create({ url: chrome.runtime.getURL("options/options.html#ai") })
 })
 
 const skip = $("skip")

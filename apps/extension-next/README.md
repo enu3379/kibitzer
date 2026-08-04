@@ -51,7 +51,7 @@ To pick up a rebuild, click the extension's **↻ reload** button on `chrome://e
 2. Keep browsing. When drift accumulates on off-goal pages, a toast appears on the active
    tab. Each toast offers **"목표와 관련 있어요"** (teaches relevance — recovers the gauge and
    remembers the page) and **"5분"** (snooze).
-3. Open **설정** (the options page) to tune sensitivity, quiet hours, voice read-out,
+3. Open **설정** (the options page) to tune sensitivity, quiet hours,
    persona (nudge tone), the AI judge, and data controls.
 
 Without any AI key the extension still works in **Tier-0 mode** (on-device title
@@ -103,9 +103,9 @@ build.mjs             esbuild bundler + static-file copy
 src/
   background.ts       service worker: observe → judge → dispatch → deliver
   popup/              toolbar popup (goal + gauge)
-  options/            settings page (sensitivity, quiet hours, TTS, persona, AI, data)
+  options/            settings page (sensitivity, quiet hours, persona, AI, data)
   replay/             in-extension replay page
-  offscreen.ts        audio chime + Web Speech TTS (autoplay-safe)
+  offscreen.ts        audio chime (autoplay-safe)
   content/            page-excerpt extraction (injected)
   lib/                gauge, relevance, tier0/1/2, personas, db, events, settings…
   providers/          Ollama Cloud chat client
