@@ -12,10 +12,12 @@ export const MacDesktop: React.FC<{
   clock: string;
   /** Frontmost app — owns the menu bar. */
   app: MenuBarApp;
+  /** How fast the clock is running (0–1). Blurs the digits while time accelerates. */
+  clockRush?: number;
   /** S5 push-in. Applied below the menu bar so the clock never leaves frame. */
   zoom?: number;
   children: React.ReactNode;
-}> = ({ clock, app, zoom = 1, children }) => (
+}> = ({ clock, app, clockRush = 0, zoom = 1, children }) => (
   <AbsoluteFill
     style={{
       background: "#0b0f1a",
@@ -50,7 +52,7 @@ export const MacDesktop: React.FC<{
       >
         {children}
       </div>
-      <MenuBar clock={clock} app={app} />
+      <MenuBar clock={clock} app={app} rush={clockRush} />
     </div>
   </AbsoluteFill>
 );

@@ -3,8 +3,12 @@
  *
  * The document is the one thing in this video that has to look like *work*, so it is laid
  * out like a real word processor: fixed-size sheets with a grey gutter between them, a
- * page counter, a character count. "Two or three pages written" is then something the
- * viewer can literally read off the screen instead of inferring from a scrollbar.
+ * page counter, a character count. "Five pages written" is then something the viewer can
+ * literally read off the screen instead of inferring from a scrollbar.
+ *
+ * The metrics below are set for density rather than comfort — 11.5px on 1.62, justified,
+ * ~37 lines to a page. A report that is meant to read as an afternoon of work cannot be
+ * set like a blog post.
  *
  * Heights are estimated, not measured — Remotion renders deterministically, so a single
  * conservative model here keeps the scroll position, the page breaks and the status bar
@@ -37,8 +41,8 @@ export const EDITOR = {
 export const DOC_VIEW =
   EDITOR_RECT.height - EDITOR.titlebar - EDITOR.toolbar - EDITOR.status - EDITOR.sheetTop; // 628
 
-/** Title + subtitle, which only the first page carries. */
-export const DOC_HEAD = 70;
+/** Title + subtitle + the rule under them, which only the first page carries. */
+export const DOC_HEAD = 72;
 
 /** Text height one page can hold. */
 const CAPACITY = PAGE.height - PAGE.padY * 2; // 712
@@ -46,36 +50,76 @@ const CAPACITY = PAGE.height - PAGE.padY * 2; // 712
 /**
  * Characters per line, used to guess how tall a paragraph lays out.
  *
- * Measured off the rendered stills: the 452px column takes ~48–50 characters of mixed
- * Hangul, spaces and figures. 46 leaves a little room for `word-break: keep-all`, which
- * hands a line back whenever the next word will not fit. Err high rather than low — a
- * paragraph estimated a line too tall only leaves white space above a page break, while
- * one estimated too short would push text off the bottom of a fixed-height sheet.
+ * Measured off the rendered stills: at the old 12.5px body size the 452px column took
+ * ~48–50 characters of mixed Hangul, spaces and figures, and 46 was the conservative
+ * number in use. Body type is now 11.5px with -0.1px tracking, and a re-measure off the
+ * new render puts a full line at 54–55 characters. 52 keeps a line of margin over a long
+ * paragraph and leaves room for `word-break: keep-all`, which hands a line back whenever
+ * the next word will not fit. Err high rather than low — a paragraph estimated a line too
+ * tall only leaves white space above a page break, while one estimated too short would
+ * push text off the bottom of a fixed-height sheet. Err *too* high and every page breaks
+ * early, which is what a dense report must not look like.
  */
-const CHARS_PER_LINE = 46;
-const LINE_H = 24;
+const CHARS_PER_LINE = 52;
+/** 11.5px × 1.62. A page therefore holds ~37 lines, which is about what an A4 page holds. */
+const LINE_H = 19;
+/** Enumerated items are inset, so they lose a few characters a line. */
+const LIST_CHARS_PER_LINE = 46;
+/**
+ * The bibliography is set at 9.5px and mixes scripts within a single entry — an English
+ * title followed by a Korean gloss. One character constant cannot describe both: a Hangul
+ * glyph is ~7.8px wide at that size and a Latin one ~4.9px, so an all-Latin entry fits
+ * nearly twice as much as a Korean one. `refLines` measures in Latin widths and counts a
+ * Hangul character as 1.6 of them.
+ */
+const REF_UNITS_PER_LINE = 96;
+const REF_LINE_H = 15;
+const HANGUL = /[ᄀ-ᇿ㄰-㆏가-힯]/;
 
-const lines = (text: string): number => Math.max(1, Math.ceil(Array.from(text).length / CHARS_PER_LINE));
+const linesAt = (text: string, per: number): number =>
+  Math.max(1, Math.ceil(Array.from(text).length / per));
+const lines = (text: string): number => linesAt(text, CHARS_PER_LINE);
+const refLines = (text: string): number => {
+  const units = Array.from(text).reduce((n, c) => n + (HANGUL.test(c) ? 1.6 : 1), 0);
+  return Math.max(1, Math.ceil(units / REF_UNITS_PER_LINE));
+};
 
 /** Laid-out height of a block, matching the styles in EditorMock. */
 export const blockH = (b: DocBlock): number => {
   switch (b.t) {
     case "h":
-      return 38;
+      // marginTop + line box + marginBottom, for a section head and a sub-head.
+      return b.level === 2 ? 31 : 40;
     case "p":
-      return 4 + lines(b.text) * LINE_H;
+      return 5 + lines(b.text) * LINE_H;
+    case "list":
+      return 7 + b.items.reduce((h, it) => h + linesAt(it, LIST_CHARS_PER_LINE) * LINE_H + 2, 0);
     case "quote":
-      return 59 + b.text.split("\n").length * 20;
+      return 51 + b.text.split("\n").length * 17;
     case "gap":
-      return 24;
+      return LINE_H;
     case "chart":
-      return 163;
+      return 149;
+    case "refs":
+      return 42 + b.items.reduce((h, it) => h + refLines(it) * REF_LINE_H + 3, 0);
   }
 };
 
 /** Characters a block contributes to the status bar's count. */
-const blockChars = (b: DocBlock): number =>
-  b.t === "h" || b.t === "p" || b.t === "quote" ? Array.from(b.text).length : 0;
+const blockChars = (b: DocBlock): number => {
+  switch (b.t) {
+    case "h":
+    case "p":
+    case "quote":
+      return Array.from(b.text).length;
+    case "list":
+      return b.items.reduce((n, it) => n + Array.from(it).length, 0);
+    case "refs":
+      return b.items.reduce((n, it) => n + Array.from(it).length, Array.from(b.title).length);
+    default:
+      return 0;
+  }
+};
 
 export type LaidOutPage = {
   blocks: DocBlock[];

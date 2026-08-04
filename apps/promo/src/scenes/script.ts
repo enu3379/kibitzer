@@ -138,6 +138,29 @@ const URL = {
   mail: "mail.workspace.com/u/0/#compose",
 } as const;
 
+/**
+ * Article scroll positions for the first source.
+ *
+ * `NEWS_QUOTE` is the offset that puts the pull quote under the drag in CURSOR_PATH. It
+ * is tuned against the render rather than computed — the article's block heights depend
+ * on how the browser wraps 15px Latin in a 600px column, and nothing here reads back from
+ * the DOM. Editing anything above the quote in NewsMock moves it, and the check is
+ * `node scripts/render-stills.mjs s2-select-news`.
+ *
+ * `NEWS_READ` is where the first read stops: mid-argument, before the quote, so coming
+ * back for it later is a return rather than a re-run.
+ */
+const NEWS_READ = 430;
+const NEWS_QUOTE = 1020;
+
+/**
+ * The second article, read after the return. Scrolled far enough to land on its GMV-band
+ * table rather than its lede — that table is what §4 is written from four beats later, so
+ * it has to be the thing on screen, and it has to clear the praise toast in the bottom
+ * right corner.
+ */
+const RESEARCH_SCROLL = 500;
+
 /** Toast entrance: 10 frames ≈ the 0.34s transition in toastOverlay.ts. */
 const TOAST_IN = 10;
 const toastEnter = (frame: number, at: number) => ({
@@ -211,7 +234,7 @@ type WriteEvent = {
  * The whole report, as a schedule.
  *
  * One hard constraint shapes all of it: the writing app is frontmost for well under two
- * hundred frames in the entire film, nowhere near enough to type three pages. So blocks
+ * hundred frames in the entire film, nowhere near enough to type five pages. So blocks
  * come in two kinds.
  *
  * TYPED — written while the writing app is on screen. Each one gets exactly the gap
@@ -219,51 +242,92 @@ type WriteEvent = {
  * That matters because this timeline gets re-paced: a hard-coded 0.25 that was right at
  * 54 seconds silently overruns its cut at 32, and the paragraph after it starts growing
  * on top of the one still being written. Deriving the rate cannot drift out of sync.
+ * It also caps how long a typed block may be: past RATE_MIN the text stops reading as
+ * writing, so the on-camera blocks stay at 20–50 characters and say the quotable things.
  *
  * WHOLE — `whole: true`. Its beat sits inside a stretch where the browser covers the
  * writing app, so it simply exists again by the time the next Cmd-Tab lands. That is the
- * fifteen minutes the menu-bar clock jumps over: off camera, the writer kept writing.
- * These carry the volume — five blocks of 200–370 characters against eight short typed
- * ones — and because they land whole rather than at some very fast rate, no retime can
- * make one of them spill into view half-finished.
+ * quarter hour the menu-bar clock spins through: off camera, the writer kept writing.
+ * These carry the volume — the method, the caveats, the cohort reading, the size-band
+ * analysis — and because they land whole rather than at some very fast rate, no retime
+ * can make one of them spill into view half-finished. Several may share one beat: they
+ * are invisible either way, and grouping them keeps the schedule readable.
  *
- * The result is two to four new paragraphs per editor cut, and a document that has
- * reached three pages by the time attention goes.
+ * Off-camera windows, i.e. every stretch where a `whole` block may be scheduled:
+ *   114–143   §1 body, §2.1–2.4      (clock 2:11 → 2:33)
+ *   170–190   §3.1, and the §3.2 head (clock 2:33 → 2:55)
+ *   202–218   §3.2 tail, [자료 2], §3.3
+ *   751–795   §3.4, §4                (clock 3:31 → 3:38, after the return)
+ * Anything scheduled outside one of those pops onto a visible document.
+ *
+ * The result is a page or more of new text per editor cut, and a document that has
+ * reached four dense pages by the time attention goes.
  *
  * `writeP11` lingers: it is where the momentum runs out, so it is given the whole gap
  * before the two Enters no matter how long that gap is.
  */
 const WRITING: readonly WriteEvent[] = [
   /* cycle A — the document starts empty */
-  { at: beat.writeH1, block: B.h1 },
-  { at: beat.writeP1, block: B.p1 },
-  { at: beat.writeP2, block: B.p2 },
-  /* off camera */
-  { at: beat.writeP3, whole: true, block: B.p3 },
-  { at: beat.writeP4, whole: true, block: B.p4 },
-  { at: beat.writeP5, whole: true, block: B.p5 },
+  { at: beat.writeH1, block: B.s1h },
+  { at: beat.writeP1, block: B.s1p1 },
+  { at: beat.writeP2, block: B.s1p2 },
+  /* off camera — the rest of §1 */
+  { at: beat.writeIntroBody, whole: true, block: B.s1p3 },
+  { at: beat.writeIntroBody, whole: true, block: B.s1p4 },
+  { at: beat.writeIntroBody, whole: true, block: B.s1p5 },
+  { at: beat.writeIntroBody, whole: true, block: B.s1p6 },
+  { at: beat.writeIntroBody, whole: true, block: B.s1rq },
+  /* off camera — §2, method */
+  { at: beat.writeMethod, whole: true, block: B.s2h },
+  { at: beat.writeMethod, whole: true, block: B.s2h1 },
+  { at: beat.writeMethod, whole: true, block: B.s2p1 },
+  { at: beat.writeMethod, whole: true, block: B.s2h2 },
+  { at: beat.writeMethod, whole: true, block: B.s2p2 },
+  { at: beat.writeMethod, whole: true, block: B.s2h3 },
+  { at: beat.writeMethod, whole: true, block: B.s2p3 },
+  /* off camera — §2.4, ending on the sentence the pasted table lands under */
+  { at: beat.writeStats, whole: true, block: B.s2h4 },
+  { at: beat.writeStats, whole: true, block: B.s2p4 },
+  { at: beat.writeStats, whole: true, block: B.s2p5 },
   /* cycle B */
-  { at: beat.paste1, whole: true, paste: true, block: B.q1 },
-  { at: beat.writeH2, block: B.h2 },
-  { at: beat.writeP6, block: B.p6 },
-  /* off camera */
-  { at: beat.writeP7, whole: true, block: B.p7 },
-  /* cycle C — typed on camera, abandoned mid-paragraph, finished behind the browser */
-  { at: beat.writeP8, block: B.p8 },
-  /* off camera */
-  { at: beat.writeP9, whole: true, block: B.p9 },
+  { at: beat.paste1, whole: true, paste: true, block: B.s2q },
+  { at: beat.writeH2, block: B.s3h },
+  { at: beat.writeP6, block: B.s3p1 },
+  /* off camera — §3.1, plus the sub-head the next typed block opens under */
+  { at: beat.writeCoupon, whole: true, block: B.s3h1 },
+  { at: beat.writeCoupon, whole: true, block: B.s3p2 },
+  { at: beat.writeCoupon, whole: true, block: B.s3p3 },
+  { at: beat.writeCoupon, whole: true, block: B.s3h2 },
+  /* cycle C — typed on camera, at the fastest rate in the film */
+  { at: beat.writeP8, block: B.s3p4 },
+  /* off camera — §3.2 tail, the cohort table, §3.3 */
+  { at: beat.writeCuration, whole: true, block: B.s3p5 },
+  { at: beat.writeCuration, whole: true, block: B.s3q1 },
+  { at: beat.writeCuration, whole: true, block: B.s3p6 },
+  { at: beat.writeCuration, whole: true, block: B.s3h3 },
+  { at: beat.writeCuration, whole: true, block: B.s3p7 },
+  { at: beat.writeCuration, whole: true, block: B.s3p8 },
+  { at: beat.writeCuration, whole: true, block: B.s3p9 },
   /* coming back down — and then the pace comes off the boil */
-  { at: beat.paste2, whole: true, paste: true, block: B.q2 },
-  { at: beat.writeP10, block: B.p10 },
-  { at: beat.writeP11, linger: true, block: B.p11 },
+  { at: beat.paste2, whole: true, paste: true, block: B.s3q2 },
+  { at: beat.writeP10, block: B.s3p10 },
+  { at: beat.writeP11, linger: true, block: B.s3p11 },
   { at: beat.enter1, whole: true, block: GAP },
   { at: beat.enter2, whole: true, block: GAP },
-  /* S7 — after the return */
-  { at: beat.writeH3, block: B.h3 },
-  { at: beat.writeP12, block: B.p12 },
-  { at: beat.writeP13, block: B.p13 },
-  { at: beat.writeP14, block: B.p14 },
-  { at: beat.chartIn, whole: true, block: B.chart },
+  /* off camera, after the return — §3.4 finishes the interrupted thought, then §4 */
+  { at: beat.writeSynthesis, whole: true, block: B.s3h4 },
+  { at: beat.writeSynthesis, whole: true, block: B.s3p12 },
+  { at: beat.writeSynthesis, whole: true, block: B.s3p13 },
+  { at: beat.writeRetention, whole: true, block: B.s4h },
+  { at: beat.writeRetention, whole: true, block: B.s4p1 },
+  { at: beat.writeRetention, whole: true, block: B.s4p2 },
+  { at: beat.writeRetention, whole: true, block: B.chart },
+  /* S7 — the conclusion, typed on camera, and then the bibliography closes the document */
+  { at: beat.writeH3, block: B.s5h },
+  { at: beat.writeP12, block: B.s5p1 },
+  { at: beat.writeP13, block: B.s5p2 },
+  { at: beat.writeP14, block: B.s5p3 },
+  { at: beat.chartIn, whole: true, block: B.refs },
 ];
 
 /**
@@ -399,8 +463,10 @@ const s1 = (frame: number, st: Stage): void => {
  * paragraph is typed four times slower than the ones before it, two Enters, and a third
  * of a second short of a full second with nothing on screen but a caret.
  *
- * The clock jumps ~15 minutes per trip. Only the trips are on camera; the writing that
- * fills those jumps happens behind the browser window (see WRITING).
+ * The clock runs ~15 minutes per trip, and it runs rather than snapping: each Cmd-Tab
+ * into the browser sets the minutes spinning for about half a second before they settle.
+ * Only the trips are on camera; the writing that fills those minutes happens behind the
+ * browser window (see WRITING).
  */
 /**
  * One search-and-open cycle: results page up, a row goes hot, it is clicked, the source
@@ -448,7 +514,7 @@ const s2 = (frame: number, st: Stage): void => {
   } else if (frame < beat.statsEnter) {
     st.activeId = "news";
     st.url = URL.news;
-    st.page = { k: "news", variant: 0, scroll: range(frame, [beat.newsEnter + 3, beat.switchToEditor1], [0, 430]), select: 0 };
+    st.page = { k: "news", variant: 0, scroll: range(frame, [beat.newsEnter + 3, beat.switchToEditor1], [0, NEWS_READ]), select: 0 };
   } else if (frame < beat.cohortsEnter) {
     st.activeId = "stats";
     st.url = URL.stats;
@@ -469,7 +535,7 @@ const s2 = (frame: number, st: Stage): void => {
     st.page = {
       k: "news",
       variant: 0,
-      scroll: range(frame, [beat.newsReturn, beat.select2 - 1], [430, 820]),
+      scroll: range(frame, [beat.newsReturn, beat.select2 - 1], [NEWS_READ, NEWS_QUOTE]),
       select: range(frame, [beat.select2, beat.select2 + 6], [0, 1]),
     };
   }
@@ -537,7 +603,7 @@ const s3 = (frame: number, st: Stage): void => {
   st.tabs = [{ ...TAB.search }, { ...TAB.news }, { ...TAB.stats }, { ...TAB.cohorts }];
   st.activeId = "news";
   st.url = URL.news;
-  st.page = { k: "news", variant: 0, scroll: 820, select: 0 };
+  st.page = { k: "news", variant: 0, scroll: NEWS_QUOTE, select: 0 };
   st.dot = "none";
 
   // New tab, one keystroke, autocomplete, Tab. Nobody types a whole hostname any more.
@@ -830,7 +896,12 @@ const s6 = (frame: number, st: Stage): void => {
       st.url = URL.research;
       // The scroll has to finish inside S6; +8 collided with s7WrapUp.from after the
       // retime, and interpolate() throws on a zero-width input range.
-      st.page = { k: "news", variant: 1, scroll: range(frame, [beat.researchLoad + 2, scene.s7WrapUp.from], [0, 190]), select: 0 };
+      st.page = {
+        k: "news",
+        variant: 1,
+        scroll: range(frame, [beat.researchLoad + 2, scene.s7WrapUp.from], [0, RESEARCH_SCROLL]),
+        select: 0,
+      };
     } else {
       st.url = URL.newtab;
       st.page = { k: "newtab" };
@@ -851,7 +922,7 @@ const s7 = (frame: number, st: Stage): void => {
   st.tabs = [{ ...TAB.search }, { ...TAB.news }, { ...TAB.stats }, { ...TAB.cohorts }, { ...TAB.research }];
   st.activeId = "research";
   st.url = URL.research;
-  st.page = { k: "news", variant: 1, scroll: 190, select: 0 };
+  st.page = { k: "news", variant: 1, scroll: RESEARCH_SCROLL, select: 0 };
   st.dot = "none";
 
   st.toast = praiseToast(frame);

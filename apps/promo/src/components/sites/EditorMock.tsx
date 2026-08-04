@@ -41,8 +41,9 @@ const Toolbar: React.FC = () => (
 const comma = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
 /**
- * The page counter is the point of the whole pagination exercise: it says "three pages"
- * in words, so the viewer does not have to infer the volume from a scroll position.
+ * The page counter is the point of the whole pagination exercise: it says "six pages,
+ * six thousand characters" in words, so the viewer does not have to infer the volume from
+ * a scroll position.
  */
 const StatusBar: React.FC<{ page: number; total: number; chars: number }> = ({ page, total, chars }) => (
   <div
@@ -73,33 +74,72 @@ const StatusBar: React.FC<{ page: number; total: number; chars: number }> = ({ p
 );
 
 const Caret: React.FC = () => (
-  <span style={{ display: "inline-block", width: 1.6, height: 15, background: "#1f2937", marginLeft: 1, verticalAlign: "-3px" }} />
+  <span style={{ display: "inline-block", width: 1.4, height: 13, background: "#1f2937", marginLeft: 1, verticalAlign: "-2px" }} />
 );
+
+/**
+ * Body copy. Justified with a first-line indent, which is how a Korean paper is set —
+ * and what makes a column of it read as dense rather than as a stack of chat messages.
+ */
+const BODY: React.CSSProperties = {
+  fontSize: 11.5,
+  lineHeight: 1.62,
+  letterSpacing: "-0.1px",
+  color: "#3c4043",
+  wordBreak: "keep-all",
+  textAlign: "justify",
+};
 
 /** Bars for the figure that closes the report. */
 const Figure: React.FC<{ caption: string }> = ({ caption }) => (
   <>
     <div
       style={{
-        height: 128,
-        borderRadius: 6,
+        height: 118,
+        borderRadius: 5,
         background: "#f1f3f4",
         border: "1px solid #e8eaed",
         display: "flex",
         alignItems: "flex-end",
-        gap: 13,
-        padding: "14px 18px",
-        marginTop: 14,
+        gap: 12,
+        padding: "13px 16px",
+        marginTop: 12,
       }}
     >
       {[0.42, 0.68, 0.55, 0.86, 0.31].map((h, i) => (
         <div key={i} style={{ flex: 1, display: "flex", justifyContent: "center" }}>
-          <div style={{ width: "62%", height: 84 * h, background: i === 3 ? "#0f766e" : "#9aa0a6", borderRadius: "2px 2px 0 0" }} />
+          <div style={{ width: "62%", height: 78 * h, background: i === 3 ? "#0f766e" : "#9aa0a6", borderRadius: "2px 2px 0 0" }} />
         </div>
       ))}
     </div>
-    <div style={{ fontSize: 10.5, color: "#80868b", marginTop: 7 }}>{caption}</div>
+    <div style={{ fontSize: 9.5, color: "#80868b", marginTop: 6, letterSpacing: "-0.1px" }}>{caption}</div>
   </>
+);
+
+/** The bibliography. Hanging indent, small type — the last page of a paper. */
+const Bibliography: React.FC<{ block: Extract<DocBlock, { t: "refs" }> }> = ({ block }) => (
+  <div style={{ marginTop: 14, paddingTop: 8, borderTop: "1px solid #e8eaed" }}>
+    <div style={{ fontSize: 10.5, fontWeight: 700, color: "#202124", marginBottom: 5, letterSpacing: "-0.1px" }}>
+      {block.title}
+    </div>
+    {block.items.map((it, i) => (
+      <div
+        key={i}
+        style={{
+          fontSize: 9.5,
+          lineHeight: 1.55,
+          color: "#5f6368",
+          marginBottom: 3,
+          paddingLeft: 14,
+          textIndent: -14,
+          letterSpacing: "-0.1px",
+          wordBreak: "keep-all",
+        }}
+      >
+        {it}
+      </div>
+    ))}
+  </div>
 );
 
 /**
@@ -109,8 +149,8 @@ const Figure: React.FC<{ caption: string }> = ({ caption }) => (
 const Pasted: React.FC<{ block: Extract<DocBlock, { t: "quote" }>; flash: number }> = ({ block, flash }) => (
   <div
     style={{
-      margin: "12px 0",
-      padding: "9px 13px",
+      margin: "10px 0",
+      padding: "8px 12px",
       borderLeft: "3px solid #9aa0a6",
       background: flash > 0 ? `rgba(66,133,244,${0.20 * flash})` : "#fafafa",
       borderRadius: "0 4px 4px 0",
@@ -118,11 +158,20 @@ const Pasted: React.FC<{ block: Extract<DocBlock, { t: "quote" }>; flash: number
     }}
   >
     {block.text.split("\n").map((l, i) => (
-      <div key={i} style={{ fontSize: 11.5, lineHeight: 1.72, color: "#3c4043", fontVariantNumeric: "tabular-nums" }}>
+      <div
+        key={i}
+        style={{
+          fontSize: 10.5,
+          lineHeight: 1.6,
+          color: "#3c4043",
+          fontVariantNumeric: "tabular-nums",
+          whiteSpace: "pre",
+        }}
+      >
         {l}
       </div>
     ))}
-    <div style={{ fontSize: 9.5, color: "#9aa0a6", marginTop: 4 }}>{block.source}</div>
+    <div style={{ fontSize: 9, color: "#9aa0a6", marginTop: 3 }}>{block.source}</div>
   </div>
 );
 
@@ -150,12 +199,12 @@ const Sheet: React.FC<{
     }}
   >
     {first ? (
-      <>
-        <h1 style={{ fontSize: 21, fontWeight: 700, margin: "0 0 5px", letterSpacing: "-0.4px", wordBreak: "keep-all" }}>
+      <div style={{ borderBottom: "1px solid #e8eaed", paddingBottom: 10, marginBottom: 16 }}>
+        <h1 style={{ fontSize: 19, fontWeight: 700, margin: "0 0 4px", letterSpacing: "-0.45px", wordBreak: "keep-all" }}>
           {report.title}
         </h1>
-        <div style={{ fontSize: 11.5, color: "#80868b", marginBottom: 20 }}>{report.subtitle}</div>
-      </>
+        <div style={{ fontSize: 11, color: "#80868b", letterSpacing: "-0.1px", wordBreak: "keep-all" }}>{report.subtitle}</div>
+      </div>
     ) : null}
 
     {page.blocks.map((b, i) => {
@@ -163,10 +212,36 @@ const Sheet: React.FC<{
       const caret = index === caretIndex;
       switch (b.t) {
         case "h":
-          return (
+          return b.level === 2 ? (
             <div
               key={index}
-              style={{ fontSize: 13.5, lineHeight: 1.9, marginTop: i === 0 ? 0 : 12, color: "#202124", fontWeight: 700, wordBreak: "keep-all" }}
+              style={{
+                fontSize: 11.5,
+                lineHeight: 1.7,
+                marginTop: i === 0 ? 0 : 10,
+                marginBottom: 1,
+                color: "#202124",
+                fontWeight: 650,
+                letterSpacing: "-0.1px",
+                wordBreak: "keep-all",
+              }}
+            >
+              {b.text}
+              {caret ? <Caret /> : null}
+            </div>
+          ) : (
+            <div
+              key={index}
+              style={{
+                fontSize: 12.5,
+                lineHeight: 1.7,
+                marginTop: i === 0 ? 0 : 16,
+                marginBottom: 2,
+                color: "#202124",
+                fontWeight: 700,
+                letterSpacing: "-0.2px",
+                wordBreak: "keep-all",
+              }}
             >
               {b.text}
               {caret ? <Caret /> : null}
@@ -174,21 +249,33 @@ const Sheet: React.FC<{
           );
         case "p":
           return (
-            <div key={index} style={{ fontSize: 12.5, lineHeight: 1.95, marginTop: 4, color: "#3c4043", wordBreak: "keep-all" }}>
+            <div key={index} style={{ ...BODY, marginTop: 5, textIndent: "1em" }}>
               {b.text}
               {caret ? <Caret /> : null}
+            </div>
+          );
+        case "list":
+          return (
+            <div key={index} style={{ marginTop: 5, marginBottom: 2 }}>
+              {b.items.map((it, j) => (
+                <div key={j} style={{ ...BODY, paddingLeft: 12, marginBottom: 2 }}>
+                  {it}
+                </div>
+              ))}
             </div>
           );
         case "quote":
           return <Pasted key={index} block={b} flash={index === lastIndex ? pasteFlash : 0} />;
         case "gap":
           return (
-            <div key={index} style={{ fontSize: 12.5, lineHeight: 1.95, minHeight: 24 }}>
+            <div key={index} style={{ fontSize: 11.5, lineHeight: 1.62, minHeight: 19 }}>
               {caret ? <Caret /> : null}
             </div>
           );
         case "chart":
           return <Figure key={index} caption={b.caption} />;
+        case "refs":
+          return <Bibliography key={index} block={b} />;
       }
     })}
   </div>

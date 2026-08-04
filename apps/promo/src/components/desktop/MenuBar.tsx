@@ -36,7 +36,11 @@ const StatusIcons: React.FC = () => (
   </svg>
 );
 
-export const MenuBar: React.FC<{ clock: string; app: MenuBarApp }> = ({ clock, app }) => (
+export const MenuBar: React.FC<{ clock: string; app: MenuBarApp; rush?: number }> = ({
+  clock,
+  app,
+  rush = 0,
+}) => (
   <div
     style={{
       position: "absolute",
@@ -64,6 +68,22 @@ export const MenuBar: React.FC<{ clock: string; app: MenuBarApp }> = ({ clock, a
     <div style={{ flex: 1 }} />
     <StatusIcons />
     <span style={{ fontWeight: 450, letterSpacing: "-0.1px" }}>8월 4일 (화)</span>
-    <span style={{ fontWeight: 450, letterSpacing: "-0.1px", fontVariantNumeric: "tabular-nums" }}>{clock}</span>
+    {/*
+      Tabular figures so a spinning minute does not shove the whole clock sideways, and a
+      touch of blur while it spins — a camera pointed at a fast dial would smear it, and
+      without that cue a digit changing every frame just reads as a glitch. The date next
+      to it stays sharp, which is what makes the smear legible as speed.
+    */}
+    <span
+      style={{
+        fontWeight: 450,
+        letterSpacing: "-0.1px",
+        fontVariantNumeric: "tabular-nums",
+        filter: rush > 0 ? `blur(${(0.9 * rush).toFixed(2)}px)` : undefined,
+        opacity: 1 - 0.15 * rush,
+      }}
+    >
+      {clock}
+    </span>
   </div>
 );

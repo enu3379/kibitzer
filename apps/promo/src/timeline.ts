@@ -59,8 +59,8 @@ export const beat = {
    * characters, which is not typing so much as the memory of having typed.
    *
    * The long method-and-findings blocks run at 0.02 frames per character inside the
-   * stretches where the browser covers the writing app. That is the fifteen minutes the
-   * menu-bar clock jumps over: off camera, the writer kept writing.
+   * stretches where the browser covers the writing app. Those are the stretches the
+   * menu-bar clock spins through: off camera, the writer kept writing.
    */
 
   /* --- opening: find the first source properly (readable speed) */
@@ -68,30 +68,39 @@ export const beat = {
   result1Click: 70,
   newsEnter: 72,
 
-  /* --- cycle A: write, then go find the numbers */
+  /* --- cycle A: write, then go find the numbers
+   * The off-camera beats are named for the section they deliver, because that is the only
+   * thing that identifies them — none of them is ever seen landing.
+   */
   switchToEditor1: 84,
+  /** §1 heading. */
   writeH1: 90,
   writeP1: 97,
   writeP2: 108,
   switchToBrowser1: 114,
-  writeP3: 120, // off camera
+  /** off camera — rest of §1: the LTV/CAC critique, prior work, the research questions. */
+  writeIntroBody: 120,
   searchEnter2: 120,
-  writeP4: 124, // off camera
+  /** off camera — §2.1–2.3: sample, operational definitions, caveats. */
+  writeMethod: 124,
   result2Click: 126,
   statsEnter: 128,
 
   /* --- cycle B: copy the channel table into the report */
   select1: 133,
-  writeP5: 136, // off camera
+  /** off camera — §2.4 descriptive statistics, ending on the line [자료 1] lands under. */
+  writeStats: 136,
   copy1: 139,
   switchToEditor2: 143,
   paste1: 149,
+  /** §3 heading. */
   writeH2: 154,
   writeP6: 161,
 
   /* --- cycle C: the peak. A third source, up for ten frames. */
   switchToBrowser2: 170,
-  writeP7: 174, // off camera
+  /** off camera — §3.1 coupons, and the §3.2 sub-head the next typed block opens under. */
+  writeCoupon: 174,
   searchEnter3: 176,
   result3Click: 180,
   cohortsEnter: 181,
@@ -103,7 +112,8 @@ export const beat = {
   switchToBrowser3: 202,
   newsReturn: 205,
   select2: 209,
-  writeP9: 212, // off camera
+  /** off camera — rest of §3.2, the cohort table [자료 2], and §3.3 curation. */
+  writeCuration: 212,
   copy2: 215,
   switchToEditor4: 218,
   paste2: 224,
@@ -176,16 +186,27 @@ export const beat = {
   switchToEditor5: 732,
   switchToBrowser5: 748,
   newResearchTab: 754,
+  /** off camera — §3.4, the soft conclusion the drift interrupted mid-thought. */
+  writeSynthesis: 756,
   researchLoad: 762,
   praiseIn: 764,
+  /** off camera — §4, the size-band analysis, and the figure that closes it. */
+  writeRetention: 768,
 
   /* --------------------------------------------------------- S7 finish + wrap up (130f) */
   praiseOut: 788,
   switchToEditor6: 792,
+  /** §5 heading — the conclusion, and the last thing typed on camera. */
   writeH3: 798,
   writeP12: 804,
   writeP13: 812,
   writeP14: 822,
+  /**
+   * The bibliography lands, and the document is finished. The figure it refers to was
+   * already written into §4 off camera — a figure belongs in the section that analyses
+   * it, and putting the reference list last is what makes the closing frame read as a
+   * paper rather than as a slide.
+   */
   chartIn: 832,
   switchToBrowser6: 840,
   mailOpen: 846,
@@ -208,43 +229,114 @@ export const sfx = [
 ] as const;
 
 /**
- * Menu-bar clock. Absolute frame -> displayed time.
+ * Menu-bar clock — a dial that speeds up and slows down, not a label that snaps.
  *
- * Two spans have to read as real elapsed time: the research loop (2:00 → 3:02, the
- * "about an hour" of actual work) and the drift (3:04 → 3:30). The snooze at 3:15 and
- * nudge #3 at 3:29 are what make "벌써 14분째" literally true on screen.
+ * Each anchor pins a frame to the minute it must display; between two anchors the time
+ * *runs*, eased in and out, so a stretch that covers fifteen minutes spends half a second
+ * visibly spinning through them. Where the film is watching something in real time the
+ * two ends of a segment carry the same minute, and the clock simply holds — the S1 setup,
+ * the caret void at the end of S2, and the whole of the S5 freeze are flat on purpose.
+ *
+ * The rate is what the audience actually reads. A hold says "this is happening now"; a
+ * blur of digits says "an hour of this went by". Snapping said neither, because a value
+ * that changes between two frames and never again is indistinguishable from a cut.
+ *
+ * Anchors must be in strictly ascending frame order — a zero-width segment divides by
+ * zero, and an inverted one runs time backwards.
+ *
+ * Two spans carry copy that has to be literally true on screen:
+ *   snoozeClick 3:15 → nudge3In 3:29   = "벌써 14분째"
+ *   igEnter 3:04 → returnToGoalTab 3:30 = "26분 만의 복귀"
+ * Both endpoints are anchors, so they display exactly, whatever the easing does between.
  */
-export const clockSteps: ReadonlyArray<{ from: number; label: string }> = [
-  { from: 0, label: "오후 2:00" },
-  { from: beat.newsEnter, label: "오후 2:04" },
-  { from: beat.switchToEditor1, label: "오후 2:11" },
-  { from: beat.statsEnter, label: "오후 2:26" },
-  { from: beat.paste1, label: "오후 2:33" },
-  { from: beat.cohortsEnter, label: "오후 2:41" },
-  { from: beat.switchToEditor4, label: "오후 2:55" },
-  { from: beat.writeP11, label: "오후 2:58" },
-  { from: beat.enter2, label: "오후 3:02" },
-  { from: beat.igEnter, label: "오후 3:04" },
-  { from: beat.igDmEnter, label: "오후 3:06" },
-  { from: beat.musicOpen, label: "오후 3:09" },
-  { from: beat.nudge1In, label: "오후 3:11" },
-  { from: beat.nudge2In, label: "오후 3:14" },
-  { from: beat.snoozeClick, label: "오후 3:15" },
-  { from: beat.shopEnter, label: "오후 3:18" },
-  { from: beat.cart3, label: "오후 3:22" },
-  { from: beat.cart6, label: "오후 3:26" },
-  { from: beat.cartViewEnter, label: "오후 3:29" },
-  { from: beat.returnToGoalTab, label: "오후 3:30" },
-  { from: beat.praiseIn, label: "오후 3:31" },
-  { from: beat.switchToEditor6, label: "오후 3:38" },
-  { from: beat.mailOpen, label: "오후 3:52" },
-  { from: beat.popupOpen2, label: "오후 3:55" },
+type ClockAnchor = { at: number; min: number };
+
+/** 오후 2:00, in minutes past midnight. */
+const CLOCK_ORIGIN = 14 * 60;
+
+export const clockAnchors: readonly ClockAnchor[] = [
+  { at: 0, min: 0 },
+  /* S1 — two seconds of real time; the clock does not move. */
+  { at: scene.s2Research.from, min: 0 },
+  /* S2 — finding, reading, and the stretches where the browser covers the writing. */
+  { at: beat.newsEnter, min: 4 },
+  { at: beat.switchToEditor1, min: 11 },
+  /** On camera in the writing app: near real time. */
+  { at: beat.switchToBrowser1, min: 13 },
+  /** First run-up — thirteen minutes in fourteen frames. */
+  { at: beat.statsEnter, min: 26 },
+  { at: beat.copy1, min: 28 },
+  { at: beat.paste1, min: 33 },
+  { at: beat.switchToBrowser2, min: 36 },
+  { at: beat.cohortsEnter, min: 41 },
+  { at: beat.switchToEditor3, min: 42 },
+  { at: beat.switchToBrowser3, min: 44 },
+  /** The last and longest run-up, straight into the slowdown. */
+  { at: beat.switchToEditor4, min: 55 },
+  { at: beat.writeP11, min: 58 },
+  { at: beat.enter2, min: 62 },
+  /** Nothing on screen but a caret — and a clock that has stopped with it. */
+  { at: scene.s3Messages.from, min: 62 },
+  /* S3–S4 — the drift runs close to real time; it is meant to feel like no time at all. */
+  { at: beat.igEnter, min: 64 },
+  { at: beat.igDmEnter, min: 66 },
+  { at: beat.musicOpen, min: 69 },
+  { at: beat.nudge1In, min: 71 },
+  { at: beat.nudge2In, min: 74 },
+  { at: beat.snoozeClick, min: 75 },
+  { at: beat.shopEnter, min: 78 },
+  { at: beat.cart3, min: 82 },
+  { at: beat.cart6, min: 86 },
+  { at: beat.cartViewEnter, min: 89 },
+  /** S5 — everything stops, the clock included. */
+  { at: beat.freezeEnd, min: 89 },
+  { at: beat.returnToGoalTab, min: 90 },
+  /* S6–S7 */
+  { at: beat.praiseIn, min: 91 },
+  { at: beat.switchToEditor6, min: 98 },
+  /**
+   * The conclusion is typed on camera, so it costs about what it looks like it costs —
+   * and the run-up holds off until the finished document has had a few frames to read.
+   */
+  { at: beat.chartIn + 4, min: 101 },
+  /** Done writing — the last run-up covers exporting, attaching, and opening the mail. */
+  { at: beat.mailOpen, min: 112 },
+  { at: beat.popupOpen2, min: 115 },
+  { at: TOTAL_FRAMES, min: 115 },
 ];
 
+/** Accelerate, run, settle. The easing is the whole effect. */
+const easeInOut = (p: number): number => (p < 0.5 ? 2 * p * p : 1 - ((-2 * p + 2) ** 2) / 2);
+
+/** Minutes past midnight at `frame`. Fractional — `frame` may be fractional too. */
+export const clockMinutesAt = (frame: number): number => {
+  if (frame <= clockAnchors[0].at) return CLOCK_ORIGIN + clockAnchors[0].min;
+  for (let i = 1; i < clockAnchors.length; i++) {
+    const b = clockAnchors[i];
+    if (frame > b.at) continue;
+    const a = clockAnchors[i - 1];
+    const span = a.min + (b.min - a.min) * easeInOut((frame - a.at) / (b.at - a.at));
+    return CLOCK_ORIGIN + span;
+  }
+  return CLOCK_ORIGIN + clockAnchors[clockAnchors.length - 1].min;
+};
+
 export const clockAt = (frame: number): string => {
-  let label = clockSteps[0].label;
-  for (const step of clockSteps) if (frame >= step.from) label = step.label;
-  return label;
+  // The epsilon keeps an anchor frame from landing on 88.99999 and displaying 3:28.
+  const total = Math.floor(clockMinutesAt(frame) + 1e-6);
+  const h24 = Math.floor(total / 60);
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${h24 < 12 ? "오전" : "오후"} ${h12}:${String(total % 60).padStart(2, "0")}`;
+};
+
+/**
+ * How hard the clock is running right now, 0–1 — drives a little motion blur on the
+ * digits. Below ~0.15 minutes per frame the minute changes slowly enough to read, and
+ * blurring a readable clock would look like a defect rather than like speed.
+ */
+export const clockRushAt = (frame: number): number => {
+  const perFrame = clockMinutesAt(frame + 0.5) - clockMinutesAt(frame - 0.5);
+  return Math.max(0, Math.min(1, (perFrame - 0.15) / 0.85));
 };
 
 export const seconds = (frames: number): number => frames / FPS;

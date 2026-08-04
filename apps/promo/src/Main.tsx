@@ -1,6 +1,6 @@
 import React from "react";
 import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame } from "remotion";
-import { beat, clockAt, scene, sfx } from "./timeline";
+import { beat, clockAt, clockRushAt, scene, sfx } from "./timeline";
 import { CURSOR_PATH, EditorState, PageKind, stageAt } from "./scenes/script";
 import { cursorAt } from "./lib/cursor";
 import { range } from "./lib/anim";
@@ -123,7 +123,7 @@ export const Main: React.FC = () => {
   return (
     <AbsoluteFill style={{ background: "#000" }}>
       <AbsoluteFill style={{ opacity: 1 - endIn }}>
-        <MacDesktop clock={clockAt(frame)} app={st.focus} zoom={st.zoom}>
+        <MacDesktop clock={clockAt(frame)} clockRush={clockRushAt(frame)} app={st.focus} zoom={st.zoom}>
           {/* Stacking order follows focus: the frontmost app is rendered last. */}
           {browserFocused ? [editor, browser] : [browser, editor]}
           {st.switcher ? <AppSwitcher selected={st.switcher.selected} opacity={st.switcher.opacity} /> : null}

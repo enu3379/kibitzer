@@ -15,78 +15,119 @@ export type SearchResult = {
   snippet: string;
 };
 
-/** One set per search in the scene; the highlighted row is the one about to be clicked. */
-export const SEARCHES: ReadonlyArray<{ query: string; results: readonly SearchResult[]; pick: number }> = [
+/**
+ * One set per search in the scene; the highlighted row is the one about to be clicked.
+ *
+ * The three queries are the report's three research questions in the order it asks them —
+ * what the instruments cost, how cost trades against retention, and what the curve looks
+ * like underneath. The rows that are *not* clicked are the two strands of prior work §1
+ * says the literature splits into: attribution accuracy on one side, discount elasticity
+ * on the other. Passing over them on the way to a third source is what makes §1's "두
+ * 갈래 모두 획득을 하나의 사건으로 취급한다" read as a decision rather than an assertion.
+ */
+export const SEARCHES: ReadonlyArray<{
+  query: string;
+  results: readonly SearchResult[];
+  pick: number;
+  /** Bottom-of-page chips. They are where the *next* query in the scene comes from. */
+  related: readonly string[];
+}> = [
   {
     query: "marketplace customer acquisition cost benchmark",
     pick: 0,
+    related: [
+      "acquisition cost by channel 2026",
+      "first order discount churn rate",
+      "why LTV/CAC is circular",
+      "last touch attribution bias",
+    ],
     results: [
       {
         site: "commerceweekly.com",
         url: "commerceweekly.com › analysis › how-marketplaces-buy",
         title: "How Marketplaces Buy Their First Million Customers",
         snippet:
-          "Coupons remain the fastest lever, but discount-acquired cohorts churn at nearly twice the rate of every other channel …",
+          "The cost of a first order runs three to four times monthly revenue per active user — and discount-acquired cohorts churn at nearly twice the rate of every other channel …",
       },
       {
         site: "retailops.io",
-        url: "retailops.io › guides › cac-by-channel",
-        title: "CAC by channel: a practical breakdown",
-        snippet: "A working guide to separating blended acquisition cost into per-channel figures you can actually act on …",
+        url: "retailops.io › guides › attribution-windows",
+        title: "Last touch, first touch, and what each one hides",
+        snippet:
+          "Tightening the attribution window improves apparent accuracy and systematically under-counts anything that converts slowly …",
       },
       {
         site: "thelanding.dev",
-        url: "thelanding.dev › posts › paid-vs-organic-2026",
-        title: "Paid vs organic in 2026 — what actually changed",
-        snippet: "Attribution windows shortened again this year, which makes year-over-year comparisons quietly misleading …",
+        url: "thelanding.dev › posts › discount-elasticity-2026",
+        title: "Discount elasticity, re-estimated for 2026",
+        snippet:
+          "Every model here stops at the first purchase. Depth of discount predicts conversion well and predicts nothing after it …",
       },
     ],
   },
   {
     query: "channel level CAC vs D90 retention dashboard",
     pick: 1,
+    related: [
+      "D90 retention benchmark ecommerce",
+      "membership payback period months",
+      "steps to first order cost",
+      "CAC won dollar conversion 2026",
+    ],
     results: [
       {
         site: "retailops.io",
-        url: "retailops.io › tools › retention-calculator",
-        title: "Retention calculator (free)",
-        snippet: "Enter cohort size and repeat rate to estimate ninety-day survival by acquisition instrument …",
+        url: "retailops.io › guides › ltv-cac-is-circular",
+        title: "Why LTV/CAC cannot tell you what you want to know",
+        snippet:
+          "The numerator is a forecast and the forecast already takes retention as an input, so the ratio holds steady while the business does not …",
       },
       {
         site: "app.marketpulse.io",
         url: "app.marketpulse.io › acquisition › channels",
         title: "Acquisition Analytics — Channel Breakdown",
-        snippet: "Live dashboard: blended CAC, D90 retention and ROI for every acquisition channel over the last 90 days …",
+        snippet:
+          "12 platforms · 72 monthly cohorts · 1.18M signups. CAC, D90 retention and ROI per instrument, with cost dispersion and steps to first order …",
       },
       {
         site: "commerceweekly.com",
         url: "commerceweekly.com › data › methodology",
         title: "How we count a new customer",
-        snippet: "Signup to first order is the acquisition window; reinstalls on an existing account are not counted as new …",
+        snippet:
+          "Signup to first order is the acquisition window; reinstalls on an existing account are not counted as new, and impression-only traffic is excluded …",
       },
     ],
   },
   {
     query: "membership cohort retention curve d90",
     pick: 2,
+    related: [
+      "retention slope first 14 days",
+      "curation catalogue depth threshold",
+      "cohort censoring incomplete D90",
+      "membership retention benchmark 2026",
+    ],
     results: [
       {
         site: "thelanding.dev",
         url: "thelanding.dev › posts › cohort-charts-that-lie",
         title: "Cohort charts that lie to you",
-        snippet: "A single ninety-day number for a whole platform describes nothing, and averaging two of them describes less …",
+        snippet:
+          "A single ninety-day number for a whole platform describes nothing, and a chart that hides its censored cohorts describes less …",
       },
       {
         site: "retailops.io",
         url: "retailops.io › guides › membership-payback",
         title: "Membership payback periods, measured",
-        snippet: "Paid tiers convert slower and cost more up front, then hold far above the category average …",
+        snippet:
+          "Paid tiers convert at a third of the coupon rate and cost more up front, then break even near month four and keep going …",
       },
       {
         site: "app.marketpulse.io",
         url: "app.marketpulse.io › cohorts › retention",
         title: "Retention Cohorts — survival to D90",
-        snippet: "Retention decay per acquisition instrument, with the monthly signup grid underneath …",
+        snippet:
+          "Decay per instrument sampled at D0/7/14/30/60/90, discount depth against D90, and the monthly signup grid with incomplete cohorts marked …",
       },
     ],
   },
@@ -209,6 +250,35 @@ export const SearchMock: React.FC<{
             <div style={{ fontSize: 12, lineHeight: 1.55, color: "#4d5156" }}>{r.snippet}</div>
           </div>
         ))}
+
+        {/* Related searches. The last chip of set 3 is the query typed after the return —
+            the research thread was already on the page before the drift interrupted it. */}
+        <div style={{ marginTop: 10, paddingTop: 16, borderTop: "1px solid #ebedef" }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: "#202124", marginBottom: 11 }}>관련 검색어</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 9 }}>
+            {s.related.map((q) => (
+              <span
+                key={q}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  background: "#f1f3f4",
+                  borderRadius: 999,
+                  padding: "8px 15px 8px 12px",
+                  fontSize: 11.5,
+                  color: "#202124",
+                }}
+              >
+                <svg width={12} height={12} viewBox="0 0 24 24" aria-hidden style={{ flexShrink: 0 }}>
+                  <circle cx="10" cy="10" r="7" fill="none" stroke="#5f6368" strokeWidth="2.6" />
+                  <path d="M15 15 L21 21" stroke="#5f6368" strokeWidth="2.8" strokeLinecap="round" />
+                </svg>
+                {q}
+              </span>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
