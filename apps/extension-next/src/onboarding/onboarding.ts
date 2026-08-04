@@ -7,7 +7,7 @@ import { showKibitzerToast } from "../content/toastOverlay.ts"
 import { sundialSVG } from "../lib/sundial.ts"
 import { bandOf } from "../lib/sessionStats.ts"
 import { PERSONAS, PERSONA_DEFAULT } from "../lib/personas.data.ts"
-import { DEFAULT_PERSONA_KEYS } from "../lib/personas.ts"
+import { DEFAULT_PERSONA_KEYS, fillTemplate } from "../lib/personas.ts"
 
 interface WizardState {
   persona?: string
@@ -76,9 +76,7 @@ prev.addEventListener("click", () => go(cur - 1))
 next.addEventListener("click", () => go(cur + 1))
 
 // --- persona copy (real fallback templates, demo context) --------------------------
-
-const fillTemplate = (template: string, ctx: Record<string, string>): string =>
-  template.replace(/\{(\w+)\}/g, (_, key: string) => ctx[key] ?? "")
+// fillTemplate is the shared particle-aware fill: "{goal}이" + "논문 정리" → "논문 정리가".
 
 let currentPersona = PERSONA_DEFAULT
 
