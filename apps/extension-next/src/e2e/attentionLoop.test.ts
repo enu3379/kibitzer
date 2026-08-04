@@ -158,6 +158,11 @@ console.debug = () => {}
 
 // Import the real SW (registers its listeners on the mock above).
 await import("../background.ts")
+// Settle the restart-decision barrier once, exactly as a real launch does (Chrome dispatches
+// runtime.onStartup before any user interaction): observe()/heartbeat/get-state now await
+// startupSettled, and without this the suite's first observations would stall on its 1.5 s
+// fallback timer instead. No goal exists yet, so the handler itself is a no-op.
+for (const fn of listeners["runtime.onStartup"]) await fn()
 const { extractActiveExcerpt, setActivePage, testNag } = await import("../lib/gaugeRuntime.ts")
 const { getGoal } = await import("../lib/session.ts")
 

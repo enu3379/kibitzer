@@ -12,6 +12,9 @@ Core components:
 
 - `src/background.ts` — authoritative nav → Tier 0/1/2 → gauge → delivery pipeline.
 - `src/lib/db.ts` / `gaugeRuntime.ts` — IndexedDB SSOT, durable outbox, and runtime wiring.
+- `src/lib/sessionRestore.ts` — browser-restart policy: ≤5-min relaunch continues the
+  session (clock rebase, no gap integration); longer gaps park it as a resumable
+  "suspended session" (`session.ts`) the popup can 이어가기.
 - `src/content/`, `src/offscreen.ts`, `src/popup/`, `src/options/` — browser surfaces.
 
 There is no server client, port discovery, or shadow runtime.

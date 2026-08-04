@@ -1,0 +1,48 @@
+{
+  "name": "inactive-rebases-clock-no-integration",
+  "kind": "golden",
+  "description": "Contract §5: `inactive` rebases the clock and integrates nothing. A 10-minute gap on a DRIFT page ends with an inactive event (the browser-restart continue path emits exactly this), then a 60s heartbeat. S and m must be identical to fixture 01's single 60s heartbeat — proving the gap was absorbed by the rebase, not integrated under the pre-shutdown verdict (not even the gapCap's 90s).",
+  "config": {
+    "rDrain": 0.1,
+    "rRecover": 0.1,
+    "accel": [1.0, 1.5, 2.5],
+    "tauM": 300,
+    "tUp": [0.5, 0.8],
+    "tDown": [0.2, 0.5],
+    "kRecover": 2,
+    "gapCap": 90,
+    "rRenag": 40,
+    "bBackoff": 2.0,
+    "rRenagMax": 320,
+    "cArm": 20,
+    "cCelebrate": 80,
+    "rDismiss": 30,
+    "bRefund": 10,
+    "freshWindow": 600,
+    "degradedP": 3,
+    "degradedM": 0.25
+  },
+  "initial_state": {
+    "s": 100,
+    "m": 0,
+    "accelTier": 0,
+    "updatedAt": 0,
+    "activePageKey": "example.com/drift",
+    "activeVerdict": "DRIFT",
+    "degraded": false
+  },
+  "events": [
+    { "type": "inactive", "ts": 600000 },
+    { "type": "heartbeat", "ts": 660000 }
+  ],
+  "tolerance": 1e-6,
+  "expected": {
+    "final_state": {
+      "s": 94.0,
+      "m": 0.18126924692201818,
+      "accelTier": 0,
+      "updatedAt": 660000
+    },
+    "effects_contain": []
+  }
+}
