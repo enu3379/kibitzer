@@ -24,6 +24,13 @@
         --ok-fg: #175f3b; --err-soft: #f7e2e0; --err-fg: #8f322c;
         --shadow: 0 12px 32px rgba(28, 36, 32, .08);
         --popup-bg: #ffffff;
+        /* Optical centring for the numbered step badges (.callout / .co / .legend .n).
+           Their content is a plain digit, whose ink box the grid centres geometrically —
+           but a cap-height-only glyph reads a touch low there, so nudge it up. Applied as
+           padding-bottom ×2: with border-box + a fixed height, bottom padding shrinks the
+           content box from below and place-items:center re-centres inside it, moving the
+           digit up by half the padding. So this value IS the pixel shift. */
+        --num-nudge: 0.5px;
       }
       @media (prefers-color-scheme: dark) {
         :root {
@@ -177,7 +184,8 @@
       .callout {
         position: absolute; z-index: 5; width: 20px; height: 20px; border-radius: 50%;
         background: var(--accent); color: var(--accent-ink); font-size: 11.5px; font-weight: 800;
-        display: grid; place-items: center; box-shadow: 0 2px 8px rgba(0,0,0,.25);
+        display: grid; place-items: center; padding-bottom: calc(var(--num-nudge) * 2);
+        box-shadow: 0 2px 8px rgba(0,0,0,.25);
       }
       .kholder { position: absolute; top: 10px; right: 10px; width: 164px; height: 206px; z-index: 3; }
       .kholder .kpopup { position: absolute; top: 0; right: 0; transform: scale(.55); transform-origin: top right; }
@@ -192,7 +200,8 @@
       .legend li { display: flex; gap: 9px; font-size: 12.5px; color: var(--page-ink-2); align-items: baseline; }
       .legend .n {
         flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--accent-soft); color: var(--ok-fg);
-        font-size: 10.5px; font-weight: 800; display: grid; place-items: center; transform: translateY(3px);
+        font-size: 10.5px; font-weight: 800; display: grid; place-items: center;
+        padding-bottom: calc(var(--num-nudge) * 2); transform: translateY(3px);
       }
       .legend b { color: var(--page-ink); }
       .ldot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 1px 0 3px; transform: translateY(0.5px); }
@@ -228,7 +237,8 @@
       .pindemo .co {
         position: absolute; top: -9px; right: -9px; z-index: 5; width: 18px; height: 18px; border-radius: 50%;
         background: var(--accent); color: var(--accent-ink); font-size: 10.5px; font-weight: 800;
-        display: grid; place-items: center; box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
+        display: grid; place-items: center; padding-bottom: calc(var(--num-nudge) * 2);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
       }
       .d-cap { font-size: 11.5px; color: var(--page-ink-3); text-align: center; margin: 12px 0 0; }
       .d-cap b { color: var(--page-ink-2); }
@@ -436,7 +446,7 @@
                     <i class="dot"></i>
                   </span>
                 </span>
-                <span class="callout" style="right: 2px; top: 26px;">①</span>
+                <span class="callout" style="right: 2px; top: 26px;">1</span>
               </div>
               <div class="chrome-page">
                 <span class="skel" style="top: 18px; width: 50%; height: 12px;"></span>
@@ -469,19 +479,19 @@
                     <span class="kbtn kghost" style="display:block; text-align:center">설정</span>
                   </div>
                 </div>
-                <span class="callout" style="right: 180px; top: 16px;">②</span>
+                <span class="callout" style="right: 180px; top: 16px;">2</span>
                 <div class="mini-toast">
                   <p class="mb">Kibitzer</p>
                   <p class="mm" id="miniToastMsg">대단히 생산적인 방문이군요.</p>
                 </div>
-                <span class="callout" style="right: 196px; bottom: 30px;">③</span>
+                <span class="callout" style="right: 196px; bottom: 30px;">3</span>
               </div>
             </div>
 
             <ul class="legend">
-              <li><span class="n">①</span><span><b>툴바 아이콘의 색 점</b> — 지금 상태를 조용히 표시합니다. <span class="ldot" style="background:#1f9d6b"></span>몰입 <span class="ldot" style="background:#e0a100"></span>주의 <span class="ldot" style="background:#d1495b"></span>이탈 <span class="ldot" style="background:#8a8a90"></span>조용히 중.</span></li>
-              <li><span class="n">②</span><span><b>팝업</b> — 아이콘을 누르면 열립니다. 목표, 해시계(남은 시간), 몰입 게이지, 일시정지가 여기에.</span></li>
-              <li><span class="n">③</span><span><b>훈수</b> — 딴길이 쌓이면 보고 있던 페이지의 오른쪽 아래에 나타납니다. 답하거나 닫으면 그만.</span></li>
+              <li><span class="n">1</span><span><b>툴바 아이콘의 색 점</b> — 지금 상태를 조용히 표시합니다. <span class="ldot" style="background:#1f9d6b"></span>몰입 <span class="ldot" style="background:#e0a100"></span>주의 <span class="ldot" style="background:#d1495b"></span>이탈 <span class="ldot" style="background:#8a8a90"></span>조용히 중.</span></li>
+              <li><span class="n">2</span><span><b>팝업</b> — 아이콘을 누르면 열립니다. 목표, 해시계(남은 시간), 몰입 게이지, 일시정지가 여기에.</span></li>
+              <li><span class="n">3</span><span><b>훈수</b> — 딴길이 쌓이면 보고 있던 페이지의 오른쪽 아래에 나타납니다. 답하거나 닫으면 그만.</span></li>
             </ul>
             <button class="btn" id="tryToast">▶ 연습 훈수 받아보기</button>
             <p class="footnote">실제 위치(이 화면 오른쪽 아래)에 실물 훈수가 그대로 뜹니다. 연습 훈수의 응답은 기록되지 않습니다.</p>
@@ -497,7 +507,7 @@
                 <div class="d-toolbar">
                   <span class="d-url"></span>
                   <span class="d-slot"><span class="kicon"><img src="../icons/icon-32.png" alt="" /><i class="dot"></i></span></span>
-                  <span class="d-puzzle"><svg class="puzzle-svg" aria-hidden="true"><use href="#i-puzzle"/></svg><span class="co">①</span></span>
+                  <span class="d-puzzle"><svg class="puzzle-svg" aria-hidden="true"><use href="#i-puzzle"/></svg><span class="co">1</span></span>
                 </div>
                 <div class="d-menu">
                   <div class="d-row">
@@ -508,7 +518,7 @@
                         <path class="po" d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4m3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z"/>
                         <path class="pf" d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z"/>
                       </svg>
-                      <span class="co">②</span>
+                      <span class="co">2</span>
                     </span>
                   </div>
                 </div>
