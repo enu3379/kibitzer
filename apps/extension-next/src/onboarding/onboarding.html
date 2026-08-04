@@ -246,7 +246,8 @@
         box-shadow: var(--shadow); animation: nudge-bob 2.4s ease-in-out infinite;
       }
       .nudge[hidden] { display: none; }
-      .nudge .up { color: var(--accent); font-size: 13px; }
+      /* The glyph's own bearing already leaves space on its left and sits low in the line box. */
+      .nudge .up { color: var(--accent); font-size: 15px; line-height: 1; margin-left: -4px; transform: translateY(-1.5px); }
       @keyframes nudge-bob { 50% { transform: translateY(-4px); } }
       .nudge.on { border-style: solid; background: var(--accent); color: var(--accent-ink); animation: nudge-fade .5s ease-in 1.4s forwards; }
       .nudge.on .up { color: var(--accent-ink); }
@@ -597,7 +598,7 @@
     <div class="nudge" id="nudge" hidden>
       <span class="pl-off">진짜 <svg class="puzzle-svg" aria-hidden="true"><use href="#i-puzzle"/></svg>는 바로 위에 있어요</span>
       <span class="pl-on">고정됐어요!</span>
-      <span class="up">↗</span>
+      <span class="up">↑</span>
     </div>
     <script type="module" src="onboarding.js"></script>
   </body>
