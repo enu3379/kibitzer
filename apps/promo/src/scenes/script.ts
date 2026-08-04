@@ -23,9 +23,10 @@ import {
   researchQuery,
   tabs as tabTitles,
 } from "../copy";
-import { SWITCHER_FRAMES, beat, clockAt, scene } from "../timeline";
+import { SWITCHER_FRAMES, beat, clockAt, driveAt, scene } from "../timeline";
 import { between, progress, range, toastEase } from "../lib/anim";
-import { typed } from "../lib/typewriter";
+import { typed, typedEnd } from "../lib/typewriter";
+import { KeyPress, SfxCue, TypingRun, clickCues, keyboardCues, mergeInput } from "../lib/inputsfx";
 import { layout, scrollFor } from "../lib/doclayout";
 import { Waypoint } from "../lib/cursor";
 import { OmniState, TabSpec, tabBaseWidth, tabCloseX } from "../components/browser/BrowserWindow";
@@ -476,6 +477,22 @@ const keyHintAt = (frame: number): KeyHintState | null => {
   return hint;
 };
 
+/*
+ * Typing rates that are not derived from a gap, named because the keystroke cues at the
+ * bottom of this file have to reproduce them exactly. A literal in two places is a
+ * literal that will eventually disagree with itself.
+ *
+ * The two searches run at a rate no hand could reach, and are meant to: an address bar
+ * with four words already in it is autocomplete, not typing, and the film has no time to
+ * pretend otherwise. The goal and the mall query are the ones you watch being written.
+ */
+const GOAL_RATE = 1.55;
+const SEARCH_RATE = 0.16;
+const SEARCH_LEAD = 6;
+const RESEARCH_RATE = 0.4;
+const PORTAL_QUERY = "러닝화 추천";
+const PORTAL_RATE = 1.1;
+
 /* ------------------------------------------------------------------ S1 — goal declaration */
 
 const s1 = (frame: number, st: Stage): void => {
@@ -499,7 +516,7 @@ const s1 = (frame: number, st: Stage): void => {
       frame < beat.startClick + 2
         ? {
             kind: "setup",
-            goal: typed(GOAL, frame, beat.goalTypeStart, 1.55),
+            goal: typed(GOAL, frame, beat.goalTypeStart, GOAL_RATE),
             // The budget is a select now, so it reads its default from the first frame —
             // there is nothing to type and the pointer never goes near it.
             duration: GOAL_BUDGET_LABEL,
@@ -555,7 +572,7 @@ const CYCLES: readonly Cycle[] = [
 const searchPage = (frame: number, c: Cycle): PageKind => ({
   k: "search",
   set: c.set,
-  query: typed(SEARCHES[c.set].query, frame, c.searchAt - 6, 0.16),
+  query: typed(SEARCHES[c.set].query, frame, c.searchAt - SEARCH_LEAD, SEARCH_RATE),
   hot: frame >= c.clickAt - 5 ? SEARCHES[c.set].pick : null,
 });
 
@@ -872,7 +889,7 @@ const s4 = (frame: number, st: Stage): void => {
     st.url = URL.portal;
     st.page = {
       k: "portal",
-      query: typed("러닝화 추천", frame, beat.portalQuery, 1.1),
+      query: typed(PORTAL_QUERY, frame, beat.portalQuery, PORTAL_RATE),
       adHot: between(frame, beat.shopEnter - 8, beat.shopEnter) ? 0 : null,
     };
     return;
@@ -1074,7 +1091,11 @@ const s6 = (frame: number, st: Stage): void => {
     } else {
       st.url = URL.newtab;
       st.page = { k: "newtab" };
-      st.omni = { typed: typed(researchQuery, frame, beat.newResearchTab + 2, 0.4), completion: "", suggestion: null };
+      st.omni = {
+        typed: typed(researchQuery, frame, beat.newResearchTab + 2, RESEARCH_RATE),
+        completion: "",
+        suggestion: null,
+      };
     }
   }
 
@@ -1418,3 +1439,90 @@ export const CURSOR_PATH: readonly Waypoint[] = [
   { frame: beat.endSessionClick, x: HIT.endSessionBtn.x, y: HIT.endSessionBtn.y, click: true },
   { frame: beat.endCardIn - 6, x: HIT.endSessionBtn.x, y: HIT.endSessionBtn.y },
 ];
+
+/* ------------------------------------------------------------------ input sound */
+
+/**
+ * The compose box types whatever outgoing message is coming next, finishing exactly as
+ * that bubble lands — the same derivation `dmPage` runs per frame, unrolled into runs.
+ *
+ * Message j is on screen from `from + (j - first) * step`, which is both the frame the
+ * compose box starts typing it and the frame the previous bubble landed. Everything here
+ * has to stay a restatement of that one line in `dmPage`; a segment's rate is its length
+ * divided by its message count, and nothing in this file may round it differently.
+ */
+const dmComposeRuns = (): TypingRun[] => {
+  const runs: TypingRun[] = [];
+  for (const seg of dmSegments) {
+    const log = DM_LOGS[seg.thread] ?? [];
+    const step = (seg.to - seg.from) / Math.max(1, seg.last - seg.first);
+    for (let j = seg.first; j < Math.min(seg.last, log.length); j++) {
+      if (!log[j].out) continue;
+      runs.push({
+        from: seg.from + (j - seg.first) * step,
+        text: log[j].text,
+        fpc: step / Math.max(1, log[j].chars),
+      });
+    }
+  }
+  return runs;
+};
+
+/**
+ * Every run of text the film types on camera.
+ *
+ * Each entry restates the three arguments of a `typed()` call above it, which is why the
+ * rates are named constants rather than literals: this list is not allowed to have its
+ * own opinion about how fast anything is typed. A block that lands whole — the pastes,
+ * and everything written while the browser covers the writing app — contributes nothing,
+ * because nothing was seen being typed.
+ */
+/**
+ * The frames the writing app goes behind the browser, i.e. where a block still being
+ * typed stops being watched. `applySwitch` flips at the switcher's midpoint, so that is
+ * the frame the document is covered on, not the frame the gesture starts.
+ */
+const EDITOR_OFF = [
+  beat.switchToBrowser1,
+  beat.switchToBrowser2,
+  beat.switchToBrowser3,
+  beat.switchToBrowser4,
+  beat.switchToBrowser5,
+  beat.switchToBrowser6,
+].map((f) => f + Math.round(SWITCHER_FRAMES / 2));
+
+export const TYPING_RUNS: readonly TypingRun[] = [
+  // The goal field is taken away by 시작 before the sentence finishes — see `until`.
+  { from: beat.goalTypeStart, text: GOAL, fpc: GOAL_RATE, until: beat.startClick },
+  ...CYCLES.map((c) => ({ from: c.searchAt - SEARCH_LEAD, text: SEARCHES[c.set].query, fpc: SEARCH_RATE })),
+  // The one character anybody actually types into an address bar.
+  { from: beat.omniType - 1, text: omniSocial.typed, fpc: 1 },
+  { from: beat.portalQuery, text: PORTAL_QUERY, fpc: PORTAL_RATE },
+  // The page loads under the address bar while the query is still going in.
+  { from: beat.newResearchTab + 2, text: researchQuery, fpc: RESEARCH_RATE, until: beat.researchLoad },
+  ...WRITING.flatMap((ev, i) => {
+    if (ev.whole || (ev.block.t !== "h" && ev.block.t !== "p")) return [];
+    return [{ from: ev.at - 1, text: ev.block.text, fpc: rateFor(i), until: EDITOR_OFF.find((f) => f > ev.at) }];
+  }),
+  ...dmComposeRuns(),
+];
+
+/**
+ * Single presses. `KEY_HINTS` is already the authored list of keys the film puts a chip
+ * on screen for; the rest are the Enters that submit a query, placed where the typing
+ * ends rather than where the page turns, so a retime carries them.
+ */
+export const KEY_PRESSES: readonly KeyPress[] = [
+  ...KEY_HINTS.map((k) => ({ at: k.at })),
+  ...CYCLES.map((c) => ({
+    at: typedEnd(SEARCHES[c.set].query, c.searchAt - SEARCH_LEAD, SEARCH_RATE) + 2,
+  })),
+  { at: typedEnd(PORTAL_QUERY, beat.portalQuery, PORTAL_RATE) + 2 },
+  { at: typedEnd(researchQuery, beat.newResearchTab + 2, RESEARCH_RATE) + 2 },
+];
+
+/** Everything the hands do, as one ordered cue list for `Main` to mount. */
+export const INPUT_SFX: readonly SfxCue[] = mergeInput(
+  keyboardCues(TYPING_RUNS, KEY_PRESSES, driveAt),
+  clickCues(CURSOR_PATH, driveAt),
+);

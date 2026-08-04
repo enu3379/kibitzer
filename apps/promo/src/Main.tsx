@@ -1,7 +1,8 @@
 import React from "react";
 import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame } from "remotion";
 import { beat, clockAt, clockRushAt, scene, sfx } from "./timeline";
-import { CURSOR_PATH, EditorState, PageKind, stageAt } from "./scenes/script";
+import { CURSOR_PATH, EditorState, INPUT_SFX, PageKind, stageAt } from "./scenes/script";
+import { SFX_FRAMES } from "./lib/inputsfx";
 import { cursorAt } from "./lib/cursor";
 import { range } from "./lib/anim";
 /** The writing app's window rect lives with the page-break maths that is derived from it. */
@@ -145,6 +146,17 @@ export const Main: React.FC = () => {
       {sfx.map((cue, i) => (
         <Sequence key={i} from={cue.at} name={`sfx-${i}`}>
           <Audio src={staticFile(cue.file)} volume={0.55} />
+        </Sequence>
+      ))}
+
+      {/*
+       * The hands. These are bounded rather than left open like the four authored cues
+       * above: there are hundreds of them, and an unbounded Sequence keeps every one
+       * mounted for the rest of the film once it has fired.
+       */}
+      {INPUT_SFX.map((cue, i) => (
+        <Sequence key={`in-${i}`} from={cue.at} durationInFrames={SFX_FRAMES} name={`input-${i}`}>
+          <Audio src={staticFile(cue.file)} volume={cue.volume} />
         </Sequence>
       ))}
     </AbsoluteFill>

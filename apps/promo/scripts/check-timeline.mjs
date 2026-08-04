@@ -16,6 +16,8 @@
  *   5. the freeze and the caret void hold the clock still
  *   6. the mall spree: each cart step lands on a product page with the right badge, and
  *      each rail hop opens the product its hot row was holding
+ *   7. input sound: every keystroke and click cue lands inside the film, and no single
+ *      frame is carrying a pile of them
  *
  * Bundles to real files rather than data: URLs so that `remotion` and `react` resolve out
  * of node_modules; they are external because nothing here renders anything.
@@ -42,9 +44,9 @@ const load = async (rel, i) => {
   return import(pathToFileURL(out).href);
 };
 
-const { stageAt, CURSOR_PATH } = await load("src/scenes/script.ts", 0);
+const { stageAt, CURSOR_PATH, INPUT_SFX, TYPING_RUNS } = await load("src/scenes/script.ts", 0);
 const { cursorAt } = await load("src/lib/cursor.ts", 1);
-const { beat, clockAt, clockMinutesAt, TOTAL_FRAMES } = await load("src/timeline.ts", 2);
+const { beat, clockAt, clockMinutesAt, driveAt, TOTAL_FRAMES } = await load("src/timeline.ts", 2);
 for (const f of temps) fs.rmSync(f, { force: true });
 
 let bad = 0;
@@ -120,6 +122,59 @@ hops.forEach((f, i) => {
     fail(`hop${i + 1} @${f}: 밝아진 줄은 ${from.rec[from.recHot]}인데 ${to.product}가 열림`);
 });
 if (bad === before) console.log("  ✓ spree: 담기 7회 · 레일 hop 6회, 밝아진 줄이 언제나 다음 상품");
+
+/* 7 — input sound
+ *
+ * The cues are derived, so they cannot fall out of sync with the picture; what they CAN
+ * do is fall off the end of it. A cue past TOTAL_FRAMES is silently dropped by Remotion
+ * and a negative one throws mid-render, and both are what a retime produces when a typed
+ * block is pushed past its cut. The density check is the other half: three samples on one
+ * frame is not typing, it is a doubled transient, and it means two derivations have
+ * started describing the same keypress.
+ */
+const before7 = bad;
+let out = 0;
+for (const cue of INPUT_SFX) {
+  if (!Number.isFinite(cue.at) || cue.at < 0 || cue.at >= TOTAL_FRAMES) {
+    out += 1;
+    if (out <= 5) fail(`input cue off the film: ${cue.file} @${cue.at}`);
+  }
+}
+for (const run of TYPING_RUNS) {
+  if (!(run.fpc > 0)) fail(`typing run "${run.text.slice(0, 12)}…" has rate ${run.fpc}`);
+}
+const perFrame = new Map();
+for (const cue of INPUT_SFX) perFrame.set(cue.at, (perFrame.get(cue.at) ?? 0) + 1);
+const piles = [...perFrame.entries()].filter(([, n]) => n > 2);
+for (const [f, n] of piles.slice(0, 5)) fail(`f${f}: ${n} input cues on one frame`);
+// A drive anchor out of order reads as a value out of range on the frames around it.
+let offRange = 0;
+for (let f = 0; f < TOTAL_FRAMES; f += 1) {
+  const d = driveAt(f);
+  if (!(d >= 0 && d <= 1)) offRange += 1;
+}
+if (offRange > 0) fail(`drive leaves 0–1 on ${offRange} frames — anchors out of order?`);
+if (bad === before7) {
+  const keys = INPUT_SFX.filter((c) => c.file.includes("key")).length;
+  console.log(`  ✓ input: ${keys} keystrokes + ${INPUT_SFX.length - keys} clicks, ${TYPING_RUNS.length} typed runs`);
+  // Measured inside each run rather than over a scene: a window that is mostly browser
+  // averages the keyboard away, and what the drive curve shapes is the run itself.
+  const rate = (run) => {
+    const end = Math.min(run.from + [...run.text].length * run.fpc, run.until ?? Infinity);
+    const n = INPUT_SFX.filter((c) => c.at > run.from && c.at <= end + 1 && c.file.includes("key")).length;
+    return (n / Math.max(1, end - run.from)) * 30;
+  };
+  const named = (label, at) => {
+    const run = TYPING_RUNS.find((r) => Math.round(r.from) === at);
+    return run ? `${label} ${rate(run).toFixed(0)}` : `${label} —`;
+  };
+  console.log(
+    `  · 타건/초 — ${named("목표", beat.goalTypeStart)}` +
+      `, ${named("S2 정점", beat.writeP8 - 1)}` +
+      `, ${named("힘 빠질 때", beat.writeP11 - 1)}` +
+      `, ${named("결론", beat.writeH3 - 1)}`,
+  );
+}
 
 if (bad > 0) {
   console.log(`\n${bad} problem(s)`);

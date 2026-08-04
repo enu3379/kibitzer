@@ -276,6 +276,92 @@ export const beat = {
   endCardIn: 1082,
 } as const;
 
+/**
+ * Drive — how hard the film is pushing at this frame, 0–1.
+ *
+ * The keystroke and click sounds are cut against this rather than laid down at one rate,
+ * because a uniform rate says the wrong thing. The research loop is written as a parabola
+ * and the mall is written as an accelerating loop; played at a flat fifteen keys a second
+ * both of them sound like the same afternoon, and the one thing the film is about is that
+ * they are not. So the sound thickens where the picture accelerates and thins where it
+ * lets go — see `keyboardCues` in lib/inputsfx.ts, which spends this on the minimum gap
+ * between two strikes, and on level.
+ *
+ * This cannot be read off `GAUGE`. S is flat at 100 through the whole of the research loop
+ * and flat at 0 through the whole of the spree — it measures whether the work is on goal,
+ * not how fast it is going, and those are different curves. Nor is it `clockRushAt`, which
+ * spikes on every Cmd-Tab regardless of what the hands are doing. It is a directorial
+ * curve, so it is authored, and the anchors are the beats it is describing:
+ *
+ *   · S2 climbs to 1.0 at `writeP8` — the fastest rate in the film — then comes off the
+ *     boil hard: `writeP11` is four times slower than the block before it, and the caret
+ *     void after it is the quietest frame in the first half.
+ *   · S3 opens low and builds as the thread takes over.
+ *   · S4 stops dead at `nudge2In`, restarts on the snooze, and tops out at `cart7`.
+ *   · S5 is zero. Nothing moves in the freeze, including the sound.
+ *
+ * Anchors interpolate linearly and must stay in ascending frame order.
+ */
+const DRIVE: ReadonlyArray<readonly [frame: number, v: number]> = [
+  [0, 0.15],
+  [beat.goalTypeStart, 0.6],
+  [beat.startClick, 0.5],
+  /* S2 — the parabola */
+  [beat.searchEnter1, 0.35],
+  [beat.newsEnter, 0.35],
+  [beat.writeH1, 0.45],
+  [beat.searchEnter2, 0.6],
+  [beat.paste1, 0.75],
+  [beat.searchEnter3, 0.9],
+  [beat.writeP8, 1],
+  [beat.newsReturn, 0.8],
+  [beat.writeP10, 0.5],
+  [beat.writeP11, 0.22],
+  [beat.enter2, 0.1],
+  [scene.s3Messages.from, 0.05],
+  /* S3 — the thread takes over */
+  [beat.newTabClick, 0.25],
+  [beat.igEnter, 0.3],
+  [beat.dmRun1, 0.35],
+  [beat.dmSwitch2, 0.6],
+  [beat.dmSwitch3, 0.7],
+  [beat.dmReturn, 0.75],
+  [beat.nudge1In, 0.7],
+  /* S4 — the spree */
+  [beat.portalQuery, 0.5],
+  [beat.shopPick, 0.65],
+  [beat.cart2, 0.8],
+  [beat.nudge2In, 0.55],
+  [beat.snoozeClick, 0.6],
+  [beat.cart4, 0.85],
+  [beat.cart6, 0.95],
+  [beat.cart7, 1],
+  [beat.nudge3In, 0.9],
+  /* S5 — everything stops */
+  [beat.freezeStart, 0],
+  [beat.freezeEnd, 0],
+  /* S6/S7 — back to work, then winding down */
+  [beat.closeTab1, 0.35],
+  [beat.newResearchTab, 0.45],
+  [beat.writeH3, 0.6],
+  [beat.writeP14, 0.5],
+  [beat.chartIn, 0.35],
+  [beat.mailOpen, 0.3],
+  [beat.endCardIn, 0.2],
+];
+
+export const driveAt = (frame: number): number => {
+  if (frame <= DRIVE[0][0]) return DRIVE[0][1];
+  for (let i = 1; i < DRIVE.length; i += 1) {
+    const [f1, v1] = DRIVE[i];
+    if (frame <= f1) {
+      const [f0, v0] = DRIVE[i - 1];
+      return f1 === f0 ? v1 : v0 + ((v1 - v0) * (frame - f0)) / (f1 - f0);
+    }
+  }
+  return DRIVE[DRIVE.length - 1][1];
+};
+
 /** Audio cues — file + absolute frame of the visual it must land on. */
 export const sfx = [
   { file: "sfx/ding.wav", at: beat.nudge1In },
