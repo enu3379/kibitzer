@@ -421,18 +421,22 @@ export const driveAt = (frame: number): number => {
 /**
  * Audio cues — file + absolute frame of the visual it must land on.
  *
- * The celebration is the only one that plays twice, and the second one is the end card: the
- * mark comes up at `endCardIn + 4` and the same sound comes up with it. It is the film's
- * one deliberate rhyme — the note the product makes when the work comes back is the note
- * the film signs off on — and it also stops the last two seconds from being the only
- * stretch with nothing in the mix at all.
+ * The celebration is the only one that plays twice, and the second one is the end card. It
+ * is the film's one deliberate rhyme — the note the product makes when the work comes back
+ * is the note the film signs off on — and it also stops the last two seconds from being the
+ * only stretch with nothing in the mix at all.
+ *
+ * It lands half a second AFTER the mark rises (endCardIn + 4 + 15), not with it. On the
+ * frame the logo appears the sound is just a transition effect, one more thing happening in
+ * a frame where everything is already moving. Fifteen frames later the card has settled and
+ * the wordmark is in, and the same sample stops being punctuation and becomes a sign-off.
  */
 export const sfx = [
   { file: "sfx/ding.wav", at: beat.nudge1In },
   { file: "sfx/ding.wav", at: beat.nudge2In },
   { file: "sfx/ding.wav", at: beat.nudge3In },
   { file: "sfx/celebrate.wav", at: beat.praiseIn },
-  { file: "sfx/celebrate.wav", at: beat.endCardIn + 4 },
+  { file: "sfx/celebrate.wav", at: beat.endCardIn + 19 },
 ] as const;
 
 /**
