@@ -6,7 +6,7 @@ import { cursorAt } from "./lib/cursor";
 import { range } from "./lib/anim";
 /** The writing app's window rect lives with the page-break maths that is derived from it. */
 import { EDITOR_RECT } from "./lib/doclayout";
-import { editorApp, report, summary as summaryCopy } from "./copy";
+import { editorApp, report } from "./copy";
 import { MacDesktop } from "./components/desktop/MacDesktop";
 import { AppWindow } from "./components/desktop/AppWindow";
 import { AppSwitcher } from "./components/desktop/AppSwitcher";
@@ -94,7 +94,7 @@ export const Main: React.FC = () => {
       activeId={st.activeId}
       url={st.url}
       omni={st.omni}
-      dot={st.dot}
+      badge={st.badge}
       extHighlight={st.popup !== null}
       active={browserFocused}
     >
@@ -111,7 +111,7 @@ export const Main: React.FC = () => {
           closeHot={st.toast.closeHot}
         />
       ) : null}
-      {st.popup ? <ExtensionPopup state={st.popup.state} frame={frame} summary={summaryCopy} reveal={st.popup.reveal} /> : null}
+      {st.popup ? <ExtensionPopup state={st.popup.state} frame={frame} reveal={st.popup.reveal} /> : null}
     </BrowserWindow>
   );
 

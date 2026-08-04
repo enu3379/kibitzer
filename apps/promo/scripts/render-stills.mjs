@@ -52,7 +52,7 @@ const BEATS = [
   { id: "s2-select-news", frame: beat.copy2, caption: "S2 · 기사 인용구 선택 + ⌘C" },
   { id: "s2-paste-2", frame: beat.paste2 + 3, caption: "S2 · 두 번째 붙여넣기" },
   { id: "s2-doc-full", frame: beat.writeP11 + 14, caption: "S2 · 한 시간 뒤의 문서 — 4페이지 꽉 참" },
-  { id: "s2-idle-caret", frame: beat.enter2 + 6, caption: "S2 · 엔터 두 번, 4페이지 빈 줄에 커서만" },
+  { id: "s2-idle-caret", frame: beat.enter2 + 6, caption: "S2 · 엔터 두 번, 빈 5페이지에 커서만" },
 
   { id: "s3-omni-autocomplete", frame: beat.omniTab + 2, caption: "S3 · 새 탭 → 'g' → 자동완성 → Tab" },
   { id: "s3-ig-feed", frame: beat.igEnter + 10, caption: "S3 · 딴짓① 소셜 피드" },
@@ -78,7 +78,7 @@ const BEATS = [
 
   { id: "s7-report-done", frame: beat.chartIn + 4, caption: "S7 · 보고서 완성 — 6페이지 · 6,146자 · 참고 자료까지" },
   { id: "s7-mail-send", frame: beat.sendClick + 3, caption: "S7 · 메일 전송" },
-  { id: "s7-summary", frame: beat.summaryShown + 8, caption: "S7 · 세션 요약" },
+  { id: "s7-gauge-back", frame: beat.popupOpen2 + 12, caption: "S7 · 팝업 — 게이지 복귀" },
   { id: "s8-endcard", frame: beat.endCardIn + 30, caption: "S8 · 엔드카드" },
 ].map((b) => ({ ...b, frame: Math.min(b.frame, TOTAL_FRAMES - 1) }));
 

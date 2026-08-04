@@ -143,32 +143,43 @@ export const beat = {
   musicLink: 370,
   musicOpen: 378,
   dmReturn: 394,
-  dotRed1: 398,
+  /*
+   * The badge no longer needs a beat of its own: it is a continuous read of the gauge
+   * (GAUGE in scenes/script.ts), so it has already gone amber and then red on its own by
+   * the time the first nudge fires. S is spent exactly here, which is what triggers it —
+   * the first nag is the downward crossing into zero.
+   */
   nudge1In: 402,
   nudge1Dismiss: 440,
 
   /* --------------------------------------------------------- S4 drift #2/#3: mall (185f)
    * Page loads and scrolls are cut to the bone; what is left is the cart climbing and the
    * two trips back to the messages.
+   *
+   * Nudge #2 lands *after* the spree has started, not on the messages before it. A nudge
+   * can only name what is on screen, and what is on screen here is someone researching
+   * customer acquisition while being acquired — which is the joke the whole film is built
+   * on. It also gives the beat a shape: two items go in the cart, the nudge stops it, the
+   * snooze restarts it, five more go in.
    */
-  nudge2In: 470,
-  snoozeClick: 496,
-  portalEnter: 502,
-  portalQuery: 505,
+  portalEnter: 466,
+  portalQuery: 470,
   /** The mall opens on its listing page; the pick happens after a short scroll. */
-  shopEnter: 516,
-  shopPick: 528,
-  cart1: 533,
-  cart2: 541,
-  dmPeek1: 547,
-  dmPeek1End: 560,
-  cart3: 565,
-  cart4: 571,
-  cart5: 577,
-  dmPeek2: 583,
-  dmPeek2End: 595,
-  cart6: 601,
-  cart7: 607,
+  shopEnter: 480,
+  shopPick: 492,
+  cart1: 497,
+  cart2: 505,
+  nudge2In: 512,
+  snoozeClick: 538,
+  cart3: 546,
+  cart4: 552,
+  dmPeek1: 558,
+  dmPeek1End: 570,
+  cart5: 576,
+  cart6: 584,
+  dmPeek2: 590,
+  dmPeek2End: 600,
+  cart7: 606,
   cartViewEnter: 611,
   nudge3In: 624,
 
@@ -212,9 +223,15 @@ export const beat = {
   mailOpen: 846,
   sendClick: 858,
   mailSent: 864,
+  /*
+   * The closing look at the popup, and the last beat before the end card.
+   *
+   * There is no 세션 종료 button and no summary screen to open behind it — the extension
+   * holds one goal until it is replaced, and its popup has only the setup and active
+   * views. So this beat is not a click into anything; it is the gauge, read once, back at
+   * the top. The 32 frames it now holds are what the summary screen used to spend.
+   */
   popupOpen2: 868,
-  endSessionClick: 878,
-  summaryShown: 880,
 
   /* --------------------------------------------------------- S8 (60f) */
   endCardIn: 900,
@@ -282,11 +299,14 @@ export const clockAnchors: readonly ClockAnchor[] = [
   { at: beat.igDmEnter, min: 66 },
   { at: beat.musicOpen, min: 69 },
   { at: beat.nudge1In, min: 71 },
+  { at: beat.portalEnter, min: 72 },
+  { at: beat.shopEnter, min: 73 },
   { at: beat.nudge2In, min: 74 },
+  /** 3:15 — the minute nudge #3 counts fourteen from. */
   { at: beat.snoozeClick, min: 75 },
-  { at: beat.shopEnter, min: 78 },
-  { at: beat.cart3, min: 82 },
-  { at: beat.cart6, min: 86 },
+  { at: beat.cart3, min: 76 },
+  { at: beat.cart5, min: 81 },
+  { at: beat.cart7, min: 88 },
   { at: beat.cartViewEnter, min: 89 },
   /** S5 — everything stops, the clock included. */
   { at: beat.freezeEnd, min: 89 },

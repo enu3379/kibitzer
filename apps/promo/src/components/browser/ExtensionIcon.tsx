@@ -1,21 +1,30 @@
 import React from "react";
-import { DotKind, dotColor } from "../../theme";
+import { BadgeKind, badgeColor } from "../../theme";
 import { KibitzerLogo } from "../brand/KibitzerLogo";
 
 /**
  * The Kibitzer action icon in the Chrome toolbar.
  *
- * The status dot mirrors STATUS_DOT_COLOR in apps/extension/src/background.ts: it is
- * painted top-right at radius max(2.4, size * 0.16), and "tracking" draws no dot at all
- * — drift only becomes visible once a nudge is actually pending.
+ * updateBadge in apps/extension-next/src/lib/badge.ts drives Chrome's *native* badge —
+ * `setBadgeText({ text: "●" })` plus a background colour — rather than compositing a dot
+ * onto the icon bitmap the way the retired build did. Chrome draws that as a rounded
+ * rectangle across the bottom of the icon slot with the glyph centred in it, so this is a
+ * plate with a white dot rather than a dot pinned to the icon's corner.
+ *
+ * The badge is present for the whole session and only its colour moves; `none` means no
+ * goal is declared, which is the one state that clears it (`clearBadge`).
  */
-export const ExtensionIcon: React.FC<{ dot: DotKind; size?: number; highlight?: boolean }> = ({
-  dot,
+export const ExtensionIcon: React.FC<{ badge: BadgeKind; size?: number; highlight?: boolean }> = ({
+  badge,
   size = 19,
   highlight = false,
 }) => {
-  const color = dotColor[dot];
-  const r = Math.max(2.4, size * 0.16);
+  const color = badgeColor[badge];
+  // Chrome's badge plate is about half the icon wide and a third of it tall, sitting on
+  // the icon's bottom edge and bleeding a little past its right.
+  const plateW = Math.round(size * 0.62);
+  const plateH = Math.round(size * 0.42);
+  const dot = Math.max(2.6, plateH * 0.42);
   return (
     <div
       style={{
@@ -34,15 +43,19 @@ export const ExtensionIcon: React.FC<{ dot: DotKind; size?: number; highlight?: 
         <span
           style={{
             position: "absolute",
-            top: (11 - 1) / 2 - r + 1,
-            right: (11 - 1) / 2 - r + 1,
-            width: r * 2,
-            height: r * 2,
-            borderRadius: "50%",
+            bottom: (11 - 1) / 2,
+            right: (11 - 1) / 2 - 1,
+            width: plateW,
+            height: plateH,
+            borderRadius: 2.5,
             background: color,
-            boxShadow: "0 0 0 1.2px rgba(255,255,255,0.95)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
           }}
-        />
+        >
+          <span style={{ width: dot, height: dot, borderRadius: "50%", background: "#fff" }} />
+        </span>
       ) : null}
     </div>
   );

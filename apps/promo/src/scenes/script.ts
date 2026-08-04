@@ -1,21 +1,22 @@
 import { Easing } from "remotion";
 import {
+  BadgeKind,
   CONTENT_H,
-  DotKind,
   TABSTRIP_H,
   TABSTRIP_LEFT,
   TOAST,
   TOAST_SCALE,
   TOOLBAR_H,
   WINDOW,
+  badgeForGauge,
 } from "../theme";
 import {
   DocBlock,
   GOAL,
   GOAL_BUDGET_MIN,
-  dashboard,
   nudge,
   omniSocial,
+  popupLines,
   praise,
   report,
   researchQuery,
@@ -96,13 +97,66 @@ export type Stage = {
   activeId: string;
   url: string;
   omni: OmniState | null;
-  dot: DotKind;
+  badge: BadgeKind;
   page: PageKind;
   popup: { state: PopupState; reveal: number } | null;
   toast: ToastState | null;
   keyHint: KeyHintState | null;
   zoom: number;
 };
+
+/* ------------------------------------------------------------------ the gauge */
+
+/**
+ * S, the 0–100 focus gauge, as a function of frame.
+ *
+ * This is the spine of the piece, so it is written once here and everything else reads
+ * it: the toolbar badge takes its colour from the band (theme.badgeForGauge), and the
+ * popup prints the number outright. The shape is dictated by the shipping reducer in
+ * apps/extension-next/src/core/gauge/reducer.ts, not chosen for looks:
+ *
+ *   · S starts at 100 (initGaugeState) and holds there while the work is on goal —
+ *     recovery is capped, so on-goal time cannot bank credit.
+ *   · Drift drains it. The FIRST nudge fires on the downward crossing into ZERO, not at
+ *     some streak count, which is why S has to be spent by nudge1In rather than at it.
+ *   · It stays at 0 for the rest of the drift; nudges 2 and 3 are scheduled by renagDebt
+ *     (rRenag 40, doubling per nag), which keeps accruing even while snoozed — that is
+ *     what makes the third nudge land the moment the 5-minute break expires.
+ *   · Coming back refills it, and the celebration fires crossing cCelebrate = 80, so the
+ *     praise toast at praiseIn is pinned to that crossing.
+ *
+ * Frames between keypoints interpolate linearly, which is what a constant rDrain/rRecover
+ * looks like.
+ */
+const GAUGE: ReadonlyArray<readonly [frame: number, s: number]> = [
+  [beat.startClick, 100],
+  [beat.newTabClick, 100],
+  // 100 → 0 across the messages drift; passes 66 near the social landing and 33 near the
+  // point the thread takes over completely.
+  [beat.nudge1In - 2, 0],
+  [beat.returnToGoalTab, 0],
+  [beat.praiseIn, 80],
+  [beat.praiseIn + 16, 100],
+];
+
+export const gaugeAt = (frame: number): number => {
+  if (frame <= GAUGE[0][0]) return GAUGE[0][1];
+  for (let i = 1; i < GAUGE.length; i += 1) {
+    const [f1, s1] = GAUGE[i];
+    if (frame <= f1) {
+      const [f0, s0] = GAUGE[i - 1];
+      return f1 === f0 ? s1 : s0 + ((s1 - s0) * (frame - f0)) / (f1 - f0);
+    }
+  }
+  return GAUGE[GAUGE.length - 1][1];
+};
+
+/** The 5-minute break taken off nudge #2 — a live snooze outranks every colour band. */
+const snoozedAt = (frame: number): boolean => between(frame, beat.snoozeClick, beat.nudge3In);
+
+/** No goal declared yet means no badge at all, not a neutral one (clearBadge). */
+const badgeAt = (frame: number): BadgeKind =>
+  frame < beat.startClick ? "none" : badgeForGauge(gaugeAt(frame), snoozedAt(frame));
 
 /* ------------------------------------------------------------------ fixtures */
 
@@ -414,8 +468,6 @@ const s1 = (frame: number, st: Stage): void => {
   st.activeId = "newtab";
   st.url = URL.newtab;
   st.page = { k: "newtab" };
-  // No goal declared yet -> the amber "no_goal" dot, per STATUS_DOT_COLOR in background.ts.
-  st.dot = frame < beat.startClick ? "amber" : "none";
 
   const reveal =
     frame < beat.popupOpen
@@ -433,21 +485,18 @@ const s1 = (frame: number, st: Stage): void => {
         ? {
             kind: "setup",
             goal: typed(GOAL, frame, beat.goalTypeStart, 1.55),
-            budget: frame >= beat.goalTypeEnd + 4 ? GOAL_BUDGET_MIN : "",
+            minutes: frame >= beat.goalTypeEnd + 4 ? GOAL_BUDGET_MIN : "",
             typingGoal: between(frame, beat.goalTypeStart - 4, beat.startClick),
             startPressed: between(frame, beat.startClick, beat.startClick + 5),
           }
         : {
-            kind: "dashboard",
+            // A fresh session opens at a full gauge — initGaugeState puts S at 100 and
+            // nothing has been judged yet.
+            kind: "active",
+            s: Math.round(gaugeAt(frame)),
             goal: GOAL,
-            pillLabel: "추적 중",
-            pillTone: "green",
-            pageTitle: "새 탭",
-            pageHost: "—",
-            pageDrift: false,
-            streak: 0,
-            observations: "–",
-            relatedRatio: "–",
+            mode: popupLines.mode,
+            persona: popupLines.persona,
           },
   };
 };
@@ -489,7 +538,6 @@ const searchPage = (frame: number, c: Cycle): PageKind => ({
 });
 
 const s2 = (frame: number, st: Stage): void => {
-  st.dot = "none";
   st.focus = "browser";
 
   // Tabs accumulate as sources are opened — the strip fills up the way real research does.
@@ -604,7 +652,6 @@ const s3 = (frame: number, st: Stage): void => {
   st.activeId = "news";
   st.url = URL.news;
   st.page = { k: "news", variant: 0, scroll: NEWS_QUOTE, select: 0 };
-  st.dot = "none";
 
   // New tab, one keystroke, autocomplete, Tab. Nobody types a whole hostname any more.
   if (between(frame, beat.newTabClick, beat.igEnter)) {
@@ -644,8 +691,6 @@ const s3 = (frame: number, st: Stage): void => {
     }
   }
 
-  // The dot only turns red once a nudge is actually pending — matches background.ts.
-  st.dot = frame >= beat.dotRed1 ? "red" : "none";
 
   st.toast = nudgeToast(frame, nudge.first, beat.nudge1In, beat.nudge1Dismiss, {
     closeHot: between(frame, beat.nudge1Dismiss - 6, beat.nudge1Dismiss + 2),
@@ -682,14 +727,8 @@ const s4 = (frame: number, st: Stage): void => {
   st.activeId = "insta";
   st.url = URL.igDm;
   st.page = dmPage(frame);
-  st.dot = frame < beat.snoozeClick ? "red" : frame < beat.nudge3In ? "blue" : "red";
-
-  if (frame < beat.portalEnter) {
-    st.toast = nudgeToast(frame, nudge.second, beat.nudge2In, beat.snoozeClick, {
-      hotButton: between(frame, beat.snoozeClick - 8, beat.snoozeClick + 3) ? "break" : null,
-    });
-    return;
-  }
+  // The messages carry on for a moment before the portal; no toast is up yet.
+  if (frame < beat.portalEnter) return;
 
   /*
    * A search on the portal turns into a spree. The cart badge is the clock — 0 → 7 says
@@ -739,6 +778,15 @@ const s4 = (frame: number, st: Stage): void => {
     };
   }
 
+  /*
+   * Nudge #2, on the product page rather than on the messages — the cart is at two and
+   * still climbing, so the toast can point at the thing it is actually about. The spree
+   * stops dead while it is up and resumes on the snooze.
+   */
+  st.toast = nudgeToast(frame, nudge.second, beat.nudge2In, beat.snoozeClick, {
+    hotButton: between(frame, beat.snoozeClick - 8, beat.snoozeClick + 3) ? "break" : null,
+  });
+
   // Nudge #3 — the snooze callback. (Promotional assumption: the shipping build resumes
   // silently after a snooze expires. Flagged in storyboard.md.)
   if (frame >= beat.nudge3In) {
@@ -784,7 +832,6 @@ const s5 = (frame: number, st: Stage): void => {
   ];
   st.activeId = "shop";
   st.url = URL.shopCart;
-  st.dot = "red";
   st.page = {
     k: "shop",
     view: "cart",
@@ -830,7 +877,6 @@ const praiseToast = (frame: number): ToastState | null => {
 const s6 = (frame: number, st: Stage): void => {
   st.editor = docAt(frame);
   st.focus = "browser";
-  st.dot = frame >= beat.returnToGoalTab ? "none" : "red";
 
   // Everything the session was not about, closed right to left.
   const cleared = frame >= beat.closeTab4 + 8;
@@ -923,7 +969,6 @@ const s7 = (frame: number, st: Stage): void => {
   st.activeId = "research";
   st.url = URL.research;
   st.page = { k: "news", variant: 1, scroll: RESEARCH_SCROLL, select: 0 };
-  st.dot = "none";
 
   st.toast = praiseToast(frame);
 
@@ -941,25 +986,21 @@ const s7 = (frame: number, st: Stage): void => {
     sent: frame >= beat.mailSent,
   };
 
+  /*
+   * The closing look at the popup. There is no session-end button and no summary screen to
+   * reach — the extension keeps one goal until it is replaced, so the last thing the film
+   * can honestly show is the gauge itself, back at the top after the return.
+   */
   if (frame >= beat.popupOpen2) {
     st.popup = {
       reveal: progress(frame, beat.popupOpen2, 8),
-      state:
-        frame >= beat.summaryShown
-          ? { kind: "summary" }
-          : {
-              kind: "dashboard",
-              goal: GOAL,
-              pillLabel: "추적 중",
-              pillTone: "green",
-              pageTitle: dashboard.pageTitle,
-              pageHost: dashboard.pageHost,
-              pageDrift: false,
-              streak: 0,
-              observations: dashboard.observations,
-              relatedRatio: dashboard.relatedRatio,
-              endPressed: between(frame, beat.endSessionClick - 4, beat.endSessionClick + 2),
-            },
+      state: {
+        kind: "active",
+        s: Math.round(gaugeAt(frame)),
+        goal: GOAL,
+        mode: popupLines.mode,
+        persona: popupLines.persona,
+      },
     };
   }
 };
@@ -976,7 +1017,7 @@ export const stageAt = (frame: number): Stage => {
     activeId: "",
     url: "",
     omni: null,
-    dot: "none",
+    badge: badgeAt(frame),
     page: { k: "newtab" },
     popup: null,
     toast: null,
@@ -1021,10 +1062,13 @@ const toastHit = (dx: number, dy: number) => ({
  * stills rather than computed, because most of these boxes are auto-height.
  */
 const HIT = {
-  // The popup is a child of the page viewport, so POPUP.top is measured from y=122.
-  goalInput: { x: 930, y: 301 },
-  startBtn: { x: 930, y: 417 },
-  endSessionBtn: { x: 1003, y: 606 },
+  /*
+   * The popup is 296 wide and pinned to a fixed right edge, so it spans x 794–1090 with a
+   * 14px pad. The goal field shares its row with the fixed 82px 시간(분) column, which is
+   * why it centres left of the button below it rather than under it.
+   */
+  goalInput: { x: 897, y: 302 },
+  startBtn: { x: 942, y: 352 },
   toastClose: toastHit(-24, -118), // 1.5× → (1076, 647)
   toastBreak: toastHit(-144, -28), // 1.5× → (896, 782)
   mailSend: { x: 706, y: 817 },
@@ -1141,9 +1185,10 @@ export const CURSOR_PATH: readonly Waypoint[] = [
   { frame: beat.nudge1Dismiss, x: HIT.toastClose.x, y: HIT.toastClose.y, click: true },
   idle(beat.nudge1Dismiss + 10, 820, 700),
 
-  /* ---------------------------------------------------------------- S4 (460–645) */
-  { frame: beat.snoozeClick - 10, x: HIT.toastBreak.x, y: HIT.toastBreak.y },
-  { frame: beat.snoozeClick, x: HIT.toastBreak.x, y: HIT.toastBreak.y, click: true },
+  /* ---------------------------------------------------------------- S4 (460–645)
+   * The spree comes first and the nudge interrupts it, so the pointer leaves the
+   * add-to-cart button for the toast and comes straight back to it.
+   */
   { frame: beat.portalEnter - 3, x: newTabX(6), y: TAB_Y },
   { frame: beat.portalEnter, x: newTabX(6), y: TAB_Y, click: true },
   { frame: beat.shopEnter - 8, x: HIT.portalAd.x, y: HIT.portalAd.y },
@@ -1151,23 +1196,27 @@ export const CURSOR_PATH: readonly Waypoint[] = [
   { frame: beat.shopEnter + 3, x: 640, y: 500 },
   { frame: beat.shopPick - 7, x: HIT.shopCard.x, y: HIT.shopCard.y },
   { frame: beat.shopPick, x: HIT.shopCard.x, y: HIT.shopCard.y, click: true },
-  // Parked on the add-to-cart button through the spree — the badge does the talking.
+  // Parked on the add-to-cart button through the spree — the counter does the talking.
   { frame: beat.cart1, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
   { frame: beat.cart2, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
+  // Nudge #2 arrives; the hand hesitates on the button before going for `5분만`.
+  idle(beat.nudge2In + 6, HIT.shopAdd.x, HIT.shopAdd.y),
+  { frame: beat.snoozeClick - 10, x: HIT.toastBreak.x, y: HIT.toastBreak.y },
+  { frame: beat.snoozeClick, x: HIT.toastBreak.x, y: HIT.toastBreak.y, click: true },
+  { frame: beat.cart3, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
+  { frame: beat.cart4, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
   { frame: beat.dmPeek1 - 3, x: tabX(4, 8), y: TAB_Y },
   { frame: beat.dmPeek1, x: tabX(4, 8), y: TAB_Y, click: true },
   idle(beat.dmPeek1 + 8, 700, 620),
   { frame: beat.dmPeek1End - 3, x: tabX(7, 8), y: TAB_Y },
   { frame: beat.dmPeek1End, x: tabX(7, 8), y: TAB_Y, click: true },
-  { frame: beat.cart3, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
-  { frame: beat.cart4, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
   { frame: beat.cart5, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
+  { frame: beat.cart6, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
   { frame: beat.dmPeek2 - 3, x: tabX(4, 8), y: TAB_Y },
   { frame: beat.dmPeek2, x: tabX(4, 8), y: TAB_Y, click: true },
   idle(beat.dmPeek2 + 7, 700, 620),
   { frame: beat.dmPeek2End - 3, x: tabX(7, 8), y: TAB_Y },
   { frame: beat.dmPeek2End, x: tabX(7, 8), y: TAB_Y, click: true },
-  { frame: beat.cart6, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
   { frame: beat.cart7, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
   { frame: beat.cartViewEnter, x: HIT.shopCart.x, y: HIT.shopCart.y, click: true },
   { frame: beat.cartViewEnter + 10, x: 700, y: 430 },
@@ -1197,7 +1246,7 @@ export const CURSOR_PATH: readonly Waypoint[] = [
   { frame: beat.sendClick, x: HIT.mailSend.x, y: HIT.mailSend.y, click: true },
   { frame: beat.popupOpen2 - 4, x: EXT.x, y: EXT.y },
   { frame: beat.popupOpen2, x: EXT.x, y: EXT.y, click: true },
-  { frame: beat.endSessionClick - 5, x: HIT.endSessionBtn.x, y: HIT.endSessionBtn.y },
-  { frame: beat.endSessionClick, x: HIT.endSessionBtn.x, y: HIT.endSessionBtn.y, click: true },
-  { frame: beat.endCardIn - 6, x: HIT.endSessionBtn.x, y: HIT.endSessionBtn.y },
+  // Nothing left to click: no session-end button, no summary. The pointer rests on the
+  // icon it just opened and the film ends on the gauge reading.
+  { frame: beat.endCardIn - 6, x: EXT.x, y: EXT.y },
 ];

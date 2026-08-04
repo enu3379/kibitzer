@@ -19,19 +19,34 @@ export const nudge = {
     message: "대화가 대단히 활발하시군요. 보고서 목차엔 없는 항목입니다만.",
     context: "gramline.com - 다이렉트 메시지",
   },
-  /** DRAFT — repeat offence, counts the interventions */
+  /**
+   * DRAFT — repeat offence. Moved onto the mall, two items into the cart, which is what
+   * lets it say the one thing only this film can say: the report being written is about
+   * how shopping platforms acquire customers, and it is being interrupted by the writer
+   * getting acquired.
+   *
+   * Every word it leans on is one the Writer is actually given. "유인 전략" is lifted from
+   * the goal; "오늘의 특가" is the tab title. Nothing here names the coupon on the page or
+   * the size of the cart — those are page content, and persona rule 3 does not let a
+   * message see them. The second sentence keeps the running tally the dry voice needs.
+   */
   second: {
-    message: "오늘 2번째 관전평입니다. 꾸준함만은 인정합니다.",
-    context: "gramline.com - 다이렉트 메시지",
+    message: "유인 전략을 분석하신다더니 오늘의 특가에 유인되고 계시는군요. 오늘 2번째 관전평입니다.",
+    context: "shop.daylight.co.kr - 오늘의 특가 · DAYLIGHT",
   },
   /**
-   * FIXED DIRECTION — the snooze callback. The second sentence lands the irony of the
-   * whole piece (researching customer acquisition while being acquired) and can be cut.
-   * NOTE: the shipping product resumes silently after a snooze expires; this beat is a
-   * promotional assumption, agreed with the user.
+   * FIXED DIRECTION — the snooze callback, and it is real behaviour, not a promotional
+   * assumption. maybeRenag keeps accruing renagDebt while a snooze is live and only
+   * declines to speak; the moment the 5-minute break lapses the debt is already past the
+   * threshold, so the next nudge lands immediately.
+   *
+   * The cart count is gone from this line on purpose: the Writer is never given page
+   * excerpts, so a message may only lean on title and host words (persona rule 3 in
+   * apps/extension-next/src/lib/personas.data.ts). "장바구니" survives because it is in the
+   * tab title; "7개" would have been invented.
    */
   third: {
-    message: "5분만 시간을 달라시더니, 벌써 14분째인 건 아십니까? 장바구니는 7개가 되었고요.",
+    message: "5분만이라 하시고 벌써 14분째입니다. 장바구니 쪽으로는 대단히 성실하시군요.",
     context: "shop.daylight.co.kr - 장바구니",
   },
 } as const;
@@ -352,21 +367,21 @@ export const mail = {
   ],
 } as const;
 
-/** Session summary — mirrors renderSummary() in popup.ts, including its composed strings. */
-export const summary = {
-  duration: "1시간 55분",
-  observations: "63회",
-  onGoal: "58%",
-  interventions: "3회 · 수락 1회",
-  topDrift: "shop.daylight.co.kr · 14회",
-} as const;
-
-/** Live dashboard readouts, shown just before the session is ended. */
-export const dashboard = {
-  pageTitle: "Membership Retention Benchmarks",
-  pageHost: "commerceweekly.com",
-  observations: "63",
-  relatedRatio: "58%",
+/**
+ * The two secondary lines under the gauge, composed exactly as showActive() in
+ * apps/extension-next/src/popup/popup.ts composes them.
+ *
+ * `mode` is modeText(): with an Ollama key saved it reads "LLM 판정: <tier2Model> · 키
+ * N개", and minimax-m3 is the shipped default (DEFAULTS in lib/tier12.ts). Without a key
+ * it would instead read "제목 유사도만 (LLM 꺼짐)" — worth remembering, because that is
+ * what a viewer sees on a fresh install before they set anything up.
+ *
+ * `persona` is personaName(): "말투 · " plus the display name of the selected persona.
+ * dry_kibitzer is PERSONA_DEFAULT, and it is the voice all four toasts are written in.
+ */
+export const popupLines = {
+  mode: "LLM 판정: minimax-m3 · 키 1개",
+  persona: "말투 · 건조한 훈수꾼",
 } as const;
 
 /* ------------------------------------------------------------------ browser tabs */

@@ -1,7 +1,7 @@
 import React from "react";
 import {
+  BadgeKind,
   CONTENT_H,
-  DotKind,
   FONT,
   TABSTRIP_H,
   TABSTRIP_LEFT,
@@ -162,13 +162,13 @@ export const BrowserWindow: React.FC<{
   url: string;
   /** Set while the address bar is being typed into; overrides `url`. */
   omni?: OmniState | null;
-  /** Kibitzer action-icon status dot. */
-  dot: DotKind;
+  /** Kibitzer toolbar badge — colour tracks the gauge band, absent until a goal is set. */
+  badge: BadgeKind;
   extHighlight?: boolean;
   /** Inactive windows lose their traffic-light colour and most of their shadow. */
   active?: boolean;
   children: React.ReactNode;
-}> = ({ tabs, activeId, url, omni = null, dot, extHighlight, active = true, children }) => (
+}> = ({ tabs, activeId, url, omni = null, badge, extHighlight, active = true, children }) => (
   <div
     style={{
       position: "absolute",
@@ -268,7 +268,7 @@ export const BrowserWindow: React.FC<{
         )}
       </div>
       <PuzzleIcon />
-      <ExtensionIcon dot={dot} highlight={extHighlight} />
+      <ExtensionIcon badge={badge} highlight={extHighlight} />
       <span
         style={{
           width: 22,

@@ -32,8 +32,14 @@ export const CONTENT_H = WINDOW.height - TABSTRIP_H - TOOLBAR_H;
  */
 export const EXT_ICON = { x: WINDOW.width - 55, y: TABSTRIP_H + TOOLBAR_H / 2 } as const;
 
-/** Popup is anchored under the toolbar, right edge aligned to the extension icon */
-export const POPUP = { width: 320, right: 40, top: TABSTRIP_H + TOOLBAR_H + 6 } as const;
+/**
+ * Popup is anchored under the toolbar, right edge aligned to the extension icon.
+ *
+ * 296 = the shipping `body { width: 268px; padding: 14px }` measured as Chrome sizes the
+ * popup window: nothing in apps/extension-next/src/popup/popup.html sets `box-sizing` on
+ * body, so the declared 268 is content only and the padding lands outside it.
+ */
+export const POPUP = { width: 296, pad: 14, right: 40, top: TABSTRIP_H + TOOLBAR_H + 6 } as const;
 
 /** Where the tab strip begins (after the traffic lights) and how wide a full tab can be */
 export const TABSTRIP_LEFT = 75;
@@ -51,36 +57,56 @@ export const TAB_NEW_W = 31;
 export const TOAST = { width: 300, right: 18, bottom: 18 } as const;
 export const TOAST_SCALE = 1.5;
 
-/** Extension palette — mirrors apps/extension/src/popup/popup.html (light scheme) */
+/**
+ * Brand marks shared by the toast and the end card. These four are the only colours the
+ * shipping overlay hard-codes outside its light/dark branch — see the `accent`, `ink` and
+ * `eye` bindings in apps/extension-next/src/content/toastOverlay.ts.
+ */
 export const ext = {
+  emerald: "#10B981", // intervention border
+  sage: "#79B7A0", // celebration border
+  ink: "#1F2937", // the head and the hands
+  offWhite: "#F9FAFB", // the eyes
+} as const;
+
+/**
+ * Popup palette — mirrors the <style> block of apps/extension-next/src/popup/popup.html.
+ *
+ * The shipping popup declares `color-scheme: light dark` and then names exactly two
+ * colours of its own: one grey for every secondary line, one green for the start button.
+ * Everything else is UA default, which is why `bg`/`text` below are plain white and black
+ * rather than the zinc ramp the retired popup carried.
+ */
+export const popup = {
   bg: "#ffffff",
-  card: "#f4f4f5",
-  text: "#18181b",
-  muted: "#71717a",
-  border: "#e4e4e7",
-  accent: "#2563eb",
-  emerald: "#10B981",
-  sage: "#79B7A0",
-  ink: "#1F2937",
-  offWhite: "#F9FAFB",
+  text: "#000000",
+  muted: "#979797",
+  /** `#8884` — the 27%-alpha grey every border in the popup is drawn with. */
+  border: "rgba(136,136,136,0.267)",
+  start: "#1e7a4c",
+  err: "#d1495b",
 } as const;
 
-/** Badge status dot colours — mirrors STATUS_DOT_COLOR in apps/extension/src/background.ts */
-export const dotColor = {
+/**
+ * Toolbar badge colours — mirrors updateBadge in apps/extension-next/src/lib/badge.ts.
+ *
+ * Note the inversion from the retired build: this badge is present for the whole session
+ * and only its colour moves, so "no badge" now means "no goal declared" rather than
+ * "nothing wrong". The bands are S < 33 red, S < 66 amber, else green; a live snooze
+ * outranks all three.
+ */
+export const badgeColor = {
   none: null,
-  red: "#a32d2d", // pending — an unanswered nudge
-  blue: "#185fa5", // snoozed
-  amber: "#ba7517", // no_goal
+  focused: "#1f9d6b",
+  slipping: "#e0a100",
+  drifting: "#d1495b",
+  snoozed: "#8a8a90",
 } as const;
-export type DotKind = keyof typeof dotColor;
+export type BadgeKind = keyof typeof badgeColor;
 
-/** Status pill colours from popup.ts */
-export const pill = {
-  tracking: { bg: "#dcfce7", fg: "#166534" },
-  snoozed: { bg: "#dbeafe", fg: "#1e40af" },
-  cooldown: { bg: "#fef3c7", fg: "#92400e" },
-  ended: { bg: "#e4e4e7", fg: "#52525b" },
-} as const;
+/** Which band a gauge reading falls in, so scenes can name S and let the badge follow. */
+export const badgeForGauge = (s: number, snoozed = false): BadgeKind =>
+  snoozed ? "snoozed" : s < 33 ? "drifting" : s < 66 ? "slipping" : "focused";
 
 /** Chrome browser chrome (macOS light) */
 export const chrome = {
@@ -95,4 +121,12 @@ export const chrome = {
   divider: "#dadce0",
 } as const;
 
+/**
+ * KNOWN DEVIATION. The shipping UI asks for `system-ui` first and therefore renders in
+ * Apple SD Gothic Neo on macOS and Malgun Gothic on Windows; this bundles Pretendard
+ * ahead of both. That is deliberate — `remotion render` runs in a headless Chrome with no
+ * Korean system face, so a faithful stack would fall back mid-render and the output would
+ * not match the Studio preview (see fonts.ts). Korean stroke weight is a little lighter
+ * here than in the real popup; everything else about the type is the shipping value.
+ */
 export const FONT = "PretendardPromo, -apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif";
