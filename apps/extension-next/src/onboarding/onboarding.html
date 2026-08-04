@@ -166,6 +166,7 @@
         border-radius: 999px; padding: 3px 12px; font-family: ui-monospace, "SF Mono", Menlo, monospace;
       }
       .ticons { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+      .puzzle-svg { width: 1.3em; height: 1.3em; fill: currentColor; flex: none; vertical-align: -0.25em; }
       /* Real toolbar icon + the status dot exactly where badge.ts draws it:
          r = size×0.2, centred at (size−r, r) → the top-right corner of the bitmap. */
       .kicon { position: relative; display: inline-flex; width: 16px; height: 16px; }
@@ -361,6 +362,12 @@
     </style>
   </head>
   <body>
+    <!-- Chrome's actual toolbar puzzle icon (Material "extension", outlined) — referenced via <use> below. -->
+    <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+      <symbol id="i-puzzle" viewBox="0 0 24 24">
+        <path d="M10.5 4.5c.28 0 .5.22.5.5v2h6v6h2c.28 0 .5.22.5.5s-.22.5-.5.5h-2v6h-2.12c-.68-1.75-2.39-3-4.38-3s-3.7 1.25-4.38 3H4v-2.12c1.75-.68 3-2.39 3-4.38 0-1.99-1.24-3.7-2.99-4.38L4 7h6V5c0-.28.22-.5.5-.5m0-2C9.12 2.5 8 3.62 8 5H4c-1.1 0-2 .9-2 2v3.8h.29c1.49 0 2.71 1.21 2.71 2.7s-1.22 2.7-2.71 2.7H2V20c0 1.1.9 2 2 2h3.8v-.3c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7v.3H17c1.1 0 2-.9 2-2v-4c1.38 0 2.5-1.12 2.5-2.5S20.38 11 19 11V7c0-1.1-.9-2-2-2h-4c0-1.38-1.12-2.5-2.5-2.5z"/>
+      </symbol>
+    </svg>
     <div class="frame">
       <div class="wizard">
         <div class="wtop">
@@ -422,7 +429,7 @@
               </div>
               <div class="chrome-addr">
                 <span class="url">youtube.com/watch?v=meokbang</span>
-                <span class="ticons">🧩
+                <span class="ticons"><svg class="puzzle-svg" aria-hidden="true"><use href="#i-puzzle"/></svg>
                   <span class="kicon">
                     <img src="../icons/icon-32.png" alt="Kibitzer 툴바 아이콘" />
                     <i class="dot"></i>
@@ -489,7 +496,7 @@
                 <div class="d-toolbar">
                   <span class="d-url"></span>
                   <span class="d-slot"><span class="kicon"><img src="../icons/icon-32.png" alt="" /><i class="dot"></i></span></span>
-                  <span class="d-puzzle">🧩<span class="co">①</span></span>
+                  <span class="d-puzzle"><svg class="puzzle-svg" aria-hidden="true"><use href="#i-puzzle"/></svg><span class="co">①</span></span>
                 </div>
                 <div class="d-menu">
                   <div class="d-row">
@@ -504,7 +511,7 @@
                     </span>
                   </div>
                 </div>
-                <p class="d-cap">메뉴 이름도 실제와 같아요 — ① 🧩 <b>확장 프로그램 메뉴</b> → ② 📌 <b>툴바에 고정</b></p>
+                <p class="d-cap">메뉴 이름도 실제와 같아요 — ① <svg class="puzzle-svg" aria-hidden="true"><use href="#i-puzzle"/></svg> <b>확장 프로그램 메뉴</b> → ② 📌 <b>툴바에 고정</b></p>
               </div>
               <div class="pinlive" id="pinLive">
                 <span class="kicon"><img src="../icons/icon-32.png" alt="" /><i class="dot"></i></span>
@@ -559,7 +566,7 @@
             <div class="pgrid" id="pgrid"></div>
             <div class="sample" id="sample"></div>
             <div class="pinlive" id="pinReminder">
-              <span class="kbd">🧩</span>
+              <span class="kbd"><svg class="puzzle-svg" aria-hidden="true"><use href="#i-puzzle"/></svg></span>
               <span>아직 툴바 고정 전이에요 — 퍼즐 메뉴에서 <b>툴바에 고정</b>을 누르면 색 점이 항상 보입니다.</span>
             </div>
           </section>
@@ -588,7 +595,7 @@
       </div>
     </div>
     <div class="nudge" id="nudge" hidden>
-      <span class="pl-off">진짜 🧩는 바로 위에 있어요</span>
+      <span class="pl-off">진짜 <svg class="puzzle-svg" aria-hidden="true"><use href="#i-puzzle"/></svg>는 바로 위에 있어요</span>
       <span class="pl-on">고정됐어요!</span>
       <span class="up">↗</span>
     </div>
