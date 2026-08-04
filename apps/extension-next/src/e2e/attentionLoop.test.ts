@@ -767,7 +767,7 @@ test("E2E: destroying the focused window stops all attribution to its page (Fix 
     // the minute heartbeats kept crediting dwell to the vanished page AND kept integrating its
     // stale DRIFT into S (up to gapCap each beat); only windows.onRemoved can stop it.
     activeTab = { id: 22, url: "chrome://newtab/", title: "New Tab", active: true, windowId: 1 }
-    await fireWindowRemoved(1)
+    await fireWindowRemoved(2)
     // The listener is fire-and-forget, so poll the SSOT rather than racing it with a bare settle.
     await settleUntilStored(async () => ((await getVisits())?.open ?? null) === null)
     await settle(30) // let the trailing hand-over observe() finish too
@@ -809,7 +809,7 @@ test("E2E: a window close hands the session to the surviving window's page (Fix 
     // rather than sitting wedged in the hold.
     await kvDelete(PENDING_DWELL_KEY)
     activeTab = { id: 32, url: "https://registry.terraform.io/modules", title: "테라폼 모듈 레지스트리", active: true, windowId: 1 }
-    await fireWindowRemoved(1)
+    await fireWindowRemoved(2)
     // Poll the checkpoint: the hand-over sits at the very end of the listener's async chain.
     await settleUntilStored(async () => (await kvGet(PENDING_DWELL_KEY)) !== undefined)
 
@@ -858,6 +858,38 @@ test("E2E: closing a BACKGROUND window changes nothing — the drift keeps being
     assert.ok(
       ((await send({ type: "get-state" })).s as number) < sBefore,
       "the verdict is still live, so the drift keeps integrating — it was not dropped into a hold",
+    )
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: a tab belonging to the window being closed is not mistaken for a survivor (Fix 5)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 61, url: "https://video.test/watch?v=crab", title: "귀여운 게 영상 몰아보기", active: true, windowId: 3 }
+    await send({ type: "set-goal", goal: "회계 원리 정리", minutes: null })
+    await settle(50)
+
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+    await beat()
+    assert.ok((await getVisits())?.open, "the judged page owns the open interval")
+
+    // Clicking the X on an UNFOCUSED window focuses it first, so `lastFocusedWindow` can still
+    // resolve to the window being torn down and hand back its own doomed tab. Matching that key
+    // would look like "the page still exists" and turn the whole re-sync into a no-op — the exact
+    // leak this handler exists to close. The tab's windowId is what disqualifies it.
+    await fireWindowRemoved(3)
+    await settleUntilStored(async () => ((await getVisits())?.open ?? null) === null)
+
+    assert.equal(
+      (await getVisits())?.open ?? null,
+      null,
+      "the doomed window's own tab is not treated as the surviving page",
     )
   } finally {
     mock.timers.reset()
