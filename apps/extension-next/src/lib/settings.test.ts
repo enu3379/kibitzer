@@ -1,11 +1,25 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
+// chrome.storage.local stub for the getSettings/setSettings coercion tests below.
+const store: Record<string, unknown> = {}
+;(globalThis as unknown as { chrome: unknown }).chrome = {
+  storage: {
+    local: {
+      get: async (key: string) => (key in store ? { [key]: store[key] } : {}),
+      set: async (obj: Record<string, unknown>) => void Object.assign(store, obj),
+      remove: async (key: string) => void delete store[key],
+    },
+  },
+}
+
 import {
   DEFAULT_SETTINGS,
   SENSITIVITY_PRESETS,
+  getSettings,
   inQuietHours,
   sensitivityLevelFor,
+  setSettings,
   snapTauOk,
   type QuietHours,
 } from "./settings.ts"
@@ -43,6 +57,22 @@ test("sensitivity presets are strictly ordered and the default is standard", () 
   assert.equal(DEFAULT_SETTINGS.tauOk, SENSITIVITY_PRESETS.standard)
   assert.equal(DEFAULT_SETTINGS.observeLocalPdfs, false, "local PDFs must be explicit opt-in")
   assert.equal(DEFAULT_SETTINGS.localPdfPolicyRevision, 0)
+})
+
+test("sessionAutoContinue defaults ON — including for legacy records that predate the field", async () => {
+  assert.equal(DEFAULT_SETTINGS.sessionAutoContinue, true)
+
+  // A settings record written before the field existed: Boolean(undefined) would silently
+  // opt legacy users out of restart-continue; the coercion must default it to true instead.
+  store["kibitzer:settings:v1"] = { tauOk: 0.59, observeLocalPdfs: true }
+  assert.equal((await getSettings()).sessionAutoContinue, true)
+
+  // The explicit OFF choice round-trips and survives an unrelated patch.
+  await setSettings({ sessionAutoContinue: false })
+  assert.equal((await getSettings()).sessionAutoContinue, false)
+  await setSettings({ tauOk: SENSITIVITY_PRESETS.strict })
+  assert.equal((await getSettings()).sessionAutoContinue, false)
+  delete store["kibitzer:settings:v1"]
 })
 
 test("sensitivityLevelFor maps a tauOk to the nearest preset level", () => {

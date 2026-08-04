@@ -54,6 +54,7 @@ const quietSw = $<HTMLButtonElement>("quietSw")
 const quietStart = $<HTMLInputElement>("quietStart")
 const quietEnd = $<HTMLInputElement>("quietEnd")
 const localPdfSw = $<HTMLButtonElement>("localPdfSw")
+const restoreSw = $<HTMLButtonElement>("restoreSw")
 const blockList = $<HTMLTextAreaElement>("blockList")
 const allowList = $<HTMLTextAreaElement>("allowList")
 const blockCount = $<HTMLElement>("blockCount")
@@ -104,6 +105,7 @@ async function init(): Promise<void> {
   quietEnd.value = settings.quietHours.end
   quietStart.disabled = quietEnd.disabled = !settings.quietHours.enabled
   setChecked(localPdfSw, settings.observeLocalPdfs)
+  setChecked(restoreSw, settings.sessionAutoContinue)
   renderDomainLists((await send({ type: "get-domain-lists" })) as DomainLists)
 
   const state = (await send({ type: "get-state" })) as StateResponse
@@ -251,6 +253,12 @@ localPdfSw.addEventListener("click", () => {
   const on = !isChecked(localPdfSw)
   setChecked(localPdfSw, on)
   void saveSettings({ observeLocalPdfs: on })
+})
+
+restoreSw.addEventListener("click", () => {
+  const on = !isChecked(restoreSw)
+  setChecked(restoreSw, on)
+  void saveSettings({ sessionAutoContinue: on })
 })
 
 // --- 사이트 목록 (감시 제외 / 항상 OK) ---------------------------------------------

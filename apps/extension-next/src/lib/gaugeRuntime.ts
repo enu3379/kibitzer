@@ -259,6 +259,21 @@ export function dispatch(event: GaugeEvent, goal: SessionGoal | null): Promise<v
   })
 }
 
+/** Absorb browser downtime (restart-continue / suspend-resume, sessionRestore.ts): rebase the
+ *  reducer clock via an `inactive` event so advance() can't integrate up to gapCap seconds of
+ *  the gap under the pre-shutdown verdict, and push the wall-clock drift timer past the gap so
+ *  drift_minutes / return_minutes don't count time the browser was closed. Serialized. */
+export function rebaseAfterGap(gapMs: number, goal: SessionGoal | null): Promise<void> {
+  return enqueue(async () => {
+    if (gapMs > 0) {
+      const since = await driftSince()
+      if (since != null) await setDriftSince(since + gapMs)
+    }
+    const state = await loadState()
+    await runEvent({ type: "inactive", ts: Date.now() }, goal, state)
+  })
+}
+
 /** Put the gauge into the NEUTRAL holding state for a newly-observed page: stop integrating the
  *  previous page's verdict so S neither drains nor recovers while we wait for this page's dwell
  *  and judgement (which resume integration all at once via a `nav` event). A no-op when the
@@ -292,6 +307,12 @@ async function persistStateAndOutbox(
 // drain (or a wake mid-job) can't run the same slow Ollama request twice.
 const inFlightTier2 = new Set<number>()
 
+// A terminal effect (nag/celebrate) is normally delivered within seconds of being queued
+// (teardown recovery adds at most the 1-min heartbeat). Anything older means the browser was
+// closed in between — surfacing an hours-old nag about a page from before the shutdown right
+// as Chrome relaunches is worse than dropping it (the drift is already logged upstream).
+const TERMINAL_EFFECT_TTL_MS = 5 * 60_000
+
 /** Drain the outbox (oldest first). Terminal effects (nag/celebrate) deliver and ACK. A
  *  request_tier2 is a durable job: it is NOT ACKed here — startTier2Job owns its lifetime and
  *  deletes the record only after the outcome is durably reflected or stale-cancelled. */
@@ -300,6 +321,12 @@ async function drainOutbox(): Promise<void> {
     if (record.effect.type === "request_tier2") {
       startTier2Job(record)
       return false // keep; the job self-ACKs when it truly completes
+    }
+    // Stale (pre-shutdown) or orphaned (session ended/suspended while it sat queued): ACK
+    // without delivering. request_tier2 records above self-cancel through their own guards.
+    if (Date.now() - record.ts > TERMINAL_EFFECT_TTL_MS || !(await getGoal())) {
+      klog(`outbox ${record.effect.type} dropped (stale/no session)`)
+      return true
     }
     await deliver(record.effect, record.goal, record.ts, record.writerMessage, record.source)
     return true

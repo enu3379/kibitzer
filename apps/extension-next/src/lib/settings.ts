@@ -14,6 +14,9 @@ export interface Settings {
   quietHours: QuietHours
   observeLocalPdfs: boolean // opt-in: use Chrome's local-PDF tab title for judging
   localPdfPolicyRevision: number // increments on every ON/OFF edge; invalidates stale async work
+  // Browser fully quit + relaunched within RESTORE_GAP_MS → the in-flight session continues
+  // seamlessly (경우 ①). OFF: any restart parks the session as resumable (경우 ②).
+  sessionAutoContinue: boolean
 }
 
 export type SensitivityLevel = "lenient" | "standard" | "strict"
@@ -53,6 +56,7 @@ export const DEFAULT_SETTINGS: Settings = {
   quietHours: { enabled: false, start: "22:00", end: "08:00" },
   observeLocalPdfs: false,
   localPdfPolicyRevision: 0,
+  sessionAutoContinue: true,
 }
 
 function coerce(value: Partial<Settings> | undefined): Settings {
@@ -71,6 +75,11 @@ function coerce(value: Partial<Settings> | undefined): Settings {
       value.localPdfPolicyRevision >= 0
         ? value.localPdfPolicyRevision
         : DEFAULT_SETTINGS.localPdfPolicyRevision,
+    // Default-true: Boolean(value?.x) would silently flip absent legacy records to false.
+    sessionAutoContinue:
+      typeof value?.sessionAutoContinue === "boolean"
+        ? value.sessionAutoContinue
+        : DEFAULT_SETTINGS.sessionAutoContinue,
   }
 }
 

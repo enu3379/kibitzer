@@ -17,6 +17,10 @@ interface StateResponse {
   persona?: string
   personas?: Array<{ key: string; name: string }>
   health?: { ok: boolean; kind: string; message: string; ts: number } | null
+  // Restart policy (sessionRestore): a parked session the setup view offers to resume (②)
+  // and the continue-banner event shown over the active view (①).
+  suspended?: { text: string; minutes: number | null; downFrom: number; showHint: boolean } | null
+  restoreNotice?: { at: number; gapMs: number } | null
 }
 
 interface SummaryTopPage {
@@ -141,9 +145,57 @@ function showSetup(): void {
     goalInput.value = current.goal.text
     minutesInput.value = current.goal.availableMinutes != null ? String(current.goal.availableMinutes) : ""
   }
+  renderResume(current)
   void maybeShowGoalHint()
   goalInput.focus()
 }
+
+// --- suspended-session resume (경우 ② — 크롬 재시작으로 잠들어 있던 세션) -------------
+
+const resumeWrap = document.getElementById("resumeWrap") as HTMLElement
+const resumeBtn = document.getElementById("resumeBtn") as HTMLButtonElement
+const resumeGoalEl = document.getElementById("resumeGoal") as HTMLElement
+const resumeMetaEl = document.getElementById("resumeMeta") as HTMLElement
+const suspendHintEl = document.getElementById("suspendHint") as HTMLElement
+const suspendHintClose = document.getElementById("suspendHintClose") as HTMLButtonElement
+
+/** "N분/시간/일 전" for the resume button's 중단 시점. */
+function fmtAgo(ms: number): string {
+  const minutes = Math.max(1, Math.round(ms / 60_000))
+  if (minutes < 60) return `${minutes}분 전`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours}시간 전`
+  return `${Math.round(hours / 24)}일 전`
+}
+
+function renderResume(state: StateResponse | null): void {
+  const suspended = state?.suspended ?? null
+  resumeWrap.hidden = !suspended
+  if (!suspended) return
+  resumeGoalEl.textContent = suspended.text
+  resumeMetaEl.textContent = `${fmtAgo(Date.now() - suspended.downFrom)} 중단${
+    suspended.minutes != null ? ` · ${suspended.minutes}분 목표` : ""
+  }`
+  suspendHintEl.hidden = !suspended.showHint
+}
+
+resumeBtn.addEventListener("click", async () => {
+  try {
+    await chrome.runtime.sendMessage({ type: "resume-session" })
+  } catch {
+    // SW not ready — fall through; the re-render below shows whatever state holds now.
+  }
+  render(await getState())
+})
+
+suspendHintClose.addEventListener("click", () => {
+  suspendHintEl.hidden = true
+  try {
+    void chrome.runtime.sendMessage({ type: "suspend-hint-seen" })
+  } catch {
+    // Cosmetic flag — losing it only means the hint shows once more.
+  }
+})
 
 // --- first-run goal hint (shown until the first goal is ever declared) --------------
 
@@ -228,7 +280,27 @@ function renderActive(state: StateResponse): void {
   renderMode(state)
   personaActiveEl.textContent = personaName(state) ? `말투 · ${personaName(state)}` : ""
   renderProviderWarn(state)
+  restoreBannerEl.hidden = !state.restoreNotice
 }
+
+// --- restart-continue banner (경우 ① — 5분 이내 재시작으로 세션이 이어진 직후) ---------
+
+const restoreBannerEl = document.getElementById("restoreBanner") as HTMLElement
+const restoreDefaultOff = document.getElementById("restoreDefaultOff") as HTMLButtonElement
+const restoreNever = document.getElementById("restoreNever") as HTMLButtonElement
+
+async function actOnRestoreBanner(action: "default-off" | "never-show"): Promise<void> {
+  restoreBannerEl.hidden = true
+  if (current?.restoreNotice) current.restoreNotice = null
+  try {
+    await chrome.runtime.sendMessage({ type: "restore-banner-action", action })
+  } catch {
+    // SW not ready — the banner reappears on the next poll if the flag survived.
+  }
+}
+
+restoreDefaultOff.addEventListener("click", () => void actOnRestoreBanner("default-off"))
+restoreNever.addEventListener("click", () => void actOnRestoreBanner("never-show"))
 
 function showActive(state: StateResponse): void {
   view = "active"

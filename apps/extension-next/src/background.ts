@@ -5,7 +5,18 @@
 //   → gauge (degraded mode) → S drains on drift → S=0 → real nag notification.
 // A 1-min alarm feeds heartbeats so dwell time (not click count) drives the gauge.
 
-import { getGoal, setGoal, type SessionGoal } from "./lib/session.ts"
+import { getGoal, getSuspendedSession, setGoal, takeSuspendedSession, type SessionGoal } from "./lib/session.ts"
+import {
+  clearRestoreNotice,
+  dismissRestoreBannerForever,
+  getRestoreNotice,
+  handleBrowserStartup,
+  isSuspendHintSeen,
+  markSuspendHintSeen,
+  noteAlive,
+  resumeSuspendedSession,
+  startupSettled,
+} from "./lib/sessionRestore.ts"
 import { embedText, embedTexts, judgeTier0 } from "./lib/tier0.ts"
 import { addExemplar, admissionEligible, admitAnchor, loadRefs, setDerived } from "./lib/relevance.ts"
 import { filterDerivedPhrases, MAX_PHRASES } from "./lib/goalEnrichment.ts"
@@ -98,6 +109,10 @@ async function gaugeAccountsFor(pageKey: string, obsKey: string): Promise<boolea
  *  immediately on sensitive pages, and otherwise schedules the judgement after a dwell so
  *  transient pages don't count. */
 async function observe(url: string | undefined, title: string | undefined): Promise<void> {
+  // Restored-tab events can beat the onStartup restart decision; observing then would
+  // enterNeutral/nav-integrate up to gapCap of the shutdown gap under the pre-shutdown
+  // verdict. One microtask in steady state (the barrier is long resolved).
+  await startupSettled
   const goal = await getGoal()
   if (!goal || !url) return
   const descriptor = describeObservableUrl(url)
@@ -438,32 +453,52 @@ chrome.runtime.onInstalled.addListener((details) => {
 // Kick the user domain-lists load early so the synchronous privacy gate is warm before the
 // first observation (observe/judge also await the memoized init as a readiness barrier).
 void initDomainLists()
-void flushOutbox()
-void dwell.reconcile()
-chrome.runtime.onStartup.addListener(() => {
+// The first drain/reconcile waits for the restart decision (startupSettled: resolved by
+// handleBrowserStartup, or after a short fallback on plain SW wakes where onStartup never
+// fires). An eager module-level flush used to race the suspend decision — with 자동 유지 OFF
+// and a short gap, a young pre-shutdown nag could deliver in the ms before the suspend
+// committed and stripped its goal. The 1-min heartbeat still bounds recovery latency.
+void startupSettled.then(() => {
   void flushOutbox()
   void dwell.reconcile()
-  // Closing the LAST window quits Chrome on Windows, so windows.onRemoved can lose its race with
-  // the teardown and the open interval / active verdict survive on disk pointing at a page from
-  // the previous run. Re-sync once here so they are settled before the first heartbeat can resume
-  // crediting them. Session restore has usually NOT committed yet at this point, so expect no
-  // surviving key rather than a match — which is why the startup path rebases the clock instead
-  // of integrating the shutdown gap (see resyncActivePage).
-  void resyncActivePage("startup").catch(() => klog("startup resync skipped"))
+})
+chrome.runtime.onStartup.addListener(() => {
+  void (async () => {
+    // The restart policy first: a suspend must land before the startup drain, so queued
+    // pre-shutdown effects meet the no-session/TTL guards instead of a delivery attempt.
+    await handleBrowserStartup().catch(() => undefined)
+    void flushOutbox()
+    void dwell.reconcile()
+    // Closing the LAST window quits Chrome on Windows, so windows.onRemoved can lose its race with
+    // the teardown and the open interval / active verdict survive on disk pointing at a page from
+    // the previous run. Re-sync once here so they are settled before the first heartbeat can resume
+    // crediting them. Runs AFTER the restart policy: a suspend leaves no goal (resync no-ops), and
+    // a continue leaves the clock already rebased, so the re-sync only has to settle an orphaned
+    // page hold — never the shutdown gap itself.
+    void resyncActivePage("startup").catch(() => klog("startup resync skipped"))
+  })()
 })
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== HEARTBEAT_ALARM) return
-  void getGoal().then(async (goal) => {
+  void (async () => {
+    // A relaunch replays the missed heartbeat alarm almost immediately, racing the restart
+    // decision on BOTH of its inputs: its noteAlive(now) would mask the real gap (a multi-day
+    // downtime measuring ≈0 → session wrongly continued), and its dispatch would integrate up
+    // to gapCap of the gap under the pre-shutdown verdict before the rebase/suspend commits.
+    // One microtask in steady state (the barrier is long resolved).
+    await startupSettled
+    const goal = await getGoal()
     if (!goal) return
     // Only drain while Chrome is focused and the user is active; otherwise pause.
     const present = await browserPresent()
     await notePresence(present) // record presence transitions off the same signal the gauge uses
     const now = Date.now()
+    void noteAlive(now) // durable last-alive marker — the restart-gap measurement (sessionRestore)
     // Once-a-minute durable checkpoint for the visit tracker (bounds teardown loss).
     void (present ? noteHeartbeat(now, goal.epoch) : noteInactive(now, goal.epoch))
     await dispatch({ type: present ? "heartbeat" : "inactive", ts: now }, goal)
-  })
+  })()
 })
 
 chrome.idle.setDetectionInterval(60)
@@ -612,6 +647,7 @@ interface PopupMessage {
   persona?: string
   displayToken?: number
   sourceTabId?: number
+  action?: string // restore-banner-action: "default-off" | "never-show"
   settings?: Partial<Settings>
   // provider settings (options AI 판정 pane)
   provider?: ProviderId
@@ -688,6 +724,9 @@ async function enableLocalPdfObservation(sourceTabId: number): Promise<EnableLoc
 
 async function handleMessage(message: PopupMessage): Promise<unknown> {
   if (message?.type === "get-state") {
+    // A popup opened in the first moments of a relaunch must not advance the gauge across a
+    // not-yet-decided restart gap (same reasoning as the heartbeat alarm's gate).
+    await startupSettled
     const goal = await getGoal()
     // Advance the gauge to "now" so the popup shows a live value between the 1-min heartbeat
     // alarms (a nag can still fire here if S reaches 0) — but gate on presence exactly like the
@@ -702,6 +741,9 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
       getPersonaKey(),
       getProviderHealth(),
     ])
+    // Restart-policy surfaces: a parked session the setup view can resume (경우 ②, mutually
+    // exclusive with a live goal by construction) and the continue-banner event (경우 ①).
+    const suspended = goal ? null : await getSuspendedSession()
     return {
       goal,
       s: Math.round(state.s),
@@ -711,7 +753,40 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
       persona,
       personas: personaChoices(),
       health,
+      suspended: suspended
+        ? {
+            text: suspended.goal.text,
+            minutes: suspended.goal.availableMinutes,
+            downFrom: suspended.downFrom,
+            showHint: !(await isSuspendHintSeen()),
+          }
+        : null,
+      restoreNotice: goal ? await getRestoreNotice(goal) : null,
     }
+  }
+  if (message?.type === "resume-session") {
+    const goal = await resumeSuspendedSession()
+    if (goal) {
+      void ensureHeartbeat()
+      lastObservedKey = null // re-judge the active page under the resumed goal
+      void observeActiveTab()
+    }
+    return { goal: goal ?? (await getGoal()) }
+  }
+  if (message?.type === "restore-banner-action") {
+    // "잇지 않음을 기본으로" flips the setting (future restarts suspend, so the banner has no
+    // trigger left); "다시 보지 않기" suppresses the banner forever without changing behavior.
+    if (message.action === "default-off") {
+      await applySettingsPatch({ sessionAutoContinue: false })
+      await clearRestoreNotice()
+    } else if (message.action === "never-show") {
+      await dismissRestoreBannerForever()
+    }
+    return { ok: true }
+  }
+  if (message?.type === "suspend-hint-seen") {
+    await markSuspendHintSeen()
+    return { ok: true }
   }
   // Pause = 30-min quiet (same as the "30분 조용히" toast); resume = clear the snooze by
   // setting its expiry to now. Both reuse the gauge's snooze action; no-op with no goal.
@@ -827,6 +902,7 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     await setGoal("", null)
     await resetState()
     await clearVisits()
+    void clearRestoreNotice()
     lastObservedKey = null
     clearBadge()
     logEvent("goal", { text: null, minutes: null, revision: null })
@@ -847,6 +923,32 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     return { ok: true }
   }
   if (message?.type === "set-goal") {
+    // Declaring a NEW goal instead of resuming a parked session closes that session quietly:
+    // its stats enter the session history (next session's "지난번 대비" comparison) but the
+    // summary view never pops. MUST run before the resetState/clearVisits below wipes the
+    // snapshot sources. The session's end time is when the browser went down — not now.
+    if ((message.goal ?? "").trim()) {
+      // take (atomic, serialized) FIRST so a concurrent resume-session can't revive a session
+      // this handler is about to close; the finalize is then best-effort — a transient storage
+      // failure must not abort the set-goal (the popup would hang on a never-sent response)
+      // and only costs the closed session its history entry.
+      const suspended = await takeSuspendedSession()
+      if (suspended) {
+        try {
+          const summary = await finalizeSession(suspended.goal, suspended.downFrom)
+          await dismissSessionSummary() // quiet close — recorded, never surfaced
+          logEvent("session-end", {
+            epoch: suspended.goal.epoch,
+            silent: true,
+            pages_total: summary.stats.pagesTotal,
+            pages_ok: summary.stats.pagesOk,
+            valid_ms: summary.stats.validMs,
+          })
+        } catch (error) {
+          klog(`suspended-session quiet close failed (no history entry): ${String(error)}`)
+        }
+      }
+    }
     const previous = await getGoal()
     const goal: SessionGoal | null = await setGoal(
       message.goal ?? "",
@@ -858,6 +960,7 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     if (!goal || previous?.epoch !== goal.epoch) {
       await resetState()
       await clearVisits() // stale dwell aggregates must not bleed into the next session
+      void clearRestoreNotice() // a continue-banner belongs to the session it interrupted
       // A fresh session supersedes the previous session's cached summary; a plain clear
       // (goal null) keeps it so the summary survives until a new goal starts.
       if (goal) await clearSessionSummary()
