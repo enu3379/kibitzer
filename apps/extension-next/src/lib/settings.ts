@@ -12,7 +12,6 @@ export interface QuietHours {
 export interface Settings {
   tauOk: number // Tier-0 OK threshold; one of SENSITIVITY_PRESETS (higher = stricter, more drift)
   quietHours: QuietHours
-  ttsEnabled: boolean // speak the nag via Web Speech
   observeLocalPdfs: boolean // opt-in: use Chrome's local-PDF tab title for judging
   localPdfPolicyRevision: number // increments on every ON/OFF edge; invalidates stale async work
 }
@@ -52,7 +51,6 @@ export function snapTauOk(tauOk: number): number {
 export const DEFAULT_SETTINGS: Settings = {
   tauOk: SENSITIVITY_PRESETS.standard,
   quietHours: { enabled: false, start: "22:00", end: "08:00" },
-  ttsEnabled: false,
   observeLocalPdfs: false,
   localPdfPolicyRevision: 0,
 }
@@ -66,7 +64,6 @@ function coerce(value: Partial<Settings> | undefined): Settings {
       start: typeof q?.start === "string" ? q.start : DEFAULT_SETTINGS.quietHours.start,
       end: typeof q?.end === "string" ? q.end : DEFAULT_SETTINGS.quietHours.end,
     },
-    ttsEnabled: Boolean(value?.ttsEnabled),
     observeLocalPdfs: Boolean(value?.observeLocalPdfs),
     localPdfPolicyRevision:
       typeof value?.localPdfPolicyRevision === "number" &&

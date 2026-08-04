@@ -56,7 +56,7 @@ tab activation / settled navigation / title change
         → revalidate the durable request token
         → feed result back into the gauge
       nag / celebrate
-        → deliver toast, badge, chime/TTS, and record feedback context
+        → deliver toast, badge, chime, and record feedback context
 ```
 
 A heartbeat integrates dwell only while Chrome is present and the tab is
