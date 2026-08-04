@@ -36,7 +36,7 @@ const BEATS = [
   { id: "s3-dm-interrupt", frame: 694, caption: "S3 · 다른 사람이 끼어듦" },
   { id: "s3-music-link", frame: 722, caption: "S3 · 링크로 받은 뮤직비디오" },
   { id: "s3-music", frame: 740, caption: "S3 · 노래 재생" },
-  { id: "s3-nudge-1", frame: 792, caption: "S3 · 첫 훈수 (2배 토스트)" },
+  { id: "s3-nudge-1", frame: 792, caption: "S3 · 첫 훈수 (1.5배 토스트)" },
 
   { id: "s4-nudge-2", frame: 846, caption: "S4 · 두 번째 훈수 + 5분만" },
   { id: "s4-portal", frame: 900, caption: "S4 · 딴짓② 포털 검색" },

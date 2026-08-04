@@ -71,7 +71,7 @@ cd apps/promo && npx remotion studio
 
 ## 훈수 토스트 크기
 
-이 컷에는 토스트 줌인이 없으므로 **토스트 전체를 2배로 확대**했습니다(`theme.ts`의 `TOAST_SCALE`). 내부 CSS 값은 `toastOverlay.ts`의 실제 값을 한 글자도 바꾸지 않았고, 앵커(우하단 18/18)를 원점으로 하는 `transform: scale(2)` 한 줄만 걸었습니다. 실측 재현과 영상 가독성을 둘 다 지키는 방법입니다.
+이 컷에는 토스트 줌인이 없으므로 **토스트 전체를 1.5배로 확대**했습니다(`theme.ts`의 `TOAST_SCALE`). 내부 CSS 값은 `toastOverlay.ts`의 실제 값을 한 글자도 바꾸지 않았고, 앵커(우하단 18/18)를 원점으로 하는 `transform: scale(1.5)` 한 줄만 걸었습니다. 실측 재현과 영상 가독성을 둘 다 지키는 방법입니다.
 
 ---
 
@@ -105,7 +105,7 @@ cd apps/promo && npx remotion studio
 | ![](storyboard/s3-music-link.png) | ![](storyboard/s3-music.png) |
 | **f722** 링크로 받은 뮤직비디오 카드 | **f740** 새 탭에서 재생 |
 | ![](storyboard/s3-nudge-1.png) | |
-| **f792** 훈수 #1 — 2배 토스트. 아이콘 빨간 점 | |
+| **f792** 훈수 #1 — 1.5배 토스트. 아이콘 빨간 점 | |
 
 ### S4 — 딴짓②③ 포털 → 쇼핑몰
 | | |
@@ -169,7 +169,7 @@ node scripts/render-stills.mjs s3-nudge-1 # 한 장
 
 | 요소 | 출처 | 재현 방식 |
 |---|---|---|
-| 훈수/칭찬 토스트 | `apps/extension/src/content/toastOverlay.ts` | shadow-root 스타일시트 수치를 그대로 이식 — 300px 폭, `1.5px solid #10B981`(칭찬 `#79B7A0`), radius 12, `0 6px 24px rgba(0,0,0,.18)`, 메시지 13px/1.55, 컨텍스트·버튼 10.5/11.5px, 등장 `cubic-bezier(.2,.8,.3,1)`. peek·hands SVG는 좌표까지 동일(`circle cx32 cy24 r15`, `rect x6/47 y4 w11 h8 rx4`). **영상용 2배 확대는 값 수정이 아니라 바깥 `transform: scale(2)` 한 줄** |
+| 훈수/칭찬 토스트 | `apps/extension/src/content/toastOverlay.ts` | shadow-root 스타일시트 수치를 그대로 이식 — 300px 폭, `1.5px solid #10B981`(칭찬 `#79B7A0`), radius 12, `0 6px 24px rgba(0,0,0,.18)`, 메시지 13px/1.55, 컨텍스트·버튼 10.5/11.5px, 등장 `cubic-bezier(.2,.8,.3,1)`. peek·hands SVG는 좌표까지 동일(`circle cx32 cy24 r15`, `rect x6/47 y4 w11 h8 rx4`). **영상용 1.5배 확대는 값 수정이 아니라 바깥 `transform: scale(1.5)` 한 줄** |
 | 팝업 (설정/대시보드/요약) | `popup.html` + `popup.ts`의 `renderSetup`/`renderDashboard`/`renderSummary` | 320px 폭, `14px 16px 16px` 패딩, pill 12px, 입력 14px, 버튼 13px, 요약 진행바는 **accent 블루**(브랜드 그린 아님), 행 구성·문구 동일 |
 | 아이콘 상태 점 | `background.ts`의 `STATUS_DOT_COLOR` | 앰버 `#ba7517`(목표 없음) / 빨강 `#a32d2d`(훈수 대기) / 파랑 `#185fa5`(스누즈) / 정상 추적은 **점 없음** |
 | 로고 | `apps/extension/icons/icon-128.svg` | SVG 도형 좌표 그대로 React 포팅 |
