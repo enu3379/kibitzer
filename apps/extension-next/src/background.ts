@@ -490,20 +490,23 @@ async function resyncActivePage(reason: "window-close" | "startup", closedWindow
   const tab = await survivor()
   const survivorKey = tab?.url ? (describeObservableUrl(tab.url)?.pageKey ?? null) : null
   const visits = await getVisits()
-  const openOrphaned =
-    visits?.epoch === goal.epoch && visits.open != null && visits.open.pageKey !== survivorKey
+  const trackedOpen = visits?.epoch === goal.epoch ? (visits.open ?? null) : null
+  const openOrphaned = trackedOpen != null && trackedOpen.pageKey !== survivorKey
   // Close the interval at once: the destroyed page must not be credited one more second.
   if (openOrphaned) await noteInactive(Date.now(), goal.epoch)
   const state = await currentState()
   const gaugeOrphaned = state.activeVerdict != null && state.activePageKey !== survivorKey
   // Always trace: the gauge half is silent whenever the hold is already NEUTRAL (a freshly opened
   // window sits on an internal page, which neutralizes it), so without this line a working re-sync
-  // and one that never fired are indistinguishable in the log. The survivor is described by KIND
-  // only — never by key: it may be a sensitive or user-blocked page, and this log is exportable
-  // to ~/Downloads (the privacy scenarios in the e2e suite assert exactly that).
+  // and one that never fired are indistinguishable in the log. Report why each half did nothing —
+  // "nothing was open/held" and "what is open/held belongs to the survivor" are both correct
+  // no-ops, and a single "kept" label made them unreadable against a genuine miss. The survivor is
+  // described by KIND only, never by key: it may be a sensitive or user-blocked page, and this log
+  // is exportable to ~/Downloads (the privacy scenarios in the e2e suite assert exactly that).
   klog(
     `resync (${reason}) survivor=${tab ? (survivorKey ? "observable" : "internal") : "none"}` +
-      ` visits=${openOrphaned ? "closed" : "kept"} gauge=${gaugeOrphaned ? "neutral" : "kept"}`,
+      ` visits=${openOrphaned ? "closed" : trackedOpen == null ? "none" : "match"}` +
+      ` gauge=${gaugeOrphaned ? "neutral" : state.activeVerdict == null ? "none" : "match"}`,
   )
   if (gaugeOrphaned) {
     // On a window CLOSE the user was looking at that page right up to the moment it went away, so
