@@ -12,7 +12,7 @@ import { tier2Confirm } from "./tier12.ts"
 import { getGoal } from "./session.ts"
 import { activePersona, clampSentences, DEFAULT_MAX_SENTENCES, pickCelebrate, pickFallback } from "./personas.ts"
 import { klog } from "./klog.ts"
-import { playChime, speak } from "./chime.ts"
+import { playChime } from "./chime.ts"
 import { shouldDropUrl } from "./domainFilter.ts"
 import { initDomainLists } from "./domainLists.ts"
 import { getSettings, inQuietHours, localPdfPolicyMatches } from "./settings.ts"
@@ -443,7 +443,6 @@ async function deliver(
     const token = await showToast(message, effect.pageKey, "intervention", source)
     if (token != null) {
       await recordNag({ ts, host: page?.urlHost ?? "", token })
-      if (settings.ttsEnabled) void speak(message) // read the nudge aloud
     }
   } else if (effect.type === "celebrate") {
     // Celebrate in the selected persona's voice; fall back to the plain line.

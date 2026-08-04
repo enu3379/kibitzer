@@ -1,4 +1,4 @@
-// Options page: sensitivity, quiet hours, voice, persona, AI judge providers, and data
+// Options page: sensitivity, quiet hours, persona, AI judge providers, and data
 // controls. All state lives in the service worker; this page just reads/writes via
 // messages — key values travel INTO the worker only, responses carry masked keys.
 
@@ -53,7 +53,6 @@ const sensHint = $<HTMLElement>("sensHint")
 const quietSw = $<HTMLButtonElement>("quietSw")
 const quietStart = $<HTMLInputElement>("quietStart")
 const quietEnd = $<HTMLInputElement>("quietEnd")
-const ttsSw = $<HTMLButtonElement>("ttsSw")
 const localPdfSw = $<HTMLButtonElement>("localPdfSw")
 const blockList = $<HTMLTextAreaElement>("blockList")
 const allowList = $<HTMLTextAreaElement>("allowList")
@@ -104,7 +103,6 @@ async function init(): Promise<void> {
   quietStart.value = settings.quietHours.start
   quietEnd.value = settings.quietHours.end
   quietStart.disabled = quietEnd.disabled = !settings.quietHours.enabled
-  setChecked(ttsSw, settings.ttsEnabled)
   setChecked(localPdfSw, settings.observeLocalPdfs)
   renderDomainLists((await send({ type: "get-domain-lists" })) as DomainLists)
 
@@ -248,12 +246,6 @@ const saveQuiet = (): void =>
   void saveSettings({ quietHours: { enabled: isChecked(quietSw), start: quietStart.value, end: quietEnd.value } })
 quietStart.addEventListener("change", saveQuiet)
 quietEnd.addEventListener("change", saveQuiet)
-
-ttsSw.addEventListener("click", () => {
-  const on = !isChecked(ttsSw)
-  setChecked(ttsSw, on)
-  void saveSettings({ ttsEnabled: on })
-})
 
 localPdfSw.addEventListener("click", () => {
   const on = !isChecked(localPdfSw)
