@@ -805,6 +805,47 @@ test("E2E: bouncing back to a judged page within another page's dwell re-enters 
   }
 })
 
+test("E2E: a pending dwell never survives returning to a held internal page or disabled PDF", async () => {
+  // The internal-page and disabled-PDF branches debounce on lastObservedKey too. Pre-fix their
+  // early return sat ABOVE dwell.cancel(), so held-page → real page Y → back within Y's dwell
+  // left Y's checkpoint alive; it then fired against the held page, was dropped, and the gauge
+  // froze on Y with nothing armed. The cancel must run even on the debounced path.
+  const newtab = { id: 16, url: "chrome://newtab/", title: "New Tab", active: true, windowId: 1 }
+  activeTab = newtab
+  await send({ type: "set-goal", goal: "재무 보고서 검토", minutes: null })
+  await settle(50) // set-goal observes the newtab → internal hold, lastObservedKey = internal key
+
+  // Open a real page in that tab: its dwell is armed.
+  activeTab = { id: 16, url: "https://blog.test/third-essay", title: "세 번째 잡담 에세이", active: true, windowId: 1 }
+  for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
+  await settle(50)
+  assert.ok(await kvGet<PendingDwell>(PENDING_DWELL_KEY), "the real page armed a dwell")
+
+  // Back to the identical newtab within the dwell — the debounced internal path must still cancel.
+  activeTab = newtab
+  for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
+  await settle(50)
+  assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "returning to the held internal page cancels the abandoned dwell")
+
+  // Same shape through holdLocalPdfDisabled: all disabled PDFs share one debounce key.
+  await send({ type: "set-settings", settings: { observeLocalPdfs: false } })
+  activeTab = { id: 16, url: "file:///C:/docs/one.pdf", title: "one.pdf", active: true, windowId: 1 }
+  for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
+  await settle(50) // → lastObservedKey = "local-pdf#disabled"
+
+  activeTab = { id: 16, url: "https://blog.test/fourth-essay", title: "네 번째 잡담 에세이", active: true, windowId: 1 }
+  for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
+  await settle(50)
+  assert.ok(await kvGet<PendingDwell>(PENDING_DWELL_KEY), "the real page armed a dwell (PDF phase)")
+
+  activeTab = { id: 16, url: "file:///C:/docs/two.pdf", title: "two.pdf", active: true, windowId: 1 }
+  for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
+  await settle(50)
+  assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "a second disabled PDF (same debounce key) still cancels the abandoned dwell")
+
+  await send({ type: "set-settings", settings: { observeLocalPdfs: true } })
+})
+
 test("E2E: first install opens the onboarding tab once — updates and re-fires never re-open it", async () => {
   createdTabs.length = 0
   const fireInstalled = async (details?: { reason: string }) => {

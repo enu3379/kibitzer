@@ -69,8 +69,11 @@ async function holdLocalPdfDisabled(goal: SessionGoal): Promise<void> {
   // A judged PDF may have an open visit interval. OFF means observation stops now, even if
   // the gauge was already neutral or a stale observe later tries to resume the interval.
   await noteInactive(Date.now(), goal.epoch)
-  if (lastObservedKey === disabledKey) return
+  // Cancel BEFORE the debounce below: the page just left may still have a dwell pending, and
+  // an early return here would let it fire against this PDF and be dropped — leaving the
+  // gauge frozen on that page with nothing armed (same defect as the main observe debounce).
   await dwell.cancel()
+  if (lastObservedKey === disabledKey) return
   lastObservedKey = disabledKey
   klog("drop (local-pdf disabled)")
   await enterNeutral(disabledKey, goal)
@@ -125,8 +128,11 @@ async function observe(url: string | undefined, title: string | undefined): Prom
     }
     const internalPageKey = `internal#${protocol}`
     const obsKey = `${internalPageKey}\n${title}`
-    if (obsKey === lastObservedKey) return // same internal page storming — already held
+    // Cancel BEFORE the storm debounce: returning to an already-held internal page must still
+    // kill the dwell of the page just left, or that dwell fires against this chrome:// tab,
+    // is dropped, and the gauge freezes on the abandoned page with nothing armed.
     await dwell.cancel() // drop any prior page's pending dwell; this page never counts
+    if (obsKey === lastObservedKey) return // same internal page storming — already held
     lastObservedKey = obsKey
     klog(`drop (internal) ${protocol}`)
     await enterNeutral(internalPageKey, goal)
