@@ -210,48 +210,110 @@ export type Thread = {
   handle: string;
   preview: string;
   time: string;
-  unread?: boolean;
 };
 
 export const THREADS: readonly Thread[] = [
-  { name: "민아", handle: "mina_", preview: "그래서 걔가 뭐랬는데?", time: "지금", unread: true },
-  { name: "준호", handle: "junh0", preview: "ㅋㅋㅋㅋㅋㅋ 진짜?", time: "1분", unread: true },
-  { name: "다영", handle: "dayoung", preview: "사진 보냈어 확인해봐", time: "2분", unread: true },
-  { name: "스터디 4인방", handle: "3명", preview: "김: 주말에 되는사람~", time: "4분", unread: true },
+  { name: "민아", handle: "mina_", preview: "그래서 걔가 뭐랬는데?", time: "지금" },
+  { name: "준호", handle: "junh0", preview: "ㅇㅋㅇㅋ 예약 걸어둘게", time: "1분" },
+  { name: "다영", handle: "dayoung", preview: "무조건 들어야 됨 ㅋㅋ", time: "2분" },
+  { name: "스터디 4인방", handle: "3명", preview: "김: 주말에 되는사람~", time: "4분" },
   { name: "태현", handle: "t.park", preview: "그거 링크 좀", time: "9분" },
   { name: "연서", handle: "yeon__", preview: "나 지금 나감", time: "14분" },
   { name: "혜진", handle: "hyejin.log", preview: "고마워!!", time: "26분" },
   { name: "동아리 단톡", handle: "12명", preview: "박: 공지 확인 부탁드려요", time: "38분" },
 ];
 
-/** Message log for the open thread. `out` = sent by the user. */
-const CHAT: ReadonlyArray<{ out: boolean; text: string }> = [
-  { out: false, text: "야 그래서 어제 그거 어떻게 됐어" },
-  { out: true, text: "아 그거ㅋㅋ 완전 난리났지" },
-  { out: false, text: "헐 뭔데뭔데" },
-  { out: true, text: "일단 걔가 먼저 얘기를 꺼냈는데" },
-  { out: true, text: "다들 표정이 굳어버림" },
-  { out: false, text: "ㅋㅋㅋㅋㅋㅋㅋㅋ 상상된다" },
-  { out: false, text: "그래서 걔가 뭐랬는데?" },
-  { out: true, text: "그게 진짜 웃긴게" },
+export type Msg = { out: boolean; text?: string; link?: { title: string; channel: string } };
+
+/**
+ * One log per thread. Thread 2 is the one that carries the music link — that is how the
+ * video gets to the player without the player itself being a distraction the user chose.
+ */
+const CHATS: ReadonlyArray<readonly Msg[]> = [
+  [
+    { out: false, text: "야 그래서 어제 그거 어떻게 됐어" },
+    { out: true, text: "아 그거ㅋㅋ 완전 난리났지" },
+    { out: false, text: "헐 뭔데뭔데" },
+    { out: true, text: "일단 걔가 먼저 얘기를 꺼냈는데" },
+    { out: true, text: "다들 표정이 굳어버림" },
+    { out: false, text: "ㅋㅋㅋㅋㅋㅋㅋㅋ 상상된다" },
+    { out: false, text: "그래서 걔가 뭐랬는데?" },
+    { out: true, text: "그게 진짜 웃긴게" },
+  ],
+  [
+    { out: false, text: "형 주말에 시간 됨?" },
+    { out: true, text: "토요일? 될 듯" },
+    { out: false, text: "ㅇㅋ 그럼 예약 걸어둔다" },
+    { out: false, text: "근데 인원 몇 명이지" },
+    { out: true, text: "나 포함 넷?" },
+    { out: false, text: "ㅇㅋㅇㅋ 예약 걸어둘게" },
+  ],
+  [
+    { out: false, text: "이거 봤어??" },
+    { out: false, text: "요즘 이것만 들음" },
+    { out: true, text: "오 뭔데" },
+    { out: false, link: { title: "Paperlight — Neon Alley (Official MV)", channel: "metube.com" } },
+    { out: false, text: "무조건 들어야 됨 ㅋㅋ" },
+    { out: true, text: "일단 틀어볼게" },
+  ],
 ];
 
-const Bubble: React.FC<{ out: boolean; text: string }> = ({ out, text }) => (
-  <div style={{ display: "flex", justifyContent: out ? "flex-end" : "flex-start", marginBottom: 7 }}>
-    <span
-      style={{
-        maxWidth: "68%",
-        padding: "8px 13px",
-        borderRadius: 18,
-        fontSize: 12,
-        lineHeight: 1.45,
-        background: out ? "#3797f0" : "#efefef",
-        color: out ? "#fff" : "#262626",
-        wordBreak: "keep-all",
-      }}
-    >
-      {text}
-    </span>
+/** Shared link preview card — the bridge from the thread to the player. */
+const LinkCard: React.FC<{ link: NonNullable<Msg["link"]>; hot: boolean }> = ({ link, hot }) => (
+  <div
+    style={{
+      width: 214,
+      borderRadius: 14,
+      overflow: "hidden",
+      border: `1px solid ${hot ? "#3797f0" : "#dbdbdb"}`,
+      background: "#fff",
+      boxShadow: hot ? "0 4px 14px rgba(55,151,240,0.3)" : "none",
+      transform: hot ? "scale(0.985)" : "none",
+    }}
+  >
+    <div style={{ position: "relative", height: 118, background: "linear-gradient(135deg,#7c3aed 0%,#db2777 52%,#0f172a 100%)" }}>
+      <span style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
+        <span style={{ width: 38, height: 27, borderRadius: 7, background: "#e0303a", display: "grid", placeItems: "center" }}>
+          <span
+            style={{
+              width: 0,
+              height: 0,
+              marginLeft: 3,
+              borderLeft: "10px solid #fff",
+              borderTop: "6.5px solid transparent",
+              borderBottom: "6.5px solid transparent",
+            }}
+          />
+        </span>
+      </span>
+    </div>
+    <div style={{ padding: "8px 10px 10px" }}>
+      <div style={{ fontSize: 11, lineHeight: 1.35, color: "#262626", fontWeight: 550, wordBreak: "keep-all" }}>{link.title}</div>
+      <div style={{ fontSize: 9.5, color: "#8e8e8e", marginTop: 3 }}>{link.channel}</div>
+    </div>
+  </div>
+);
+
+const Bubble: React.FC<{ msg: Msg; linkHot?: boolean }> = ({ msg, linkHot = false }) => (
+  <div style={{ display: "flex", justifyContent: msg.out ? "flex-end" : "flex-start", marginBottom: 7 }}>
+    {msg.link ? (
+      <LinkCard link={msg.link} hot={linkHot} />
+    ) : (
+      <span
+        style={{
+          maxWidth: "68%",
+          padding: "8px 13px",
+          borderRadius: 18,
+          fontSize: 12,
+          lineHeight: 1.45,
+          background: msg.out ? "#3797f0" : "#efefef",
+          color: msg.out ? "#fff" : "#262626",
+          wordBreak: "keep-all",
+        }}
+      >
+        {msg.text}
+      </span>
+    )}
   </div>
 );
 
@@ -268,12 +330,30 @@ const TypingDots: React.FC = () => (
 export const InstagramDM: React.FC<{
   /** Which thread is open. */
   activeThread: number;
-  /** How many messages of the log are visible. */
+  /** How many messages of the open thread's log are visible. */
   messages: number;
   typing?: boolean;
   dmBadge?: number;
-}> = ({ activeThread, messages, typing = false, dmBadge }) => {
-  const shown = CHAT.slice(0, Math.max(0, Math.min(CHAT.length, messages)));
+  /** How many rows in the list currently carry an unread marker (from the top). */
+  unreadRows?: number;
+  /** A row that just received something — pulses to pull the eye across. */
+  flashThread?: number | null;
+  /** Text in the compose box, mid-reply. */
+  composing?: string;
+  /** Highlights the shared link right before it gets clicked. */
+  linkHot?: boolean;
+}> = ({
+  activeThread,
+  messages,
+  typing = false,
+  dmBadge,
+  unreadRows = 0,
+  flashThread = null,
+  composing = "",
+  linkHot = false,
+}) => {
+  const log = CHATS[activeThread % CHATS.length];
+  const shown = log.slice(0, Math.max(0, Math.min(log.length, messages)));
   const thread = THREADS[activeThread % THREADS.length];
   return (
     <div style={{ position: "absolute", inset: 0, background: "#fff", display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -286,36 +366,53 @@ export const InstagramDM: React.FC<{
             <span style={{ marginLeft: "auto", fontSize: 16 }}>✎</span>
           </div>
           <div style={{ flex: 1, overflow: "hidden" }}>
-            {THREADS.map((t, i) => (
-              <div
-                key={t.handle}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 11,
-                  padding: "9px 16px",
-                  background: i === activeThread % THREADS.length ? "#efefef" : "transparent",
-                }}
-              >
-                <Avatar i={i} size={40} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: t.unread ? 700 : 450, color: "#262626" }}>{t.name}</div>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: t.unread ? "#262626" : "#8e8e8e",
-                      fontWeight: t.unread ? 600 : 400,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {t.preview} · {t.time}
+            {THREADS.map((t, i) => {
+              const open = i === activeThread % THREADS.length;
+              // An open thread has by definition just been read.
+              const unread = !open && i < unreadRows;
+              const flash = flashThread === i;
+              return (
+                <div
+                  key={t.handle}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 11,
+                    padding: "9px 16px",
+                    background: open ? "#efefef" : flash ? "#e8f2fd" : "transparent",
+                  }}
+                >
+                  <Avatar i={i} size={40} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: unread ? 700 : 450, color: "#262626" }}>{t.name}</div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: unread ? "#262626" : "#8e8e8e",
+                        fontWeight: unread ? 600 : 400,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {t.preview} · {t.time}
+                    </div>
                   </div>
+                  {unread ? (
+                    <span
+                      style={{
+                        width: flash ? 10 : 8,
+                        height: flash ? 10 : 8,
+                        borderRadius: "50%",
+                        background: "#3797f0",
+                        flexShrink: 0,
+                        boxShadow: flash ? "0 0 0 4px rgba(55,151,240,0.22)" : "none",
+                      }}
+                    />
+                  ) : null}
                 </div>
-                {t.unread ? <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#3797f0", flexShrink: 0 }} /> : null}
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
@@ -330,7 +427,7 @@ export const InstagramDM: React.FC<{
           </div>
           <div style={{ flex: 1, padding: "14px 18px", display: "flex", flexDirection: "column", justifyContent: "flex-end", minHeight: 0 }}>
             {shown.map((m, i) => (
-              <Bubble key={i} out={m.out} text={m.text} />
+              <Bubble key={i} msg={m} linkHot={linkHot && Boolean(m.link)} />
             ))}
             {typing ? <TypingDots /> : null}
           </div>
@@ -339,16 +436,19 @@ export const InstagramDM: React.FC<{
               style={{
                 height: 38,
                 borderRadius: 999,
-                border: "1px solid #dbdbdb",
+                border: `1px solid ${composing ? "#a8a8a8" : "#dbdbdb"}`,
                 display: "flex",
                 alignItems: "center",
                 padding: "0 16px",
                 fontSize: 12,
-                color: "#8e8e8e",
+                color: composing ? "#262626" : "#8e8e8e",
               }}
             >
-              메시지 입력...
-              <span style={{ marginLeft: "auto", color: "#3797f0", fontWeight: 650 }}>보내기</span>
+              {composing || "메시지 입력..."}
+              {composing ? (
+                <span style={{ display: "inline-block", width: 1.4, height: 13, background: "#262626", marginLeft: 1 }} />
+              ) : null}
+              <span style={{ marginLeft: "auto", color: composing ? "#0095f6" : "#9fd0f7", fontWeight: 650 }}>보내기</span>
             </div>
           </div>
         </div>

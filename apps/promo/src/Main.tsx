@@ -12,6 +12,7 @@ import { BrowserWindow } from "./components/browser/BrowserWindow";
 import { ExtensionPopup } from "./components/extension/ExtensionPopup";
 import { KibitzerToast } from "./components/toast/Toast";
 import { Cursor } from "./components/Cursor";
+import { KeyHint } from "./components/KeyHint";
 import { EndCard } from "./components/EndCard";
 import { NewTabMock } from "./components/sites/NewTabMock";
 import { NewsMock } from "./components/sites/NewsMock";
@@ -31,24 +32,38 @@ const Page: React.FC<{ page: PageKind }> = ({ page }) => {
     case "newtab":
       return <NewTabMock />;
     case "news":
-      return <NewsMock scroll={page.scroll} />;
+      return <NewsMock scroll={page.scroll} variant={page.variant} selectQuote={page.select} />;
     case "stats":
-      return <StatsMock reveal={page.reveal} />;
+      return <StatsMock reveal={page.reveal} select={page.select} />;
     case "tube":
       return <TubeMock videoIndex={page.video} progress={page.progress} />;
     case "igFeed":
       return <InstagramFeed scroll={page.scroll} />;
     case "igDm":
-      return <InstagramDM activeThread={page.thread} messages={page.messages} typing={page.typing} dmBadge={page.badge} />;
+      return (
+        <InstagramDM
+          activeThread={page.thread}
+          messages={page.messages}
+          typing={page.typing}
+          dmBadge={page.badge}
+          unreadRows={page.unreadRows}
+          flashThread={page.flashThread}
+          composing={page.composing}
+          linkHot={page.linkHot}
+        />
+      );
     case "portal":
       return <PortalMock query={page.query} adHot={page.adHot} />;
     case "shop":
       return (
         <ShopMock
           view={page.view}
+          listScroll={page.listScroll}
+          listHot={page.listHot}
           productIndex={page.product}
           cartCount={page.cart}
           cartPulse={page.cartPulse}
+          cartItems={page.cartItems}
           addHot={page.addHot}
         />
       );
@@ -59,13 +74,7 @@ const Page: React.FC<{ page: PageKind }> = ({ page }) => {
 
 const EditorApp: React.FC<{ editor: EditorState; active: boolean }> = ({ editor, active }) => (
   <AppWindow {...EDITOR_RECT} title={editorApp.name} subtitle={report.title} active={active}>
-    <EditorMock
-      lines={editor.lines}
-      showCaret={editor.caret && active}
-      body={editor.body}
-      scroll={editor.scroll}
-      complete={editor.complete}
-    />
+    <EditorMock blocks={editor.blocks} showCaret={editor.caret && active} pasteFlash={editor.pasteFlash} scroll={editor.scroll} />
   </AppWindow>
 );
 
@@ -82,6 +91,7 @@ export const Main: React.FC = () => {
       tabs={st.tabs}
       activeId={st.activeId}
       url={st.url}
+      omni={st.omni}
       dot={st.dot}
       extHighlight={st.popup !== null}
       active={browserFocused}
@@ -115,6 +125,7 @@ export const Main: React.FC = () => {
           {/* Stacking order follows focus: the frontmost app is rendered last. */}
           {browserFocused ? [editor, browser] : [browser, editor]}
           {st.switcher ? <AppSwitcher selected={st.switcher.selected} opacity={st.switcher.opacity} /> : null}
+          {st.keyHint ? <KeyHint state={st.keyHint} /> : null}
           {frame < scene.s8EndCard.from ? <Cursor state={cursor} /> : null}
         </MacDesktop>
       </AbsoluteFill>

@@ -124,17 +124,51 @@ const PuzzleIcon: React.FC = () => (
   </span>
 );
 
+/**
+ * Omnibox in editing mode: what was typed, plus the completion Chrome offers back with
+ * the remainder selected. One keystroke and a Tab is all it takes to reach a site you
+ * visit often — which is exactly the point of the beat this renders.
+ */
+export type OmniState = {
+  typed: string;
+  completion: string;
+  suggestion: { site: SiteKey; title: string; url: string } | null;
+};
+
+const OmniSuggestion: React.FC<{ s: NonNullable<OmniState["suggestion"]> }> = ({ s }) => (
+  <div
+    style={{
+      position: "absolute",
+      left: 0,
+      right: 0,
+      top: TABSTRIP_H + TOOLBAR_H,
+      background: "#fff",
+      boxShadow: "0 6px 14px rgba(0,0,0,0.16)",
+      padding: "5px 0 7px",
+      zIndex: 5,
+    }}
+  >
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 44px", background: "#e8f0fe" }}>
+      <Favicon site={s.site} size={15} />
+      <span style={{ fontSize: 12, color: "#202124", fontWeight: 550 }}>{s.url}</span>
+      <span style={{ fontSize: 11.5, color: "#5f6368" }}>— {s.title}</span>
+    </div>
+  </div>
+);
+
 export const BrowserWindow: React.FC<{
   tabs: readonly TabSpec[];
   activeId: string;
   url: string;
+  /** Set while the address bar is being typed into; overrides `url`. */
+  omni?: OmniState | null;
   /** Kibitzer action-icon status dot. */
   dot: DotKind;
   extHighlight?: boolean;
   /** Inactive windows lose their traffic-light colour and most of their shadow. */
   active?: boolean;
   children: React.ReactNode;
-}> = ({ tabs, activeId, url, dot, extHighlight, active = true, children }) => (
+}> = ({ tabs, activeId, url, omni = null, dot, extHighlight, active = true, children }) => (
   <div
     style={{
       position: "absolute",
@@ -198,7 +232,8 @@ export const BrowserWindow: React.FC<{
           flex: 1,
           height: 28,
           borderRadius: 14,
-          background: C.omnibox,
+          background: omni ? "#fff" : C.omnibox,
+          boxShadow: omni ? "0 0 0 2px #1a73e8, 0 1px 5px rgba(0,0,0,0.16)" : "none",
           display: "flex",
           alignItems: "center",
           gap: 8,
@@ -208,11 +243,29 @@ export const BrowserWindow: React.FC<{
           minWidth: 0,
         }}
       >
-        <svg width={12} height={12} viewBox="0 0 14 14" style={{ flexShrink: 0, opacity: 0.66 }} aria-hidden>
-          <rect x="2.6" y="6.2" width="8.8" height="6.2" rx="1.5" stroke="currentColor" strokeWidth="1.3" fill="none" />
-          <path d="M4.8 6.2V4.5a2.2 2.2 0 0 1 4.4 0v1.7" stroke="currentColor" strokeWidth="1.3" fill="none" />
-        </svg>
-        <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{url}</span>
+        {omni ? (
+          <svg width={12} height={12} viewBox="0 0 14 14" style={{ flexShrink: 0, opacity: 0.66 }} aria-hidden>
+            <circle cx="6.3" cy="6.3" r="4.2" stroke="currentColor" strokeWidth="1.4" fill="none" />
+            <path d="M9.4 9.4L12.4 12.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+        ) : (
+          <svg width={12} height={12} viewBox="0 0 14 14" style={{ flexShrink: 0, opacity: 0.66 }} aria-hidden>
+            <rect x="2.6" y="6.2" width="8.8" height="6.2" rx="1.5" stroke="currentColor" strokeWidth="1.3" fill="none" />
+            <path d="M4.8 6.2V4.5a2.2 2.2 0 0 1 4.4 0v1.7" stroke="currentColor" strokeWidth="1.3" fill="none" />
+          </svg>
+        )}
+        {omni ? (
+          <span style={{ whiteSpace: "nowrap", overflow: "hidden" }}>
+            {omni.typed}
+            {omni.completion ? (
+              <span style={{ background: "#b7d0f7", color: "#202124" }}>{omni.completion}</span>
+            ) : (
+              <span style={{ display: "inline-block", width: 1.4, height: 13, background: "#202124", verticalAlign: "-2px" }} />
+            )}
+          </span>
+        ) : (
+          <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{url}</span>
+        )}
       </div>
       <PuzzleIcon />
       <ExtensionIcon dot={dot} highlight={extHighlight} />
@@ -236,5 +289,7 @@ export const BrowserWindow: React.FC<{
 
     {/* page viewport — position:relative so the toast can pin to its bottom-right */}
     <div style={{ position: "relative", height: CONTENT_H, overflow: "hidden", background: "#fff" }}>{children}</div>
+
+    {omni?.suggestion ? <OmniSuggestion s={omni.suggestion} /> : null}
   </div>
 );

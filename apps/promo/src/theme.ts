@@ -40,8 +40,16 @@ export const TABSTRIP_LEFT = 75;
 export const TAB_MAX_W = 186;
 export const TAB_NEW_W = 31;
 
-/** Toast lives bottom-right of the *page viewport*, like the real content script */
+/**
+ * Toast lives bottom-right of the *page viewport*, like the real content script.
+ *
+ * TOAST_SCALE magnifies the whole card as one transform rather than re-authoring its
+ * numbers: every value inside Toast.tsx stays literally the one in toastOverlay.ts, and
+ * the video simply shows it bigger. There is no zoom-in on the nudge in this cut, so the
+ * toast has to carry itself at a glance.
+ */
 export const TOAST = { width: 300, right: 18, bottom: 18 } as const;
+export const TOAST_SCALE = 1.5;
 
 /** Extension palette — mirrors apps/extension/src/popup/popup.html (light scheme) */
 export const ext = {

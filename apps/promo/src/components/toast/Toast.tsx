@@ -1,5 +1,5 @@
 import React from "react";
-import { FONT, TOAST, ext } from "../../theme";
+import { FONT, TOAST, TOAST_SCALE, ext } from "../../theme";
 
 /**
  * React port of the injected overlay in apps/extension/src/content/toastOverlay.ts.
@@ -70,7 +70,10 @@ export const KibitzerToast: React.FC<{
         width: TOAST.width,
         boxSizing: "border-box",
         fontFamily: FONT,
-        transform: `translateY(${lift}px)`,
+        // Scale from the anchored corner so the card grows up-and-left out of the same
+        // spot the real overlay pins itself to. `lift` rides the scale, as it should.
+        transform: `scale(${TOAST_SCALE}) translateY(${lift}px)`,
+        transformOrigin: "100% 100%",
         opacity: reveal,
         zIndex: 50,
       }}

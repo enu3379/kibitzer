@@ -3,7 +3,7 @@ import React from "react";
 /**
  * Generic shopping mall. Icon-only header, invented products.
  *
- * The cart badge is the point: it counts up across the montage, which reads as elapsed
+ * The cart badge is the point: it counts up across the spree, which reads as elapsed
  * time far more concretely than a scroll ever could. Products are deliberately personal
  * consumer goods so the beat cannot be misread as on-goal e-commerce research.
  */
@@ -15,16 +15,21 @@ export type Product = {
   was: string;
   art: string;
   glyph: string;
+  slug: string;
 };
 
+/** The first seven are the ones that end up in the cart; the rest pad out the listing. */
 export const PRODUCTS: readonly Product[] = [
-  { name: "에어쿠션 러닝화 3세대", brand: "STRIDE", price: "89,000", was: "129,000", art: "linear-gradient(140deg,#0ea5e9,#4f46e5)", glyph: "👟" },
-  { name: "노이즈캔슬링 무선 이어버드", brand: "AUDIO/N", price: "119,000", was: "159,000", art: "linear-gradient(140deg,#64748b,#1e293b)", glyph: "🎧" },
-  { name: "경량 캠핑 체어 (2color)", brand: "OUTLINE", price: "54,900", was: "72,000", art: "linear-gradient(140deg,#22c55e,#0f766e)", glyph: "🪑" },
-  { name: "이중 진공 보온 텀블러 500ml", brand: "DAYLOOP", price: "27,500", was: "38,000", art: "linear-gradient(140deg,#f59e0b,#dc2626)", glyph: "🥤" },
-  { name: "오버핏 코튼 후디", brand: "PLAINWEAR", price: "45,000", was: "59,000", art: "linear-gradient(140deg,#a855f7,#ec4899)", glyph: "🧥" },
-  { name: "접이식 블루투스 키보드", brand: "TYPEBOX", price: "62,000", was: "84,000", art: "linear-gradient(140deg,#14b8a6,#0369a1)", glyph: "⌨️" },
-  { name: "간편 원두 드립백 30개입", brand: "MORNING CO.", price: "18,900", was: "24,000", art: "linear-gradient(140deg,#b45309,#78350f)", glyph: "☕" },
+  { name: "에어쿠션 러닝화 3세대", brand: "STRIDE", price: "89,000", was: "129,000", art: "linear-gradient(140deg,#0ea5e9,#4f46e5)", glyph: "👟", slug: "stride-air-3" },
+  { name: "노이즈캔슬링 무선 이어버드", brand: "AUDIO/N", price: "119,000", was: "159,000", art: "linear-gradient(140deg,#64748b,#1e293b)", glyph: "🎧", slug: "audio-n-buds-anc" },
+  { name: "경량 캠핑 체어 (2color)", brand: "OUTLINE", price: "54,900", was: "72,000", art: "linear-gradient(140deg,#22c55e,#0f766e)", glyph: "🪑", slug: "outline-camp-chair" },
+  { name: "이중 진공 보온 텀블러 500ml", brand: "DAYLOOP", price: "27,500", was: "38,000", art: "linear-gradient(140deg,#f59e0b,#dc2626)", glyph: "🥤", slug: "dayloop-tumbler-500" },
+  { name: "오버핏 코튼 후디", brand: "PLAINWEAR", price: "45,000", was: "59,000", art: "linear-gradient(140deg,#a855f7,#ec4899)", glyph: "🧥", slug: "plainwear-cotton-hoodie" },
+  { name: "접이식 블루투스 키보드", brand: "TYPEBOX", price: "62,000", was: "84,000", art: "linear-gradient(140deg,#14b8a6,#0369a1)", glyph: "⌨️", slug: "typebox-fold-keyboard" },
+  { name: "간편 원두 드립백 30개입", brand: "MORNING CO.", price: "18,900", was: "24,000", art: "linear-gradient(140deg,#b45309,#78350f)", glyph: "☕", slug: "morning-co-dripbag-30" },
+  { name: "저소음 미니 가습기 4L", brand: "AIRLEAF", price: "39,000", was: "52,000", art: "linear-gradient(140deg,#38bdf8,#0369a1)", glyph: "💧", slug: "airleaf-humidifier-4l" },
+  { name: "인체공학 무선 마우스", brand: "TYPEBOX", price: "47,000", was: "61,000", art: "linear-gradient(140deg,#475569,#0f172a)", glyph: "🖱️", slug: "typebox-ergo-mouse" },
+  { name: "극세사 워시 담요 (싱글)", brand: "PLAINWEAR", price: "33,000", was: "44,000", art: "linear-gradient(140deg,#fb7185,#9f1239)", glyph: "🧣", slug: "plainwear-wash-blanket" },
 ];
 
 const CartIcon: React.FC<{ count: number; pulse: number }> = ({ count, pulse }) => (
@@ -106,6 +111,62 @@ const Header: React.FC<{ cart: number; pulse: number }> = ({ cart, pulse }) => (
   </div>
 );
 
+/* ------------------------------------------------------------------ listing */
+
+/** The grid you land on from the portal ad, and scroll before picking anything. */
+const ListView: React.FC<{ scroll: number; hot: number | null }> = ({ scroll, hot }) => (
+  <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+    <div style={{ padding: "16px 24px", transform: `translateY(${-scroll}px)` }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
+        <span style={{ fontSize: 17, fontWeight: 700, color: "#262626" }}>오늘의 특가</span>
+        <span style={{ fontSize: 11.5, color: "#8c8c8c" }}>1,284개 상품</span>
+        <span style={{ marginLeft: "auto", fontSize: 11.5, color: "#595959" }}>인기순 ▾</span>
+      </div>
+      <div style={{ fontSize: 11, color: "#ff4d4f", fontWeight: 650, marginBottom: 14 }}>타임특가 · 02:41:08 남음</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 13 }}>
+        {PRODUCTS.map((p, i) => (
+          <div
+            key={p.slug}
+            style={{
+              border: `1px solid ${hot === i ? "#ff4d4f" : "#f0f0f0"}`,
+              borderRadius: 8,
+              overflow: "hidden",
+              transform: hot === i ? "translateY(-3px)" : "none",
+              boxShadow: hot === i ? "0 6px 16px rgba(0,0,0,0.14)" : "none",
+            }}
+          >
+            <div style={{ height: 112, background: p.art, display: "grid", placeItems: "center", fontSize: 40 }}>{p.glyph}</div>
+            <div style={{ padding: "8px 9px 10px" }}>
+              <div style={{ fontSize: 9.5, color: "#8c8c8c", marginBottom: 2 }}>{p.brand}</div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "#262626",
+                  lineHeight: 1.35,
+                  height: 30,
+                  overflow: "hidden",
+                  wordBreak: "keep-all",
+                }}
+              >
+                {p.name}
+              </div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 5, marginTop: 5 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#ff4d4f" }}>31%</span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: "#262626" }}>
+                  {p.price}
+                  <span style={{ fontSize: 10, fontWeight: 500 }}>원</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+);
+
+/* ------------------------------------------------------------------ detail */
+
 const ProductDetail: React.FC<{ product: Product; addHot: boolean }> = ({ product, addHot }) => (
   <div style={{ display: "flex", gap: 26, padding: "22px 26px" }}>
     <div style={{ width: 300, height: 300, borderRadius: 10, background: product.art, display: "grid", placeItems: "center", fontSize: 92, flexShrink: 0 }}>
@@ -159,17 +220,19 @@ const ProductDetail: React.FC<{ product: Product; addHot: boolean }> = ({ produc
   </div>
 );
 
-const CartView: React.FC<{ count: number }> = ({ count }) => {
-  const items = PRODUCTS.slice(0, Math.max(0, Math.min(PRODUCTS.length, count)));
-  const total = items.reduce((sum, p) => sum + Number(p.price.replace(/,/g, "")), 0);
+/* ------------------------------------------------------------------ cart */
+
+const CartView: React.FC<{ items: readonly number[] }> = ({ items }) => {
+  const rows = items.map((i) => PRODUCTS[i % PRODUCTS.length]);
+  const total = rows.reduce((sum, p) => sum + Number(p.price.replace(/,/g, "")), 0);
   return (
     <div style={{ padding: "18px 26px" }}>
       <div style={{ fontSize: 17, fontWeight: 700, color: "#262626", marginBottom: 14 }}>
-        장바구니 <span style={{ color: "#ff4d4f" }}>{count}</span>
+        장바구니 <span style={{ color: "#ff4d4f" }}>{rows.length}</span>
       </div>
       <div style={{ border: "1px solid #f0f0f0", borderRadius: 8, overflow: "hidden" }}>
-        {items.map((p) => (
-          <div key={p.name} style={{ display: "flex", alignItems: "center", gap: 13, padding: "9px 14px", borderBottom: "1px solid #f5f5f5" }}>
+        {rows.map((p) => (
+          <div key={p.slug} style={{ display: "flex", alignItems: "center", gap: 13, padding: "9px 14px", borderBottom: "1px solid #f5f5f5" }}>
             <span style={{ width: 20, height: 20, borderRadius: 4, border: "1.5px solid #ff4d4f", background: "#ff4d4f", display: "grid", placeItems: "center", color: "#fff", fontSize: 12, flexShrink: 0 }}>
               ✓
             </span>
@@ -196,21 +259,35 @@ const CartView: React.FC<{ count: number }> = ({ count }) => {
 };
 
 export const ShopMock: React.FC<{
-  view: "detail" | "cart";
-  productIndex: number;
+  view: "list" | "detail" | "cart";
+  /** list */
+  listScroll?: number;
+  listHot?: number | null;
+  /** detail */
+  productIndex?: number;
+  addHot?: boolean;
+  /** header */
   cartCount: number;
   /** 0→1 pop on the badge when an item lands in the cart. */
   cartPulse?: number;
-  addHot?: boolean;
-}> = ({ view, productIndex, cartCount, cartPulse = 0, addHot = false }) => (
+  /** cart — product indices, in the order they were added */
+  cartItems?: readonly number[];
+}> = ({
+  view,
+  listScroll = 0,
+  listHot = null,
+  productIndex = 0,
+  addHot = false,
+  cartCount,
+  cartPulse = 0,
+  cartItems = [],
+}) => (
   <div style={{ position: "absolute", inset: 0, background: "#fff", overflow: "hidden", display: "flex", flexDirection: "column" }}>
     <Header cart={cartCount} pulse={cartPulse} />
-    <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
-      {view === "detail" ? (
-        <ProductDetail product={PRODUCTS[productIndex % PRODUCTS.length]} addHot={addHot} />
-      ) : (
-        <CartView count={cartCount} />
-      )}
+    <div style={{ position: "relative", flex: 1, minHeight: 0, overflow: "hidden" }}>
+      {view === "list" ? <ListView scroll={listScroll} hot={listHot} /> : null}
+      {view === "detail" ? <ProductDetail product={PRODUCTS[productIndex % PRODUCTS.length]} addHot={addHot} /> : null}
+      {view === "cart" ? <CartView items={cartItems} /> : null}
     </div>
   </div>
 );

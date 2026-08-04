@@ -22,8 +22,15 @@ const TABLE = [
   ["Paid membership", "$42.10", "77.2%", "2.44x"],
 ];
 
-/** Generic analytics dashboard. All figures are invented. */
-export const StatsMock: React.FC<{ reveal?: number }> = ({ reveal = 1 }) => (
+/**
+ * Generic analytics dashboard. All figures are invented.
+ *
+ * `select` (0→1) paints the drag-selection over the two rows that end up pasted into the
+ * report — the coupon row and the membership row, the comparison the whole piece hangs on.
+ */
+const SELECTED_ROWS = [0, 3];
+
+export const StatsMock: React.FC<{ reveal?: number; select?: number }> = ({ reveal = 1, select = 0 }) => (
   <div style={{ position: "absolute", inset: 0, background: "#f7f8fa", overflow: "hidden", color: "#0f172a" }}>
     {/* app bar */}
     <div
@@ -142,23 +149,28 @@ export const StatsMock: React.FC<{ reveal?: number }> = ({ reveal = 1 }) => (
             <span style={{ flex: 1, textAlign: "right" }}>D90</span>
             <span style={{ flex: 1, textAlign: "right" }}>ROI</span>
           </div>
-          {TABLE.map((r) => (
-            <div
-              key={r[0]}
-              style={{
-                display: "flex",
-                fontSize: 10.5,
-                padding: "9px 0",
-                borderBottom: "1px solid #f3f4f6",
-                fontVariantNumeric: "tabular-nums",
-              }}
-            >
-              <span style={{ flex: 2, color: "#0f172a" }}>{r[0]}</span>
-              <span style={{ flex: 1, textAlign: "right", color: "#475569" }}>{r[1]}</span>
-              <span style={{ flex: 1, textAlign: "right", color: "#475569" }}>{r[2]}</span>
-              <span style={{ flex: 1, textAlign: "right", fontWeight: 650 }}>{r[3]}</span>
-            </div>
-          ))}
+          {TABLE.map((r, i) => {
+            const sel = SELECTED_ROWS.includes(i) ? Math.max(0, Math.min(1, select)) : 0;
+            return (
+              <div
+                key={r[0]}
+                style={{
+                  display: "flex",
+                  fontSize: 10.5,
+                  padding: "9px 0",
+                  borderBottom: "1px solid #f3f4f6",
+                  fontVariantNumeric: "tabular-nums",
+                  background: `rgba(172,206,247,${sel})`,
+                  boxShadow: sel > 0 ? `0 0 0 3px rgba(172,206,247,${sel})` : "none",
+                }}
+              >
+                <span style={{ flex: 2, color: "#0f172a" }}>{r[0]}</span>
+                <span style={{ flex: 1, textAlign: "right", color: "#475569" }}>{r[1]}</span>
+                <span style={{ flex: 1, textAlign: "right", color: "#475569" }}>{r[2]}</span>
+                <span style={{ flex: 1, textAlign: "right", fontWeight: 650 }}>{r[3]}</span>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
