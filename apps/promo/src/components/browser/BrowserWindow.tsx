@@ -83,13 +83,32 @@ const Tab: React.FC<{ tab: TabSpec; active: boolean; base: number }> = ({ tab, a
   );
 };
 
-const NavIcons: React.FC = () => (
+/**
+ * Back / forward / reload.
+ *
+ * Forward is greyed out for almost the whole film because there is nothing to go forward
+ * to — until S4 presses Back, at which point it has to come alive, or the one navigation in
+ * the film that uses browser chrome is drawn on a control set that says it never happened.
+ */
+const NavIcons: React.FC<{ backHot: boolean; forwardOn: boolean }> = ({ backHot, forwardOn }) => (
   <div style={{ display: "flex", alignItems: "center", gap: 3, paddingLeft: 8, color: "#5f6368" }}>
     {[
       "M9.5 3.5L5 8l4.5 4.5", // back
       "M6.5 3.5L11 8l-4.5 4.5", // forward
     ].map((d, i) => (
-      <span key={d} style={{ width: 26, height: 26, display: "grid", placeItems: "center", opacity: i === 1 ? 0.38 : 1 }}>
+      <span
+        key={d}
+        style={{
+          width: 26,
+          height: 26,
+          borderRadius: "50%",
+          display: "grid",
+          placeItems: "center",
+          opacity: i === 1 ? (forwardOn ? 1 : 0.38) : 1,
+          background: i === 0 && backHot ? "rgba(31,35,40,0.10)" : "transparent",
+          transform: i === 0 && backHot ? "scale(0.94)" : "none",
+        }}
+      >
         <svg width={16} height={16} viewBox="0 0 16 16" aria-hidden>
           <path d={d} stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
@@ -165,10 +184,13 @@ export const BrowserWindow: React.FC<{
   /** Kibitzer status dot — colour tracks the gauge band, absent until a goal is set. */
   dot: DotKind;
   extHighlight?: boolean;
+  /** Toolbar Back pressed, and whether Forward has anywhere to go. */
+  backHot?: boolean;
+  forwardOn?: boolean;
   /** Inactive windows lose their traffic-light colour and most of their shadow. */
   active?: boolean;
   children: React.ReactNode;
-}> = ({ tabs, activeId, url, omni = null, dot, extHighlight, active = true, children }) => (
+}> = ({ tabs, activeId, url, omni = null, dot, extHighlight, backHot = false, forwardOn = false, active = true, children }) => (
   <div
     style={{
       position: "absolute",
@@ -226,7 +248,7 @@ export const BrowserWindow: React.FC<{
         borderBottom: `1px solid ${C.divider}`,
       }}
     >
-      <NavIcons />
+      <NavIcons backHot={backHot} forwardOn={forwardOn} />
       <div
         style={{
           flex: 1,

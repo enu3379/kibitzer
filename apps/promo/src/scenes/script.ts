@@ -61,9 +61,15 @@ export type PageKind =
   | { k: "portal"; query: string; adHot: number | null }
   | {
       k: "shop";
-      view: "list" | "detail" | "cart";
+      view: "list" | "detail" | "results" | "cart";
       listScroll: number;
+      /** Grid card about to be clicked — an index into the grid on screen, not into PRODUCTS. */
       listHot: number | null;
+      /** Product order behind the search results grid. */
+      results: number[];
+      /** What is in the mall's own search box, and whether the caret is in it. */
+      query: string;
+      searchFocus: boolean;
       product: number;
       cart: number;
       cartPulse: number;
@@ -109,6 +115,9 @@ export type Stage = {
   popup: { state: PopupState; reveal: number } | null;
   toast: ToastState | null;
   keyHint: KeyHintState | null;
+  /** Toolbar Back, lit while it is being pressed; Forward, enabled once there is a page to go back to. */
+  backHot: boolean;
+  forwardOn: boolean;
   zoom: number;
 };
 
@@ -203,6 +212,7 @@ const URL = {
   music: "metube.com/watch?v=8kR2vQ",
   portal: "narae.com/search?query=러닝화+추천",
   shopList: "shop.daylight.co.kr/deals/today",
+  shopSearch: "shop.daylight.co.kr/search?q=",
   shopCart: "shop.daylight.co.kr/cart",
   research: "commerceweekly.com/data/membership-retention-benchmarks-2026",
   mail: "mail.workspace.com/u/0/#compose",
@@ -324,10 +334,10 @@ type WriteEvent = {
  * are invisible either way, and grouping them keeps the schedule readable.
  *
  * Off-camera windows, i.e. every stretch where a `whole` block may be scheduled:
- *   133–164   §1 body, §2.1–2.4       (clock 2:13 → 2:33)
- *   191–213   §3.1, and the §3.2 head  (clock 2:36 → 2:42)
- *   226–242   §3.2 tail, [자료 2], §3.3
- *   895–946   §3.4, §4                 (clock 3:31 → 3:38, after the return)
+ *   211–242   §1 body, §2.1–2.4       (clock 2:13 → 2:33)
+ *   269–291   §3.1, and the §3.2 head  (clock 2:36 → 2:42)
+ *   304–320   §3.2 tail, [자료 2], §3.3
+ *   1000–1051  §3.4, §4                 (clock 3:31 → 3:38, after the return)
  * Anything scheduled outside one of those pops onto a visible document.
  *
  * The result is a page or more of new text per editor cut, and a document that has
@@ -800,23 +810,74 @@ const s3 = (frame: number, st: Stage): void => {
 /* ------------------------------------------------------------------ S4 — drift #2/#3: the mall */
 
 /**
- * The spree, as a loop rather than a montage.
+ * The mall, as a browsing session.
  *
- * product page → 장바구니 → the badge pops and a chip says so → a click on the 함께 본
- * 상품 rail → the next product page. Nobody walks back to a listing grid seven times; they
- * take whatever the mall puts beside the thing they just added, which is the mechanism the
- * report being neglected is literally about.
+ * The old cut was a loop: 장바구니, rail row, 장바구니, rail row, seven times over. It is
+ * the right MECHANISM — a mall keeps somebody by putting the next thing beside the thing
+ * they just took, which is the mechanism the neglected report is literally about — but run
+ * seven times unbroken it stops reading as a person and starts reading as a macro: one
+ * button and one row, alternating, on a page that barely changes between them.
  *
- * SPREE is the order the products are visited in and CART_STEPS the frames they are added
- * on, so the cart count and the product on screen are two reads of the same list: the k-th
- * hop puts SPREE[k] on screen, and cart_k+1 adds it.
+ * So the same window now carries the four ways somebody actually moves through a shop, and
+ * no two consecutive items arrive the same way:
+ *
+ *   `shopPick`      off the listing grid, after the landing scroll
+ *   `hop1` `hop2`   the 함께 본 상품 rail — the mall's own suggestion
+ *   `backClick`     the browser's Back button, onto the product page from two stops ago —
+ *                   the one page the history actually holds — and out of it again down a
+ *                   different rail row (`hop3`)
+ *   `shopSearch`    the mall's own search box: 캠핑 의자 typed into it, results, a card
+ *   `hop4`          the rail once more, to close it out
+ *
+ * MALL is that session written as an ordered list of PAGES, each carrying how it was
+ * reached, because "how it was reached" is what decides what lights up before the click:
+ * a rail row, a grid card, or nothing at all. Everything else in the scene — the cart
+ * contents, the badge, the rail contents, the URL — is derived from this list, so the
+ * pointer cannot end up clicking something the page is not showing.
  */
-const SPREE = [3, 5, 1, 8, 6, 0, 4] as const;
-const CART_STEPS = [beat.cart1, beat.cart2, beat.cart3, beat.cart4, beat.cart5, beat.cart6, beat.cart7] as const;
-/** Each hop is a click on the rail; the first product comes off the listing grid instead. */
-const HOP_STEPS = [beat.hop1, beat.hop2, beat.hop3, beat.hop4, beat.hop5, beat.hop6] as const;
-/** Which rail row each hop takes — varied so seven clicks do not land on one pixel. */
-const REC_ROWS = [0, 2, 1, 2, 0, 1] as const;
+const SHOP_QUERY = "캠핑 의자";
+const SHOP_QUERY_RATE = 1.2;
+/** What the mall puts up for that query: the thing searched for, then its usual neighbours. */
+const SHOP_RESULTS = [2, 3, 9, 6, 7] as const;
+
+type MallPage = {
+  /** Frame the page appears — i.e. the frame the click that opened it lands on. */
+  at: number;
+  /** How it was reached. `card` indexes the grid on screen, `row` the three rail rows. */
+  via: "portal" | "card" | "rail" | "back" | "search" | "result" | "cart";
+  view: "list" | "detail" | "results" | "cart";
+  product?: number;
+  row?: number;
+  card?: number;
+};
+
+const MALL: readonly MallPage[] = [
+  { at: beat.shopEnter, via: "portal", view: "list" },
+  { at: beat.shopPick, via: "card", view: "detail", product: 0, card: 0 },
+  { at: beat.hop1, via: "rail", view: "detail", product: 5, row: 0 },
+  { at: beat.hop2, via: "rail", view: "detail", product: 1, row: 2 },
+  // Back. Not to the listing — to the page that was on screen two stops ago, which is what
+  // a browser's history actually holds and the only thing this button is allowed to do.
+  { at: beat.backClick, via: "back", view: "detail", product: 5 },
+  { at: beat.hop3, via: "rail", view: "detail", product: 8, row: 1 },
+  { at: beat.searchResults, via: "search", view: "results" },
+  { at: beat.searchPick, via: "result", view: "detail", product: 2, card: 0 },
+  { at: beat.hop4, via: "rail", view: "detail", product: 4, row: 2 },
+  { at: beat.cartViewEnter, via: "cart", view: "cart" },
+];
+
+const CART_STEPS = [beat.cart1, beat.cart2, beat.cart3, beat.cart4, beat.cart5, beat.cart6] as const;
+
+/**
+ * What ends up in the cart: whatever product page was on screen at each 담기, in order.
+ * Derived rather than listed, so the cart cannot disagree with what was clicked.
+ */
+const CART_ITEMS: readonly number[] = CART_STEPS.map((at) => {
+  let product = 0;
+  for (const p of MALL) if (p.at <= at && p.view === "detail") product = p.product ?? product;
+  return product;
+});
+
 /** Rows drawn by RecRail in ShopMock, and hit points HIT.shopRec in the cursor path. */
 const REC_RAIL_ROWS = 3;
 
@@ -835,29 +896,55 @@ const railFor = (product: number, next: number | null, row: number): number[] =>
   return rail;
 };
 
-const cartAt = (frame: number) => {
+/** The mall at `frame`: which page, what is in the cart, and what is about to be clicked. */
+const mallAt = (frame: number) => {
+  let i = 0;
+  for (let k = 0; k < MALL.length; k += 1) if (frame >= MALL[k].at) i = k;
+  const page = MALL[i];
+  const next = i + 1 < MALL.length ? MALL[i + 1] : null;
+
   let added = 0;
   for (const at of CART_STEPS) if (frame >= at) added += 1;
-  let hops = 0;
-  for (const at of HOP_STEPS) if (frame >= at) hops += 1;
-
   const lastAdd = added > 0 ? CART_STEPS[added - 1] : -999;
   const nextAdd = added < CART_STEPS.length ? CART_STEPS[added] : Infinity;
-  const nextHop = hops < HOP_STEPS.length ? HOP_STEPS[hops] : Infinity;
 
-  const product = SPREE[Math.min(SPREE.length - 1, hops)];
-  const upNext = hops + 1 < SPREE.length ? SPREE[hops + 1] : null;
-  const row = REC_ROWS[Math.min(REC_ROWS.length - 1, hops)];
+  // Whatever opens the NEXT page is what has to light up before it is clicked.
+  const rail = next && next.via === "rail" ? next : null;
+  const card = next && (next.via === "card" || next.via === "result") ? next : null;
+  const product = page.product ?? 0;
 
   return {
-    count: added,
-    items: SPREE.slice(0, added),
-    pulse: range(frame, [lastAdd, lastAdd + 8], [1, 0], Easing.out(Easing.quad)),
-    addHot: frame >= nextAdd - 5 && frame < nextAdd + 2,
+    view: page.view,
     product,
-    rec: railFor(product, upNext, row),
-    recHot: frame >= nextHop - 6 && frame < nextHop + 2 ? row : null,
+    count: added,
+    items: CART_ITEMS.slice(0, added),
+    pulse: range(frame, [lastAdd, lastAdd + 8], [1, 0], Easing.out(Easing.quad)),
+    addHot: page.view === "detail" && frame >= nextAdd - 5 && frame < nextAdd + 2,
+    rec: page.view === "detail" ? railFor(product, rail?.product ?? null, rail?.row ?? 0) : [],
+    recHot: rail && frame >= rail.at - 6 && frame < rail.at + 2 ? (rail.row ?? 0) : null,
+    cardHot: card && frame >= card.at - 8 && frame < card.at + 2 ? (card.card ?? 0) : null,
   };
+};
+
+/**
+ * The cart as it stands after the last 담기 — the page the freeze holds on and the one the
+ * cleanup closes. Written once because S4, S5 and S6 all have to show the same six items.
+ */
+const CART_PAGE: PageKind = {
+  k: "shop",
+  view: "cart",
+  listScroll: 0,
+  listHot: null,
+  results: [...SHOP_RESULTS],
+  query: SHOP_QUERY,
+  searchFocus: false,
+  product: CART_ITEMS[CART_ITEMS.length - 1],
+  cart: CART_ITEMS.length,
+  cartPulse: 0,
+  cartItems: [...CART_ITEMS],
+  addHot: false,
+  rec: [],
+  recHot: null,
 };
 
 const onDmPeek = (frame: number): boolean =>
@@ -874,14 +961,16 @@ const s4 = (frame: number, st: Stage): void => {
   if (frame < beat.portalEnter) return;
 
   /*
-   * A search on the portal turns into a spree. The cart badge is the clock — 0 → 7 says
+   * A search on the portal turns into a session. The cart badge is the clock — 0 → 6 says
    * "time passed" more concretely than any scroll, and it is the payoff of the report's
    * own subject matter. The two trips back to the messages are what make the badge jump:
    * you look away, and both counters have moved.
    *
-   * The listing grid is on screen for the twenty-four frames after `shopEnter` and never
-   * again: it exists to say "this is a shopping site" before the loop starts, because the
-   * spree means nothing if the audience is still working out what page it is on.
+   * The listing grid gets the twenty frames after `shopEnter`: it exists to say "this is a
+   * shopping site" before anything is clicked, because the spree means nothing if the
+   * audience is still working out what page it is on. Unlike the old cut it is not the only
+   * page of its kind — the search puts a second grid up two thirds of the way through, and
+   * the two are what keep the middle of the scene from looking like one screen.
    */
   st.tabs.push({ ...TAB.portal });
   if (frame < beat.shopEnter) {
@@ -903,29 +992,38 @@ const s4 = (frame: number, st: Stage): void => {
     st.url = URL.igDm;
     st.page = dmPage(frame);
   } else {
-    const cart = cartAt(frame);
-    const listing = frame < beat.shopPick;
-    const cartView = frame >= beat.cartViewEnter;
+    const mall = mallAt(frame);
     st.activeId = "shop";
-    st.url = cartView
-      ? URL.shopCart
-      : listing
-        ? URL.shopList
-        : `shop.daylight.co.kr/products/${PRODUCTS[cart.product].slug}`;
+    st.url =
+      mall.view === "cart"
+        ? URL.shopCart
+        : mall.view === "list"
+          ? URL.shopList
+          : mall.view === "results"
+            ? // Chrome shows the decoded query in the omnibox, not the percent-escaped one.
+              `${URL.shopSearch}${SHOP_QUERY}`
+            : `shop.daylight.co.kr/products/${PRODUCTS[mall.product].slug}`;
     st.page = {
       k: "shop",
-      view: cartView ? "cart" : listing ? "list" : "detail",
-      // A long, readable scroll: this is the landing, and it is the only time the grid is up.
-      listScroll: range(frame, [beat.shopEnter + 3, beat.shopPick - 4], [0, 96], Easing.linear),
-      listHot: between(frame, beat.shopPick - 8, beat.shopPick + 2) ? SPREE[0] : null,
-      product: cart.product,
-      cart: cart.count,
-      cartPulse: cartView ? 0 : cart.pulse,
-      cartItems: [...cart.items],
-      addHot: !cartView && !listing && cart.addHot,
-      rec: cart.rec,
-      recHot: cartView || listing ? null : cart.recHot,
+      view: mall.view,
+      // A long, readable scroll: this is the landing, and the grid earns its twenty frames.
+      listScroll: mall.view === "list" ? range(frame, [beat.shopEnter + 3, beat.shopPick - 4], [0, 96], Easing.linear) : 0,
+      listHot: mall.cardHot,
+      results: [...SHOP_RESULTS],
+      // The query stays in the box once it has been submitted, the way a real one does.
+      query: frame < beat.shopSearch ? "" : typed(SHOP_QUERY, frame, beat.shopSearch + 1, SHOP_QUERY_RATE),
+      searchFocus: between(frame, beat.shopSearch, beat.searchResults),
+      product: mall.product,
+      cart: mall.count,
+      cartPulse: mall.view === "cart" ? 0 : mall.pulse,
+      cartItems: [...mall.items],
+      addHot: mall.addHot,
+      rec: mall.rec,
+      recHot: mall.recHot,
     };
+    // Back is pressed once, and Forward stays live until the next click writes over it.
+    st.backHot = between(frame, beat.backClick - 4, beat.backClick + 4);
+    st.forwardOn = between(frame, beat.backClick, beat.hop3);
   }
 
   /*
@@ -968,19 +1066,7 @@ const s5 = (frame: number, st: Stage): void => {
   ];
   st.activeId = "shop";
   st.url = URL.shopCart;
-  st.page = {
-    k: "shop",
-    view: "cart",
-    listScroll: 0,
-    listHot: null,
-    product: 0,
-    cart: 7,
-    cartPulse: 0,
-    cartItems: [...SPREE],
-    addHot: false,
-    rec: [],
-    recHot: null,
-  };
+  st.page = CART_PAGE;
 
   // Everything holds and the frame pushes in 4%. The menu bar stays put.
   st.zoom = Math.min(
@@ -1038,19 +1124,7 @@ const s6 = (frame: number, st: Stage): void => {
   if (closed === 0) {
     st.activeId = "shop";
     st.url = URL.shopCart;
-    st.page = {
-      k: "shop",
-      view: "cart",
-      listScroll: 0,
-      listHot: null,
-      product: 0,
-      cart: 7,
-      cartPulse: 0,
-      cartItems: [...SPREE],
-      addHot: false,
-      rec: [],
-      recHot: null,
-    };
+    st.page = CART_PAGE;
   } else if (closed === 1) {
     st.activeId = "portal";
     st.url = URL.portal;
@@ -1170,6 +1244,8 @@ export const stageAt = (frame: number): Stage => {
     popup: null,
     toast: null,
     keyHint: null,
+    backHot: false,
+    forwardOn: false,
     zoom: 1,
   };
 
@@ -1236,11 +1312,33 @@ const HIT = {
   dmCompose: { x: 700, y: 800 },
   /** First product card in the portal's shopping panel — the bridge to the mall. */
   portalAd: { x: 133, y: 419 },
-  /** Fourth card in the mall's listing grid, after a scroll. */
-  shopCard: { x: 790, y: 330 },
+  /**
+   * Columns of the mall's 5-up grid. 1060px of content inside a 24px pad, four 13px gutters:
+   * a column is 201.6 wide and the k-th centre is 146.8 + 214.6k. `shopCard` is the listing,
+   * which is scrolled 96px by the time anything is picked; `shopResult` is the same row on
+   * the search results, which is not scrolled at all — hence the 96px between them.
+   */
+  shopCard: [
+    { x: 147, y: 330 },
+    { x: 361, y: 330 },
+    { x: 576, y: 330 },
+    { x: 791, y: 330 },
+    { x: 1005, y: 330 },
+  ],
+  shopResult: [
+    { x: 147, y: 426 },
+    { x: 361, y: 426 },
+    { x: 576, y: 426 },
+    { x: 791, y: 426 },
+    { x: 1005, y: 426 },
+  ],
   /** "장바구니" button on a product page, and the cart icon in the mall header. */
   shopAdd: { x: 455, y: 468 },
   shopCart: { x: 1096, y: 147 },
+  /** The mall's own search box: 420 wide, after the 26px mark and an 18px gap. */
+  shopSearch: { x: 300, y: 147 },
+  /** Toolbar Back — 8px of padding plus half of a 26px button, on the toolbar's centre line. */
+  navBack: { x: WINDOW.x + 21, y: WINDOW.y + TABSTRIP_H + TOOLBAR_H / 2 },
   /**
    * The three 함께 본 상품 rows, which is where every hop after the first one is clicked.
    * Derived from RecRail's own geometry: the rail is 236 wide against the window's right
@@ -1265,8 +1363,23 @@ const HIT = {
 /** Nudges the pointer a few px so parked stretches do not look frozen. */
 const idle = (frame: number, x: number, y: number): Waypoint => ({ frame, x, y });
 
-/** Where the k-th hop clicks: the rail row that hop's next product was planted in. */
-const recHit = (k: number) => HIT.shopRec[REC_ROWS[k]];
+/**
+ * Where a mall click lands, read out of MALL rather than repeated here.
+ *
+ * The pointer and the page are the two halves of the same lie, and the way that lie used to
+ * break was a retime moving one of them: a hop whose rail row had been re-ordered, a card
+ * index that no longer matched the grid. Taking the coordinate from the page's own `row` /
+ * `card` means the pointer cannot click a row the page is not lighting up.
+ */
+const mallHit = (at: number) => {
+  const page = MALL.find((p) => p.at === at);
+  if (!page) throw new Error(`no mall page at ${at}`);
+  if (page.via === "rail") return HIT.shopRec[page.row ?? 0];
+  if (page.via === "card") return HIT.shopCard[page.card ?? 0];
+  if (page.via === "result") return HIT.shopResult[page.card ?? 0];
+  if (page.via === "back") return HIT.navBack;
+  return HIT.shopCart;
+};
 
 /**
  * When the pointer comes back after a Cmd-Tab: a few frames past the switch, but never
@@ -1289,7 +1402,7 @@ const reappear = (afterSwitch: number, before: number): number =>
  * retime — stretching a beat lengthens the pause, not the reach.
  */
 export const CURSOR_PATH: readonly Waypoint[] = [
-  /* ---------------------------------------------------------------- S1 (0–66)
+  /* ---------------------------------------------------------------- S1 (0–144)
    * Opens with the pointer parked mid-screen on the new-tab page. The first movement in
    * the film is the crossing to the Kibitzer icon.
    */
@@ -1297,14 +1410,19 @@ export const CURSOR_PATH: readonly Waypoint[] = [
   { frame: 6, x: 576, y: 432 },
   { frame: 13, x: EXT.x, y: EXT.y },
   { frame: beat.popupOpen, x: EXT.x, y: EXT.y, click: true },
-  { frame: 21, x: HIT.goalInput.x, y: HIT.goalInput.y },
-  { frame: 22, x: HIT.goalInput.x, y: HIT.goalInput.y, click: true },
+  // The popup is READ before it is typed into: 18 frames of hint and example chips with the
+  // pointer sitting still on the icon it just clicked, which is what people actually do.
+  { frame: 34, x: HIT.goalInput.x, y: HIT.goalInput.y },
+  { frame: 36, x: HIT.goalInput.x, y: HIT.goalInput.y, click: true },
   { frame: beat.goalTypeEnd, x: HIT.goalInput.x, y: HIT.goalInput.y },
-  { frame: 51, x: HIT.startBtn.x, y: HIT.startBtn.y },
+  { frame: 94, x: HIT.startBtn.x, y: HIT.startBtn.y },
   { frame: beat.startClick, x: HIT.startBtn.x, y: HIT.startBtn.y, click: true },
-  { frame: 64, x: 640, y: 430 },
+  // And read once more: the active view holds for 40 frames after the click, so the hand
+  // comes off the button and waits with it rather than cutting away.
+  idle(beat.startClick + 14, 730, 512),
+  { frame: beat.popupClose + 4, x: 640, y: 430 },
 
-  /* ---------------------------------------------------------------- S2 (66–306)
+  /* ---------------------------------------------------------------- S2 (144–411)
    * Three search-and-open cycles. Each one returns to the results tab, picks a different
    * row and opens it, so three distinct sources end up in the strip.
    */
@@ -1336,7 +1454,7 @@ export const CURSOR_PATH: readonly Waypoint[] = [
   { frame: beat.copy2, x: 855, y: 322 },
   { frame: beat.switchToEditor4 + 4, x: 855, y: 322, hidden: true },
 
-  /* ---------------------------------------------------------------- S3 (306–538)
+  /* ---------------------------------------------------------------- S3 (411–643)
    * Two landings before the run: the feed is browsed for a full second before the messages
    * are opened, and the thread that opens is looked at before anything is typed into it.
    */
@@ -1366,53 +1484,57 @@ export const CURSOR_PATH: readonly Waypoint[] = [
   { frame: beat.nudge1Dismiss, x: HIT.toastClose.x, y: HIT.toastClose.y, click: true },
   idle(beat.nudge1Dismiss + 10, 820, 700),
 
-  /* ---------------------------------------------------------------- S4 (538–764)
+  /* ---------------------------------------------------------------- S4 (643–869)
    * The landing is the slow part: the listing grid is scrolled for the best part of a
-   * second before anything is picked. Then the loop — 장바구니, rail, 장바구니, rail —
-   * and the pointer crosses the page every time, which is what makes seven additions read
-   * as seven decisions rather than as one button being held down.
+   * second before anything is picked. What follows is not a loop — the pointer goes to the
+   * rail, to the Back button, into the mall's own search box and onto two different grids,
+   * and it crosses the page for every one of them. Six additions, six different routes.
    */
   { frame: beat.portalEnter - 4, x: newTabX(6), y: TAB_Y },
   { frame: beat.portalEnter, x: newTabX(6), y: TAB_Y, click: true },
   { frame: beat.shopEnter - 8, x: HIT.portalAd.x, y: HIT.portalAd.y },
   { frame: beat.shopEnter - 2, x: HIT.portalAd.x, y: HIT.portalAd.y, click: true },
-  idle(beat.shopEnter + 9, 640, 520),
-  idle(beat.shopEnter + 17, 600, 380),
-  { frame: beat.shopPick - 5, x: HIT.shopCard.x, y: HIT.shopCard.y },
-  { frame: beat.shopPick, x: HIT.shopCard.x, y: HIT.shopCard.y, click: true },
+  idle(beat.shopEnter + 8, 640, 520),
+  idle(beat.shopEnter + 14, 600, 380),
+  { frame: beat.shopPick - 5, x: mallHit(beat.shopPick).x, y: mallHit(beat.shopPick).y },
+  { frame: beat.shopPick, x: mallHit(beat.shopPick).x, y: mallHit(beat.shopPick).y, click: true },
   { frame: beat.cart1, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
-  { frame: beat.hop1, x: recHit(0).x, y: recHit(0).y, click: true },
+  { frame: beat.hop1, x: mallHit(beat.hop1).x, y: mallHit(beat.hop1).y, click: true },
   { frame: beat.cart2, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
   // Nudge #2 arrives; the hand hesitates on the button before going for `5분만`.
   idle(beat.nudge2In + 8, HIT.shopAdd.x, HIT.shopAdd.y),
   { frame: beat.snoozeClick - 12, x: HIT.toastBreak.x, y: HIT.toastBreak.y },
   { frame: beat.snoozeClick, x: HIT.toastBreak.x, y: HIT.toastBreak.y, click: true },
-  { frame: beat.hop2, x: recHit(1).x, y: recHit(1).y, click: true },
+  { frame: beat.hop2, x: mallHit(beat.hop2).x, y: mallHit(beat.hop2).y, click: true },
   { frame: beat.cart3, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
-  { frame: beat.hop3, x: recHit(2).x, y: recHit(2).y, click: true },
+  // All the way back across the window to the Back button, and out again down the rail.
+  { frame: beat.backClick, x: HIT.navBack.x, y: HIT.navBack.y, click: true },
+  { frame: beat.hop3, x: mallHit(beat.hop3).x, y: mallHit(beat.hop3).y, click: true },
   { frame: beat.cart4, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
   { frame: beat.dmPeek1 - 4, x: tabX(4, 8), y: TAB_Y },
   { frame: beat.dmPeek1, x: tabX(4, 8), y: TAB_Y, click: true },
-  idle(beat.dmPeek1 + 9, 700, 620),
+  idle(beat.dmPeek1 + 8, 700, 620),
   { frame: beat.dmPeek1End - 4, x: tabX(7, 8), y: TAB_Y },
   { frame: beat.dmPeek1End, x: tabX(7, 8), y: TAB_Y, click: true },
-  { frame: beat.hop4, x: recHit(3).x, y: recHit(3).y, click: true },
+  // Into the mall's own search box — the hand leaves it alone while the query is typed.
+  { frame: beat.shopSearch, x: HIT.shopSearch.x, y: HIT.shopSearch.y, click: true },
+  idle(beat.searchResults + 2, HIT.shopSearch.x + 26, HIT.shopSearch.y + 14),
+  { frame: beat.searchPick - 5, x: mallHit(beat.searchPick).x, y: mallHit(beat.searchPick).y },
+  { frame: beat.searchPick, x: mallHit(beat.searchPick).x, y: mallHit(beat.searchPick).y, click: true },
   { frame: beat.cart5, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
-  { frame: beat.hop5, x: recHit(4).x, y: recHit(4).y, click: true },
-  { frame: beat.cart6, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
   { frame: beat.dmPeek2 - 4, x: tabX(4, 8), y: TAB_Y },
   { frame: beat.dmPeek2, x: tabX(4, 8), y: TAB_Y, click: true },
   idle(beat.dmPeek2 + 8, 700, 620),
   { frame: beat.dmPeek2End - 4, x: tabX(7, 8), y: TAB_Y },
   { frame: beat.dmPeek2End, x: tabX(7, 8), y: TAB_Y, click: true },
-  { frame: beat.hop6, x: recHit(5).x, y: recHit(5).y, click: true },
-  { frame: beat.cart7, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
+  { frame: beat.hop4, x: mallHit(beat.hop4).x, y: mallHit(beat.hop4).y, click: true },
+  { frame: beat.cart6, x: HIT.shopAdd.x, y: HIT.shopAdd.y, click: true },
   { frame: beat.cartViewEnter, x: HIT.shopCart.x, y: HIT.shopCart.y, click: true },
   { frame: beat.cartViewEnter + 10, x: 700, y: 430 },
   // Dead still across the freeze — any drift undercuts the pause.
   { frame: beat.freezeEnd, x: 700, y: 430 },
 
-  /* ---------------------------------------------------------------- S6 (824–920) */
+  /* ---------------------------------------------------------------- S6 (929–1025) */
   { frame: beat.closeTab1 - 5, x: tabCloseX(7, 8), y: TAB_Y },
   { frame: beat.closeTab1, x: tabCloseX(7, 8), y: TAB_Y, click: true },
   { frame: beat.closeTab2, x: tabCloseX(6, 8), y: TAB_Y, click: true },
@@ -1426,7 +1548,7 @@ export const CURSOR_PATH: readonly Waypoint[] = [
   { frame: beat.newResearchTab, x: newTabX(4), y: TAB_Y, click: true },
   idle(beat.researchLoad + 6, HIT.read.x, HIT.read.y),
 
-  /* ---------------------------------------------------------------- S7 (920–1082) */
+  /* ---------------------------------------------------------------- S7 (1025–1187) */
   { frame: beat.switchToEditor6 + 4, x: HIT.read.x, y: HIT.read.y, hidden: true },
   { frame: reappear(beat.switchToBrowser6, beat.mailOpen), x: 620, y: 300, hidden: false },
   { frame: beat.mailOpen - 3, x: newTabX(5), y: TAB_Y },
@@ -1498,6 +1620,9 @@ export const TYPING_RUNS: readonly TypingRun[] = [
   // The one character anybody actually types into an address bar.
   { from: beat.omniType - 1, text: omniSocial.typed, fpc: 1 },
   { from: beat.portalQuery, text: PORTAL_QUERY, fpc: PORTAL_RATE },
+  // The mall's own search box — the one query in the film that is typed into a page rather
+  // than into the address bar.
+  { from: beat.shopSearch + 1, text: SHOP_QUERY, fpc: SHOP_QUERY_RATE },
   // The page loads under the address bar while the query is still going in.
   { from: beat.newResearchTab + 2, text: researchQuery, fpc: RESEARCH_RATE, until: beat.researchLoad },
   ...WRITING.flatMap((ev, i) => {
@@ -1518,6 +1643,7 @@ export const KEY_PRESSES: readonly KeyPress[] = [
     at: typedEnd(SEARCHES[c.set].query, c.searchAt - SEARCH_LEAD, SEARCH_RATE) + 2,
   })),
   { at: typedEnd(PORTAL_QUERY, beat.portalQuery, PORTAL_RATE) + 2 },
+  { at: typedEnd(SHOP_QUERY, beat.shopSearch + 1, SHOP_QUERY_RATE) + 2 },
   { at: typedEnd(researchQuery, beat.newResearchTab + 2, RESEARCH_RATE) + 2 },
 ];
 

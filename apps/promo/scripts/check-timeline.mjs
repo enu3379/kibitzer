@@ -99,29 +99,74 @@ const holds = (a, b, label) =>
 holds(beat.freezeStart, beat.freezeEnd, "freeze");
 holds(beat.enter2, beat.switchToBrowser4, "caret void");
 
-/* 6 — the spree */
+/* 6 — the spree
+ *
+ * The mall is a browsing session now, not a rail loop: an item is reached off the listing
+ * grid, off the rail, off the Back button, or off the mall's own search results. Each route
+ * has its own way of lying — a rail row that lights up holding the wrong product, a grid
+ * card index that no longer matches the grid on screen, a Back that lands somewhere the
+ * history never was. So each is checked as what it claims to be, and the routes are read
+ * out of the page list rather than restated here.
+ */
 const shopAt = (f) => {
   const p = stageAt(f).page;
   return p.k === "shop" ? p : null;
 };
-const carts = [beat.cart1, beat.cart2, beat.cart3, beat.cart4, beat.cart5, beat.cart6, beat.cart7];
-const hops = [beat.hop1, beat.hop2, beat.hop3, beat.hop4, beat.hop5, beat.hop6];
+const carts = [beat.cart1, beat.cart2, beat.cart3, beat.cart4, beat.cart5, beat.cart6];
+const hops = [
+  { at: beat.hop1, k: "rail" },
+  { at: beat.hop2, k: "rail" },
+  { at: beat.backClick, k: "back" },
+  { at: beat.hop3, k: "rail" },
+  { at: beat.searchPick, k: "card" },
+  { at: beat.hop4, k: "rail" },
+];
 const before = bad;
 carts.forEach((f, i) => {
   const p = shopAt(f + 1);
   if (!p || p.view !== "detail") fail(`cart${i + 1} @${f}: 상품 페이지가 아님 (${p ? p.view : "not shop"})`);
   else if (p.cart !== i + 1) fail(`cart${i + 1} @${f}: 배지가 ${p.cart}`);
 });
-hops.forEach((f, i) => {
+// The listing pick is the same shape as the search pick, so it is checked with them.
+[{ at: beat.shopPick, k: "card" }, ...hops].forEach(({ at: f, k }) => {
   const from = shopAt(f - 2);
   const to = shopAt(f + 2);
-  if (!from || !to) return fail(`hop${i + 1} @${f}: 쇼핑몰이 화면에 없음`);
-  if (from.product === to.product) fail(`hop${i + 1} @${f}: 상품이 그대로 (${to.product})`);
-  if (from.recHot === null) fail(`hop${i + 1} @${f}: 클릭 직전에 밝아진 레일 줄이 없음`);
-  else if (from.rec[from.recHot] !== to.product)
-    fail(`hop${i + 1} @${f}: 밝아진 줄은 ${from.rec[from.recHot]}인데 ${to.product}가 열림`);
+  if (!from || !to) return fail(`${k} @${f}: 쇼핑몰이 화면에 없음`);
+  if (to.view !== "detail") return fail(`${k} @${f}: 상품 페이지가 열리지 않음 (${to.view})`);
+  // Only a product page has a product to leave; a grid does not.
+  if (from.view === "detail" && from.product === to.product && k !== "back")
+    fail(`${k} @${f}: 상품이 그대로 (${to.product})`);
+  if (k === "rail") {
+    if (from.recHot === null) fail(`rail @${f}: 클릭 직전에 밝아진 레일 줄이 없음`);
+    else if (from.rec[from.recHot] !== to.product)
+      fail(`rail @${f}: 밝아진 줄은 ${from.rec[from.recHot]}인데 ${to.product}가 열림`);
+  }
+  if (k === "card") {
+    const grid = from.view === "results" ? from.results : from.view === "list" ? from.results.map((_, i) => i) : null;
+    if (from.listHot === null) fail(`card @${f}: 클릭 직전에 밝아진 카드가 없음`);
+    else if (from.view === "results" && grid[from.listHot] !== to.product)
+      fail(`card @${f}: 밝아진 카드는 ${grid[from.listHot]}인데 ${to.product}가 열림`);
+    else if (from.view === "list" && from.listHot !== to.product)
+      fail(`card @${f}: 밝아진 카드는 ${from.listHot}인데 ${to.product}가 열림`);
+  }
+  if (k === "back") {
+    // Back may only land on a page the session has actually been on, and not the one it is
+    // leaving — which is the only thing that makes it read as history rather than as a link.
+    const seen = [];
+    for (let g = beat.shopEnter; g < f; g += 1) {
+      const p = shopAt(g);
+      if (p && p.view === "detail" && seen[seen.length - 1] !== p.product) seen.push(p.product);
+    }
+    if (to.product === from.product) fail(`back @${f}: 같은 상품에 그대로 있음 (${to.product})`);
+    else if (!seen.includes(to.product)) fail(`back @${f}: 방문한 적 없는 ${to.product}로 돌아감`);
+  }
 });
-if (bad === before) console.log("  ✓ spree: 담기 7회 · 레일 hop 6회, 밝아진 줄이 언제나 다음 상품");
+// The search: focus, a query that grows, results, and a URL that carries it.
+const typing = shopAt(beat.searchResults - 4);
+const results = shopAt(beat.searchResults + 2);
+if (!typing || !typing.searchFocus || !typing.query) fail("검색: 입력 중인 질의가 검색창에 없음");
+if (!results || results.view !== "results") fail(`검색: 결과 격자가 뜨지 않음 (${results ? results.view : "not shop"})`);
+if (bad === before) console.log("  ✓ mall: 담기 6회 · 격자/레일/뒤로/검색 네 경로, 클릭한 것이 언제나 열린 것");
 
 /* 7 — input sound
  *

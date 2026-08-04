@@ -25,24 +25,32 @@ import { FPS } from "./theme";
  * makes the thread faster, never longer.
  */
 export const scene = {
-  /** New tab on screen, cursor crosses to the icon, goal declared. */
-  s1Setup: { from: 0, duration: 66 },
+  /**
+   * New tab on screen, cursor crosses to the icon, goal declared.
+   *
+   * The popup is the product, and it used to be on screen for 51 frames — long enough to
+   * see that something appeared, nowhere near long enough to read it. It now gets 2.5× that
+   * (16 → 142), which is what buys the goal sentence the room to be typed to its last
+   * character and the active view a full second of the finished gauge, the sundial and the
+   * persona line. Everything else in S1 is unchanged; the extra time is all popup.
+   */
+  s1Setup: { from: 0, duration: 144 },
   /** Search → read → write, three times over. Paced as a parabola (see below). */
-  s2Research: { from: 66, duration: 240 },
+  s2Research: { from: 144, duration: 267 },
   /** Drift #1 — direct messages, plus the music link that arrives inside them. */
-  s3Messages: { from: 306, duration: 232 },
+  s3Messages: { from: 411, duration: 232 },
   /** Drift #2/#3 — portal → mall, interleaved with the messages piling up. */
-  s4Shopping: { from: 538, duration: 226 },
+  s4Shopping: { from: 643, duration: 226 },
   /** Everything stops. The only slow thing left in the middle of the film. */
-  s5Freeze: { from: 764, duration: 60 },
+  s5Freeze: { from: 869, duration: 60 },
   /** Clear the mess, look at the document, pick a new research thread. */
-  s6Reset: { from: 824, duration: 96 },
+  s6Reset: { from: 929, duration: 96 },
   /** Praise carries over, the report is finished, the mail goes out, session ends. */
-  s7WrapUp: { from: 920, duration: 162 },
-  s8EndCard: { from: 1082, duration: 70 },
+  s7WrapUp: { from: 1025, duration: 162 },
+  s8EndCard: { from: 1187, duration: 70 },
 } as const;
 
-export const TOTAL_FRAMES = scene.s8EndCard.from + scene.s8EndCard.duration; // 1152 = 38.4s
+export const TOTAL_FRAMES = scene.s8EndCard.from + scene.s8EndCard.duration; // 1257 = 41.9s
 
 /**
  * How long the Cmd-Tab switcher stays up. Short: at this tempo there are ten app
@@ -51,17 +59,26 @@ export const TOTAL_FRAMES = scene.s8EndCard.from + scene.s8EndCard.duration; // 
 export const SWITCHER_FRAMES = 6;
 
 export const beat = {
-  /* --------------------------------------------------------- S1 goal declaration (66f)
+  /* -------------------------------------------------------- S1 goal declaration (144f)
    * Opens on the new-tab page with the pointer parked mid-screen; the first thing that
    * happens in the film is the cursor crossing to the Kibitzer icon.
+   *
+   * The popup then owns the rest of the scene, at 2.5× the time it used to get, and the
+   * extra frames are spent on the three things that were previously unreadable:
+   *   · 24 frames on the first-run setup view before anything is typed into it — the
+   *     specificity hint and the three example chips are on screen long enough to read;
+   *   · the goal typed to its LAST character (26 chars × 1.55f), where it used to be cut
+   *     off mid-sentence by 시작;
+   *   · 42 frames of the active view after the click — a full second and a bit of the
+   *     goal line, the sundial at first light and the gauge sitting at 100.
    */
   popupOpen: 16,
-  goalTypeStart: 23,
-  goalTypeEnd: 47,
-  startClick: 55,
-  popupClose: 61,
+  goalTypeStart: 40,
+  goalTypeEnd: 82,
+  startClick: 100,
+  popupClose: 136,
 
-  /* --------------------------------------------------------- S2 the research loop (240f)
+  /* --------------------------------------------------------- S2 the research loop (267f)
    *
    * Three search-and-read cycles, not three visits to the same two tabs: each one goes
    * back to the results page, picks a *different* source, opens it, and comes back to the
@@ -78,65 +95,74 @@ export const beat = {
    */
 
   /* --- opening: find the first source properly (readable speed) */
-  searchEnter1: 68,
-  result1Click: 80,
-  newsEnter: 82,
+  searchEnter1: 146,
+  result1Click: 158,
+  newsEnter: 160,
 
   /* --- cycle A: write, then go find the numbers
    * The off-camera beats are named for the section they deliver, because that is the only
    * thing that identifies them — none of them is ever seen landing.
    */
-  switchToEditor1: 102,
+  switchToEditor1: 180,
   /** §1 heading. */
-  writeH1: 108,
-  writeP1: 115,
-  writeP2: 125,
-  switchToBrowser1: 133,
+  writeH1: 186,
+  writeP1: 193,
+  writeP2: 203,
+  switchToBrowser1: 211,
   /** off camera — rest of §1: the LTV/CAC critique, prior work, the research questions. */
-  writeIntroBody: 139,
-  searchEnter2: 139,
+  writeIntroBody: 217,
+  searchEnter2: 217,
   /** off camera — §2.1–2.3: sample, operational definitions, caveats. */
-  writeMethod: 143,
-  result2Click: 146,
-  statsEnter: 148,
+  writeMethod: 221,
+  result2Click: 224,
+  statsEnter: 226,
 
   /* --- cycle B: copy the channel table into the report */
-  select1: 154,
+  select1: 232,
   /** off camera — §2.4 descriptive statistics, ending on the line [자료 1] lands under. */
-  writeStats: 157,
-  copy1: 160,
-  switchToEditor2: 164,
-  paste1: 170,
+  writeStats: 235,
+  copy1: 238,
+  switchToEditor2: 242,
+  paste1: 248,
   /** §3 heading. */
-  writeH2: 175,
-  writeP6: 182,
+  writeH2: 253,
+  writeP6: 260,
 
   /* --- cycle C: the peak. A third source, up for eleven frames. */
-  switchToBrowser2: 191,
+  switchToBrowser2: 269,
   /** off camera — §3.1 coupons, and the §3.2 sub-head the next typed block opens under. */
-  writeCoupon: 195,
-  searchEnter3: 197,
-  result3Click: 201,
-  cohortsEnter: 202,
-  switchToEditor3: 213,
+  writeCoupon: 273,
+  searchEnter3: 275,
+  result3Click: 279,
+  cohortsEnter: 280,
+  switchToEditor3: 291,
   /** Typed at the fastest rate in the film, and abandoned when the cut leaves. */
-  writeP8: 218,
+  writeP8: 296,
 
   /* --- coming back down: the pull quote, then the boil comes off */
-  switchToBrowser3: 226,
-  newsReturn: 229,
-  select2: 233,
+  switchToBrowser3: 304,
+  newsReturn: 307,
+  select2: 311,
   /** off camera — rest of §3.2, the cohort table [자료 2], and §3.3 curation. */
-  writeCuration: 236,
-  copy2: 239,
-  switchToEditor4: 242,
-  paste2: 248,
-  writeP10: 254,
+  writeCuration: 314,
+  copy2: 317,
+  switchToEditor4: 320,
+  paste2: 326,
+  writeP10: 332,
   /** Four times slower than the block before it. This is where attention goes. */
-  writeP11: 260,
-  enter1: 283,
-  enter2: 288,
-  /** 288 → 306: six tenths of a second with nothing on screen but a blinking caret. */
+  writeP11: 338,
+  enter1: 361,
+  enter2: 366,
+  /**
+   * 366 → 411: a second and a half of nothing.
+   *
+   * The document is finished, the hands are off the keyboard, and the only thing moving on
+   * the whole screen is the caret blinking on the empty line the two Enters just made. It
+   * used to be 18 frames, which reads as a beat between two actions; at 45 it stops being a
+   * pause inside the work and becomes the gap the drift walks into. Nothing else may be
+   * scheduled in here — no scroll, no clock, no pointer (it is hidden from switchToEditor4
+   * on), because the emptiness IS the shot.
+   */
 
   /* --------------------------------------------------------- S3 drift #1: messages (232f)
    *
@@ -151,129 +177,141 @@ export const beat = {
    * one reply out, done. The segment windows are fixed (see `dmSegments`); the message
    * rate inside each is derived from them, so more chat never costs more screen time.
    */
-  switchToBrowser4: 306,
-  newTabClick: 318,
-  omniType: 325,
-  omniSuggest: 331,
-  omniTab: 338,
-  igEnter: 344,
+  switchToBrowser4: 411,
+  newTabClick: 423,
+  omniType: 430,
+  omniSuggest: 436,
+  omniTab: 443,
+  igEnter: 449,
   /** Landing: the feed holds for a second before the messages are opened. */
-  igDmEnter: 374,
+  igDmEnter: 479,
   /** Landing: the open thread sits still for half a second before it starts moving. */
-  dmRun1: 388,
-  dmReply1: 402,
-  dmSwitch2: 424,
-  dmReply2: 432,
+  dmRun1: 493,
+  dmReply1: 507,
+  dmSwitch2: 529,
+  dmReply2: 537,
   /** A third thread lights up mid-reply and wins. */
-  dmInterrupt: 438,
-  dmSwitch3: 444,
-  musicLink: 464,
-  musicOpen: 474,
-  dmReturn: 488,
+  dmInterrupt: 543,
+  dmSwitch3: 549,
+  musicLink: 569,
+  musicOpen: 579,
+  dmReturn: 593,
   /*
    * The badge no longer needs a beat of its own: it is a continuous read of the gauge
    * (GAUGE in scenes/script.ts), so it has already gone amber and then red on its own by
    * the time the first nudge fires. S is spent exactly here, which is what triggers it —
    * the first nag is the downward crossing into zero.
    */
-  nudge1In: 496,
-  nudge1Dismiss: 528,
+  nudge1In: 601,
+  nudge1Dismiss: 633,
 
   /* --------------------------------------------------------- S4 drift #2/#3: mall (226f)
    *
-   * The mall gets the longest landing in the film: twenty-four frames on the listing grid,
-   * scrolling, before anything is clicked. It has to read as "this is a shopping site"
-   * before the spree can mean anything — and once it has, the page changes are cut to the
-   * bone.
+   * The mall gets a twenty-frame landing on the listing grid, scrolling, before anything is
+   * clicked. It has to read as "this is a shopping site" before the spree can mean anything.
    *
-   * The spree itself is a loop, not a montage: product page → 장바구니 → the badge pops
-   * top right → click something off the 함께 본 상품 rail → the next product page. Each
-   * `hop` is that click. It is how a mall actually keeps somebody, which is the point the
-   * report being neglected is literally about.
+   * What follows is a browsing SESSION, not a loop. The old cut alternated between one
+   * button and one rail row for seven straight additions, which is not what being kept by a
+   * mall looks like — it looks like a machine. So the same window now carries the four ways
+   * a person actually moves through a shop, and no two consecutive items are reached the
+   * same way:
+   *
+   *   `shopPick`      off the listing grid, after the scroll
+   *   `hop1` `hop2`   the 함께 본 상품 rail — the mall's own suggestion
+   *   `backClick`     the browser Back button, onto the product page from two steps ago,
+   *                   and out of it again down a different rail row (`hop3`)
+   *   `shopSearch`    the mall's own search box: 캠핑 의자 typed, results, a card off them
+   *   `hop4`          the rail again, once, to close it out
+   *
+   * Six items, not seven — the seventh existed to fill a rhythm that no longer needs
+   * filling, and the frames it used to take now belong to the search and the backtrack.
    *
    * Nudge #2 lands *after* the spree has started, not on the messages before it. A nudge
    * can only name what is on screen, and what is on screen here is someone researching
    * customer acquisition while being acquired. It also gives the beat a shape: two items
-   * go in the cart, the nudge stops it, the snooze restarts it, five more go in.
+   * go in the cart, the nudge stops it, the snooze restarts it, four more go in.
    */
-  portalEnter: 546,
-  portalQuery: 552,
+  portalEnter: 649,
+  portalQuery: 655,
   /** The mall opens on its listing page; the pick happens after a long, readable scroll. */
-  shopEnter: 566,
-  shopPick: 590,
-  cart1: 598,
-  hop1: 606,
-  cart2: 612,
-  nudge2In: 618,
-  snoozeClick: 648,
-  hop2: 656,
-  cart3: 662,
-  hop3: 668,
-  cart4: 674,
-  dmPeek1: 680,
-  dmPeek1End: 696,
-  hop4: 702,
-  cart5: 708,
-  hop5: 714,
-  cart6: 720,
-  dmPeek2: 726,
-  dmPeek2End: 740,
-  hop6: 746,
-  cart7: 752,
-  cartViewEnter: 758,
-  nudge3In: 762,
+  shopEnter: 669,
+  shopPick: 689,
+  cart1: 697,
+  hop1: 705,
+  cart2: 711,
+  nudge2In: 717,
+  snoozeClick: 747,
+  hop2: 755,
+  cart3: 761,
+  /** Back — onto the product page two steps ago, then out of it down another rail row. */
+  backClick: 767,
+  hop3: 775,
+  cart4: 781,
+  dmPeek1: 787,
+  dmPeek1End: 799,
+  /** The mall's own search box: focused, typed into, submitted. */
+  shopSearch: 803,
+  searchResults: 813,
+  searchPick: 821,
+  cart5: 827,
+  dmPeek2: 833,
+  dmPeek2End: 845,
+  hop4: 851,
+  cart6: 857,
+  cartViewEnter: 863,
+  nudge3In: 867,
 
   /* --------------------------------------------------------- S5 the stop (60f) */
-  freezeStart: 774,
-  freezeEnd: 810,
+  freezeStart: 879,
+  freezeEnd: 915,
 
   /* --------------------------------------------------------- S6 clear + restart (96f) */
-  closeTab1: 830, // shop
-  closeTab2: 838, // portal
-  closeTab3: 846, // music
-  closeTab4: 854, // messages
-  returnToGoalTab: 864,
+  closeTab1: 935, // shop
+  closeTab2: 943, // portal
+  closeTab3: 951, // music
+  closeTab4: 959, // messages
+  returnToGoalTab: 969,
   /** Open the document once — long enough to see the empty line it was left on. */
-  switchToEditor5: 872,
-  switchToBrowser5: 892,
-  newResearchTab: 899,
+  switchToEditor5: 977,
+  switchToBrowser5: 997,
+  newResearchTab: 1004,
   /** off camera — §3.4, the soft conclusion the drift interrupted mid-thought. */
-  writeSynthesis: 901,
-  researchLoad: 908,
-  praiseIn: 910,
+  writeSynthesis: 1006,
+  researchLoad: 1013,
+  praiseIn: 1015,
   /** off camera — §4, the size-band analysis, and the figure that closes it. */
-  writeRetention: 914,
+  writeRetention: 1019,
 
   /* --------------------------------------------------------- S7 finish + wrap up (162f) */
-  praiseOut: 942,
-  switchToEditor6: 946,
+  praiseOut: 1047,
+  switchToEditor6: 1051,
   /** §5 heading — the conclusion, and the last thing typed on camera. */
-  writeH3: 954,
-  writeP12: 962,
-  writeP13: 972,
-  writeP14: 984,
+  writeH3: 1059,
+  writeP12: 1067,
+  writeP13: 1077,
+  writeP14: 1089,
   /**
    * The bibliography lands, and the document is finished. The figure it refers to was
    * already written into §4 off camera — a figure belongs in the section that analyses
    * it, and putting the reference list last is what makes the closing frame read as a
    * paper rather than as a slide.
    */
-  chartIn: 996,
-  switchToBrowser6: 1012,
-  mailOpen: 1018,
-  sendClick: 1032,
-  mailSent: 1040,
+  chartIn: 1101,
+  switchToBrowser6: 1117,
+  mailOpen: 1123,
+  sendClick: 1137,
+  mailSent: 1145,
   /*
    * The closing look at the popup: the immersion bar back at the top with the sundial's
    * shadow at its longest, then 종료하기 into the session summary — the one screen that
    * reports on the whole two hours.
    */
-  popupOpen2: 1046,
-  endSessionClick: 1058,
-  summaryShown: 1060,
+  popupOpen2: 1151,
+  endSessionClick: 1163,
+  summaryShown: 1165,
 
   /* --------------------------------------------------------- S8 (70f) */
-  endCardIn: 1082,
+  endCardIn: 1187,
 } as const;
 
 /**
@@ -297,7 +335,7 @@ export const beat = {
  *     boil hard: `writeP11` is four times slower than the block before it, and the caret
  *     void after it is the quietest frame in the first half.
  *   · S3 opens low and builds as the thread takes over.
- *   · S4 stops dead at `nudge2In`, restarts on the snooze, and tops out at `cart7`.
+ *   · S4 stops dead at `nudge2In`, restarts on the snooze, and tops out at `cart6`.
  *   · S5 is zero. Nothing moves in the freeze, including the sound.
  *
  * Anchors interpolate linearly and must stay in ascending frame order.
@@ -334,8 +372,8 @@ const DRIVE: ReadonlyArray<readonly [frame: number, v: number]> = [
   [beat.nudge2In, 0.55],
   [beat.snoozeClick, 0.6],
   [beat.cart4, 0.85],
-  [beat.cart6, 0.95],
-  [beat.cart7, 1],
+  [beat.cart5, 0.95],
+  [beat.cart6, 1],
   [beat.nudge3In, 0.9],
   /* S5 — everything stops */
   [beat.freezeStart, 0],
@@ -400,7 +438,7 @@ const CLOCK_ORIGIN = 14 * 60;
 
 export const clockAnchors: readonly ClockAnchor[] = [
   { at: 0, min: 0 },
-  /* S1 — two seconds of real time; the clock does not move. */
+  /* S1 — five seconds of real time; the clock does not move. */
   { at: scene.s2Research.from, min: 0 },
   /* S2 — finding, reading, and the stretches where the browser covers the writing. */
   { at: beat.newsEnter, min: 4 },
@@ -433,7 +471,7 @@ export const clockAnchors: readonly ClockAnchor[] = [
   { at: beat.snoozeClick, min: 75 },
   { at: beat.cart3, min: 76 },
   { at: beat.cart5, min: 81 },
-  { at: beat.cart7, min: 88 },
+  { at: beat.cart6, min: 88 },
   { at: beat.cartViewEnter, min: 89 },
   /** S5 — everything stops, the clock included. */
   { at: beat.freezeEnd, min: 89 },

@@ -63,6 +63,9 @@ const Page: React.FC<{ page: PageKind }> = ({ page }) => {
           view={page.view}
           listScroll={page.listScroll}
           listHot={page.listHot}
+          results={page.results}
+          query={page.query}
+          searchFocus={page.searchFocus}
           productIndex={page.product}
           cartCount={page.cart}
           cartPulse={page.cartPulse}
@@ -99,6 +102,8 @@ export const Main: React.FC = () => {
       omni={st.omni}
       dot={st.dot}
       extHighlight={st.popup !== null}
+      backHot={st.backHot}
+      forwardOn={st.forwardOn}
       active={browserFocused}
     >
       <Page page={st.page} />

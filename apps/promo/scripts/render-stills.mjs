@@ -38,8 +38,9 @@ const { beat, TOTAL_FRAMES } = await import(
 );
 
 const BEATS = [
+  { id: "s1-first-run", frame: beat.popupOpen + 16, caption: "S1 · 첫 실행 셋업 — 안내와 예시 칩을 읽을 시간" },
   { id: "s1-goal-typing", frame: beat.goalTypeEnd - 8, caption: "S1 · 목표 입력" },
-  { id: "s1-tracking-on", frame: beat.startClick + 4, caption: "S1 · 추적 시작 직후" },
+  { id: "s1-tracking-on", frame: beat.startClick + 20, caption: "S1 · 추적 시작 — 활성 화면이 머무는 동안" },
 
   { id: "s2-search", frame: beat.searchEnter1 + 6, caption: "S2 · 첫 검색 결과" },
   { id: "s2-news-read", frame: beat.newsEnter + 8, caption: "S2 · 기사 정독" },
@@ -67,11 +68,13 @@ const BEATS = [
 
   { id: "s4-nudge-2", frame: beat.nudge2In + 14, caption: "S4 · 두 번째 훈수 + 5분만" },
   { id: "s4-portal", frame: beat.portalQuery + 6, caption: "S4 · 딴짓② 포털 검색" },
-  { id: "s4-shop-list", frame: beat.shopPick - 10, caption: "S4 · 쇼핑몰 착지 — 목록 스크롤" },
+  { id: "s4-shop-list", frame: beat.shopPick - 2, caption: "S4 · 쇼핑몰 착지 — 스크롤 끝에서 카드 하나" },
   { id: "s4-shop-detail", frame: beat.cart1 + 3, caption: "S4 · 장바구니 담김 — 배지 + 확인 칩" },
   { id: "s4-shop-rec", frame: beat.hop2 - 3, caption: "S4 · 함께 본 상품 — 다음 상품으로" },
+  { id: "s4-shop-back", frame: beat.backClick - 1, caption: "S4 · 뒤로 가기 — 두 단계 전 상품 페이지로" },
   { id: "s4-dm-peek", frame: beat.dmPeek1 + 6, caption: "S4 · DM 왕복 — 그새 쌓인 알림" },
-  { id: "s4-cart-7", frame: beat.cart7 + 3, caption: "S4 · 장바구니 7개" },
+  { id: "s4-shop-search", frame: beat.searchResults + 5, caption: "S4 · 쇼핑몰 자체 검색 — '캠핑 의자' 결과" },
+  { id: "s4-cart-6", frame: beat.cart6 + 3, caption: "S4 · 장바구니 6개" },
   { id: "s4-nudge-3", frame: beat.nudge3In + 12, caption: "S4 · 스누즈 콜백" },
 
   { id: "s5-freeze", frame: beat.freezeStart + 15, caption: "S5 · 전부 멈춤 · 정적" },

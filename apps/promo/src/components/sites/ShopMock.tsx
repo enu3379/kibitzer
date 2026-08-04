@@ -73,7 +73,12 @@ const CartIcon: React.FC<{ count: number; pulse: number }> = ({ count, pulse }) 
   </span>
 );
 
-const Header: React.FC<{ cart: number; pulse: number }> = ({ cart, pulse }) => (
+const Header: React.FC<{ cart: number; pulse: number; query: string; searchFocus: boolean }> = ({
+  cart,
+  pulse,
+  query,
+  searchFocus,
+}) => (
   <div style={{ borderBottom: "1px solid #ececec", background: "#fff", flexShrink: 0 }}>
     <div style={{ height: 50, display: "flex", alignItems: "center", padding: "0 22px", gap: 18 }}>
       {/* icon-only mark */}
@@ -82,6 +87,11 @@ const Header: React.FC<{ cart: number; pulse: number }> = ({ cart, pulse }) => (
         <path d="M8 10.5h12l-1.4 8.2H9.4z" fill="#fff" />
         <path d="M11 10.5a3 3 0 0 1 6 0" stroke="#fff" strokeWidth="1.8" fill="none" strokeLinecap="round" />
       </svg>
+      {/*
+        The search box. Empty it carries the mall's placeholder; typed into it carries the
+        query and a focus ring, and the caret sits at the end of what has been typed so far
+        — the box is a real input for ten frames in the middle of the scene.
+      */}
       <div
         style={{
           flex: 1,
@@ -89,14 +99,18 @@ const Header: React.FC<{ cart: number; pulse: number }> = ({ cart, pulse }) => (
           height: 32,
           borderRadius: 999,
           border: "2px solid #ff4d4f",
+          boxShadow: searchFocus ? "0 0 0 3px rgba(255,77,79,0.18)" : "none",
           display: "flex",
           alignItems: "center",
           padding: "0 15px",
           fontSize: 12,
-          color: "#8c8c8c",
+          color: query ? "#262626" : "#8c8c8c",
         }}
       >
-        오늘의 특가 검색
+        {query || "오늘의 특가 검색"}
+        {searchFocus ? (
+          <span style={{ display: "inline-block", width: 1.4, height: 14, background: "#262626", marginLeft: 1.5 }} />
+        ) : null}
       </div>
       <div style={{ flex: 1 }} />
       <CartIcon count={cart} pulse={pulse} />
@@ -113,18 +127,35 @@ const Header: React.FC<{ cart: number; pulse: number }> = ({ cart, pulse }) => (
 
 /* ------------------------------------------------------------------ listing */
 
-/** The grid you land on from the portal ad, and scroll before picking anything. */
-const ListView: React.FC<{ scroll: number; hot: number | null }> = ({ scroll, hot }) => (
+/**
+ * The 5-up product grid — the page you land on from the portal ad, and the page the mall's
+ * own search puts up two thirds of the way through the scene.
+ *
+ * One component for both, because the pointer hits them by coordinate: the two headers are
+ * built to the same height (a title row, then one small line) so a card sits at the same y
+ * on either, and the only thing that changes between them is which products are in it.
+ */
+const Grid: React.FC<{
+  items: readonly number[];
+  scroll: number;
+  hot: number | null;
+  title: React.ReactNode;
+  count: string;
+  sort: string;
+  note: React.ReactNode;
+}> = ({ items, scroll, hot, title, count, sort, note }) => (
   <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
     <div style={{ padding: "16px 24px", transform: `translateY(${-scroll}px)` }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
-        <span style={{ fontSize: 17, fontWeight: 700, color: "#262626" }}>오늘의 특가</span>
-        <span style={{ fontSize: 11.5, color: "#8c8c8c" }}>1,284개 상품</span>
-        <span style={{ marginLeft: "auto", fontSize: 11.5, color: "#595959" }}>인기순 ▾</span>
+        <span style={{ fontSize: 17, fontWeight: 700, color: "#262626" }}>{title}</span>
+        <span style={{ fontSize: 11.5, color: "#8c8c8c" }}>{count}</span>
+        <span style={{ marginLeft: "auto", fontSize: 11.5, color: "#595959" }}>{sort}</span>
       </div>
-      <div style={{ fontSize: 11, color: "#ff4d4f", fontWeight: 650, marginBottom: 14 }}>타임특가 · 02:41:08 남음</div>
+      <div style={{ fontSize: 11, color: "#ff4d4f", fontWeight: 650, marginBottom: 14 }}>{note}</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 13 }}>
-        {PRODUCTS.map((p, i) => (
+        {items.map((idx, i) => {
+          const p = PRODUCTS[idx % PRODUCTS.length];
+          return (
           <div
             key={p.slug}
             style={{
@@ -159,10 +190,37 @@ const ListView: React.FC<{ scroll: number; hot: number | null }> = ({ scroll, ho
               </div>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   </div>
+);
+
+/** The deals page the portal ad lands on. */
+const ListView: React.FC<{ scroll: number; hot: number | null }> = ({ scroll, hot }) => (
+  <Grid
+    items={PRODUCTS.map((_, i) => i)}
+    scroll={scroll}
+    hot={hot}
+    title="오늘의 특가"
+    count="1,284개 상품"
+    sort="인기순 ▾"
+    note="타임특가 · 02:41:08 남음"
+  />
+);
+
+/** What the mall's own search box puts up. */
+const ResultsView: React.FC<{ items: readonly number[]; query: string; hot: number | null }> = ({ items, query, hot }) => (
+  <Grid
+    items={items}
+    scroll={0}
+    hot={hot}
+    title={<>‘{query}’ 검색결과</>}
+    count="38개 상품"
+    sort="정확도순 ▾"
+    note="오늘출발 · 무료배송 상품 먼저"
+  />
 );
 
 /* ------------------------------------------------------------------ detail */
@@ -353,10 +411,15 @@ const AddedChip: React.FC<{ pulse: number }> = ({ pulse }) =>
   );
 
 export const ShopMock: React.FC<{
-  view: "list" | "detail" | "cart";
-  /** list */
+  view: "list" | "detail" | "results" | "cart";
+  /** list / results */
   listScroll?: number;
   listHot?: number | null;
+  /** results — product order behind the grid */
+  results?: readonly number[];
+  /** header search box */
+  query?: string;
+  searchFocus?: boolean;
   /** detail */
   productIndex?: number;
   addHot?: boolean;
@@ -373,6 +436,9 @@ export const ShopMock: React.FC<{
   view,
   listScroll = 0,
   listHot = null,
+  results = [],
+  query = "",
+  searchFocus = false,
   productIndex = 0,
   addHot = false,
   recItems = [],
@@ -382,9 +448,10 @@ export const ShopMock: React.FC<{
   cartItems = [],
 }) => (
   <div style={{ position: "absolute", inset: 0, background: "#fff", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-    <Header cart={cartCount} pulse={cartPulse} />
+    <Header cart={cartCount} pulse={cartPulse} query={query} searchFocus={searchFocus} />
     <div style={{ position: "relative", flex: 1, minHeight: 0, overflow: "hidden" }}>
       {view === "list" ? <ListView scroll={listScroll} hot={listHot} /> : null}
+      {view === "results" ? <ResultsView items={results} query={query} hot={listHot} /> : null}
       {view === "detail" ? (
         <ProductDetail product={PRODUCTS[productIndex % PRODUCTS.length]} addHot={addHot} rec={recItems} recHot={recHot} />
       ) : null}
