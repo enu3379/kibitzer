@@ -4,8 +4,8 @@
 /** A fast, deterministic, non-cryptographic 53-bit string hash (cyrb53). Used to fold a
  *  URL's path+query into a compact opaque token: the raw path — which can carry PII like
  *  `/user/123/secret-doc` — is never stored, while pages that differ only by query stay
- *  distinct. (Not a security primitive; a crypto-grade SHA-256 would require making pageKeyOf
- *  async, which ripples through the whole synchronous observation path.) */
+ *  distinct. (Not a security primitive; a crypto-grade SHA-256 would require making
+ *  describeObservableUrl async, which ripples through the whole synchronous observation path.) */
 function cyrb53(str: string): string {
   let h1 = 0xdeadbeef
   let h2 = 0x41c6ce57
