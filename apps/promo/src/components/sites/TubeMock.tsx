@@ -12,43 +12,38 @@ export type TubeVideo = {
   caption: string;
 };
 
-/** Invented videos — generic snack/convenience-store content, no real creators. */
+/**
+ * Invented music videos, no real artists. This site is NOT a distraction beat — it is
+ * the background music the user puts on to work, and its tab survives the S5 cleanup.
+ * The captions are subtitle-style lyric lines so the player frame reads as video.
+ */
 export const TUBE_VIDEOS: readonly TubeVideo[] = [
   {
-    title: "Ranking Every Snack I Could Find",
-    channel: "Midnight Pantry",
-    views: "2.4M views · 3 days ago",
-    length: 1127,
-    art: "linear-gradient(135deg,#f97316 0%,#db2777 55%,#4c1d95 100%)",
-    glyph: "🍫",
-    caption: "…okay, this one is genuinely unbeatable.",
+    title: "Paperlight — Neon Alley (Official Music Video)",
+    channel: "Paperlight",
+    views: "8.2M views · 2 months ago",
+    length: 227,
+    art: "linear-gradient(135deg,#7c3aed 0%,#db2777 52%,#0f172a 100%)",
+    glyph: "🎧",
+    caption: "♪ we were only passing through the neon ♪",
   },
   {
-    title: "I Ate Only Convenience Store Food",
-    channel: "Midnight Pantry",
-    views: "1.1M views · 1 week ago",
-    length: 964,
-    art: "linear-gradient(135deg,#0ea5e9 0%,#4f46e5 60%,#111827 100%)",
-    glyph: "🍜",
-    caption: "Day three and I have made a terrible mistake.",
-  },
-  {
-    title: "24 Hours In A Vending Machine Hotel",
+    title: "Slow Detour — Harbour Lights (Live Session)",
     channel: "Slow Detour",
-    views: "870K views · 2 weeks ago",
-    length: 1508,
-    art: "linear-gradient(135deg,#22c55e 0%,#0f766e 55%,#0f172a 100%)",
-    glyph: "🏨",
-    caption: "Everything in this room came out of a machine.",
+    views: "2.1M views · 5 months ago",
+    length: 284,
+    art: "linear-gradient(135deg,#0ea5e9 0%,#1e3a8a 58%,#020617 100%)",
+    glyph: "🎸",
+    caption: "♪ the harbour keeps the light on ♪",
   },
   {
-    title: "Every Instant Noodle, Ranked Blind",
-    channel: "Midnight Pantry",
-    views: "3.6M views · 1 month ago",
-    length: 1342,
-    art: "linear-gradient(135deg,#eab308 0%,#dc2626 58%,#450a0a 100%)",
-    glyph: "🍲",
-    caption: "I genuinely cannot tell these two apart.",
+    title: "Morning Co. — Long Way Round (Visualiser)",
+    channel: "Morning Co.",
+    views: "940K views · 1 year ago",
+    length: 198,
+    art: "linear-gradient(135deg,#f59e0b 0%,#b45309 55%,#431407 100%)",
+    glyph: "🎹",
+    caption: "♪ take the long way round with me ♪",
   },
 ];
 

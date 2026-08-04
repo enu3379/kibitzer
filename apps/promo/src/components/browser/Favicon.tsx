@@ -1,6 +1,6 @@
 import React from "react";
 
-export type SiteKey = "news" | "stats" | "editor" | "tube" | "mail" | "newtab";
+export type SiteKey = "news" | "stats" | "tube" | "mail" | "newtab" | "insta" | "portal" | "shop";
 
 /**
  * Generic favicons. Deliberately abstract shapes + colours — no real wordmarks or logos
@@ -32,12 +32,36 @@ export const Favicon: React.FC<{ site: SiteKey; size?: number }> = ({ site, size
           <i style={{ width: size * 0.13, height: size * 0.28, background: "#99f6e4" }} />
         </div>
       );
-    case "editor":
+    case "insta":
       return (
-        <div style={{ ...box, background: "#2563eb", flexDirection: "column", gap: size * 0.1 }}>
-          <i style={{ width: size * 0.5, height: size * 0.09, background: "#dbeafe" }} />
-          <i style={{ width: size * 0.5, height: size * 0.09, background: "#dbeafe" }} />
-          <i style={{ width: size * 0.3, height: size * 0.09, background: "#dbeafe", alignSelf: "flex-start", marginLeft: size * 0.25 }} />
+        <div style={{ ...box, background: "linear-gradient(135deg,#f9ce34,#ee2a7b 55%,#6228d7)", borderRadius: size * 0.3 }}>
+          <span
+            style={{
+              width: size * 0.44,
+              height: size * 0.44,
+              borderRadius: "50%",
+              border: `${Math.max(1, size * 0.11)}px solid #fff`,
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
+      );
+    case "portal":
+      return (
+        <div style={{ ...box, background: "#03c75a" }}>
+          <svg width={size * 0.62} height={size * 0.62} viewBox="0 0 14 14" aria-hidden>
+            <circle cx="6" cy="6" r="3.6" stroke="#fff" strokeWidth="1.9" fill="none" />
+            <path d="M8.9 8.9L12 12" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+        </div>
+      );
+    case "shop":
+      return (
+        <div style={{ ...box, background: "#ff4d4f" }}>
+          <svg width={size * 0.62} height={size * 0.62} viewBox="0 0 14 14" aria-hidden>
+            <path d="M3 5h8l-.9 5.6H3.9z" fill="#fff" />
+            <path d="M5 5a2 2 0 0 1 4 0" stroke="#fff" strokeWidth="1.3" fill="none" strokeLinecap="round" />
+          </svg>
         </div>
       );
     case "tube":

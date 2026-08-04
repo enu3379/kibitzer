@@ -9,16 +9,16 @@ import { FPS } from "./theme";
 
 export const scene = {
   s1Setup: { from: 0, duration: 140 },
-  s2Focus: { from: 140, duration: 140 },
-  s3Drift: { from: 280, duration: 140 },
-  s4Escalate: { from: 420, duration: 230 },
-  s5Return: { from: 650, duration: 130 },
-  s6Praise: { from: 780, duration: 90 },
-  s7WrapUp: { from: 870, duration: 110 },
-  s8EndCard: { from: 980, duration: 60 },
+  s2Focus: { from: 140, duration: 150 },
+  s3Drift: { from: 290, duration: 140 },
+  s4Escalate: { from: 430, duration: 230 },
+  s5Return: { from: 660, duration: 120 },
+  s6Praise: { from: 780, duration: 86 },
+  s7WrapUp: { from: 866, duration: 106 },
+  s8EndCard: { from: 972, duration: 58 },
 } as const;
 
-export const TOTAL_FRAMES = scene.s8EndCard.from + scene.s8EndCard.duration; // 1040 ≈ 34.7s
+export const TOTAL_FRAMES = scene.s8EndCard.from + scene.s8EndCard.duration; // 1030 ≈ 34.3s
 
 /** How long the Cmd-Tab switcher stays up. */
 export const SWITCHER_FRAMES = 9;
@@ -31,55 +31,59 @@ export const beat = {
   startClick: 122,
   popupClose: 136,
 
-  // S2 — focused work: read, check the numbers, then switch to the writing app
-  newsEnter: 140,
-  statsEnter: 186,
-  switchToEditor1: 206,
-  outlineTypeStart: 216,
-  outlineTypeEnd: 277,
+  // S2 — put music on, read, check the numbers, then switch to the writing app
+  musicView: 140,
+  newsEnter: 166,
+  statsEnter: 208,
+  switchToEditor1: 228,
+  outlineTypeStart: 238,
+  outlineTypeEnd: 287,
 
-  // S3 — first drift: back to the browser, then away from the goal.
+  // S3 — drift #1: direct messages.
   // Every beat here must sit at or after scene.s3Drift.from, or s3() never runs it.
-  switchToBrowser1: 282,
-  tubeEnter: 298,
-  dotRed1: 330,
-  nudge1In: 336,
-  nudge1Dismiss: 384,
-  tubeSecondVideo: 394,
+  switchToBrowser1: 292,
+  igEnter: 308,
+  igDmEnter: 340,
+  dotRed1: 362,
+  nudge1In: 368,
+  nudge1Dismiss: 414,
 
-  // S4 — snooze + time-lapse
-  nudge2In: 424,
-  snoozeClick: 470,
-  montageStart: 478,
-  montageEnd: 596,
-  nudge3In: 602,
+  // S4 — snooze, then drift #2/#3: portal → mall, with the cart as the clock
+  nudge2In: 434,
+  snoozeClick: 480,
+  montageStart: 488,
+  portalEnter: 488,
+  shopEnter: 516,
+  cartViewEnter: 588,
+  montageEnd: 606,
+  nudge3In: 612,
 
   // S5 — the awakening
-  freezeStart: 650,
-  freezeEnd: 682,
-  closeTab1: 698,
-  closeTab2: 712,
-  closeTab3: 726,
-  returnToGoalTab: 742,
+  freezeStart: 660,
+  freezeEnd: 692,
+  closeTab1: 708,
+  closeTab2: 722,
+  closeTab3: 736,
+  returnToGoalTab: 752,
 
   // S6 — praise (in the browser, on a goal-related tab), then back to writing
   praiseIn: 782,
-  praiseOut: 824,
-  switchToEditor2: 828,
-  resumeTypeStart: 840,
-  resumeTypeEnd: 864,
+  praiseOut: 820,
+  switchToEditor2: 824,
+  resumeTypeStart: 836,
+  resumeTypeEnd: 856,
 
   // S7 — wrap-up: finish, switch back, send, end the session
-  switchToBrowser2: 886,
-  mailOpen: 898,
-  sendClick: 922,
-  mailSent: 932,
-  popupOpen2: 938,
-  endSessionClick: 954,
-  summaryShown: 956,
+  switchToBrowser2: 882,
+  mailOpen: 894,
+  sendClick: 918,
+  mailSent: 928,
+  popupOpen2: 934,
+  endSessionClick: 950,
+  summaryShown: 952,
 
   // S8
-  endCardIn: 980,
+  endCardIn: 972,
 } as const;
 
 /** Audio cues — file + absolute frame of the visual it must land on. */
@@ -97,12 +101,12 @@ export const sfx = [
 export const clockSteps: ReadonlyArray<{ from: number; label: string }> = [
   { from: 0, label: "오후 2:00" },
   { from: scene.s2Focus.from, label: "오후 2:01" },
-  { from: beat.tubeEnter, label: "오후 2:03" },
+  { from: beat.igEnter, label: "오후 2:03" },
   { from: beat.nudge2In, label: "오후 2:05" },
   { from: beat.montageStart, label: "오후 2:07" },
-  { from: beat.montageStart + 40, label: "오후 2:09" },
-  { from: beat.montageStart + 78, label: "오후 2:12" },
-  { from: beat.nudge3In - 6, label: "오후 2:14" },
+  { from: beat.shopEnter, label: "오후 2:09" },
+  { from: beat.shopEnter + 44, label: "오후 2:12" },
+  { from: beat.cartViewEnter, label: "오후 2:14" },
   { from: beat.freezeStart, label: "오후 2:15" },
   { from: beat.praiseIn, label: "오후 2:16" },
   { from: scene.s7WrapUp.from, label: "오후 2:48" },

@@ -14,23 +14,25 @@ export const GOAL = "쇼핑 플랫폼의 고객 유인 전략 분석 보고서 �
 export const GOAL_BUDGET_MIN = "90";
 
 export const nudge = {
-  /** DRAFT — dry-spectator tone, first drift */
+  /** DRAFT — dry-spectator tone. Drift #1: direct messages. */
   first: {
-    message: "대단히 유익해 보이는 영상이군요. 보고서 목차엔 없겠습니다만.",
-    context: "metube.com - Ranking Every Snack I Could Find",
+    message: "대화가 대단히 활발하시군요. 보고서 목차엔 없는 항목입니다만.",
+    context: "gramline.com - 다이렉트 메시지",
   },
   /** DRAFT — repeat offence, counts the interventions */
   second: {
     message: "오늘 2번째 관전평입니다. 꾸준함만은 인정합니다.",
-    context: "metube.com - I Ate Only Convenience Store Food",
+    context: "gramline.com - 다이렉트 메시지",
   },
   /**
-   * FIXED DIRECTION — the snooze callback. NOTE: the shipping product resumes silently
-   * after a snooze expires; this beat is a promotional assumption, agreed with the user.
+   * FIXED DIRECTION — the snooze callback. The second sentence lands the irony of the
+   * whole piece (researching customer acquisition while being acquired) and can be cut.
+   * NOTE: the shipping product resumes silently after a snooze expires; this beat is a
+   * promotional assumption, agreed with the user.
    */
   third: {
-    message: "5분만 시간을 달라시더니, 벌써 14분째인 건 아십니까?",
-    context: "metube.com - Every Instant Noodle, Ranked Blind",
+    message: "5분만 시간을 달라시더니, 벌써 14분째인 건 아십니까? 장바구니는 7개가 되었고요.",
+    context: "shop.daylight.co.kr - 장바구니",
   },
 } as const;
 
@@ -50,13 +52,10 @@ export const endCard = {
 export const report = {
   title: "쇼핑 플랫폼 고객 유인 전략 분석",
   subtitle: "리테일 커머스 리서치 · 2026",
-  /** Typed live in S2 (the outline) */
-  outline: [
-    "1. 문제 정의 — 신규 고객 획득 비용의 구조",
-    "2. 유인 수단별 분류: 쿠폰 · 멤버십 · 큐레이션",
-  ],
+  /** Typed live in S2 (the outline). Length is timed against beat.outlineTypeStart. */
+  outline: ["1. 문제 정의 — 신규 고객 획득 비용", "2. 유인 수단: 쿠폰 · 멤버십 · 큐레이션"],
   /** Typed live in S6 (resuming after the return) */
-  resumed: "3. 유인 이후: 리텐션으로 이어지는 조건",
+  resumed: "3. 유인 이후: 리텐션 조건",
   /** Already-written body, visible in S7 */
   body: [
     "국내 주요 쇼핑 플랫폼은 신규 고객 1인을 확보하는 데 평균적으로",
@@ -90,7 +89,7 @@ export const summary = {
   observations: "38회",
   onGoal: "71%",
   interventions: "3회 · 수락 1회",
-  topDrift: "metube.com · 12회",
+  topDrift: "shop.daylight.co.kr · 9회",
 } as const;
 
 /** Live dashboard readouts, shown just before the session is ended. */
@@ -106,12 +105,13 @@ export const dashboard = {
  * The writing app is NOT a tab — it is a separate application (see AppWindow).
  */
 export const tabs = {
+  /** Background music — open the whole time, and deliberately NOT closed in S5. */
+  music: "Paperlight — Neon Alley (Official MV)",
   news: "How Marketplaces Buy Their First Mil…",
   stats: "Acquisition Analytics — Channels",
-  tube1: "Ranking Every Snack I Could Find",
-  tube2: "I Ate Only Convenience Store Food",
-  tube3: "24 Hours In A Vending Machine Hotel",
-  tube4: "Every Instant Noodle, Ranked Blind",
+  insta: "다이렉트 메시지",
+  portal: "러닝화 추천 : 통합검색",
+  shop: "장바구니 · DAYLIGHT",
   mail: "Inbox — New Message",
 } as const;
 

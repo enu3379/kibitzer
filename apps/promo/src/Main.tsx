@@ -19,6 +19,9 @@ import { StatsMock } from "./components/sites/StatsMock";
 import { TubeMock } from "./components/sites/TubeMock";
 import { EditorMock } from "./components/sites/EditorMock";
 import { MailMock } from "./components/sites/MailMock";
+import { InstagramDM, InstagramFeed } from "./components/sites/InstagramMock";
+import { PortalMock } from "./components/sites/PortalMock";
+import { ShopMock } from "./components/sites/ShopMock";
 
 /** The writing app's window rect, in logical px — offset so the browser stays readable behind it. */
 const EDITOR_RECT = { x: 88, y: 68, width: 930, height: 742 } as const;
@@ -33,6 +36,22 @@ const Page: React.FC<{ page: PageKind }> = ({ page }) => {
       return <StatsMock reveal={page.reveal} />;
     case "tube":
       return <TubeMock videoIndex={page.video} progress={page.progress} />;
+    case "igFeed":
+      return <InstagramFeed scroll={page.scroll} />;
+    case "igDm":
+      return <InstagramDM activeThread={page.thread} messages={page.messages} typing={page.typing} dmBadge={page.badge} />;
+    case "portal":
+      return <PortalMock query={page.query} adHot={page.adHot} />;
+    case "shop":
+      return (
+        <ShopMock
+          view={page.view}
+          productIndex={page.product}
+          cartCount={page.cart}
+          cartPulse={page.cartPulse}
+          addHot={page.addHot}
+        />
+      );
     case "mail":
       return <MailMock reveal={page.reveal} sendHot={page.sendHot} sent={page.sent} />;
   }
