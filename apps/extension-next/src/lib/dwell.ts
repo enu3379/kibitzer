@@ -3,11 +3,43 @@
 // to the SSOT so a service-worker teardown mid-dwell doesn't drop the judgement — the next
 // SW wake reconciles it. This module holds the pure decision the timer/reconcile share.
 
-export interface PendingDwell {
-  url: string
+import type { ObservablePageKind } from "./url.ts"
+
+export const PENDING_DWELL_VERSION = 2
+
+export interface DwellCandidate {
+  version: typeof PENDING_DWELL_VERSION
+  pageKey: string
   title: string
+  urlHost: string
+  kind: ObservablePageKind
+  localPdfPolicyRevision: number | null
   obsKey: string // pageKey + "\n" + title, the debounce identity
+}
+
+export interface PendingDwell extends DwellCandidate {
   dueAt: number // epoch ms when the dwell completes and the page should be judged
+}
+
+export function isPendingDwell(value: unknown): value is PendingDwell {
+  if (!value || typeof value !== "object") return false
+  const p = value as Partial<PendingDwell> & { url?: unknown }
+  return (
+    p.version === PENDING_DWELL_VERSION &&
+    p.url === undefined &&
+    typeof p.pageKey === "string" &&
+    typeof p.title === "string" &&
+    typeof p.urlHost === "string" &&
+    (p.kind === "web" || p.kind === "local_pdf") &&
+    ((p.kind === "web" && p.localPdfPolicyRevision === null) ||
+      (p.kind === "local_pdf" &&
+        typeof p.localPdfPolicyRevision === "number" &&
+        Number.isSafeInteger(p.localPdfPolicyRevision) &&
+        p.localPdfPolicyRevision >= 0)) &&
+    typeof p.obsKey === "string" &&
+    typeof p.dueAt === "number" &&
+    Number.isFinite(p.dueAt)
+  )
 }
 
 export type DwellAction =

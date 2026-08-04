@@ -10,6 +10,9 @@ import test, { mock } from "node:test"
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
+import { kvDelete, kvGet } from "../lib/db.ts"
+import { PENDING_DWELL_KEY } from "../lib/dwellScheduler.ts"
+import type { PendingDwell } from "../lib/dwell.ts"
 
 // Serve the real embedding assets off disk so the KoEn-E5 WASM session loads (the extension
 // fetches them via chrome.runtime.getURL + globalThis.fetch).
@@ -33,9 +36,13 @@ const evt = (name: string) => {
 }
 const store = new Map<string, unknown>() // backs chrome.storage.local
 const createdTabs: string[] = [] // URLs opened via chrome.tabs.create (onboarding assertions)
-let activeTab: { id: number; url: string; title: string; active: boolean; windowId: number } | null = null
+type MockTab = { id: number; url: string; title: string; active: boolean; windowId: number }
+let activeTab: MockTab | null = null
+let tabQuerySequence: Array<MockTab | null> = []
 const toasts: Array<Record<string, unknown>> = [] // captured injected toast payloads
 const notifications: Array<{ id: string; opts: Record<string, unknown> }> = []
+let executeScriptCalls = 0
+let settingsReadGate: { reached: () => void; release: Promise<void> } | null = null
 // Presence knobs (browserPresent = Chrome focused AND idle-active). Default present, so the
 // existing scenarios are unaffected; the presence-gate scenario flips these and restores them.
 let winFocused = true
@@ -45,7 +52,10 @@ const chrome = {
   tabs: {
     onUpdated: evt("tabs.onUpdated"),
     onActivated: evt("tabs.onActivated"),
-    query: async () => (activeTab ? [activeTab] : []),
+    query: async () => {
+      const tab = tabQuerySequence.length > 0 ? tabQuerySequence.shift() : activeTab
+      return tab ? [tab] : []
+    },
     get: async () => activeTab,
     create: async (opts: { url?: string } = {}) => {
       createdTabs.push(opts.url ?? "")
@@ -76,6 +86,7 @@ const chrome = {
   },
   scripting: {
     executeScript: async ({ args }: { args?: unknown[] }) => {
+      executeScriptCalls += 1
       const payload = args?.[0]
       if (payload && typeof payload === "object" && "message" in payload) toasts.push(payload as Record<string, unknown>)
       return [{ result: undefined }]
@@ -83,7 +94,16 @@ const chrome = {
   },
   storage: {
     local: {
-      get: async (key: string) => (store.has(key) ? { [key]: store.get(key) } : {}),
+      get: async (key: string) => {
+        const snapshot = store.has(key) ? { [key]: store.get(key) } : {}
+        if (key === "kibitzer:settings:v1" && settingsReadGate) {
+          const gate = settingsReadGate
+          settingsReadGate = null
+          gate.reached()
+          await gate.release
+        }
+        return snapshot
+      },
       set: async (obj: Record<string, unknown>) => void Object.entries(obj).forEach(([k, v]) => store.set(k, v)),
       remove: async (key: string) => void store.delete(key),
     },
@@ -99,6 +119,8 @@ console.debug = () => {}
 
 // Import the real SW (registers its listeners on the mock above).
 await import("../background.ts")
+const { extractActiveExcerpt, setActivePage, testNag } = await import("../lib/gaugeRuntime.ts")
+const { getGoal } = await import("../lib/session.ts")
 
 // --- drivers -----------------------------------------------------------------------------
 const send = (msg: unknown): Promise<Record<string, unknown>> =>
@@ -135,6 +157,106 @@ async function beat(until?: () => boolean): Promise<void> {
     if (until()) return
   }
 }
+
+test("E2E: local PDFs are opt-in and their dwell checkpoint never stores the file path", async () => {
+  const rawUrl = "file:///C:/Users/alice/Private/secret-paper.pdf"
+  activeTab = { id: 12, url: rawUrl, title: "secret-paper.pdf", active: true, windowId: 1 }
+  await send({ type: "set-settings", settings: { observeLocalPdfs: false } })
+  await send({ type: "set-goal", goal: "논문 읽기", minutes: null })
+  await settle(30)
+
+  assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "OFF local PDF never creates a dwell")
+  assert.equal((await send({ type: "get-state" })).s, 100, "OFF local PDF holds the gauge neutral")
+
+  await send({ type: "set-settings", settings: { observeLocalPdfs: true } })
+  await settle(30)
+  const first = await kvGet<PendingDwell>(PENDING_DWELL_KEY)
+  assert.ok(first)
+  assert.equal(first.kind, "local_pdf")
+  assert.equal(first.urlHost, "local-pdf")
+  assert.equal(first.title, "secret-paper.pdf", "Chrome's filename title is used when PDF metadata has no title")
+  assert.equal((first as PendingDwell & { url?: string }).url, undefined)
+  assert.ok(!JSON.stringify(first).includes("alice") && !JSON.stringify(first).includes("file:///"))
+  const beforeExcerpt = executeScriptCalls
+  assert.equal(await extractActiveExcerpt(first.pageKey), null)
+  assert.equal(executeScriptCalls, beforeExcerpt, "PDF excerpt policy returns before executeScript")
+
+  activeTab.title = "PDF metadata title"
+  for (const fn of listeners["tabs.onUpdated"]) await fn(12, { title: activeTab.title }, activeTab)
+  await settle(30)
+  const updated = await kvGet<PendingDwell>(PENDING_DWELL_KEY)
+  assert.equal(updated?.dueAt, first.dueAt, "same PDF title update keeps the original dwell deadline")
+  assert.equal(updated?.title, "PDF metadata title", "the latest Chrome tab title wins")
+
+  await send({ type: "set-settings", settings: { observeLocalPdfs: false } })
+  await settle(30)
+  assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "OFF cancels a pending PDF dwell")
+
+  // Race: an ON observation snapshots its setting, OFF cancels, then the stale invocation
+  // resumes. It must not recreate a durable checkpoint after the OFF transition.
+  await send({ type: "set-settings", settings: { observeLocalPdfs: true } })
+  await settle(30)
+  let reached!: () => void
+  let release!: () => void
+  const reachedPromise = new Promise<void>((resolve) => (reached = resolve))
+  const releasePromise = new Promise<void>((resolve) => (release = resolve))
+  settingsReadGate = { reached, release: releasePromise }
+  activeTab.title = "stale observation"
+  for (const fn of listeners["tabs.onUpdated"]) fn(12, { title: activeTab.title }, activeTab)
+  await reachedPromise
+  await send({ type: "set-settings", settings: { observeLocalPdfs: false } })
+  release()
+  await settle(50)
+  assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "stale ON observe cannot rewrite after OFF")
+
+  // Chrome's built-in PDF viewer is not a reliable surface for an injected overlay. A local
+  // PDF nudge must use the OS-notification fallback, while persona templates see the allowed
+  // Chrome tab title instead of the opaque `local-pdf` identity.
+  const enabledSettings = await send({ type: "set-settings", settings: { observeLocalPdfs: true } })
+  activeTab.title = "PDF metadata title"
+  await setActivePage({
+    pageKey: first.pageKey,
+    title: activeTab.title,
+    urlHost: "local-pdf",
+    score: 0.2,
+    kind: "local_pdf",
+    localPdfPolicyRevision: enabledSettings.localPdfPolicyRevision as number,
+  })
+  toasts.length = 0
+  notifications.length = 0
+  await send({ type: "set-persona", persona: "yandere" })
+  tabQuerySequence = [
+    { id: 12, url: "https://example.test/before-pdf", title: "Previous web page", active: true, windowId: 1 },
+    { id: 12, url: "https://example.test/during-delivery", title: "Interim web page", active: true, windowId: 1 },
+    activeTab,
+  ]
+  const random = mock.method(Math, "random", () => 0)
+  try {
+    await testNag(await getGoal())
+  } finally {
+    random.mock.restore()
+  }
+  assert.equal(toasts.length, 0, "local PDFs never pretend an injected overlay was visible")
+  assert.equal(notifications.length, 1, "local PDF nags use the OS notification fallback")
+  const notificationMessage = String(notifications[0]?.opts.message ?? "")
+  assert.ok(notificationMessage.includes("PDF metadata title"), "the nudge uses the Chrome tab title")
+  assert.ok(!notificationMessage.includes("local-pdf"), "the opaque identity is never user-facing copy")
+  // The one-time explainer variant only renders inside an injected toast, so a delivery that
+  // routes to the OS notification must leave the lifetime slot unspent — otherwise a user
+  // whose first-ever nag lands on a PDF loses the explainer without ever seeing it.
+  assert.equal(
+    await kvGet("first-nag-count"),
+    undefined,
+    "the OS-notification fallback must not consume the one-time explainer slot",
+  )
+  await kvDelete("first-nag-count") // keep the suite's lifetime-first toast scenario isolated
+  notifications.length = 0
+  toasts.length = 0
+  await send({ type: "set-persona", persona: "dry_kibitzer" })
+
+  await send({ type: "set-goal", goal: "", minutes: null })
+  activeTab = { id: 1, url: "https://example.test/neutral", title: "중립 페이지", active: true, windowId: 1 }
+})
 const nagDelivered = (): boolean => toasts.some((t) => t.kind === "intervention") || notifications.length > 0
 
 test("E2E: goal → drift on an off-goal page → S drains to 0 → nag delivered", async () => {

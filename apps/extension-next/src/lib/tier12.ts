@@ -138,6 +138,8 @@ export async function tier1Rescue(
 export interface Tier2Outcome {
   flow: "drift" | "ok"
   message: string | null
+  /** Policy changed before a not-yet-started provider boundary; caller cancels the job. */
+  cancelled?: boolean
   /** Set when the judge call itself failed (nag suppressed by fail-open) — lets the
    *  caller tell the user why judging went quiet. Not set for a mere writer failure
    *  (a fallback-template nag still fires) or when the route has no keys (deliberate
@@ -148,6 +150,17 @@ export interface Tier2Outcome {
 export interface RouteTestResult {
   ok: boolean
   detail: string
+}
+
+/** Treat a failed policy/state read as cancellation at provider boundaries. */
+export async function safeShouldContinue(
+  shouldContinue: () => Promise<boolean>,
+): Promise<boolean> {
+  try {
+    return await shouldContinue()
+  } catch {
+    return false
+  }
 }
 
 function errorText(error: unknown): string {
@@ -231,8 +244,9 @@ export async function enrichGoal(goalText: string): Promise<string[]> {
  *  "오늘 N번째" flavor and the fallback template index). */
 export async function tier2Confirm(
   goalText: string,
-  page: { title: string; urlHost: string; score: number },
+  page: { title: string; urlHost: string; score: number; kind?: "web" | "local_pdf" },
   ctx: Tier2Context = { nagCount: 1, naggingContext: {}, recentTitles: [], excerpt: null, timeContext: null },
+  shouldContinue: () => Promise<boolean> = async () => true,
 ): Promise<Tier2Outcome> {
   const p = await providers()
   if (!p.tier2) return { flow: "ok", message: null }
@@ -247,6 +261,7 @@ export async function tier2Confirm(
   }
   let decision
   try {
+    if (!(await safeShouldContinue(shouldContinue))) return { flow: "ok", message: null, cancelled: true }
     const reviewPayload = buildTier2ReviewPayload(
       { rawText: goalText },
       observation,
@@ -264,6 +279,7 @@ export async function tier2Confirm(
   }
   klog(`tier2 judge: ${decision.decision} (${decision.reasonCode}, basis=${decision.basis})`)
   if (decision.decision !== "notify") return { flow: "ok", message: null }
+  if (!(await safeShouldContinue(shouldContinue))) return { flow: "ok", message: null, cancelled: true }
   // Notify confirmed → write the nag in the selected persona's voice.
   const persona = await activePersona()
   const maxSentences = persona.maxSentences ?? DEFAULT_MAX_SENTENCES
@@ -275,16 +291,18 @@ export async function tier2Confirm(
     ctx.naggingContext,
   )
   try {
+    if (!(await safeShouldContinue(shouldContinue))) return { flow: "ok", message: null, cancelled: true }
     const message = await p.tier2.writeTier2Message(messagePayload, composeWriterPrompt(persona))
     void recordProviderOk()
     return { flow: "drift", message: clampSentences(message, maxSentences) }
   } catch (error) {
     void recordProviderError(error)
     klog(`tier2 writer error (persona fallback template): ${String(error)}`)
+    const fallbackTitle = page.title || page.urlHost || "현재 페이지"
     const message = pickFallback(persona, ctx.nagCount, {
       goal: goalText,
-      title: page.title || page.urlHost || "현재 페이지",
-      host: page.urlHost || "현재 페이지",
+      title: fallbackTitle,
+      host: page.kind === "local_pdf" ? fallbackTitle : (page.urlHost || "현재 페이지"),
     })
     return { flow: "drift", message: message ? clampSentences(message, maxSentences) : message }
   }

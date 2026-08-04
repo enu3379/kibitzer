@@ -1,11 +1,15 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { dwellDecision, type PendingDwell } from "./dwell.ts"
+import { dwellDecision, PENDING_DWELL_VERSION, type PendingDwell } from "./dwell.ts"
 
 const pending = (over: Partial<PendingDwell> = {}): PendingDwell => ({
-  url: "https://a.test/x",
+  version: PENDING_DWELL_VERSION,
+  pageKey: "a.test#x",
   title: "X",
+  urlHost: "a.test",
+  kind: "web",
+  localPdfPolicyRevision: null,
   obsKey: "a.test/x\nX",
   dueAt: 5000,
   ...over,

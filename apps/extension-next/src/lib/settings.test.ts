@@ -41,6 +41,8 @@ test("sensitivity presets are strictly ordered and the default is standard", () 
   assert.ok(SENSITIVITY_PRESETS.standard < SENSITIVITY_PRESETS.strict)
   assert.equal(SENSITIVITY_PRESETS.standard, 0.59) // O4 FPR-10% operating point (tier0.TAU_OK)
   assert.equal(DEFAULT_SETTINGS.tauOk, SENSITIVITY_PRESETS.standard)
+  assert.equal(DEFAULT_SETTINGS.observeLocalPdfs, false, "local PDFs must be explicit opt-in")
+  assert.equal(DEFAULT_SETTINGS.localPdfPolicyRevision, 0)
 })
 
 test("sensitivityLevelFor maps a tauOk to the nearest preset level", () => {

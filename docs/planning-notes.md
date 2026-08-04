@@ -699,6 +699,17 @@ its sole job was to confirm the design runs correctly (byte-identical to TS over
 benchmark), which is done. Work proceeds **TypeScript-only**; the Python reducer is a
 frozen reference deleted with the server. Canonical roadmap: `docs/ts-migration-plan.md`.
 
+### D17 — Local PDF observation: explicit opt-in, title-only → DECIDED (2026-08-03)
+
+Kibitzer may observe a full-page local PDF opened in Chrome only after the user
+enables **로컬 PDF 제목 관측** in settings. The default is OFF. The observation
+uses Chrome's tab title (document metadata title when Chrome exposes it,
+otherwise the filename), the non-path host label `local-pdf`, and the normal
+Tier-0/1/2 title pipeline. It never parses PDF bytes, reads an excerpt, or stores
+or sends the raw `file:` URL. A connected Tier-1/2 provider may receive the PDF
+title under the same disclosure as web-page titles. Prompt/onboarding behavior
+is deliberately deferred to a separate follow-up decision and PR.
+
 ### D14 — Serverless cutover scope and preservation → RESOLVED (2026-07-24)
 
 The active product becomes the single TypeScript MV3 runtime in
@@ -1237,4 +1248,3 @@ the extension badge.
   sample-line copy decision. This cleanup pass: duplicate gauge "D9" block
   deduped and renumbered to D16, D9/D10 marked superseded by D14, status
   header refreshed.
-
