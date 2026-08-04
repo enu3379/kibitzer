@@ -43,14 +43,16 @@ const BEATS = [
 
   { id: "s2-search", frame: beat.searchEnter1 + 6, caption: "S2 · 첫 검색 결과" },
   { id: "s2-news-read", frame: beat.newsEnter + 8, caption: "S2 · 기사 정독" },
-  { id: "s2-write-1", frame: beat.writeP2 + 8, caption: "S2 · 사이클 A — 1장 제목 + 2문단" },
+  // +5, not +8: switchToBrowser1 raises the Cmd-Tab overlay at +6 and it covers the page
+  // this still exists to show the *volume* of.
+  { id: "s2-write-1", frame: beat.writeP2 + 5, caption: "S2 · 사이클 A — 1장 제목 + 2문단" },
   { id: "s2-select-stats", frame: beat.copy1, caption: "S2 · 대시보드 네 행 선택 + ⌘C" },
-  { id: "s2-paste-1", frame: beat.paste1 + 3, caption: "S2 · ⌘V — 그새 3문단이 늘어 있음" },
+  { id: "s2-paste-1", frame: beat.paste1 + 3, caption: "S2 · ⌘V — 그새 두 장이 늘어 있음" },
   { id: "s2-cohorts", frame: beat.cohortsEnter + 6, caption: "S2 · 코호트 페이지 (열 프레임)" },
   { id: "s2-select-news", frame: beat.copy2, caption: "S2 · 기사 인용구 선택 + ⌘C" },
   { id: "s2-paste-2", frame: beat.paste2 + 3, caption: "S2 · 두 번째 붙여넣기" },
-  { id: "s2-doc-full", frame: beat.writeP11 + 14, caption: "S2 · 한 시간 뒤의 문서 — 2페이지 꽉 참" },
-  { id: "s2-idle-caret", frame: beat.enter2 + 6, caption: "S2 · 엔터 두 번, 빈 3페이지에 커서만" },
+  { id: "s2-doc-full", frame: beat.writeP11 + 14, caption: "S2 · 한 시간 뒤의 문서 — 4페이지 꽉 참" },
+  { id: "s2-idle-caret", frame: beat.enter2 + 6, caption: "S2 · 엔터 두 번, 4페이지 빈 줄에 커서만" },
 
   { id: "s3-omni-autocomplete", frame: beat.omniTab + 2, caption: "S3 · 새 탭 → 'g' → 자동완성 → Tab" },
   { id: "s3-ig-feed", frame: beat.igEnter + 10, caption: "S3 · 딴짓① 소셜 피드" },
@@ -71,10 +73,10 @@ const BEATS = [
   { id: "s5-freeze", frame: beat.freezeStart + 15, caption: "S5 · 전부 멈춤 · 정적" },
 
   { id: "s6-closing-tabs", frame: beat.closeTab2 + 4, caption: "S6 · 무관한 탭 정리" },
-  { id: "s6-editor-look", frame: beat.switchToEditor5 + 10, caption: "S6 · 문서를 한 번 열어봄 — 빈 3페이지" },
+  { id: "s6-editor-look", frame: beat.switchToEditor5 + 10, caption: "S6 · 문서를 한 번 열어봄 — 떠날 때 그대로" },
   { id: "s6-praise", frame: beat.praiseIn + 12, caption: "S6 · 복귀 칭찬" },
 
-  { id: "s7-report-done", frame: beat.chartIn + 4, caption: "S7 · 보고서 완성 — 3페이지 · 2,054자" },
+  { id: "s7-report-done", frame: beat.chartIn + 4, caption: "S7 · 보고서 완성 — 6페이지 · 6,146자 · 참고 자료까지" },
   { id: "s7-mail-send", frame: beat.sendClick + 3, caption: "S7 · 메일 전송" },
   { id: "s7-summary", frame: beat.summaryShown + 8, caption: "S7 · 세션 요약" },
   { id: "s8-endcard", frame: beat.endCardIn + 30, caption: "S8 · 엔드카드" },
