@@ -50,7 +50,12 @@ const next = $<HTMLButtonElement>("next")
 const nav = $("nav")
 let cur = 0
 
-for (let i = 0; i < 5; i++) {
+// Step indices (see onboarding.html section order); the done screen is index 6.
+const STEP_PIN = 3
+const STEP_AI = 4
+const STEP_PERSONA = 5
+
+for (let i = 0; i < 6; i++) {
   const d = document.createElement("button")
   d.setAttribute("aria-label", `${i + 1}단계`)
   d.addEventListener("click", () => go(i))
@@ -60,17 +65,18 @@ for (let i = 0; i < 5; i++) {
 function go(i: number): void {
   const leaving = cur
   cur = Math.max(0, Math.min(steps.length - 1, i))
-  if (leaving === 3 && cur !== 3) void saveEnteredKey() // pasted a key, hit 다음 — keep it
+  if (leaving === STEP_AI && cur !== STEP_AI) void saveEnteredKey() // pasted a key, hit 다음 — keep it
   steps.forEach((s, j) => (s.hidden = j !== cur))
   ;[...dots.children].forEach((d, j) =>
     j === cur ? d.setAttribute("aria-current", "step") : d.removeAttribute("aria-current"),
   )
-  count.textContent = cur < 5 ? `${cur + 1} / 5` : "완료"
+  count.textContent = cur < 6 ? `${cur + 1} / 6` : "완료"
   prev.style.visibility = cur === 0 ? "hidden" : "visible"
-  nav.style.display = cur === 5 ? "none" : "flex"
-  next.textContent = cur === 4 ? "마무리 →" : "다음 →"
-  if (cur === 3) void refreshAiStatus()
-  if (cur === 4) void refreshPin()
+  nav.style.display = cur === 6 ? "none" : "flex"
+  next.textContent = cur === STEP_PERSONA ? "마무리 →" : "다음 →"
+  if (cur === STEP_AI) void refreshAiStatus()
+  if (cur === STEP_PIN || cur === STEP_PERSONA) void refreshPin()
+  syncPinUi(false)
 }
 prev.addEventListener("click", () => go(cur - 1))
 next.addEventListener("click", () => go(cur + 1))
@@ -169,7 +175,108 @@ $("tryToast").addEventListener("click", () =>
   firePracticeToast("연습 훈수입니다. 진짜 훈수도 정확히 이 자리에, 이렇게 옵니다.", "답하거나, 닫거나, 그냥 두면 사라집니다"),
 )
 
-// --- step 4: Ollama Cloud connect (PR #158 provider API, inlined) ------------------
+// --- step 4: toolbar pin — persuade, detect, quietly celebrate ---------------------
+
+// Chrome offers no API to pin programmatically; all we can do is show the two clicks
+// and watch for them. getUserSettings/onUserSettingsChanged landed after our
+// @types/chrome pin; feature-detect instead of typing.
+type ActionUserSettings = {
+  getUserSettings?: () => Promise<{ isOnToolbar?: boolean }>
+  onUserSettingsChanged?: { addListener(cb: (change: { isOnToolbar?: boolean }) => void): void }
+}
+const actionApi = extension ? (chrome.action as unknown as ActionUserSettings) : undefined
+
+const pinFresh = $("pinFresh")
+const pinPre = $("pinPre")
+const pinLive = $("pinLive")
+const pindemo = $("pindemo")
+const nudge = $("nudge")
+const pinReminder = $("pinReminder")
+
+let pinOn = false
+let pinInitial: boolean | null = null // first observed value — true means "arrived already pinned"
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+
+// Looping two-click demo: puzzle highlight → menu drops → pin fills → icon pops in.
+const DEMO_PHASES = ["p0", "p1", "p2", "p3", "p3"] as const
+let demoTimer: number | null = null
+let demoIdx = 0
+
+function stopPinDemo(freezeDone = false): void {
+  if (demoTimer !== null) clearTimeout(demoTimer)
+  demoTimer = null
+  if (freezeDone) pindemo.className = "pindemo p3"
+}
+
+function startPinDemo(): void {
+  if (demoTimer !== null) return // already looping
+  if (reducedMotion) {
+    pindemo.className = "pindemo p2" // static frame: menu open, both callouts visible
+    return
+  }
+  const tick = (): void => {
+    pindemo.className = `pindemo ${DEMO_PHASES[demoIdx]}`
+    demoIdx = (demoIdx + 1) % DEMO_PHASES.length
+    demoTimer = window.setTimeout(tick, demoIdx === 0 ? 1600 : 1100)
+  }
+  demoIdx = 0
+  tick()
+}
+
+// `celebrate` is true only on a live unpinned→pinned transition; any later sync
+// (step navigation, polling) renders the settled state without replaying the moment.
+function syncPinUi(celebrate: boolean): void {
+  const pre = pinOn && pinInitial === true // never teach pinning to the already-pinned
+  pinFresh.hidden = pre
+  pinPre.hidden = !pre
+  pinLive.classList.toggle("on", pinOn)
+  pinReminder.hidden = pinOn
+  nudge.classList.toggle("on", pinOn)
+  nudge.hidden = cur !== STEP_PIN || pre || (pinOn && !celebrate) // stays for the fade-out beat
+  if (cur === STEP_PIN && !pre) {
+    if (pinOn) stopPinDemo(true)
+    else startPinDemo()
+  } else {
+    stopPinDemo()
+  }
+  if (celebrate && cur === STEP_PIN) {
+    next.classList.remove("pulse")
+    void next.offsetWidth // restart the animation when it already ran once
+    next.classList.add("pulse")
+  }
+}
+next.addEventListener("animationend", () => next.classList.remove("pulse"))
+
+function onPinState(on: boolean): void {
+  const first = pinInitial === null
+  if (first) pinInitial = on
+  if (!first && on === pinOn) return
+  const celebrate = !first && on
+  pinOn = on
+  syncPinUi(celebrate)
+}
+
+async function refreshPin(): Promise<void> {
+  try {
+    const settings = await actionApi?.getUserSettings?.()
+    if (settings) onPinState(Boolean(settings.isOnToolbar))
+  } catch {
+    // API unavailable (old Chrome) — the drawn instructions stay useful without detection.
+  }
+}
+
+// Chrome 130+ pushes the change the instant the user pins; older Chromes rely on the
+// slow tick below plus the focus listener.
+try {
+  actionApi?.onUserSettingsChanged?.addListener((change) => {
+    if (typeof change?.isOnToolbar === "boolean") onPinState(change.isOnToolbar)
+    else void refreshPin()
+  })
+} catch {
+  // Event missing — polling covers it.
+}
+
+// --- step 5: Ollama Cloud connect (PR #158 provider API, inlined) ------------------
 
 const aiStatus = $("aiStatus")
 const aiStatusText = $("aiStatusText")
@@ -242,12 +349,12 @@ $("openSettingsAi").addEventListener("click", () => {
 })
 
 const skip = $("skip")
-skip.addEventListener("click", () => go(4))
+skip.addEventListener("click", () => go(STEP_PERSONA))
 skip.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" || e.key === " ") go(4)
+  if (e.key === "Enter" || e.key === " ") go(STEP_PERSONA)
 })
 
-// --- step 5: persona picker + toolbar-pin detection --------------------------------
+// --- step 6: persona picker --------------------------------------------------------
 
 const pgrid = $("pgrid")
 const sample = $("sample")
@@ -290,24 +397,6 @@ function renderPersonas(): void {
     pgrid.appendChild(b)
   }
   renderSample(currentPersona)
-}
-
-const pinstate = $("pinstate")
-
-// getUserSettings landed after our @types/chrome pin; feature-detect instead of typing.
-type ActionUserSettings = { getUserSettings?: () => Promise<{ isOnToolbar?: boolean }> }
-
-async function refreshPin(): Promise<void> {
-  if (!extension) return
-  try {
-    const settings = await (chrome.action as unknown as ActionUserSettings).getUserSettings?.()
-    if (!settings) return
-    const on = Boolean(settings.isOnToolbar)
-    pinstate.textContent = on ? "고정 감지됨 ✓" : "미고정"
-    pinstate.classList.toggle("on", on)
-  } catch {
-    // API unavailable (old Chrome) — the hint stays useful without live detection.
-  }
 }
 
 // --- done: live popup embed --------------------------------------------------------
@@ -355,14 +444,15 @@ $("closeTab").addEventListener("click", () => {
 // --- live refresh loop -------------------------------------------------------------
 
 // One slow tick keeps the visible step honest: AI status while the user is off
-// connecting keys, pin state while they hover the puzzle menu.
+// connecting keys, pin state while they hover the puzzle menu (and as the polling
+// fallback for Chromes without onUserSettingsChanged).
 window.setInterval(() => {
-  if (cur === 3) void refreshAiStatus()
-  if (cur === 4) void refreshPin()
+  if (cur === STEP_AI) void refreshAiStatus()
+  if (cur === STEP_PIN || cur === STEP_PERSONA) void refreshPin()
 }, 2000)
 window.addEventListener("focus", () => {
-  if (cur === 3) void refreshAiStatus()
-  if (cur === 4) void refreshPin()
+  if (cur === STEP_AI) void refreshAiStatus()
+  if (cur === STEP_PIN || cur === STEP_PERSONA) void refreshPin()
 })
 
 // --- init --------------------------------------------------------------------------
@@ -373,9 +463,12 @@ void (async () => {
   renderPersonas()
   $("miniToastMsg").textContent = demoNagMessage()
 })()
-// Deep link: #step-N or ?step=N (0–5) opens on that step, so settings/docs links can
+// Ask once up front so an already-pinned arrival (Chrome's auto-pin experiment, or a
+// user who pinned on their own) sees the completed variant, never the instructions.
+void refreshPin()
+// Deep link: #step-N or ?step=N (0–6) opens on that step, so settings/docs links can
 // jump straight to e.g. the AI-connect step. Anything else starts from the beginning.
 const stepParam =
-  new URLSearchParams(location.search).get("step") ?? /^#step-([0-5])$/.exec(location.hash)?.[1]
+  new URLSearchParams(location.search).get("step") ?? /^#step-([0-6])$/.exec(location.hash)?.[1]
 const initialStep = Number(stepParam ?? "0")
-go(Number.isInteger(initialStep) && initialStep >= 0 && initialStep <= 5 ? initialStep : 0)
+go(Number.isInteger(initialStep) && initialStep >= 0 && initialStep <= 6 ? initialStep : 0)
