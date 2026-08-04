@@ -89,7 +89,7 @@
         font-size: 23px; font-weight: 800; letter-spacing: -.02em; line-height: 1.3;
         margin: 0 0 10px; text-wrap: balance;
       }
-      .lede { font-size: 13.5px; color: var(--page-ink-2); margin: 0 0 20px; max-width: 46ch; }
+      .lede { font-size: 13.5px; color: var(--page-ink-2); margin: 0 0 20px; }
       .footnote { font-size: 10.5px; color: var(--page-ink-3); margin-top: 8px; }
 
       /* step 1 — concept */
@@ -433,7 +433,7 @@
               <div class="visits" id="visits"></div>
               <div class="playrow"><button class="btn" id="play">▶ 딴길 새는 과정 재생</button></div>
             </div>
-            <p class="footnote">재생이 끝나면 진짜 훈수가 이 화면 오른쪽 아래에 나타납니다 — 실제 상황과 같은 위치, 같은 모양입니다.</p>
+            <p class="footnote">재생이 끝나면 진짜 훈수가 이 화면 오른쪽 아래에 나타납니다. 실제 상황과 같은 위치, 같은 모양입니다.</p>
           </section>
 
           <!-- ③ 화면 안내 -->
@@ -504,7 +504,7 @@
               <li><span class="n">3</span><span><b>훈수</b> — 딴길이 쌓이면 보고 있던 페이지의 오른쪽 아래에 나타납니다. 답하거나 닫으면 그만.</span></li>
             </ul>
             <button class="btn" id="tryToast">▶ 연습 훈수 받아보기</button>
-            <p class="footnote">실제 위치(이 화면 오른쪽 아래)에 실물 훈수가 그대로 뜹니다. 연습 훈수의 응답은 기록되지 않습니다.</p>
+            <p class="footnote">연습 훈수의 응답은 기록되지 않습니다.</p>
           </section>
 
           <!-- ④ 툴바 고정 -->
@@ -512,7 +512,7 @@
             <div id="pinFresh">
               <p class="eyebrow">자리 잡기</p>
               <h1>훈수꾼 자리부터 마련해 주세요.</h1>
-              <p class="lede">방금 본 <b>색 점</b>은 툴바에 아이콘이 보여야 일합니다. 설치 직후엔 퍼즐 메뉴 속에 숨어 있어요 — 딱 <b>두 번의 클릭</b>으로 꺼내 주세요.</p>
+              <p class="lede">목표 선언부터 훈수까지, 모든 일은 툴바의 이 아이콘에서 시작됩니다. 설치 직후엔 퍼즐 메뉴 속에 숨어 있어요 — 딱 <b>두 번의 클릭</b>으로 꺼내 주세요.</p>
               <div class="pindemo" id="pindemo">
                 <div class="d-toolbar">
                   <span class="d-url"></span>
@@ -532,14 +532,14 @@
                     </span>
                   </div>
                 </div>
-                <p class="d-cap">메뉴 이름도 실제와 같아요 — ① <svg class="puzzle-svg" aria-hidden="true"><use href="#i-puzzle"/></svg> <b>확장 프로그램 메뉴</b> → ② 📌 <b>툴바에 고정</b></p>
+                <p class="d-cap">① <svg class="puzzle-svg" aria-hidden="true"><use href="#i-puzzle"/></svg> <b>확장 프로그램 메뉴</b> → ② 📌 <b>툴바에 고정</b></p>
               </div>
               <div class="pinlive" id="pinLive">
                 <span class="kicon"><img src="../icons/icon-32.png" alt="" /><i class="dot"></i></span>
-                <span><span class="pl-off">지금 <b>진짜 툴바</b>에서 눌러 보세요. 고정되면 여기 불이 켜집니다.</span><span class="pl-on"><b>고정 감지됨</b> — 색 점이 자리에 앉았습니다. 이제 항상 보여요.</span></span>
+                <span><span class="pl-off">지금 <b>툴바</b>에서 눌러 보세요. 고정되면 여기 불이 켜집니다.</span><span class="pl-on"><b>고정 감지됨</b> — 색 점이 자리에 앉았습니다. 이제 항상 보여요.</span></span>
                 <span class="plstate"><span class="pl-off">미고정</span><span class="pl-on">고정 감지됨 ✓</span></span>
               </div>
-              <p class="footnote">고정하지 않아도 다음으로 넘어갈 수 있어요 — 다만 색 점은 고정해야 보입니다.</p>
+              <p class="footnote">고정하지 않아도 다음으로 넘어갈 수 있어요. 다만 사용할 때마다 메뉴를 뒤져야 해요.</p>
             </div>
             <div id="pinPre" hidden>
               <p class="eyebrow">자리 잡기</p>
