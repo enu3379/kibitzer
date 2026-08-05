@@ -140,6 +140,11 @@ export interface Tier2Outcome {
   message: string | null
   /** Policy changed before a not-yet-started provider boundary; caller cancels the job. */
   cancelled?: boolean
+  /** No judgment was obtained — the tier has no route configured, or the judge call failed.
+   *  Distinct from `flow: "ok"`, which is a real verdict ("this page does not warrant a nudge").
+   *  Both used to arrive as a bare "ok", so the caller applied the OK branch and rewarded a page
+   *  nobody had actually judged. Callers must treat this as "unknown", never as a verdict. */
+  unavailable?: boolean
   /** Set when the judge call itself failed (nag suppressed by fail-open) — lets the
    *  caller tell the user why judging went quiet. Not set for a mere writer failure
    *  (a fallback-template nag still fires) or when the route has no keys (deliberate
@@ -249,7 +254,8 @@ export async function tier2Confirm(
   shouldContinue: () => Promise<boolean> = async () => true,
 ): Promise<Tier2Outcome> {
   const p = await providers()
-  if (!p.tier2) return { flow: "ok", message: null }
+  // No Tier-2 route (or its provider has no key): nothing was asked, so there is no verdict.
+  if (!p.tier2) return { flow: "ok", message: null, unavailable: true }
   const observation = {
     title: page.title,
     urlHost: page.urlHost,
@@ -274,8 +280,13 @@ export async function tier2Confirm(
     void recordProviderOk()
   } catch (error) {
     void recordProviderError(error)
-    klog(`tier2 judge error (fail-open to ok, no nag): ${String(error)}`)
-    return { flow: "ok", message: null, providerError: classifyProviderError(error).message }
+    klog(`tier2 judge error (no verdict, request released): ${String(error)}`)
+    return {
+      flow: "ok",
+      message: null,
+      unavailable: true, // the judge was asked and did not answer — still not a verdict
+      providerError: classifyProviderError(error).message,
+    }
   }
   klog(`tier2 judge: ${decision.decision} (${decision.reasonCode}, basis=${decision.basis})`)
   if (decision.decision !== "notify") return { flow: "ok", message: null }
