@@ -36,7 +36,7 @@ import type { SessionGoal } from "./session.ts"
 const EXCERPT_LIMIT = 3500 // extraction cap; the Tier-2 payload re-cleans to 3000
 
 const STATE_KEY = "gauge-state"
-const ACTIVE_PAGE_KEY = "active-page"
+export const ACTIVE_PAGE_KEY = "active-page"
 const DRIFT_SINCE_KEY = "drift-since"
 
 export interface ActivePage {
