@@ -29,6 +29,19 @@ function snoozed(state: GaugeState, now: number): boolean {
   return state.snoozedUntil != null && now < state.snoozedUntil;
 }
 
+/** The user does not want to be nudged right now — an explicit snooze, or their quiet hours.
+ *
+ *  Quiet hours used to be consulted only at delivery, so the gauge went on DECIDING nudges all
+ *  night and each one spent a rung of the re-nag ladder. Eight hours of that pins the backoff at
+ *  its ceiling, and the silence the user asked for is followed by 48 minutes of silence they did
+ *  not. Deciding nothing is what makes the window free.
+ *
+ *  `quiet` is refreshed by the heartbeat, so it can lag the real window by up to a tick — the
+ *  delivery-time check stays as the exact gate. */
+function silenced(state: GaugeState, now: number): boolean {
+  return snoozed(state, now) || state.quiet;
+}
+
 /** Discrete acceleration-tier transition with hysteresis (§5). Demotion first and
  *  mutually exclusive (a step moves m one way). Promotion is a *level* condition
  *  (m ≥ tUp[tier]); normal mode requests Tier 2 and waits (single pending slot). */
@@ -71,14 +84,14 @@ function accelTransition(
 function maybeRenag(st: GaugeState, config: GaugeConfig, effects: GaugeEffect[], now: number): GaugeState {
   if (st.nagN < 1) return st;
   const threshold = Math.min(config.rRenag * Math.pow(config.bBackoff, st.nagN - 1), config.rRenagMax);
-  if (st.renagDebt < threshold || snoozed(st, now)) return st;
+  if (st.renagDebt < threshold || silenced(st, now)) return st;
   effects.push({ type: "nag", pageKey: st.activePageKey as string });
   return { ...st, lastNagTs: now, nagN: st.nagN + 1, renagDebt: 0 };
 }
 
 /** S = 0 reached — final nag gate (§5.2b / §6). */
 function sZeroGate(st: GaugeState, config: GaugeConfig, effects: GaugeEffect[], now: number): GaugeState {
-  if (snoozed(st, now)) return st;
+  if (silenced(st, now)) return st;
   const pageKey = st.activePageKey as string;
   if (st.degraded) {
     effects.push({ type: "nag", pageKey });
@@ -203,7 +216,7 @@ function advance(
     !leaving &&
     atZeroDrift &&
     st.nagN === 0 &&
-    !snoozed(st, now) &&
+    !silenced(st, now) &&
     !freshOk &&
     !effects.some((e) => e.type === "nag") && // never stack on a renag/celebrate already emitted this tick
     !(st.pendingTier2 != null && st.pendingTier2.reason === "s_zero" && st.pendingTier2.pageKey === st.activePageKey)
@@ -269,7 +282,7 @@ function applyTier2(
   } else {
     // reason === "s_zero"
     if (flow === "drift") {
-      if (!snoozed(st, now)) {
+      if (!silenced(st, now)) {
         effects.push({ type: "nag", pageKey: st.activePageKey as string });
         st = { ...st, lastNagTs: now, nagN: st.nagN + 1, renagDebt: 0 };
       }
@@ -293,8 +306,12 @@ export function reduceGauge(
     case "inactive":
       // Contract §5: inactive does not integrate. Rebase the clock; integrate nothing.
       return { state: { ...state, updatedAt: event.ts }, effects: [] };
-    case "heartbeat":
-      return advance(state, event.ts, config);
+    case "heartbeat": {
+      // Re-stamp the quiet window BEFORE integrating, so the tick that carries the news is
+      // already governed by it rather than deciding one last nudge under the old value.
+      const st = event.quiet != null ? { ...state, quiet: event.quiet } : state;
+      return advance(st, event.ts, config);
+    }
     case "nav": {
       const adv = advance(state, event.ts, config);
       let st: GaugeState = {

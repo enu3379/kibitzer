@@ -39,7 +39,7 @@ import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
 import { clearProviderHealth, getProviderHealth } from "./lib/providerHealth.ts"
 import { clearBadge } from "./lib/badge.ts"
 import { clearEvents, exportEvents, logEvent } from "./lib/events.ts"
-import { getSettings, localPdfPolicyMatches, setSettings, type Settings } from "./lib/settings.ts"
+import { getSettings, inQuietHours, localPdfPolicyMatches, setSettings, type Settings } from "./lib/settings.ts"
 import { clearStore, kvGet, kvSet, OBS_STORE } from "./lib/db.ts"
 import { DwellScheduler, PENDING_DWELL_KEY } from "./lib/dwellScheduler.ts"
 import { isPendingDwell, PENDING_DWELL_VERSION, type PendingDwell } from "./lib/dwell.ts"
@@ -366,6 +366,14 @@ async function ensureHeartbeat(): Promise<void> {
   if (!existing) await chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 1 })
 }
 
+/** Is `ts` inside the user's quiet hours? The reducer has no clock and no settings, so the
+ *  heartbeat resolves this and carries the answer — see GaugeState.quiet. Delivery consults the
+ *  setting again at the exact moment it would show something; this is only about what the gauge
+ *  is allowed to DECIDE, so a boundary that lands mid-tick costs at most one tick of lag. */
+async function quietNow(ts: number): Promise<boolean> {
+  return inQuietHours((await getSettings()).quietHours, ts)
+}
+
 // Presence (Chrome focused AND idle-active) is defined once in ./lib/presence.ts so the gauge
 // heartbeat here and the nudge-delivery gate in gaugeRuntime agree on the exact same signal.
 const PRESENCE_KEY = "presence-last"
@@ -500,7 +508,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     void noteAlive(now) // durable last-alive marker — the restart-gap measurement (sessionRestore)
     // Once-a-minute durable checkpoint for the visit tracker (bounds teardown loss).
     void (present ? noteHeartbeat(now, goal.epoch) : noteInactive(now, goal.epoch))
-    await dispatch({ type: present ? "heartbeat" : "inactive", ts: now }, goal)
+    // Carry the quiet window into the gauge so it decides nothing during it. Read here rather
+    // than in the reducer, which has no clock and no settings — the tick that brings the news is
+    // already governed by it (see the `heartbeat` case). `inactive` integrates nothing, so it has
+    // no decision to govern and does not carry it.
+    await dispatch(present ? { type: "heartbeat", quiet: await quietNow(now), ts: now } : { type: "inactive", ts: now }, goal)
   })()
 })
 
@@ -737,7 +749,13 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     // after being away integrated the whole un-rebased gap at full DRIFT drain. `inactive`
     // rebases the reducer clock without integrating. (No notePresence here — per the alarm's
     // comment, only the alarm heartbeat logs presence transitions.)
-    if (goal) await dispatch({ type: (await browserPresent()) ? "heartbeat" : "inactive", ts: Date.now() }, goal)
+    if (goal) {
+      const now = Date.now()
+      await dispatch(
+        (await browserPresent()) ? { type: "heartbeat", quiet: await quietNow(now), ts: now } : { type: "inactive", ts: now },
+        goal,
+      )
+    }
     const [state, enabled, persona, health] = await Promise.all([
       currentState(),
       judgeEnabled(),

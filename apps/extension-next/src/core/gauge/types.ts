@@ -58,6 +58,11 @@ export interface GaugeState {
   nagRefunded: boolean;
   celebrateArmed: boolean;
   snoozedUntil: number | null;
+  // Are we inside the user's configured quiet hours? Carried in state because the reducer has no
+  // clock and no settings: the heartbeat re-reads the window and stamps it here, so it can lag the
+  // real boundary by up to a tick. Delivery still consults the setting exactly — this flag exists
+  // so nothing is DECIDED during the window, not to gate the display.
+  quiet: boolean;
 }
 
 /** GaugeConfig — contract §8 placeholder knobs. Seconds / per-second units. */
@@ -87,7 +92,10 @@ export interface GaugeConfig {
 /** GaugeEvent — contract §3 (discriminated union on `type`). ts is epoch ms. */
 export type GaugeEvent =
   | { type: "nav"; pageKey: string; verdict: Verdict; r0?: number; tauOk?: number; degraded?: boolean; ts: number }
-  | { type: "heartbeat"; ts: number }
+  // `quiet` re-stamps GaugeState.quiet from the live setting (omitted ⇒ keep what's stored, the
+  // same way `nav` carries `degraded`). The heartbeat is the only tick that runs on its own
+  // schedule, so it is what keeps the flag honest.
+  | { type: "heartbeat"; quiet?: boolean; ts: number }
   | { type: "inactive"; ts: number }
   | { type: "tier2_result"; flow: Flow; pageKey: string; ts: number }
   // Clear a pending Tier-2 request that resolved stale (page/goal moved on) without applying
@@ -149,5 +157,6 @@ export function initGaugeState(): GaugeState {
     nagRefunded: false,
     celebrateArmed: false,
     snoozedUntil: null,
+    quiet: false,
   };
 }
