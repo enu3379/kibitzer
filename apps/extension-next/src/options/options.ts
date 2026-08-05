@@ -294,7 +294,7 @@ async function saveDomainLists(): Promise<void> {
 blockList.addEventListener("change", () => void saveDomainLists())
 allowList.addEventListener("change", () => void saveDomainLists())
 
-// --- AI 판정 (연결된 제공자 · 판정 라우팅 · 사용량) --------------------------------
+// --- AI 판정 (연결된 제공자 · 모델 지정 · 사용량) --------------------------------
 
 const TIERS: readonly TierName[] = ["tier1", "tier2"]
 const TIER_LABEL: Record<TierName, string> = { tier1: "Tier 1", tier2: "Tier 2" }
