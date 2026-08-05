@@ -51,7 +51,7 @@ reduceGauge(state: GaugeState, event: GaugeEvent, config: GaugeConfig) -> GaugeT
 | `nagRefunded` | bool | false | 이번 에피소드에서 전달 실패한 나깅을 이미 한 번 되돌렸는지 (m≤0에서 리셋) |
 | `celebrateArmed` | bool | false | S ≤ C_arm에서 set, 칭찬 발송 시 clear |
 | `snoozedUntil` | int ms \| null | null | 사용자 스누즈 |
-| `quiet` | bool | false | 사용자가 설정한 조용한 시간 안인지. 하트비트가 재기록하므로 경계에서 한 틱 늦을 수 있다 |
+| `quiet` | bool | false | 사용자가 설정한 조용한 시간 안인지. 나깅을 결정할 수 있는 이벤트가 각자 실어 오고, 1분 틱은 재석/부재와 무관하게 실어 온다 — 경계에서 최대 한 틱 늦는다 |
 
 IndexedDB의 gauge checkpoint는 이 구조를 직렬화한다.
 
@@ -59,9 +59,9 @@ IndexedDB의 gauge checkpoint는 이 구조를 직렬화한다.
 
 | type | fields | source |
 |---|---|---|
-| `nav` | `pageKey, verdict("OK"\|"DRIFT"), r0?, tauOk?, degraded?, ts` | extension Tier 0/1 observation pipeline |
+| `nav` | `pageKey, verdict("OK"\|"DRIFT"), r0?, tauOk?, degraded?, quiet?, ts` | extension Tier 0/1 observation pipeline. 관찰은 창 포커스만 보고 presence는 보지 않으므로 `quiet`를 스스로 실어 온다 |
 | `heartbeat` | `quiet?, ts` | presence 하트비트 틱 (활성 중). `quiet`는 조용한 시간 창을 재기록한다(생략 시 기존 값 유지) |
-| `inactive` | `ts` | 자리 비움/탭 블러 — 적분 정지 |
+| `inactive` | `quiet?, ts` | 자리 비움/탭 블러 — 적분 정지. 부재 중 유일하게 도는 틱이라 `quiet`를 함께 실어 창을 갱신한다 |
 | `tier2_result` | `flow("drift"\|"ok"), pageKey, ts` | Tier2 Judge 응답 (승격/S=0 관문) |
 | `snooze` | `until, ts` | 사용자 스누즈 |
 

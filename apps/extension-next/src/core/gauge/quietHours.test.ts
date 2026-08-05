@@ -70,6 +70,26 @@ test("REGRESSION: the window leaves the backoff untouched, so leaving it nudges 
   )
 })
 
+test("the away tick carries the window too — it is the only one that fires while gone", () => {
+  // `inactive` decides nothing, so the flag cannot change what IT does. But observation is gated
+  // on window focus, not on presence: a user who stops touching the keyboard goes idle, every tick
+  // becomes `inactive`, and a `nav` hours later decides under whatever was last stamped. Leaving
+  // this tick out let a pre-window `false` stand for a whole night.
+  const away = reduceGauge(drifting({ quiet: false }), { type: "inactive", quiet: true, ts: now }, config).state
+  assert.equal(away.quiet, true)
+  assert.deepEqual(reduceGauge(away, { type: "heartbeat", ts: now + 60_000 }, config).effects, [], "and it holds")
+})
+
+test("a judged page decides under its own reading of the window, not a stale one", () => {
+  // `nav` runs advance BEFORE replacing the verdict, so when the gauge was already holding this
+  // page it can decide a nag — and it is dispatched with no presence gate.
+  const held = drifting({ quiet: false, activePageKey: "site/a" })
+  const nav = { type: "nav", pageKey: "site/a", verdict: "DRIFT", quiet: true, ts: now } as const
+  const { state, effects } = reduceGauge(held, nav, config)
+  assert.deepEqual(effects, [], "the window it carries governs the advance it triggers")
+  assert.equal(state.quiet, true, "and the stamp survives the verdict replacement")
+})
+
 test("an explicit snooze still silences on its own", () => {
   // `silenced` is snooze OR quiet — quiet hours widened the gate, it did not replace it.
   const { effects } = beat(drifting({ snoozedUntil: now + 60_000 }), now, false)

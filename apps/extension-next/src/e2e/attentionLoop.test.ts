@@ -1055,7 +1055,16 @@ test("E2E: quiet hours decides nothing, and the window leaves the backoff unspen
   notifications.length = 0
   activeTab = { id: 51, url: "https://video.test/watch?v=crow", title: "귀여운 까마귀 영상 몰아보기", active: true, windowId: 1 }
   await send({ type: "clear-log" })
-  await send({ type: "set-settings", settings: { quietHours: { enabled: true, start: "00:00", end: "23:59" } } })
+  // Derive the window from the wall clock so it covers the whole run whatever time of day CI
+  // starts. A fixed 00:00-23:59 leaves 23:59 OUTSIDE the window (inQuietHours is `cur < end`), so
+  // a run beginning after ~23:06 crosses the boundary mid-test and the window closes under it.
+  const hhmm = (at: number): string => {
+    const d = new Date(at)
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`
+  }
+  const windowStart = hhmm(Date.now() - 10 * 60_000)
+  const windowEnd = hhmm(Date.now() + 6 * 60 * 60_000) // the mocked clock advances ~1h across the beats
+  await send({ type: "set-settings", settings: { quietHours: { enabled: true, start: windowStart, end: windowEnd } } })
   try {
     await send({ type: "set-goal", goal: "쿠버네티스 인그레스 설정", minutes: null })
     let judged = false
@@ -1079,7 +1088,11 @@ test("E2E: quiet hours decides nothing, and the window leaves the backoff unspen
       for (let i = 0; i < 12; i += 1) await beat() // ~12 more minutes of drift inside the window
 
       const log = (await send({ type: "get-log" })).text as string
-      assert.doesNotMatch(log, /nag \((writer|fallback)\):/, "no nudge was ever decided inside the window")
+      // The reducer's own trace line, not a delivery-side one: `!! nag` is written the moment a
+      // nudge is DECIDED, which is what spends the ladder. Asserting only on the delivery lines
+      // would let a future drop reason between decision and delivery slip past.
+      assert.doesNotMatch(log, /!! nag/, "no nudge was ever decided inside the window")
+      assert.doesNotMatch(log, /nag \((writer|fallback)\):/, "so none reached delivery either")
       assert.doesNotMatch(log, /nag suppressed \(quiet hours\)/, "so there was nothing to suppress at delivery")
       assert.equal(toasts.length + notifications.length, 0, "and nothing surfaced")
 

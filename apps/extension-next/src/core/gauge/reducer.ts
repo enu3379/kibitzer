@@ -39,7 +39,9 @@ function snoozed(state: GaugeState, now: number): boolean {
  *  `quiet` is refreshed by the heartbeat, so it can lag the real window by up to a tick — the
  *  delivery-time check stays as the exact gate. */
 function silenced(state: GaugeState, now: number): boolean {
-  return snoozed(state, now) || state.quiet;
+  // `=== true`, not a bare read: a checkpoint written before this field existed has `undefined`
+  // here, and the declared boolean would be a lie at runtime (same shape as sZeroConfirms ?? 0).
+  return snoozed(state, now) || state.quiet === true;
 }
 
 /** Discrete acceleration-tier transition with hysteresis (§5). Demotion first and
@@ -305,7 +307,15 @@ export function reduceGauge(
       return { state: { ...state, snoozedUntil: event.until }, effects: [] };
     case "inactive":
       // Contract §5: inactive does not integrate. Rebase the clock; integrate nothing.
-      return { state: { ...state, updatedAt: event.ts }, effects: [] };
+      //
+      // It decides nothing, so the quiet window cannot change what it does — but while the user
+      // is away this is the ONLY tick that fires, and a `nav` landing later (observation is gated
+      // on window focus, not on presence) decides under whatever was last stamped. Without this
+      // the flag could hold a pre-window value for the whole night.
+      return {
+        state: { ...state, updatedAt: event.ts, ...(event.quiet != null ? { quiet: event.quiet } : {}) },
+        effects: [],
+      };
     case "heartbeat": {
       // Re-stamp the quiet window BEFORE integrating, so the tick that carries the news is
       // already governed by it rather than deciding one last nudge under the old value.
@@ -313,7 +323,11 @@ export function reduceGauge(
       return advance(st, event.ts, config);
     }
     case "nav": {
-      const adv = advance(state, event.ts, config);
+      // Re-stamped before integrating, like the heartbeat: a judged page can carry a verdict the
+      // gauge was already holding, in which case this advance decides nags — and it can arrive
+      // while the user is idle, long after the last present heartbeat.
+      const st0 = event.quiet != null ? { ...state, quiet: event.quiet } : state;
+      const adv = advance(st0, event.ts, config);
       let st: GaugeState = {
         ...adv.state,
         activePageKey: event.pageKey,

@@ -59,9 +59,11 @@ export interface GaugeState {
   celebrateArmed: boolean;
   snoozedUntil: number | null;
   // Are we inside the user's configured quiet hours? Carried in state because the reducer has no
-  // clock and no settings: the heartbeat re-reads the window and stamps it here, so it can lag the
-  // real boundary by up to a tick. Delivery still consults the setting exactly — this flag exists
-  // so nothing is DECIDED during the window, not to gate the display.
+  // clock and no settings: the wiring re-reads the window and stamps it here. Every event that can
+  // decide a nag carries a fresh value, and the once-a-minute tick carries one whether the user is
+  // present or away, so the flag trails the real boundary by at most that tick. Delivery still
+  // consults the setting exactly — this flag exists so nothing is DECIDED during the window, not
+  // to gate the display.
   quiet: boolean;
 }
 
@@ -91,12 +93,14 @@ export interface GaugeConfig {
 
 /** GaugeEvent — contract §3 (discriminated union on `type`). ts is epoch ms. */
 export type GaugeEvent =
-  | { type: "nav"; pageKey: string; verdict: Verdict; r0?: number; tauOk?: number; degraded?: boolean; ts: number }
+  | { type: "nav"; pageKey: string; verdict: Verdict; r0?: number; tauOk?: number; degraded?: boolean; quiet?: boolean; ts: number }
   // `quiet` re-stamps GaugeState.quiet from the live setting (omitted ⇒ keep what's stored, the
-  // same way `nav` carries `degraded`). The heartbeat is the only tick that runs on its own
-  // schedule, so it is what keeps the flag honest.
+  // same way `nav` carries `degraded`). Every event that can DECIDE a nag carries it, and the
+  // once-a-minute tick carries it whether the user is present or away — `inactive` integrates
+  // nothing, but it is the only tick that fires while they are gone, so it is what keeps the flag
+  // from going stale for the length of a night.
   | { type: "heartbeat"; quiet?: boolean; ts: number }
-  | { type: "inactive"; ts: number }
+  | { type: "inactive"; quiet?: boolean; ts: number }
   | { type: "tier2_result"; flow: Flow; pageKey: string; ts: number }
   // Clear a pending Tier-2 request that resolved stale (page/goal moved on) without applying
   // a verdict — releases the pendingTier2 slot so promotion can request again, with no
