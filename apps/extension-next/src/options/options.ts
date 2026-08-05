@@ -67,6 +67,7 @@ const pquoteTag = $<HTMLElement>("pquoteTag")
 const pquoteTxt = $<HTMLElement>("pquoteTxt")
 const ajProviders = $<HTMLElement>("ajProviders")
 const ajConnect = $<HTMLElement>("ajConnect")
+const ajRouteWarn = $<HTMLElement>("ajRouteWarn")
 const ajUsage = $<HTMLElement>("ajUsage")
 const ajSave = $<HTMLButtonElement>("ajSave")
 const ajResult = $<HTMLElement>("ajResult")
@@ -628,6 +629,34 @@ function renderRoutes(): void {
 
     renderChip(tier)
   }
+  renderRouteWarnings()
+}
+
+const TIER_KEYLESS_IMPACT: Record<TierName, string> = {
+  tier1: "멀쩡한 페이지도 가끔 딴길로 볼 수 있어요.",
+  tier2: "내용을 읽지 않고 준비된 문구로 훈수해요.",
+}
+
+/** 라우트가 키 없는 제공자를 가리키면 모델 지정 섹션 상단에 안내 배너를 띄운다.
+ *  저장된 키 목록과 화면의 드래프트 제공자만 보고 판정 — 런타임 상태·헬스와 무관.
+ *  오류가 아니라 설정이 반쪽이라는 안내: 이 상태로도 훈수는 정상 동작한다. */
+function renderRouteWarnings(): void {
+  if (!judge) return
+  ajRouteWarn.textContent = ""
+  const banner = el("div", "route-banner")
+  for (const tier of TIERS) {
+    const provider = draft[tier].provider
+    if ((judge.accounts[provider] ?? []).length > 0) continue
+    const line = el("span", "ln")
+    line.appendChild(el("b", undefined, TIER_LABEL[tier]))
+    line.appendChild(
+      document.createTextNode(
+        ` — ${profileOf(provider).label}에 등록된 키가 없어 이 단계를 건너뜁니다. ${TIER_KEYLESS_IMPACT[tier]}`,
+      ),
+    )
+    banner.appendChild(line)
+  }
+  if (banner.childElementCount > 0) ajRouteWarn.appendChild(banner)
 }
 
 function renderChip(tier: TierName): void {

@@ -12,6 +12,7 @@
         --line: #dce4df; --line-soft: #e7ede9;
         --accent: #1e7a4c; --accent-ink: #ffffff; --accent-soft: #e2f1e8;
         --ok-fg: #175f3b; --err: #bf4540; --err-soft: #f7e2e0; --err-fg: #8f322c;
+        --warn-soft: #f6eed9; --warn-fg: #7d651f; --warn-line: #e3d3a1;
       }
       @media (prefers-color-scheme: dark) {
         :root {
@@ -20,6 +21,7 @@
           --line: #3c463f; --line-soft: #333d37;
           --accent: #4cc585; --accent-ink: #0c1f14; --accent-soft: #2a4536;
           --ok-fg: #8fdcb4; --err: #e07a72; --err-soft: #4a2a27; --err-fg: #f0a8a1;
+          --warn-soft: #453d26; --warn-fg: #e5cd85; --warn-line: #5d5233;
         }
       }
       * { box-sizing: border-box; }
@@ -205,6 +207,13 @@
       .stchip.err { background: var(--err-soft); color: var(--err-fg); border-color: transparent; }
       .stchip:hover { border-color: var(--accent); }
       .stchip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      /* 키 없는 라우트 안내 배너 — 오류가 아닌 설정 안내라 앰버 톤 (빨간 오류·stchip 런타임 확인과 구분) */
+      .route-banner { background: var(--warn-soft); border-left: 3px solid var(--warn-line);
+        border-radius: 0 9px 9px 0; padding: 9px 12px; margin: 2px 0 10px;
+        font-size: 11.5px; color: var(--warn-fg); }
+      .route-banner b { font-weight: 700; }
+      .route-banner .ln { display: block; }
+      .route-banner .ln + .ln { margin-top: 3px; }
       .mctl { flex: 2 1 300px; display: flex; gap: 6px; min-width: 0; }
       .mctl select.prov { flex: 0 1 128px; min-width: 0; font-size: 12.5px; }
       .mctl select.model { flex: 1; min-width: 0; font-size: 12.5px; }
@@ -358,6 +367,7 @@
 
           <div class="msec">
             <span class="seclabel">모델 지정</span>
+            <div id="ajRouteWarn" role="status"></div>
             <div class="mrow">
               <span class="mlab">
                 <span class="mtitle"><b>Tier 1 · 빠른 판정</b><button class="stchip" data-tier="tier1" type="button">– 테스트</button></span>
@@ -383,7 +393,7 @@
               </span>
             </div>
             <p class="hint" style="margin-top: 6px">
-              두 Tier 모두 Ollama Cloud 무료 계정으로 충분합니다. 키를 넣지 않은 제공자를 고르면 그 Tier는 건너뜁니다. 훈수는 그래도 받습니다. Tier 1이 빠지면 멀쩡한 페이지도 딴길로 볼 수 있고, Tier 2가 빠지면 내용을 읽지 않고 정해진 문구로만 훈수합니다.
+              두 Tier 모두 Ollama Cloud 무료 계정으로 충분합니다.
             </p>
           </div>
 
