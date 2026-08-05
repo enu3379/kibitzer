@@ -47,6 +47,8 @@ reduceGauge(state: GaugeState, event: GaugeEvent, config: GaugeConfig) -> GaugeT
 | `nagN` | int | 0 | 이번 에피소드 나깅 순번 (m≤0에서 리셋) |
 | `renagDebt` | float | 0 | 마지막 나깅 이후 이탈 부채 |
 | `lastNagTs` | int ms \| null | null | — |
+| `sZeroConfirms` | int | 0 | 이번 에피소드의 s_zero 확인 요청 횟수 (첫 요청만 Writer 사용, m≤0에서 리셋) |
+| `nagRefunded` | bool | false | 이번 에피소드에서 전달 실패한 나깅을 이미 한 번 되돌렸는지 (m≤0에서 리셋) |
 | `celebrateArmed` | bool | false | S ≤ C_arm에서 set, 칭찬 발송 시 clear |
 | `snoozedUntil` | int ms \| null | null | 사용자 스누즈 (유일한 외부 게이트) |
 

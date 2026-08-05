@@ -45,6 +45,11 @@ const createdTabs: string[] = [] // URLs opened via chrome.tabs.create (onboardi
 type MockTab = { id: number; url: string; title: string; active: boolean; windowId: number }
 let activeTab: MockTab | null = null
 let tabQuerySequence: Array<MockTab | null> = []
+// While set, EVERY tab lookup reports this tab. Unlike tabQuerySequence (a consumed queue, so
+// which lookup gets which entry depends on how much unrelated async happens to be in flight) this
+// holds for as long as a scenario wants — the way to say "the user is somewhere else right now"
+// without racing the pipeline for a queue slot.
+let tabQueryOverride: MockTab | null = null
 const createdWindows: Array<Record<string, unknown>> = []
 const updatedTabs: Array<{ tabId: number; props: Record<string, unknown> }> = []
 let promptWindowOpen = false
@@ -64,7 +69,7 @@ const chrome = {
     onUpdated: evt("tabs.onUpdated"),
     onActivated: evt("tabs.onActivated"),
     query: async (query: Record<string, unknown> = {}) => {
-      const tab = tabQuerySequence.length > 0 ? tabQuerySequence.shift() : activeTab
+      const tab = tabQueryOverride ?? (tabQuerySequence.length > 0 ? tabQuerySequence.shift() : activeTab)
       if (query.windowId != null && tab?.windowId !== query.windowId) return []
       return tab ? [tab] : []
     },
@@ -416,6 +421,7 @@ test("E2E: goal → drift on an off-goal page → S drains to 0 → nag delivere
   // is deterministic (title vs goal cosine ≈ 0.22, well under τ=0.59), and this keeps the two clocks
   // from overlapping during judging — separating the concern from the drain phase below.
   activeTab = { id: 1, url: "https://video.test/watch?v=cat", title: "귀여운 고양이 영상 몰아보기", active: true, windowId: 1 }
+  await send({ type: "clear-log" }) // scope the probes below to this scenario
   const setRes = await send({ type: "set-goal", goal: "파이썬 알고리즘 문제 풀이", minutes: null })
   assert.ok((setRes.goal as { text?: string })?.text, "goal was declared")
 
@@ -456,6 +462,13 @@ test("E2E: goal → drift on an off-goal page → S drains to 0 → nag delivere
       (toasts[0] as { firstRun?: boolean } | undefined)?.firstRun,
       true,
       "the first-ever intervention toast is the explainer variant",
+    )
+    // A nudge the user actually saw is spent. Refunding it would reopen the S=0 recovery gate and
+    // nudge them again within the minute — the failure mode opposite to the one the refund fixes.
+    assert.doesNotMatch(
+      (await send({ type: "get-log" })).text as string,
+      /nag refunded/,
+      "a delivered nudge is never given back",
     )
   } finally {
     mock.timers.reset()
@@ -538,7 +551,8 @@ test("E2E: an unreachable judge still nudges — a configured-but-dead Tier 2 mu
   await send({ type: "clear-log" }) // the klog is shared across scenarios — see the note below
   // A real route, through the real settings API. Every provider call then fails like a dead
   // endpoint, so Tier 1 cannot rescue and Tier 2 cannot confirm.
-  await send({ type: "add-provider-key", provider: "ollama", name: "local", value: "test-key" })
+  const added = await send({ type: "add-provider-key", provider: "ollama", name: "local", value: "test-key" })
+  const keyId = ((added.accounts as Record<string, Array<{ id: string }>>)?.ollama ?? []).at(-1)?.id
   await send({ type: "set-routes", routes: { tier1: { provider: "ollama", model: "llama3" }, tier2: { provider: "ollama", model: "llama3" } } })
   providerCallsFail = true
   try {
@@ -577,9 +591,17 @@ test("E2E: an unreachable judge still nudges — a configured-but-dead Tier 2 mu
       mock.timers.reset()
     }
   } finally {
-    // Every other scenario in this file assumes the degraded (no-provider) profile.
+    // Every other scenario in this file assumes the degraded (no-provider) profile — a leaked
+    // route silently reroutes their S=0 gates through Tier-2. `disconnect-provider` cannot do
+    // this: Ollama is the default provider and disconnecting it is a deliberate no-op
+    // (providers.ts), so the key has to be removed by id.
     providerCallsFail = false
-    await send({ type: "disconnect-provider", provider: "ollama" })
+    if (keyId) await send({ type: "remove-provider-key", provider: "ollama", keyId })
+    assert.equal(
+      (await send({ type: "get-state" })).judgeEnabled,
+      false,
+      "the route must be gone again, or every later scenario silently runs non-degraded",
+    )
   }
 })
 
@@ -829,6 +851,140 @@ test("E2E: navigating the SAME tab to an internal page also closes the visit int
     assert.equal(attributedMs(await getVisits()), msAtNav, "no phantom dwell accrues while sitting on the internal page")
   } finally {
     mock.timers.reset()
+  }
+})
+
+test("E2E: a nudge that never reached the user does not spend the re-nag backoff", async () => {
+  // The nag count is committed when the reducer EMITS the effect; delivery happens afterwards and
+  // can legitimately fail. Without a refund the first such loss both consumes a rung of the
+  // backoff ladder AND shuts the S=0 recovery gate (it requires nagN === 0), so the user gets
+  // nothing at all until the debt-based re-nag comes due — ~6 beats of further drift here.
+  toasts.length = 0
+  notifications.length = 0
+  activeTab = { id: 41, url: "https://video.test/watch?v=seal", title: "귀여운 물범 영상 몰아보기", active: true, windowId: 1 }
+  await send({ type: "clear-log" }) // the klog is shared across scenarios; scope the DRIFT probe
+  await send({ type: "set-goal", goal: "고 언어 동시성 패턴 정리", minutes: null })
+  // Degraded is what makes the retry timing below exact: both the crossing nudge and the recovery
+  // retry are decided in the reducer with no judge round trip. An earlier scenario leaking a live
+  // route would route the retry through Tier-2 and blur the 1-beat signal into several.
+  assert.equal((await send({ type: "get-state" })).judgeEnabled, false, "this scenario needs degraded mode")
+  let judged = false
+  for (let i = 0; i < 200 && !judged; i += 1) {
+    await settle(100)
+    await fireStartup()
+    judged = /final=DRIFT/.test((await send({ type: "get-log" })).text as string)
+  }
+  assert.ok(judged, "the off-goal page was judged DRIFT in real time")
+  // The judging loop fires startup repeatedly and each listener body runs detached, ending in its
+  // own active-page resync. One landing AFTER the override below would see a foreign survivor and
+  // hold the gauge neutral — S would stop draining and no nudge would ever be decided. Let them
+  // finish, then check the gauge really is still integrating this page's DRIFT.
+  await settle(600)
+  assert.match(
+    (await send({ type: "get-log" })).text as string,
+    /v=DRIFT/,
+    "the gauge holds the off-goal verdict before the tab is taken away",
+  )
+
+  mock.timers.enable({ apis: ["Date"], now: Date.now() })
+  try {
+    // The user is on a page the nudge may not be shown on. Held for the whole of phase 1 rather
+    // than queued: the judging loop above leaves unrelated tab lookups in flight (dwell reconcile,
+    // active-page resync), and any one of them would eat a single queue entry and let the nudge
+    // through — which passes alone and fails in a full run. (`chase.com` is in
+    // configs/sensitive_domains.json; the drop is silent either way, since the page-identity gate
+    // would reject it too. Which gate fires does not matter — the refund keys on the outcome.)
+    tabQueryOverride = { id: 42, url: "https://chase.com/accounts", title: "Accounts", active: true, windowId: 1 }
+
+    // PHASE 1 — drain until the gauge DECIDES to nudge. The klog records that before delivery is
+    // attempted, which is how we can tell "emitted then swallowed" from "never emitted".
+    const nagEmitted = async (): Promise<boolean> =>
+      /nag \((writer|fallback)\):/.test((await send({ type: "get-log" })).text as string)
+    let emitted = false
+    for (let i = 0; i < 200 && !emitted; i += 1) {
+      await beat()
+      emitted = await settleUntilStored(nagEmitted, 3) // the klog write trails the beat
+    }
+    assert.ok(emitted, "S drained to 0 and the gauge decided to nudge")
+    // Wait on the refund rather than on a fixed settle: it is logged only after delivery has
+    // definitively failed, so it is both the "nothing was shown" signal and the phase boundary.
+    const refunded = await settleUntilStored(
+      async () => /nag refunded \(never shown\)/.test((await send({ type: "get-log" })).text as string),
+      60,
+    )
+    assert.ok(refunded, "…nothing surfaced, and the count was handed back")
+    assert.equal(
+      toasts.length + notifications.length,
+      0,
+      "…but nothing surfaced: the tab could not host it",
+    )
+    tabQueryOverride = null // the user is back on the drifting page
+
+    // PHASE 2 — beats measured from the swallowed nudge. With the refund the recovery gate reopens
+    // and fires on the very NEXT beat: exactly 1, deterministically, because the gate is a level
+    // condition on the already-zero gauge. Without it only the debt-based re-nag is left, which
+    // needs rRenag(40) of fresh drift — 6 beats at accel tier 0, but as few as 3 once the tier has
+    // climbed to 2.5×. Hence the bound is 1 and not "fewer than 6": the loose version passes
+    // against the unfixed code whenever the episode has accelerated.
+    let beats = 0
+    let nagged = false
+    for (; beats < 200 && !nagged; beats += 1) {
+      await beat(nagDelivered)
+      nagged = nagDelivered()
+    }
+    assert.ok(nagged, `a nudge does eventually arrive (S=${(await send({ type: "get-state" })).s})`)
+    assert.equal(beats, 1, `the retry is the next beat, not a backoff period away (took ${beats})`)
+  } finally {
+    mock.timers.reset()
+    tabQueryOverride = null
+  }
+})
+
+test("E2E: quiet hours spends the nudge — silence the user asked for is not a loss", async () => {
+  // The one drop that is NOT refunded. The user asked for this silence, so the nag counts as
+  // delivered-and-declined; giving it back would queue the whole quiet window up to fire the
+  // moment it ends. Without this scenario nothing distinguishes `withheld` from `lost`.
+  toasts.length = 0
+  notifications.length = 0
+  activeTab = { id: 51, url: "https://video.test/watch?v=crow", title: "귀여운 까마귀 영상 몰아보기", active: true, windowId: 1 }
+  await send({ type: "clear-log" })
+  await send({ type: "set-settings", settings: { quietHours: { enabled: true, start: "00:00", end: "23:59" } } })
+  try {
+    await send({ type: "set-goal", goal: "쿠버네티스 인그레스 설정", minutes: null })
+    let judged = false
+    for (let i = 0; i < 200 && !judged; i += 1) {
+      await settle(100)
+      await fireStartup()
+      judged = /final=DRIFT/.test((await send({ type: "get-log" })).text as string)
+    }
+    assert.ok(judged, "the off-goal page was judged DRIFT in real time")
+    await settle(200)
+
+    mock.timers.enable({ apis: ["Date"], now: Date.now() })
+    try {
+      let suppressed = false
+      for (let i = 0; i < 200 && !suppressed; i += 1) {
+        await beat()
+        suppressed = await settleUntilStored(
+          async () => /nag suppressed \(quiet hours\)/.test((await send({ type: "get-log" })).text as string),
+          3,
+        )
+      }
+      assert.ok(suppressed, "S drained to 0 and the nudge was withheld")
+      assert.equal(toasts.length + notifications.length, 0, "nothing surfaced, as asked")
+      // The suppression is logged inside `deliver`; a refund would be logged after the drain loop
+      // that called it. Asserting absence straight away would pass against a build that refunds.
+      await settle(150)
+      assert.doesNotMatch(
+        (await send({ type: "get-log" })).text as string,
+        /nag refunded/,
+        "and it is NOT given back — quiet hours is a decision, not a delivery failure",
+      )
+    } finally {
+      mock.timers.reset()
+    }
+  } finally {
+    await send({ type: "set-settings", settings: { quietHours: { enabled: false } } })
   }
 })
 
