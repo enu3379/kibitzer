@@ -182,8 +182,8 @@ function advance(
     st = { ...st, celebrateArmed: false };
   }
 
-  // episode end (m <= 0): reset renag schedule (and the Writer budget for the next episode)
-  if (st.m <= 0) st = { ...st, nagN: 0, renagDebt: 0, sZeroConfirms: 0 };
+  // episode end (m <= 0): reset renag schedule, the Writer budget, and the refund allowance
+  if (st.m <= 0) st = { ...st, nagN: 0, renagDebt: 0, sZeroConfirms: 0, nagRefunded: false };
 
   // S = 0 final gate. Both entries are skipped while `leaving`: the crossing the settlement
   // completes belongs to the page being left, and the already-at-zero entry below picks it up
@@ -321,6 +321,18 @@ export function reduceGauge(
         return { state: { ...state, pendingTier2: null }, effects: [] };
       }
       return { state, effects: [] };
+    }
+    case "nag_undelivered": {
+      // Hand back the count for a nudge that was emitted but never surfaced. Only the count: the
+      // drift debt stays where the nag left it, so this restores the RECOVERY path (the S=0 gate
+      // needs nagN === 0) rather than making a re-nag due immediately.
+      //
+      // At most once per episode. Some pages can never host a nudge — the tab is permanently
+      // sensitive, the surface keeps failing — and without the latch the gate would re-emit and
+      // re-refund on every heartbeat: a nudge decided, and its chime played, once a minute
+      // forever. One retry, then the silence is accepted as correct.
+      if (state.nagRefunded || state.nagN <= 0) return { state, effects: [] };
+      return { state: { ...state, nagN: state.nagN - 1, nagRefunded: true }, effects: [] };
     }
     case "neutral": {
       // Integrate the page they were on right up to this instant (a drift that ran until the

@@ -49,6 +49,13 @@ export interface GaugeState {
   // repeats halves that round trip, which narrows the window a hop can cancel in. Reset with
   // nagN when the episode ends (m<=0).
   sZeroConfirms: number;
+  // Has this episode already had one nudge given back? The count is committed when a nag is
+  // EMITTED, but delivery happens later and can legitimately fail (see GaugeEvent's
+  // nag_undelivered), so a nudge the user never saw would otherwise spend a rung of the backoff
+  // ladder — and, if it was the episode's first, shut the S=0 recovery gate for good. Exactly one
+  // is restored per episode: a page that can never host a nudge would otherwise re-emit and
+  // re-refund on every heartbeat, forever. Reset with nagN when the episode ends (m<=0).
+  nagRefunded: boolean;
   celebrateArmed: boolean;
   snoozedUntil: number | null;
 }
@@ -94,6 +101,12 @@ export type GaugeEvent =
   // page the user has left can't keep moving S on a stale verdict. Wiring-only; the shared
   // parity fixtures never emit it.
   | { type: "neutral"; pageKey: string; ts: number }
+  // A nag this reducer counted never reached the user. The count is committed when the effect is
+  // EMITTED, but the wiring delivers it afterwards and can legitimately fail — Chrome lost focus,
+  // the tab is now a sensitive page, the tab is no longer the page the nudge is about. Give the
+  // count back so the backoff ladder is not spent on a nudge nobody saw. Does NOT integrate: this
+  // is a correction, not a passage of time. Wiring-only; the shared parity fixtures never emit it.
+  | { type: "nag_undelivered"; ts: number }
   | { type: "snooze"; until: number; ts: number };
 
 /** GaugeEffect — contract §4 (intents; shadow mode records but does not act). */
@@ -133,6 +146,7 @@ export function initGaugeState(): GaugeState {
     renagDebt: 0,
     lastNagTs: null,
     sZeroConfirms: 0,
+    nagRefunded: false,
     celebrateArmed: false,
     snoozedUntil: null,
   };

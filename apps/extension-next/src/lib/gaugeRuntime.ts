@@ -321,6 +321,7 @@ const TERMINAL_EFFECT_TTL_MS = 5 * 60_000
  *  request_tier2 is a durable job: it is NOT ACKed here — startTier2Job owns its lifetime and
  *  deletes the record only after the outcome is durably reflected or stale-cancelled. */
 async function drainOutbox(): Promise<void> {
+  let lostNagPageKey: string | null = null
   await drainRecords<OutboxRecord>(OUTBOX_STORE, async (record) => {
     if (record.effect.type === "request_tier2") {
       startTier2Job(record)
@@ -328,13 +329,61 @@ async function drainOutbox(): Promise<void> {
     }
     // Stale (pre-shutdown) or orphaned (session ended/suspended while it sat queued): ACK
     // without delivering. request_tier2 records above self-cancel through their own guards.
+    // Deliberately NOT refunded: the refund covers a nudge that reached delivery and could not be
+    // shown, not a record discarded because its session is gone or it belongs to a browser run
+    // that ended. A suspended session keeps its gauge for a same-epoch resume (session.suspendGoal),
+    // so refunding here would spend the resumed episode's one allowance before it ever tried to
+    // deliver anything.
     if (Date.now() - record.ts > TERMINAL_EFFECT_TTL_MS || !(await getGoal())) {
       klog(`outbox ${record.effect.type} dropped (stale/no session)`)
       return true
     }
-    await deliver(record.effect, record.goal, record.ts, record.writerMessage, record.source)
+    const outcome = await deliver(record.effect, record.goal, record.ts, record.writerMessage, record.source)
+    if (record.effect.type === "nag" && outcome === "lost") lostNagPageKey = record.effect.pageKey
     return true
   })
+  // After the loop, never inside it: the record is ACKed by then, so a teardown here loses the
+  // refund and the nag stays counted — today's behaviour. The other order could hand the count
+  // back for a nag that was in fact delivered, and nudge the user twice.
+  if (lostNagPageKey != null) {
+    // Every record is ACKed by now, so a storage failure has nothing left to corrupt — but it
+    // would otherwise escape a drain that has no other throw path, and the alarm handler that
+    // owns this promise does not await it. Swallow it into the same fail direction as a teardown.
+    try {
+      await refundUndeliveredNag(lostNagPageKey)
+    } catch (error) {
+      klog(`nag refund failed (count stands): ${String(error)}`)
+    }
+  }
+}
+
+/** Give the nag count back for a nudge that was emitted but never reached the user.
+ *
+ *  A bare checkpoint write rather than a dispatch, deliberately. `deliver` already runs inside the
+ *  dispatch queue — enqueuing from there would wait on the slot it is holding, which deadlocks —
+ *  and `drainOutbox` is the LAST statement of runEvent, so nothing writes the checkpoint after it.
+ *  One atomic read-modify-write through the pure reducer keeps the state machine the only thing
+ *  that decides what a refund means (including the once-per-episode latch). */
+async function refundUndeliveredNag(pageKey: string): Promise<void> {
+  // A plain read-reduce-write: every writer of the gauge checkpoint (saveState, kvPutAndAppend,
+  // resetState) runs inside the dispatch queue, and this runs while that queue's slot is held, so
+  // nothing can interleave between the two halves.
+  const current = await kvGet<GaugeState>(STATE_KEY)
+  // Leave a value we don't recognise exactly as it is, rather than materialising a fresh state:
+  // that would reset `s` and, worse, `tier2ReqSeq`, which resetState goes out of its way to carry
+  // forward so a zombie Tier-2 job can't collide with a reused requestId.
+  if (!isGaugeState(current)) return
+  const goal = await getGoal()
+  const next = reduceGauge(current, { type: "nag_undelivered", ts: Date.now() }, configFor(goal)).state
+  // The reducer hands the state back untouched once the episode's one allowance is spent. Writing
+  // and announcing a refund anyway would reproduce — in the operator log and the exportable events
+  // — exactly the once-a-minute-forever noise the allowance exists to prevent.
+  if (next.nagN === current.nagN) return
+  await saveState(next)
+  klog(`nag refunded (never shown) — nagN=${next.nagN}`)
+  // A distinct type on purpose: `deliver` already wrote this nudge's `nag` record, and a second
+  // one would make the exportable log count a single nag twice.
+  logEvent("nag-refund", { pageKey, nagN: next.nagN })
 }
 
 /** Deliver/finish any work left in the outbox by a prior service-worker lifetime. Serialized
@@ -432,13 +481,24 @@ async function readWriterFor(pageKey: string): Promise<string | null> {
   return value && value.pageKey === pageKey ? value.message : null
 }
 
+/** What became of one delivery attempt.
+ *
+ *  - `shown`    — the nudge reached the user (in-page toast or OS notification).
+ *  - `withheld` — deliberately not shown. Quiet hours: the user asked for this silence, so the
+ *                 nag counts as spent and is NOT given back.
+ *  - `lost`     — emitted, then never reached anyone. The count is given back (once per episode).
+ *
+ *  Meaningful for nags only; celebrations always report `shown` because nothing reads their
+ *  outcome (they carry no backoff of their own). */
+type DeliveryOutcome = "shown" | "withheld" | "lost"
+
 async function deliver(
   effect: GaugeEffect,
   goal: SessionGoal | null,
   ts: number,
   writerMessage: string | null,
   source: EffectSource | null | undefined,
-): Promise<void> {
+): Promise<DeliveryOutcome> {
   const goalText = goal?.text ?? "목표"
   // request_tier2 is never delivered here — it is a durable job handled by startTier2Job.
   if (effect.type === "nag") {
@@ -447,7 +507,7 @@ async function deliver(
     if (inQuietHours(settings.quietHours, ts)) {
       klog(`nag suppressed (quiet hours)`)
       logEvent("nag", { pageKey: effect.pageKey, suppressed: "quiet_hours" })
-      return
+      return "withheld"
     }
     const page = await getActivePage()
     // Persona voice for EVERY nag: the Tier-2 Writer message when we have one (fresh
@@ -477,9 +537,9 @@ async function deliver(
     logEvent("nag", { pageKey: effect.pageKey, source: fromWriter ? "writer" : "fallback", message })
     const targetPageKey = effect.pageKey === TEST_NAG_PAGE_KEY ? null : effect.pageKey
     const token = await showToast(message, effect.pageKey, "intervention", source, targetPageKey)
-    if (token != null) {
-      await recordNag({ ts, host: page?.urlHost ?? "", token })
-    }
+    if (token == null) return "lost"
+    await recordNag({ ts, host: page?.urlHost ?? "", token })
+    return "shown"
   } else if (effect.type === "celebrate") {
     // Celebrate in the selected persona's voice; fall back to the plain line.
     const persona = await activePersona()
@@ -491,6 +551,7 @@ async function deliver(
     logEvent("celebrate", { message })
     await showToast(message, null, "celebration", source, null) // session-level: belongs to no page
   }
+  return "shown"
 }
 
 /** Grab the active tab's body text for the Tier-2 judge — but only if the active tab is
