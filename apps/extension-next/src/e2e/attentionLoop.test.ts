@@ -601,7 +601,10 @@ test("E2E: Tier 1 keyed, Tier 2 routed to a keyless provider — issue #207's si
   await send({ type: "clear-log" }) // shared klog: an earlier scenario's final=DRIFT would satisfy the probe below
   // Keys for ollama only; tier2 deliberately routed to a provider that has NO keys. This is a
   // savable configuration — the settings API accepts it exactly as the options UI would.
-  await send({ type: "add-provider-key", provider: "ollama", name: "local", value: "test-key" })
+  const keyed = await send({ type: "add-provider-key", provider: "ollama", name: "local", value: "test-key" })
+  // Every ollama key present now, not just the one just added: `makeTier` returns a live provider
+  // whenever the ROUTED provider has any key at all, so one stray key keeps the judge enabled.
+  const ollamaKeyIds = ((keyed.accounts as Record<string, Array<{ id: string }>>)?.ollama ?? []).map((a) => a.id)
   await send({ type: "set-routes", routes: { tier1: { provider: "ollama", model: "llama3" }, tier2: { provider: "openai", model: "gpt-5.6-luna" } } })
   // Tier 1 IS reachable in this configuration, but a live rescue could answer OK and stop the
   // drain. Failing the call keeps the DRIFT verdict (fail-closed) — all this test needs from
@@ -670,7 +673,16 @@ test("E2E: Tier 1 keyed, Tier 2 routed to a keyless provider — issue #207's si
     // Every other scenario in this file assumes the degraded (no-provider) profile.
     providerCallsFail = false
     await send({ type: "disconnect-provider", provider: "openai" }) // also resets the tier2 route to its default
-    await send({ type: "disconnect-provider", provider: "ollama" })
+    // That default is ollama again, so tier1 AND tier2 both route there and any surviving ollama
+    // key leaves the judge enabled for every later scenario. `disconnect-provider` cannot retract
+    // it — ollama is the default provider and disconnecting it is a deliberate no-op
+    // (providers.ts) — so the keys have to go by id.
+    for (const keyId of ollamaKeyIds) await send({ type: "remove-provider-key", provider: "ollama", keyId })
+    assert.equal(
+      (await send({ type: "get-state" })).judgeEnabled,
+      false,
+      "the route must be gone again, or every later scenario silently runs non-degraded",
+    )
     // Re-stamp the alert throttle the dead-judge scenario left behind, so scenarios after this
     // one see exactly the pre-existing-suite state.
     store.set("kibitzer:provider-alert-ts", Date.now())
