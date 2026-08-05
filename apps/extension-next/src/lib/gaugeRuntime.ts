@@ -594,10 +594,26 @@ async function serviceTier2(
     await cancelTier2(token)
     return
   }
+  // No judgment came back — no Tier-2 route, or the judge call failed. Release the request
+  // WITHOUT applying a verdict.
+  //
+  // It used to arrive as a plain `flow: "ok"` and take the OK branch, which is a verdict with
+  // teeth: it refunds S to rDismiss, zeroes the inertia and the accel tier, and flips the active
+  // page to OK. So a page nobody had judged was rewarded as if the judge had cleared it — and
+  // because S climbed back off 0, the whole drain repeated, asking a judge that was still absent
+  // and being "cleared" again every time. Silence from the judge is not a clean bill of health.
+  //
+  // Cancelling instead leaves the gauge exactly where it was: the drift is neither forgiven nor
+  // acted on, and the pending slot is freed so nothing is wedged.
+  if (outcome.unavailable) {
+    klog(`tier2 unavailable (${effect.reason}) on ${effect.pageKey} — request released, no verdict`)
+    logEvent("tier2", { pageKey: effect.pageKey, reason: effect.reason, unavailable: true })
+    if (outcome.providerError) void notifyProviderProblem(outcome.providerError)
+    await cancelTier2(token)
+    return
+  }
   klog(`tier2 gate (${effect.reason}) on ${effect.pageKey} excerpt=${excerpt?.length ?? 0}c -> ${outcome.flow}`)
   logEvent("tier2", { pageKey: effect.pageKey, reason: effect.reason, flow: outcome.flow, excerpt: excerpt?.length ?? 0 })
-  // The judge itself broke (fail-open ate a would-be nag) — tell the user once in a
-  // while; the toolbar "!" mark carries the ambient state between alerts.
   if (outcome.providerError) void notifyProviderProblem(outcome.providerError)
   // Apply guarded: dispatchTier2 re-checks (serialized) that the pending slot, goal revision,
   // and active page still match before applying — else it releases the slot (tier2_cancel)
