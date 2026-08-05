@@ -403,9 +403,14 @@ function cancelTier2(token: Tier2Token): Promise<void> {
   })
 }
 
+/** The "알림보기" shortcut's stand-in page. Not a real page key (real ones are `host#hash`),
+ *  so it is exempt from the delivery-time page check — the demo nag is about no page and may
+ *  surface wherever the user happens to be. */
+const TEST_NAG_PAGE_KEY = "test"
+
 /** Fire a nag notification immediately, for manual testing (goal = "알림보기"). */
 export async function testNag(goal: SessionGoal | null): Promise<void> {
-  await deliver({ type: "nag", pageKey: "test" }, goal, Date.now(), null, null)
+  await deliver({ type: "nag", pageKey: TEST_NAG_PAGE_KEY }, goal, Date.now(), null, null)
 }
 
 const PENDING_WRITER_KEY = "pending-writer"
@@ -466,7 +471,8 @@ async function deliver(
     }
     klog(`nag (${fromWriter ? "writer" : "fallback"}): "${message.slice(0, 48)}"`)
     logEvent("nag", { pageKey: effect.pageKey, source: fromWriter ? "writer" : "fallback", message })
-    const token = await showToast(message, effect.pageKey, "intervention", source)
+    const targetPageKey = effect.pageKey === TEST_NAG_PAGE_KEY ? null : effect.pageKey
+    const token = await showToast(message, effect.pageKey, "intervention", source, targetPageKey)
     if (token != null) {
       await recordNag({ ts, host: page?.urlHost ?? "", token })
     }
@@ -479,7 +485,7 @@ async function deliver(
     await setDriftSince(null)
     klog(`celebrate: "${message.slice(0, 48)}"`)
     logEvent("celebrate", { message })
-    await showToast(message, null, "celebration", source)
+    await showToast(message, null, "celebration", source, null) // session-level: belongs to no page
   }
 }
 
@@ -589,27 +595,32 @@ async function serviceTier2(
     recentTitles: titles,
     excerpt,
     timeContext,
+    useWriter: effect.useWriter,
   }, () => effectSourceAllowed(page))
   if (outcome.cancelled) {
     await cancelTier2(token)
     return
   }
-  // No judgment came back — no Tier-2 route, or the judge call failed. Release the request
-  // WITHOUT applying a verdict.
+  // No judgment came back — no Tier-2 route (Tier 1 configured but not Tier 2), or the judge
+  // could not be reached (Ollama not running, model never pulled, machine just resumed). Fall
+  // back to the verdict we already have: Tier 0, plus Tier 1's rescue attempt if it ran.
   //
-  // It used to arrive as a plain `flow: "ok"` and take the OK branch, which is a verdict with
-  // teeth: it refunds S to rDismiss, zeroes the inertia and the accel tier, and flips the active
-  // page to OK. So a page nobody had judged was rewarded as if the judge had cleared it — and
-  // because S climbed back off 0, the whole drain repeated, asking a judge that was still absent
-  // and being "cleared" again every time. Silence from the judge is not a clean bill of health.
+  // This is the same trade degraded mode makes. The gauge chooses between "confirm first" and
+  // "nudge on Tier-0/1 alone" using its `degraded` flag, but that flag means "no tier has a
+  // provider at all" — it cannot see a Tier-2 that is configured yet unreachable. Left as an
+  // unconfirmed silence, that gap swallows every nudge: the request is re-asked on the next page,
+  // released again, and the user drifts on with the extension apparently dead. Missing a drift is
+  // acceptable; going permanently mute because a judge is offline is not.
   //
-  // Cancelling instead leaves the gauge exactly where it was: the drift is neither forgiven nor
-  // acted on, and the pending slot is freed so nothing is wedged.
+  // Still a guarded apply, not a shortcut: dispatchTier2 re-checks that this page is the one the
+  // gauge is on, and a null message routes delivery to the persona preset (the Writer was never
+  // reached either). Nagging also advances nagN, which closes the S=0 gate for the episode — so a
+  // dead judge is asked once per episode rather than on every page.
   if (outcome.unavailable) {
-    klog(`tier2 unavailable (${effect.reason}) on ${effect.pageKey} — request released, no verdict`)
+    klog(`tier2 unavailable (${effect.reason}) on ${effect.pageKey} — keeping the tier-0/1 verdict`)
     logEvent("tier2", { pageKey: effect.pageKey, reason: effect.reason, unavailable: true })
     if (outcome.providerError) void notifyProviderProblem(outcome.providerError)
-    await cancelTier2(token)
+    await dispatchTier2(token, "drift", null, goal)
     return
   }
   klog(`tier2 gate (${effect.reason}) on ${effect.pageKey} excerpt=${excerpt?.length ?? 0}c -> ${outcome.flow}`)
@@ -672,6 +683,10 @@ async function showToast(
   contextLabel: string | null,
   kind: "intervention" | "celebration",
   source: EffectSource | null | undefined,
+  // The page this nudge is ABOUT, or null when it belongs to no page (a celebration, the
+  // "알림보기" demo) and may surface wherever the user is. Identity, not the display label:
+  // the two are separate so the label can become human-readable without weakening the check.
+  targetPageKey: string | null,
 ): Promise<number | null> {
   // Source policy, not the current tab, owns queued work. Missing source metadata on a
   // local-PDF page key is a legacy/fail-closed case.
@@ -703,6 +718,28 @@ async function showToast(
   const deliveryDescriptor = deliveryTab?.url ? describeObservableUrl(deliveryTab.url) : null
   if (deliveryDescriptor?.kind === "local_pdf" && !(await getSettings()).observeLocalPdfs) return null
   if (deliveryDescriptor?.kind === "web" && deliveryTab?.url && shouldDropUrl(deliveryTab.url)) return null
+  // Never surface a page's nudge on a DIFFERENT page. Which tab receives it is settled by the
+  // query right above, and nothing used to check that it was the tab the nudge was about — so a
+  // tab/window switch between the gauge deciding and delivery put a comment written about one
+  // page on top of an innocent other one. The reducer no longer decides a nag while the user is
+  // leaving, which closes the common case at its source; this covers what remains: the
+  // millisecond-scale race, and a nudge a torn-down worker left queued and only recovers minutes
+  // later. Gate all three surfaces here (in-page toast, its OS-notification fallback, and the
+  // chime below) rather than at the injection site alone — the local-PDF and non-injectable
+  // paths reach a notification without ever passing that site.
+  //
+  // Drop rather than redirect: the user has moved on, so the nudge is stale by definition (the
+  // drift stays logged upstream, exactly like the quiet-hours and presence drops). Feedback
+  // buttons act on the tab under them, so a misplaced toast could also flip the wrong page to
+  // on-goal and teach it as a goal exemplar — one more reason not to show it anywhere but home.
+  // No logEvent here: every other drop inside this function (presence, sensitive, local-PDF)
+  // records klog only, because `deliver` has ALREADY written this nudge's `nag` event. Emitting
+  // a second one would make the exportable log count one nag twice. (Quiet hours can log its
+  // own because it returns before that first event is written.)
+  if (targetPageKey != null && deliveryDescriptor?.pageKey !== targetPageKey) {
+    klog(`nag suppressed (page moved on)`)
+    return null
+  }
   void playChime(kind) // audible cue via the offscreen document (works off-screen)
   // Chrome's built-in PDF viewer may report executeScript success without rendering an
   // overlay in its visible plugin surface. With file access OFF it is not a reliable toast
@@ -720,6 +757,14 @@ async function showToast(
     const injectionDescriptor = injectionTab?.url ? describeObservableUrl(injectionTab.url) : null
     if (injectionDescriptor?.kind === "local_pdf" && !(await getSettings()).observeLocalPdfs) return null
     if (injectionDescriptor?.kind === "web" && injectionTab?.url && shouldDropUrl(injectionTab.url)) return null
+    // Re-check the page too, for the same reason this snapshot exists at all: the tab can change
+    // during the query above (and the policy await before it). Checking only at the delivery
+    // snapshot narrowed that window instead of closing it — this is the tab the toast is
+    // actually injected into, so it is the one that has to be the nudge's own page.
+    if (targetPageKey != null && injectionDescriptor?.pageKey !== targetPageKey) {
+      klog(`nag suppressed (page moved on)`)
+      return null
+    }
     if (injectionDescriptor?.kind === "local_pdf") {
       return (await showSystemNotification(token, message, kind)) ? token : null
     }

@@ -23,10 +23,14 @@ const assetDisk = (path: string): string =>
   path === "assets/ort/ort-wasm-simd-threaded.wasm"
     ? join(extRoot, "node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm")
     : join(extRoot, path)
+// Scenarios that configure an LLM route flip this to make every provider call fail the way an
+// unreachable endpoint does (Ollama not running, model never pulled). Model assets keep loading.
+let providerCallsFail = false
 const realFetch = globalThis.fetch
 ;(globalThis as unknown as { fetch: typeof fetch }).fetch = (async (input: string | URL | Request) => {
   const url = String(input)
   if (url.startsWith("file://")) return new Response(readFileSync(fileURLToPath(url)))
+  if (providerCallsFail) throw new Error("ECONNREFUSED")
   return realFetch(input as string)
 }) as typeof fetch
 
@@ -133,9 +137,20 @@ const chrome = {
   },
   storage: {
     local: {
-      get: async (key: string) => {
-        const snapshot = store.has(key) ? { [key]: store.get(key) } : {}
-        if (key === "kibitzer:settings:v1" && settingsReadGate) {
+      // chrome.storage.local.get takes a key, a list of keys, or an object of defaults. Handling
+      // only the string form made every multi-key read come back EMPTY — which is how the judge
+      // settings are read (`get([SETTINGS_KEY, LEGACY_OLLAMA_KEY])`). Provider config was
+      // therefore unreadable no matter what a scenario wrote, so every run of this suite was
+      // silently pinned to degraded mode and no LLM-configured path was reachable at all.
+      get: async (keys: string | string[] | Record<string, unknown>) => {
+        const names = typeof keys === "string" ? [keys] : Array.isArray(keys) ? keys : Object.keys(keys)
+        const snapshot: Record<string, unknown> = {}
+        for (const name of names) if (store.has(name)) snapshot[name] = store.get(name)
+        // The object form supplies a default for each key the store doesn't hold.
+        if (typeof keys === "object" && !Array.isArray(keys)) {
+          for (const [name, fallback] of Object.entries(keys)) if (!(name in snapshot)) snapshot[name] = fallback
+        }
+        if (names.includes("kibitzer:settings:v1") && settingsReadGate) {
           const gate = settingsReadGate
           settingsReadGate = null
           gate.reached()
@@ -444,6 +459,127 @@ test("E2E: goal → drift on an off-goal page → S drains to 0 → nag delivere
     )
   } finally {
     mock.timers.reset()
+  }
+})
+
+test("E2E: a nag never lands on a page it is not about (the tab moved before delivery)", async () => {
+  toasts.length = 0
+  notifications.length = 0
+  // PHASE 1 — REAL time, as above: judge an off-goal page DRIFT. A distinct goal resets the gauge.
+  activeTab = { id: 21, url: "https://video.test/watch?v=fox", title: "귀여운 여우 영상 몰아보기", active: true, windowId: 1 }
+  // The klog is shared by every scenario in this file, and an earlier one already wrote a
+  // `final=DRIFT` line — without this the probe below matches THAT and returns before this page
+  // has been judged at all, leaving the drain loop with no verdict to drain (passes alone, fails
+  // in a full run). Clear before the goal is declared so the judge's own line is the first.
+  await send({ type: "clear-log" })
+  await send({ type: "set-goal", goal: "러스트 소유권 개념 정리", minutes: null })
+  let judged = false
+  for (let i = 0; i < 200 && !judged; i += 1) {
+    await settle(100)
+    await fireStartup()
+    judged = /final=DRIFT/.test((await send({ type: "get-log" })).text as string)
+  }
+  assert.ok(judged, "the off-goal page was judged DRIFT in real time")
+  await settle(200)
+
+  mock.timers.enable({ apis: ["Date"], now: Date.now() })
+  try {
+    // The gauge still holds the video page's DRIFT verdict and will nag about it. But from here
+    // every tab lookup reports a DIFFERENT page: the user switched windows in the moment between
+    // the gauge deciding and the toast being injected — the residual race the reducer can't see
+    // (and the same shape a torn-down worker's queued nag recovers into minutes later). Deep
+    // enough that nothing can exhaust it and fall back to the matching tab.
+    const elsewhere = {
+      id: 22,
+      url: "https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html",
+      title: "What Is Ownership?",
+      active: true,
+      windowId: 2,
+    }
+    tabQuerySequence = Array.from({ length: 40 }, () => elsewhere)
+
+    // Fast beats: nothing is expected to deliver, so don't burn the delivery-wait budget on each.
+    let drained = false
+    let lastS = -1
+    for (let i = 0; i < 200 && !drained; i += 1) {
+      await beat()
+      lastS = (await send({ type: "get-state" })).s as number
+      drained = lastS === 0
+    }
+    assert.ok(drained, `S still drained to 0 — suppressing the nudge must not forgive the drift (S=${lastS})`)
+    // Give a delivery every chance to land before asserting it didn't (the drain loop's fast beats
+    // return before the fire-and-forget delivery would).
+    await settleUntilStored(async () => nagDelivered(), 60)
+    assert.equal(
+      toasts.length + notifications.length,
+      0,
+      "no nudge on the innocent page the user actually has open — not as a toast, not as an OS notification",
+    )
+    assert.match(
+      (await send({ type: "get-log" })).text as string,
+      /nag suppressed \(page moved on\)/,
+      "and the drop is recorded, so a silent miss is distinguishable from a bug",
+    )
+  } finally {
+    mock.timers.reset()
+    tabQuerySequence = []
+  }
+})
+
+test("E2E: an unreachable judge still nudges — a configured-but-dead Tier 2 must not mute Kibitzer", async () => {
+  // The failure this pins is silence, and silence is indistinguishable from "working, nothing to
+  // say". With a Tier-2 route configured the gauge stops nudging on Tier-0/1 alone and asks the
+  // judge first — but `degraded` only means "no tier has a provider AT ALL", so a route that
+  // exists yet cannot be reached read as "confirmable". The confirmation never arrived, no nudge
+  // was ever sent, and the request was re-asked on the next page, forever.
+  toasts.length = 0
+  notifications.length = 0
+  activeTab = { id: 31, url: "https://video.test/watch?v=owl", title: "귀여운 부엉이 영상 몰아보기", active: true, windowId: 1 }
+  await send({ type: "clear-log" }) // the klog is shared across scenarios — see the note below
+  // A real route, through the real settings API. Every provider call then fails like a dead
+  // endpoint, so Tier 1 cannot rescue and Tier 2 cannot confirm.
+  await send({ type: "add-provider-key", provider: "ollama", name: "local", value: "test-key" })
+  await send({ type: "set-routes", routes: { tier1: { provider: "ollama", model: "llama3" }, tier2: { provider: "ollama", model: "llama3" } } })
+  providerCallsFail = true
+  try {
+    // Without this the scenario is vacuous: an unresolved route means degraded mode, and the
+    // degraded S=0 gate nudges directly for reasons that have nothing to do with what is tested.
+    assert.equal((await send({ type: "get-state" })).judgeEnabled, true, "the route must actually be live")
+    await send({ type: "set-goal", goal: "타입스크립트 제네릭 정리", minutes: null })
+    let judged = false
+    for (let i = 0; i < 200 && !judged; i += 1) {
+      await settle(100)
+      await fireStartup()
+      judged = /final=DRIFT/.test((await send({ type: "get-log" })).text as string)
+    }
+    assert.ok(judged, "the off-goal page was judged DRIFT (Tier 1 could not be reached to rescue it)")
+    await settle(200)
+
+    mock.timers.enable({ apis: ["Date"], now: Date.now() })
+    try {
+      // NOT the shared nagDelivered(): it counts any OS notification, and this scenario
+      // deliberately provokes the provider-problem alert, which would satisfy it without a single
+      // nudge having been shown. Nag notifications carry the `kbz-<token>` id; the alert does not.
+      const nudgeShown = (): boolean =>
+        toasts.some((t) => t.kind === "intervention") || notifications.some((n) => n.id.startsWith("kbz-"))
+      let nagged = false
+      for (let i = 0; i < 200 && !nagged; i += 1) {
+        await beat(nudgeShown)
+        nagged = nudgeShown()
+      }
+      assert.ok(
+        nagged,
+        `the nudge still arrives when the judge cannot be reached (S=${(await send({ type: "get-state" })).s})`,
+      )
+      const log = (await send({ type: "get-log" })).text as string
+      assert.match(log, /tier2 unavailable/, `unconfirmed, not a verdict. log tail:\n${log.slice(-1800)}`)
+    } finally {
+      mock.timers.reset()
+    }
+  } finally {
+    // Every other scenario in this file assumes the degraded (no-provider) profile.
+    providerCallsFail = false
+    await send({ type: "disconnect-provider", provider: "ollama" })
   }
 })
 
