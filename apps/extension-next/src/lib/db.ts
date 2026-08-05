@@ -247,6 +247,34 @@ export async function kvUpdate<T>(key: string, updater: (current: T | undefined)
   })
 }
 
+/** Atomic take: read the value AND delete the key in one transaction iff `matches(value)`.
+ *  Returns the taken value, or undefined when the key is absent/unmatched (nothing deleted).
+ *  The single-transaction read+delete is what makes a one-shot slot (the held nag) consumable
+ *  exactly once under concurrent consumers — a separate get+delete would let two of them both
+ *  read the value before either deletes it. */
+export async function kvTakeIf<T>(
+  key: string,
+  matches: (value: unknown) => boolean,
+): Promise<T | undefined> {
+  const db = await open()
+  return await new Promise<T | undefined>((resolve, reject) => {
+    const tx = db.transaction(KV_STORE, "readwrite")
+    const os = tx.objectStore(KV_STORE)
+    const getReq = os.get(key)
+    let taken: T | undefined
+    getReq.onsuccess = () => {
+      // Issue the delete synchronously inside the same still-active transaction.
+      if (getReq.result !== undefined && matches(getReq.result)) {
+        taken = getReq.result as T
+        os.delete(key)
+      }
+    }
+    tx.oncomplete = () => resolve(taken)
+    tx.onabort = () => reject(tx.error ?? new Error("kvTakeIf aborted"))
+    tx.onerror = () => reject(tx.error ?? new Error("kvTakeIf failed"))
+  })
+}
+
 /** Atomic compare-and-delete for a kv key: delete it only if `matches(currentValue)` — so a
  *  stale reader can't clobber a value another writer has since replaced. The read and the
  *  conditional delete run in one transaction. No-op if the key is absent or unmatched. */

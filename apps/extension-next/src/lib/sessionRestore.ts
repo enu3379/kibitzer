@@ -17,7 +17,7 @@ import { kvGet, kvSet } from "./db.ts"
 import { logEvent } from "./events.ts"
 import { klog } from "./klog.ts"
 import { clearBadge } from "./badge.ts"
-import { rebaseAfterGap } from "./gaugeRuntime.ts"
+import { disarmCelebrate, purgeQueuedCelebrates, rebaseAfterGap } from "./gaugeRuntime.ts"
 import { noteInactive } from "./visits.ts"
 import { getSettings } from "./settings.ts"
 import {
@@ -94,6 +94,10 @@ export async function handleBrowserStartup(): Promise<void> {
 async function decideRestart(): Promise<void> {
   const goal = await getGoal()
   if (!goal) return
+  // 칭찬은 재시작을 넘지 않는다 (D19): a queued celebrate congratulates a recovery arc the
+  // shutdown already broke, so a relaunch — continue OR suspend — drops it undelivered.
+  // Runs before the startupSettled barrier opens the first drain, so it can't lose the race.
+  await purgeQueuedCelebrates()
   const now = Date.now()
   // The marker lags real shutdown by ≤1 heartbeat; a goal declared moments before the quit
   // may have no marker (or an older session's) yet — startedAt bounds the estimate then.
@@ -131,6 +135,11 @@ export async function resumeSuspendedSession(): Promise<SessionGoal | null> {
   if (!goal) return null
   const downMs = Math.max(0, now - suspended.downFrom)
   await rebaseAfterGap(downMs, goal)
+  // 새로 브라우저를 열고 아직 딱히 한 것도 없는데 다짜고짜 칭찬 메시지가 뜨는 것을 지양:
+  // 보류 전 어중간하게 장전된(20↓ 후 20~80 사이에서 멈춘) 축하 아크는 여기서 끊는다.
+  // 깊은 drift(S ≤ cArm)로 보류된 세션은 재개 후 첫 적분 틱에 자연 재장전되므로, 재개 후에
+  // 실제로 일어난 회복은 여전히 칭찬받는다 (disarmCelebrate 주석 참고).
+  await disarmCelebrate()
   await noteAlive(now)
   // Same epoch comes back alive — a continue-banner queued before the park (still within its
   // TTL) would otherwise reappear over a manually resumed session and misexplain what happened.

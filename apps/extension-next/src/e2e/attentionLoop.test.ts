@@ -10,7 +10,8 @@ import test, { mock } from "node:test"
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
-import { kvDelete, kvGet } from "../lib/db.ts"
+import { addRecord, kvDelete, kvGet, OUTBOX_STORE } from "../lib/db.ts"
+import { describeObservableUrl } from "../lib/url.ts"
 import { PENDING_DWELL_KEY } from "../lib/dwellScheduler.ts"
 import { LOCAL_PDF_PROMPT_DELAY_MS, LOCAL_PDF_PROMPT_SHOWN_KEY } from "../lib/localPdfPrompt.ts"
 import { getVisits, type SessionVisits } from "../lib/visits.ts"
@@ -733,6 +734,45 @@ test("E2E: a nag is never surfaced while Chrome is unfocused, but delivers once 
     idleActive = true
     mock.timers.reset()
   }
+})
+
+test("E2E: a nag born on one page never fires on another — it parks and delivers on return (D19)", async () => {
+  toasts.length = 0
+  notifications.length = 0
+  // The user drifted on the video page, a nag was queued for it, but by delivery time they
+  // are on an unrelated document. The old behavior injected the video complaint over it.
+  const drift = { id: 61, url: "https://video.test/watch?v=owl", title: "귀여운 올빼미 영상", active: true, windowId: 1 }
+  const elsewhere = { id: 62, url: "https://docs.test/reference", title: "다른 문서", active: true, windowId: 1 }
+  const driftKey = describeObservableUrl(drift.url)?.pageKey as string
+  activeTab = elsewhere
+  const goalRes = await send({ type: "set-goal", goal: "그래프 라이브러리 조사", minutes: null })
+  await addRecord(OUTBOX_STORE, {
+    effect: { type: "nag", pageKey: driftKey },
+    goal: goalRes.goal,
+    ts: Date.now(),
+    writerMessage: "올빼미는 목표가 아니에요",
+    source: null,
+  })
+  await fireStartup() // drain: wrong page at delivery → parked, not shown
+  await settle(100)
+  assert.equal(toasts.length + notifications.length, 0, "no nudge surfaces on the unrelated page")
+  assert.equal((await kvGet<{ pageKey?: string }>("nag-hold"))?.pageKey, driftKey, "parked in the hold slot")
+
+  // Returning to the trigger page pokes the hold: a short grace, then the real delivery.
+  activeTab = drift
+  for (const fn of listeners["tabs.onActivated"]) await fn({ tabId: drift.id, windowId: 1 })
+  let delivered = false
+  for (let i = 0; i < 60 && !delivered; i += 1) {
+    await settle(100)
+    delivered = toasts.length + notifications.length > 0
+  }
+  assert.ok(delivered, "the held nag delivers after the return grace")
+  const message = String(
+    (toasts[0] as { message?: string } | undefined)?.message ?? notifications[0]?.opts.message ?? "",
+  )
+  assert.ok(message.includes("올빼미는 목표가 아니에요"), "the parked Writer message is the one delivered")
+  assert.equal(await kvGet("nag-hold"), undefined, "delivery consumes the hold")
+  await send({ type: "set-goal", goal: "", minutes: null }) // reset gauge/hold for later scenarios
 })
 
 test("E2E: title churn in an UNFOCUSED window's active tab cannot steal the focused page's dwell (Fix 4)", async () => {

@@ -20,7 +20,7 @@ import {
 import { embedText, embedTexts, judgeTier0 } from "./lib/tier0.ts"
 import { addExemplar, admissionEligible, admitAnchor, loadRefs, setDerived } from "./lib/relevance.ts"
 import { filterDerivedPhrases, MAX_PHRASES } from "./lib/goalEnrichment.ts"
-import { currentState, dispatch, enterNeutral, flushOutbox, PROVIDER_ALERT_ID, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
+import { currentState, dispatch, enterNeutral, flushOutbox, pokeNagHold, PROVIDER_ALERT_ID, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
 import { enrichGoal, judgeEnabled, testRoute, tier1Rescue } from "./lib/tier12.ts"
 import {
   addProviderKey,
@@ -115,6 +115,10 @@ async function observe(url: string | undefined, title: string | undefined): Prom
   await startupSettled
   const goal = await getGoal()
   if (!goal || !url) return
+  // Held-nag return detection (D19): every observation trigger is a "did the user come back
+  // to the page that caused the parked nag?" signal. BEFORE the debounce and every drop
+  // branch below — a debounced re-entry to the held page is exactly the return we care about.
+  void pokeNagHold(goal)
   const descriptor = describeObservableUrl(url)
   let localPdfSettings: Settings | null = null
   if (descriptor?.kind === "local_pdf") {
@@ -497,6 +501,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     void noteAlive(now) // durable last-alive marker — the restart-gap measurement (sessionRestore)
     // Once-a-minute durable checkpoint for the visit tracker (bounds teardown loss).
     void (present ? noteHeartbeat(now, goal.epoch) : noteInactive(now, goal.epoch))
+    // Held-nag backstop: a presence regain with no tab event (user alt-tabs back to the same
+    // page) produces no observe(), so the heartbeat is the guaranteed ≤1-min poke.
+    if (present) void pokeNagHold(goal)
     await dispatch({ type: present ? "heartbeat" : "inactive", ts: now }, goal)
   })()
 })

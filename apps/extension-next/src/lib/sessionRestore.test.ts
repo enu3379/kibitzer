@@ -32,7 +32,7 @@ const store = new Map<string, unknown>()
 // Quiet the [kbz] diagnostics.
 console.log = () => {}
 
-const { kvGet, kvSet } = await import("./db.ts")
+const { addRecord, clearStore, getAllRecords, kvGet, kvSet, OUTBOX_STORE } = await import("./db.ts")
 const { setGoal, getGoal, getSuspendedSession } = await import("./session.ts")
 const { setSettings } = await import("./settings.ts")
 const {
@@ -175,6 +175,51 @@ test("no goal at relaunch → the policy is a no-op", async () => {
 // The startupSettled barrier contract lives in sessionRestore.barrier.test.ts — it needs a
 // FRESH module instance (this file's earlier handleBrowserStartup calls and the fallback
 // timer would have long settled the barrier, making any assertion here vacuously green).
+
+test("칭찬은 재시작을 넘지 않는다: any relaunch purges queued celebrates, keeps queued nags", async () => {
+  await resetWorld()
+  const declared = await setGoal("리포트 마무리", null)
+  assert.ok(declared)
+  const now = Date.now()
+  store.set("kibitzer:goal:v1", { ...declared, startedAt: now - 40 * 60_000 })
+  await noteAlive(now - 60_000) // 1-minute gap → continue path (the harder case: session survives)
+  await clearStore(OUTBOX_STORE)
+  await addRecord(OUTBOX_STORE, { effect: { type: "celebrate" }, goal: declared, ts: now - 30_000, writerMessage: null, source: null })
+  await addRecord(OUTBOX_STORE, { effect: { type: "nag", pageKey: "x.test#1" }, goal: declared, ts: now - 30_000, writerMessage: null, source: null })
+
+  await handleBrowserStartup()
+
+  // The rebase's own drain already ran, so look at both surfaces: the celebrate must exist
+  // NOWHERE (purged before any drain could touch it), while the nag flows into the delivery
+  // gate — no matching tab in this harness, so it lands parked in the hold slot.
+  const left = await getAllRecords<{ effect: { type: string } }>(OUTBOX_STORE)
+  assert.ok(!left.some((r) => r.effect.type === "celebrate"), "the celebrate died with the shutdown")
+  const hold = await kvGet<{ pageKey: string }>("nag-hold")
+  assert.equal(hold?.pageKey, "x.test#1", "the nag survived into the delivery gate instead")
+  await clearStore(OUTBOX_STORE)
+  await kvSet("nag-hold", null)
+})
+
+test("②-이어가기 clears celebrateArmed — 아직 아무것도 안 했는데 다짜고짜 칭찬 방지", async () => {
+  await resetWorld()
+  const declared = await setGoal("보고서 쓰기", null)
+  assert.ok(declared)
+  const now = Date.now()
+  const shutdownAt = now - 60 * 60_000
+  store.set("kibitzer:goal:v1", { ...declared, startedAt: now - 3 * 60 * 60_000 })
+  await noteAlive(shutdownAt)
+  // Parked mid-arc: dropped to ≤20 earlier (arm), partially recovered to 45 before the quit.
+  await kvSet(STATE_KEY, { ...driftingState(shutdownAt - 20_000), s: 45, activeVerdict: "OK", celebrateArmed: true })
+
+  await handleBrowserStartup() // gap 1h → suspend
+  assert.equal(await getGoal(), null)
+
+  const resumed = await resumeSuspendedSession()
+  assert.ok(resumed)
+  const state = await kvGet<{ celebrateArmed: boolean; s: number }>(STATE_KEY)
+  assert.equal(state?.celebrateArmed, false, "the half-old celebration arc dies at resume")
+  assert.equal(state?.s, 45, "everything else about the gauge continues untouched")
+})
 
 test("a goal declared moments before the quit has no last-alive marker — startedAt bounds the gap", async () => {
   await resetWorld()

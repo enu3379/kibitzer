@@ -747,6 +747,50 @@ creation AND only on the page that caused it" (user-decided — supersedes the 5
 drain TTL for nags, which that work should absorb), and whether celebrate gets an
 age cap at all.
 
+### D19 — Nag delivery gate: page-bound nudges, single hold slot, celebrate rules → DECIDED (2026-08-05)
+
+Principle: **잔소리는 그것을 유발한 페이지 위에서만 뜬다. 떠났으면 침묵하고, 드리프트가
+계속이면 게이지가 새 맥락으로 다시 말을 건다** — memory lives in the gauge, not in a
+toast. `showToast` re-checked presence/quiet-hours/sensitive but never that the active
+tab still IS `effect.pageKey`, so a nag built from page A's content could inject over an
+unrelated page B (multi-window especially, but plain tab switches too).
+
+Delivery gate (nag), judged strictly at the delivery moment, all channels (toast / OS
+notification / chime) behind the same gate:
+- **Freshness TTL 3 min** from queue entry. Replaces #196's 5-min drain TTL for nags
+  (which the 3-min gate made dead code); the no-session drain drop stays. This TTL is
+  also the restart rule the user set: a pre-shutdown nag surfaces only within 3 min of
+  creation and only on its own page.
+- **Quiet hours → drop** (no hold): configured silence outranks everything. Unchanged.
+- **Page match + presence**: mismatch OR absence parks the nag in a SINGLE durable hold
+  slot (`nag-hold` kv; newest wins — any newer nag reaching delivery evicts it). This
+  UPGRADES the old presence behavior (silent drop that still counted for renag pacing —
+  a swallowed nag pushed the next visible nudge a whole backoff cycle out).
+- **Return → 3 s grace → full re-check** (goal epoch, TTL, page, presence, quiet, snooze,
+  verdict) → deliver; ANY failed check discards the hold entirely (재시도 없음). Return
+  detection: observe() pokes on every observation trigger, the heartbeat is the ≤1-min
+  backstop.
+- **Recovery invalidation**: the moment S crosses rDismiss upward, or the held page's own
+  verdict flips OK ("관련 있어요" included), the slot empties — a nag that is no longer
+  justified must not exist. Crossing (not level) so a renag parked mid-drain survives.
+- `testNag` (알림보기) delivers in direct mode — its synthetic pageKey matches no tab.
+
+Celebrate rules (합의안 7 + this session's decisions):
+- Gate = **current verdict is OK**, not pageKey. No hold, no grace; suppressed → discard.
+- **Quiet hours now silence celebrates too** (chime included) — configured silence is
+  channel- and sentiment-agnostic.
+- **칭찬은 재시작을 넘지 않는다**: every relaunch purges queued celebrates undelivered
+  (their `celebrateArmed` was consumed at queue time, so this loses exactly one rare
+  teardown-orphaned toast). The common "quit just below 80" case survives as armed STATE
+  and fires naturally after a continue — intended.
+- **②-이어가기 clears `celebrateArmed`**: 새로 브라우저를 열고 아직 딱히 한 것도 없는데
+  다짜고짜 칭찬 메시지가 뜨는 것을 지양. Only the half-old arc (parked at 20 < S < 80)
+  dies; a deep-drift park (S ≤ cArm) re-arms on the first integrating tick after resume.
+
+미결정 9 resolution: presence-delayed nags → the hold slot (above). Quiet-hours delays →
+keep dropping. Restart flush → the 3-min page-bound TTL. Reducer/contract untouched — this
+is delivery-side only.
+
 ### D14 — Serverless cutover scope and preservation → RESOLVED (2026-07-24)
 
 The active product becomes the single TypeScript MV3 runtime in
@@ -1294,3 +1338,11 @@ the extension badge.
   nags (>5 min / no session) dropped at drain. Options toggle, popup banner +
   이어가기 UI, `05-inactive` shared fixture, sessionRestore/session/settings
   tests.
+- 2026-08-05: D19 decided and implemented — nag delivery gate. Nags surface
+  only on the page that caused them: page/presence mismatch parks the nag in a
+  single durable hold slot (3-min TTL from creation, 3-s return grace, full
+  re-check at delivery, recovery invalidates immediately); quiet hours drop
+  outright. Celebrates gate on the live OK verdict, are silenced by quiet
+  hours, never cross a restart, and ②-resume disarms `celebrateArmed`. #196's
+  5-min drain TTL absorbed (no-session drop kept). New nagHold.test.ts +
+  sessionRestore/e2e scenarios.

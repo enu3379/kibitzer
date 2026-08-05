@@ -20,7 +20,7 @@ import { describeObservableUrl, type ObservablePageKind } from "./url.ts"
 import { browserPresent } from "./presence.ts"
 import { extractPageExcerpt } from "../content/pageExcerpt.ts"
 import { updateBadge } from "./badge.ts"
-import { deleteRecord, drainRecords, kvDeleteIf, kvGet, kvPutAndAppend, kvSet, kvUpdate, kvWriteAndClear, OUTBOX_STORE } from "./db.ts"
+import { deleteRecord, drainRecords, kvDelete, kvDeleteIf, kvGet, kvPutAndAppend, kvSet, kvTakeIf, kvUpdate, kvWriteAndClear, OUTBOX_STORE } from "./db.ts"
 import { logEvent } from "./events.ts"
 import { clearRelevance } from "./relevance.ts"
 import {
@@ -134,7 +134,7 @@ export function resetState(): Promise<void> {
         { key: STATE_KEY, value: fresh },
         { key: DRIFT_SINCE_KEY, value: null },
       ],
-      [PENDING_WRITER_KEY],
+      [PENDING_WRITER_KEY, NAG_HOLD_KEY], // a held nag must not outlive its session
       [OUTBOX_STORE],
     )
     await clearHistory() // a new goal starts a fresh nag/visit context
@@ -236,6 +236,11 @@ async function runEvent(event: GaugeEvent, goal: SessionGoal | null, state: Gaug
   }
   await persistStateAndOutbox(transition.state, entries, kvDeletes)
   updateBadge(transition.state, goal, event.ts) // reflect live status on the toolbar
+  // D19 합의안 5: a recovery (S back past rDismiss, or the held page flipping OK) makes a
+  // parked nag unjustified the moment it happens — not at the next delivery attempt. Awaited
+  // BEFORE the drain below, so an old hold is settled before this same event's effects could
+  // park a new one (fire-and-forget here would race the drain nondeterministically).
+  await invalidateHoldOnRecovery(state, transition.state, configFor(goal))
   // Track when the drift episode began (persona drift_minutes / celebration return_minutes).
   // Start the clock on entering DRIFT, but only when one isn't already running: a NEUTRAL hold
   // between two off-goal pages nulls the verdict in between, and without the "already running"
@@ -307,12 +312,6 @@ async function persistStateAndOutbox(
 // drain (or a wake mid-job) can't run the same slow Ollama request twice.
 const inFlightTier2 = new Set<number>()
 
-// A terminal effect (nag/celebrate) is normally delivered within seconds of being queued
-// (teardown recovery adds at most the 1-min heartbeat). Anything older means the browser was
-// closed in between — surfacing an hours-old nag about a page from before the shutdown right
-// as Chrome relaunches is worse than dropping it (the drift is already logged upstream).
-const TERMINAL_EFFECT_TTL_MS = 5 * 60_000
-
 /** Drain the outbox (oldest first). Terminal effects (nag/celebrate) deliver and ACK. A
  *  request_tier2 is a durable job: it is NOT ACKed here — startTier2Job owns its lifetime and
  *  deletes the record only after the outcome is durably reflected or stale-cancelled. */
@@ -322,14 +321,37 @@ async function drainOutbox(): Promise<void> {
       startTier2Job(record)
       return false // keep; the job self-ACKs when it truly completes
     }
-    // Stale (pre-shutdown) or orphaned (session ended/suspended while it sat queued): ACK
-    // without delivering. request_tier2 records above self-cancel through their own guards.
-    if (Date.now() - record.ts > TERMINAL_EFFECT_TTL_MS || !(await getGoal())) {
-      klog(`outbox ${record.effect.type} dropped (stale/no session)`)
+    // Orphaned (session ended/suspended while it sat queued): ACK without delivering.
+    // Freshness is deliver()'s job now — the nag TTL is judged strictly at the delivery
+    // moment (D19), and celebrates are gated on the live verdict + purged at restart.
+    if (!(await getGoal())) {
+      klog(`outbox ${record.effect.type} dropped (no session)`)
       return true
     }
     await deliver(record.effect, record.goal, record.ts, record.writerMessage, record.source)
     return true
+  })
+}
+
+/** Drop every queued celebrate without delivering (restart path, sessionRestore). A praise
+ *  that crosses a full browser shutdown congratulates a recovery arc the relaunch already
+ *  broke — and by construction its `celebrateArmed` was consumed when it was queued, so
+ *  dropping the record loses exactly one (rare, teardown-orphaned) toast and nothing else. */
+export function purgeQueuedCelebrates(): Promise<void> {
+  return enqueue(async () => {
+    await drainRecords<OutboxRecord>(OUTBOX_STORE, async (record) => record.effect.type === "celebrate")
+  })
+}
+
+/** Clear the celebration arm (suspended-session resume, sessionRestore): 새로 브라우저를 열고
+ *  아직 딱히 한 것도 없는데 다짜고짜 칭찬 메시지가 뜨는 것을 지양하기 위함. Only the stale
+ *  half-old arc dies: a session parked with S ≤ cArm re-arms on its first integrating tick
+ *  after resume, so a recovery that truly happens post-resume still gets its praise. */
+export function disarmCelebrate(): Promise<void> {
+  return enqueue(async () => {
+    const state = await loadState()
+    if (!state.celebrateArmed) return
+    await saveState({ ...state, celebrateArmed: false })
   })
 }
 
@@ -404,12 +426,133 @@ function cancelTier2(token: Tier2Token): Promise<void> {
   })
 }
 
-/** Fire a nag notification immediately, for manual testing (goal = "알림보기"). */
+/** Fire a nag notification immediately, for manual testing (goal = "알림보기"). Direct mode:
+ *  the synthetic pageKey "test" matches no real tab, so the page-bound gate would park it. */
 export async function testNag(goal: SessionGoal | null): Promise<void> {
-  await deliver({ type: "nag", pageKey: "test" }, goal, Date.now(), null, null)
+  await deliver({ type: "nag", pageKey: "test" }, goal, Date.now(), null, null, true)
 }
 
 const PENDING_WRITER_KEY = "pending-writer"
+
+// --- held nag (D19 delivery gate: 잔소리는 유발한 페이지 위에서만) --------------------
+
+const NAG_HOLD_KEY = "nag-hold"
+// TTL anchor is the nag's queue-entry time; judged strictly at every delivery attempt. After
+// this, the drift moment the message described is history — the gauge re-nags with fresh
+// context if the drift is still real (renag debt), so nothing is silently lost forever.
+const NAG_MAX_AGE_MS = 3 * 60_000
+// Returning to the page pops the held nag only after a short grace — appearing the instant
+// the tab focuses reads as an ambush. Applies ONLY to hold-resume delivery, never normal.
+const NAG_HOLD_GRACE_MS = 3_000
+
+// The single durable hold slot: the newest nag that reached delivery while the user was not
+// looking at its page (wrong tab/window, or Chrome unfocused/idle). One slot by design —
+// an older parked complaint is obsolete the moment a newer one exists.
+interface NagHold {
+  pageKey: string
+  createdAt: number // queue-entry ts of the underlying effect — the TTL anchor
+  epoch: number // owning session; any other session must never see it
+  writerMessage: string | null
+  source: EffectSource | null
+}
+
+// In-memory single-flight for the grace timer. Deliberately NOT durable: if the SW dies
+// mid-grace the hold record survives, and the next poke (observe / heartbeat, ≤1 min) simply
+// re-arms a fresh grace — strictly later, never a double delivery.
+let holdGraceArmed = false
+
+/** Entry point for "did the user come back?" signals (observe + the heartbeat backstop).
+ *  Cheap when there is nothing held; arms the one grace timer when the active tab is the
+ *  held page and the user is present. */
+export async function pokeNagHold(goal: SessionGoal): Promise<void> {
+  if (holdGraceArmed) return
+  // Claim the single flight SYNCHRONOUSLY, before any await: a return navigation fires
+  // several observation triggers within milliseconds (onActivated + onUpdated title/complete),
+  // and a flag set only after the async checks below would let two of them both pass the
+  // check above and arm two grace timers — a double delivery (double chime, double recordNag).
+  holdGraceArmed = true
+  let armed = false
+  try {
+    const hold = await kvGet<NagHold>(NAG_HOLD_KEY)
+    if (!hold || typeof hold.pageKey !== "string") return
+    if (hold.epoch !== goal.epoch || Date.now() - hold.createdAt > NAG_MAX_AGE_MS) {
+      await kvDelete(NAG_HOLD_KEY)
+      return
+    }
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+    const descriptor = tab?.url ? describeObservableUrl(tab.url) : null
+    if (descriptor?.pageKey !== hold.pageKey) return // not back yet — the TTL keeps governing
+    if (!(await browserPresent())) return
+    // Arm for THIS hold identity. The slot can be re-parked by a NEWER nag while the grace
+    // runs (deliver's newest-wins eviction), and the stale timer must then no-op — it may
+    // never discard, or deliver, a hold it did not arm for.
+    const armedFor = { pageKey: hold.pageKey, createdAt: hold.createdAt }
+    armed = true
+    const timer = setTimeout(() => {
+      void fireHeldNag(armedFor).finally(() => {
+        holdGraceArmed = false
+      })
+    }, NAG_HOLD_GRACE_MS)
+    ;(timer as { unref?: () => void }).unref?.()
+  } finally {
+    if (!armed) holdGraceArmed = false
+  }
+}
+
+/** End of the grace: re-run EVERY gate (합의안 4) and deliver — or, on ANY failed check,
+ *  discard the hold entirely (합의안 3: 유예 중 이탈은 이번 시도 취소가 아니라 보류 소멸).
+ *  Everything is scoped to the hold identity this grace was armed for: a slot re-parked by
+ *  a newer nag mid-grace is left untouched for its own poke→grace cycle. */
+async function fireHeldNag(armedFor: { pageKey: string; createdAt: number }): Promise<void> {
+  const isArmedHold = (value: unknown): boolean => {
+    const h = value as Partial<NagHold> | undefined
+    return h?.pageKey === armedFor.pageKey && h?.createdAt === armedFor.createdAt
+  }
+  const hold = await kvGet<NagHold>(NAG_HOLD_KEY)
+  if (!hold || !isArmedHold(hold)) return // consumed/replaced while the grace ran — not ours
+  const discard = () => kvDeleteIf(NAG_HOLD_KEY, isArmedHold) // only ever kill OUR hold
+  const now = Date.now()
+  const goal = await getGoal()
+  if (!goal || goal.epoch !== hold.epoch) return void (await discard())
+  if (now - hold.createdAt > NAG_MAX_AGE_MS) return void (await discard())
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+  const descriptor = tab?.url ? describeObservableUrl(tab.url) : null
+  if (descriptor?.pageKey !== hold.pageKey) return void (await discard())
+  if (!(await browserPresent())) return void (await discard())
+  const settings = await getSettings()
+  if (inQuietHours(settings.quietHours, now)) return void (await discard())
+  const state = await loadState()
+  if (state.snoozedUntil != null && now < state.snoozedUntil) return void (await discard())
+  // 판정이 그사이 OK로 뒤집혔다면(관련 있어요 / Tier-2 ok / 재판정) 정당화되지 않는 잔소리.
+  if (state.activePageKey === hold.pageKey && state.activeVerdict === "OK") {
+    return void (await discard())
+  }
+  // Atomic take: consume exactly once even against a concurrent deliverer evicting/replacing
+  // the slot in the window since the read above — losing the take means it isn't ours to show.
+  const taken = await kvTakeIf<NagHold>(NAG_HOLD_KEY, isArmedHold)
+  if (!taken) return
+  await presentNag(taken.pageKey, goal, taken.createdAt, taken.writerMessage, taken.source)
+}
+
+/** Gauge-recovery invalidation (합의안 5): the moment S recovers past rDismiss, or the held
+ *  page's own verdict flips OK, the parked nag stopped being justified — empty the slot NOW,
+ *  don't wait for a delivery attempt to notice. Recovery is detected as an upward CROSSING,
+ *  not a level, so a renag legitimately parked at mid-drain S is not falsely invalidated. */
+async function invalidateHoldOnRecovery(
+  prev: GaugeState,
+  next: GaugeState,
+  config: GaugeConfig,
+): Promise<void> {
+  const okFlip = next.activeVerdict === "OK" && prev.activeVerdict !== "OK"
+  const crossed = prev.s < config.rDismiss && next.s >= config.rDismiss
+  if (!okFlip && !crossed) return
+  const hold = await kvGet<NagHold>(NAG_HOLD_KEY)
+  if (!hold) return
+  if (crossed || next.activePageKey === hold.pageKey) {
+    klog(`held nag invalidated (${crossed ? "gauge recovered" : "verdict flipped OK"})`)
+    await kvDelete(NAG_HOLD_KEY)
+  }
+}
 
 /** Persist the Tier-2 Writer's nag text for a page, so the nag effect it triggers can carry
  *  the persona message even across a teardown (replaces the old in-memory global). */
@@ -430,48 +573,81 @@ async function deliver(
   ts: number,
   writerMessage: string | null,
   source: EffectSource | null | undefined,
+  // testNag ("알림보기") bypasses the page-match/hold machinery: it is a manual smoke test of
+  // the presentation path fired against the synthetic pageKey "test", which no real tab can
+  // ever match — the D19 gate would silently park it forever instead of showing anything.
+  direct = false,
 ): Promise<void> {
-  const goalText = goal?.text ?? "목표"
   // request_tier2 is never delivered here — it is a durable job handled by startTier2Job.
   if (effect.type === "nag") {
+    const now = Date.now()
     const settings = await getSettings()
-    // Do-not-disturb: within quiet hours, drop the nudge (the drift is still logged).
-    if (inQuietHours(settings.quietHours, ts)) {
+    // 원칙 (D19): 잔소리는 그것을 유발한 페이지 위에서만 뜬다. 떠났으면 침묵하고, 드리프트가
+    // 계속이면 게이지가 새 맥락으로 다시 말을 건다 — 기억은 토스트가 아니라 게이지가 담당한다.
+    if (!direct) {
+      // Newest wins: the moment a newer nag reaches delivery, whatever is parked in the hold
+      // slot describes an older drift moment — discard it no matter how THIS delivery ends.
+      await kvDelete(NAG_HOLD_KEY)
+      // Freshness, judged strictly at the delivery moment (TTL anchor = queue-entry time).
+      // This also covers the restart flush: a pre-shutdown nag older than 3 minutes never
+      // surfaces, whatever page the relaunch restored.
+      if (now - ts > NAG_MAX_AGE_MS) {
+        klog(`nag dropped (stale, ${Math.round((now - ts) / 1000)}s old)`)
+        logEvent("nag", { pageKey: effect.pageKey, suppressed: "ttl" })
+        return
+      }
+    }
+    // Do-not-disturb: within quiet hours, drop the nudge entirely (the drift is still
+    // logged) — the user configured silence, so no hold either.
+    if (inQuietHours(settings.quietHours, now)) {
       klog(`nag suppressed (quiet hours)`)
       logEvent("nag", { pageKey: effect.pageKey, suppressed: "quiet_hours" })
       return
     }
-    const page = await getActivePage()
-    // Persona voice for EVERY nag: the Tier-2 Writer message when we have one (fresh
-    // gate), otherwise the persona's fallback template. This covers degraded mode,
-    // renags, cached-drift nags, and the "알림보기" test — all were showing the plain
-    // line before. The generic sentence is only a last resort (no persona templates).
-    const fromWriter = writerMessage != null
-    let message = writerMessage
-    if (!message) {
-      const persona = await activePersona()
-      const nagCount = (await nagCountToday(ts)) + 1
-      const pageTitle = page?.title || page?.urlHost || "현재 페이지"
-      // `local-pdf` is an opaque identity/host label, not user-facing copy. A local PDF's
-      // allowed Chrome tab title should fill both template slots so host-based personas do
-      // not tell the user they are looking at a page literally named "local-pdf".
-      const pageHost = page?.kind === "local_pdf" ? pageTitle : (page?.urlHost || "현재 페이지")
-      const fallback = pickFallback(persona, nagCount, {
-        goal: goalText,
-        title: pageTitle,
-        host: pageHost,
-      })
-      message = fallback
-        ? clampSentences(fallback, persona.maxSentences ?? DEFAULT_MAX_SENTENCES)
-        : `'${goalText}' 흐름에서 벗어난 것 같아요. 계속 필요한 곁가지인지 확인해볼까요?`
+    if (!direct) {
+      // The page-match + presence gate. "Away from the page" and "away from Chrome" are the
+      // same condition for a page-bound nudge: not looking at the page that caused it. Both
+      // park the nag in the single hold slot instead of dropping it — a return within the
+      // TTL delivers it after a short grace (pokeNagHold), which fixes the old swallowed-nag
+      // cost where an absence-dropped nag still counted for pacing and pushed the next
+      // visible nudge a whole backoff cycle out.
+      const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+      const descriptor = tab?.url ? describeObservableUrl(tab.url) : null
+      if (descriptor?.pageKey !== effect.pageKey || !(await browserPresent())) {
+        if (goal == null) return // no session to re-check against later — nothing to hold
+        const hold: NagHold = {
+          pageKey: effect.pageKey,
+          createdAt: ts,
+          epoch: goal.epoch,
+          writerMessage,
+          source: source ?? null,
+        }
+        await kvSet(NAG_HOLD_KEY, hold)
+        klog(`nag held (${descriptor?.pageKey === effect.pageKey ? "absent" : "page mismatch"})`)
+        logEvent("nag", { pageKey: effect.pageKey, suppressed: "held" })
+        return
+      }
     }
-    klog(`nag (${fromWriter ? "writer" : "fallback"}): "${message.slice(0, 48)}"`)
-    logEvent("nag", { pageKey: effect.pageKey, source: fromWriter ? "writer" : "fallback", message })
-    const token = await showToast(message, effect.pageKey, "intervention", source)
-    if (token != null) {
-      await recordNag({ ts, host: page?.urlHost ?? "", token })
-    }
+    await presentNag(effect.pageKey, goal, ts, writerMessage, source, !direct)
   } else if (effect.type === "celebrate") {
+    const now = Date.now()
+    // 조용한 시간은 축하도 침묵한다: 토스트만이 아니라 차임까지, 사용자가 정한 무음 시간의
+    // 의미는 채널을 가리지 않는다. 폐기(보류 없음) — 재장전 사이클이 다음 기회를 만든다.
+    const settings = await getSettings()
+    if (inQuietHours(settings.quietHours, now)) {
+      klog(`celebrate suppressed (quiet hours)`)
+      logEvent("celebrate", { suppressed: "quiet_hours" })
+      return
+    }
+    // D19 (합의안 7): 축하는 pageKey가 아니라 "현재 페이지 판정이 여전히 OK인가"로 게이트.
+    // 발화 순간과 배달 사이에 이탈했다면(NEUTRAL/DRIFT) 폐기 — misses acceptable.
+    const state = await loadState()
+    if (state.activeVerdict !== "OK") {
+      klog(`celebrate suppressed (verdict ${state.activeVerdict ?? "NEUTRAL"})`)
+      logEvent("celebrate", { suppressed: "not_ok" })
+      return
+    }
+    const goalText = goal?.text ?? "목표"
     // Celebrate in the selected persona's voice; fall back to the plain line.
     const persona = await activePersona()
     const message =
@@ -481,6 +657,52 @@ async function deliver(
     klog(`celebrate: "${message.slice(0, 48)}"`)
     logEvent("celebrate", { message })
     await showToast(message, null, "celebration", source)
+  }
+}
+
+/** The nag presentation path (persona message → toast/OS-notification → history), shared by
+ *  the normal delivery and the hold-resume delivery — both arrive here only after passing
+ *  every gate. */
+async function presentNag(
+  pageKey: string,
+  goal: SessionGoal | null,
+  ts: number,
+  writerMessage: string | null,
+  source: EffectSource | null | undefined,
+  // False only for testNag's synthetic pageKey; every real nag keeps the page-identity check
+  // alive through showToast's own late tab re-reads (the last sliver of the D19 hole).
+  requirePageMatch = true,
+): Promise<void> {
+  const goalText = goal?.text ?? "목표"
+  const page = await getActivePage()
+  // Persona voice for EVERY nag: the Tier-2 Writer message when we have one (fresh
+  // gate), otherwise the persona's fallback template. This covers degraded mode,
+  // renags, cached-drift nags, and the "알림보기" test — all were showing the plain
+  // line before. The generic sentence is only a last resort (no persona templates).
+  const fromWriter = writerMessage != null
+  let message = writerMessage
+  if (!message) {
+    const persona = await activePersona()
+    const nagCount = (await nagCountToday(ts)) + 1
+    const pageTitle = page?.title || page?.urlHost || "현재 페이지"
+    // `local-pdf` is an opaque identity/host label, not user-facing copy. A local PDF's
+    // allowed Chrome tab title should fill both template slots so host-based personas do
+    // not tell the user they are looking at a page literally named "local-pdf".
+    const pageHost = page?.kind === "local_pdf" ? pageTitle : (page?.urlHost || "현재 페이지")
+    const fallback = pickFallback(persona, nagCount, {
+      goal: goalText,
+      title: pageTitle,
+      host: pageHost,
+    })
+    message = fallback
+      ? clampSentences(fallback, persona.maxSentences ?? DEFAULT_MAX_SENTENCES)
+      : `'${goalText}' 흐름에서 벗어난 것 같아요. 계속 필요한 곁가지인지 확인해볼까요?`
+  }
+  klog(`nag (${fromWriter ? "writer" : "fallback"}): "${message.slice(0, 48)}"`)
+  logEvent("nag", { pageKey, source: fromWriter ? "writer" : "fallback", message })
+  const token = await showToast(message, pageKey, "intervention", source, requirePageMatch)
+  if (token != null) {
+    await recordNag({ ts, host: page?.urlHost ?? "", token })
   }
 }
 
@@ -641,6 +863,11 @@ async function showToast(
   contextLabel: string | null,
   kind: "intervention" | "celebration",
   source: EffectSource | null | undefined,
+  // D19: for a real nag, contextLabel IS the trigger pageKey and the late tab re-reads below
+  // must keep matching it — a tab switch in the milliseconds after deliver()'s gate must not
+  // paint page A's complaint over page B. False for celebrations (page-free by design) and
+  // testNag's synthetic key.
+  requirePageMatch = false,
 ): Promise<number | null> {
   // Source policy, not the current tab, owns queued work. Missing source metadata on a
   // local-PDF page key is a legacy/fail-closed case.
@@ -670,6 +897,7 @@ async function showToast(
   // viewer that became active while delivery was being prepared.
   const [deliveryTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
   const deliveryDescriptor = deliveryTab?.url ? describeObservableUrl(deliveryTab.url) : null
+  if (requirePageMatch && deliveryDescriptor?.pageKey !== contextLabel) return null
   if (deliveryDescriptor?.kind === "local_pdf" && !(await getSettings()).observeLocalPdfs) return null
   if (deliveryDescriptor?.kind === "web" && deliveryTab?.url && shouldDropUrl(deliveryTab.url)) return null
   void playChime(kind) // audible cue via the offscreen document (works off-screen)
@@ -687,6 +915,7 @@ async function showToast(
     // Chrome's PDF viewer.
     const [injectionTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
     const injectionDescriptor = injectionTab?.url ? describeObservableUrl(injectionTab.url) : null
+    if (requirePageMatch && injectionDescriptor?.pageKey !== contextLabel) return null
     if (injectionDescriptor?.kind === "local_pdf" && !(await getSettings()).observeLocalPdfs) return null
     if (injectionDescriptor?.kind === "web" && injectionTab?.url && shouldDropUrl(injectionTab.url)) return null
     if (injectionDescriptor?.kind === "local_pdf") {
