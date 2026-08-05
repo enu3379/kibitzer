@@ -1037,7 +1037,9 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
         if (descriptor && permitted) {
           const { pageKey, urlHost } = descriptor
           klog(`related → OK recover ${pageKey}`)
-          await dispatch({ type: "nav", pageKey, verdict: "OK", ts: now }, goal)
+          // Carries the window like every other nav: advance runs BEFORE the verdict is replaced,
+          // so this can settle a held DRIFT and decide a nag on the way through.
+          await dispatch({ type: "nav", pageKey, verdict: "OK", quiet: await quietNow(now), ts: now }, goal)
           // The user override also flips the page in the session-summary tracker (open a timed
           // interval only if present — a notification-button click can arrive with Chrome unfocused).
           const present = await browserPresent()
