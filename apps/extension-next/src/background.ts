@@ -39,7 +39,7 @@ import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
 import { clearProviderHealth, getProviderHealth } from "./lib/providerHealth.ts"
 import { clearBadge } from "./lib/badge.ts"
 import { clearEvents, exportEvents, logEvent } from "./lib/events.ts"
-import { getSettings, localPdfPolicyMatches, setSettings, type Settings } from "./lib/settings.ts"
+import { getSettings, inQuietHours, localPdfPolicyMatches, setSettings, type Settings } from "./lib/settings.ts"
 import { clearStore, kvGet, kvSet, OBS_STORE } from "./lib/db.ts"
 import { DwellScheduler, PENDING_DWELL_KEY } from "./lib/dwellScheduler.ts"
 import { isPendingDwell, PENDING_DWELL_VERSION, type PendingDwell } from "./lib/dwell.ts"
@@ -283,10 +283,11 @@ async function judgeAndDispatch(pending: PendingDwell): Promise<void> {
     await noteJudged(pageKey, title, urlHost, "OK", now, epoch, await browserPresent()) // session-summary dwell/verdict
     // No r0/tauOk: activeMargin stays null → full-speed recovery (the same event shape as
     // the "관련 있어요" user-override OK).
-    await dispatch({ type: "nav", pageKey, verdict: "OK", ts: now }, goal)
+    await dispatch({ type: "nav", pageKey, verdict: "OK", quiet: await quietNow(now), ts: now }, goal)
     return
   }
-  const tauOk = (await getSettings()).tauOk
+  const judgeSettings = await getSettings()
+  const tauOk = judgeSettings.tauOk
   const refs = await loadRefs()
   const { score, verdict: tier0Verdict, vector: titleVec, parts } = await judgeTier0(goal.text, title, tauOk, refs)
   const enabled = await judgeEnabled()
@@ -331,7 +332,9 @@ async function judgeAndDispatch(pending: PendingDwell): Promise<void> {
   // after the dwell/embed while Chrome sits unfocused/idle on the same page.
   await noteJudged(pageKey, title, urlHost, verdict, now, epoch, await browserPresent()) // session-summary dwell/verdict
   await dispatch(
-    { type: "nav", pageKey, verdict, r0: score, tauOk, degraded: !enabled, ts: now },
+    // `quiet` off the settings already read for tauOk: observation is gated on window focus, not
+    // on presence, so this dispatch can land while the once-a-minute tick is paused.
+    { type: "nav", pageKey, verdict, r0: score, tauOk, quiet: inQuietHours(judgeSettings.quietHours, now), degraded: !enabled, ts: now },
     goal,
   )
 }
@@ -364,6 +367,14 @@ async function ensureHeartbeat(): Promise<void> {
   // delay the next heartbeat up to a full minute every time the goal is (re)declared.
   const existing = await chrome.alarms.get(HEARTBEAT_ALARM)
   if (!existing) await chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 1 })
+}
+
+/** Is `ts` inside the user's quiet hours? The reducer has no clock and no settings, so the
+ *  heartbeat resolves this and carries the answer — see GaugeState.quiet. Delivery consults the
+ *  setting again at the exact moment it would show something; this is only about what the gauge
+ *  is allowed to DECIDE, so a boundary that lands mid-tick costs at most one tick of lag. */
+async function quietNow(ts: number): Promise<boolean> {
+  return inQuietHours((await getSettings()).quietHours, ts)
 }
 
 // Presence (Chrome focused AND idle-active) is defined once in ./lib/presence.ts so the gauge
@@ -500,7 +511,12 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     void noteAlive(now) // durable last-alive marker — the restart-gap measurement (sessionRestore)
     // Once-a-minute durable checkpoint for the visit tracker (bounds teardown loss).
     void (present ? noteHeartbeat(now, goal.epoch) : noteInactive(now, goal.epoch))
-    await dispatch({ type: present ? "heartbeat" : "inactive", ts: now }, goal)
+    // Carry the quiet window into the gauge so it decides nothing during it. Read here rather than
+    // in the reducer, which has no clock and no settings. Both branches carry it: `inactive`
+    // integrates nothing, but while the user is away it is the only tick that fires, and a later
+    // `nav` decides under whatever was last stamped.
+    const quiet = await quietNow(now)
+    await dispatch(present ? { type: "heartbeat", quiet, ts: now } : { type: "inactive", quiet, ts: now }, goal)
   })()
 })
 
@@ -737,7 +753,11 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     // after being away integrated the whole un-rebased gap at full DRIFT drain. `inactive`
     // rebases the reducer clock without integrating. (No notePresence here — per the alarm's
     // comment, only the alarm heartbeat logs presence transitions.)
-    if (goal) await dispatch({ type: (await browserPresent()) ? "heartbeat" : "inactive", ts: Date.now() }, goal)
+    if (goal) {
+      const now = Date.now()
+      const quiet = await quietNow(now)
+      await dispatch((await browserPresent()) ? { type: "heartbeat", quiet, ts: now } : { type: "inactive", quiet, ts: now }, goal)
+    }
     const [state, enabled, persona, health] = await Promise.all([
       currentState(),
       judgeEnabled(),
@@ -1017,7 +1037,9 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
         if (descriptor && permitted) {
           const { pageKey, urlHost } = descriptor
           klog(`related → OK recover ${pageKey}`)
-          await dispatch({ type: "nav", pageKey, verdict: "OK", ts: now }, goal)
+          // Carries the window like every other nav: advance runs BEFORE the verdict is replaced,
+          // so this can settle a held DRIFT and decide a nag on the way through.
+          await dispatch({ type: "nav", pageKey, verdict: "OK", quiet: await quietNow(now), ts: now }, goal)
           // The user override also flips the page in the session-summary tracker (open a timed
           // interval only if present — a notification-button click can arrive with Chrome unfocused).
           const present = await browserPresent()

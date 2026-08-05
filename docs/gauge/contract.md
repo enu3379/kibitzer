@@ -50,7 +50,8 @@ reduceGauge(state: GaugeState, event: GaugeEvent, config: GaugeConfig) -> GaugeT
 | `sZeroConfirms` | int | 0 | 이번 에피소드의 s_zero 확인 요청 횟수 (첫 요청만 Writer 사용, m≤0에서 리셋) |
 | `nagRefunded` | bool | false | 이번 에피소드에서 전달 실패한 나깅을 이미 한 번 되돌렸는지 (m≤0에서 리셋) |
 | `celebrateArmed` | bool | false | S ≤ C_arm에서 set, 칭찬 발송 시 clear |
-| `snoozedUntil` | int ms \| null | null | 사용자 스누즈 (유일한 외부 게이트) |
+| `snoozedUntil` | int ms \| null | null | 사용자 스누즈 |
+| `quiet` | bool | false | 사용자가 설정한 조용한 시간 안인지. 나깅을 결정할 수 있는 이벤트가 각자 실어 오고, 1분 틱은 재석/부재와 무관하게 실어 온다 — 경계에서 최대 한 틱 늦는다 |
 
 IndexedDB의 gauge checkpoint는 이 구조를 직렬화한다.
 
@@ -58,9 +59,9 @@ IndexedDB의 gauge checkpoint는 이 구조를 직렬화한다.
 
 | type | fields | source |
 |---|---|---|
-| `nav` | `pageKey, verdict("OK"\|"DRIFT"), r0?, tauOk?, degraded?, ts` | extension Tier 0/1 observation pipeline |
-| `heartbeat` | `ts` | presence 하트비트 틱 (활성 중) |
-| `inactive` | `ts` | 자리 비움/탭 블러 — 적분 정지 |
+| `nav` | `pageKey, verdict("OK"\|"DRIFT"), r0?, tauOk?, degraded?, quiet?, ts` | extension Tier 0/1 observation pipeline. 관찰은 창 포커스만 보고 presence는 보지 않으므로 `quiet`를 스스로 실어 온다 |
+| `heartbeat` | `quiet?, ts` | presence 하트비트 틱 (활성 중). `quiet`는 조용한 시간 창을 재기록한다(생략 시 기존 값 유지) |
+| `inactive` | `quiet?, ts` | 자리 비움/탭 블러 — 적분 정지. 부재 중 유일하게 도는 틱이라 `quiet`를 함께 실어 창을 갱신한다 |
 | `tier2_result` | `flow("drift"\|"ok"), pageKey, ts` | Tier2 Judge 응답 (승격/S=0 관문) |
 | `snooze` | `until, ts` | 사용자 스누즈 |
 
@@ -126,6 +127,9 @@ else:                        s' = min(100, s + Rrecover * ((1 - m') / kRecover)
 - 칭찬: `s ≤ Carm`에서 `celebrateArmed=true`; armed 상태에서 `s ≥ Ccelebrate` 첫 도달 시
   `celebrate` emit + clear.
 - 스누즈: `now < snoozedUntil`이면 `nag`·`request_tier2` 억제, 적분은 계속.
+- 조용한 시간: `quiet`가 참이면 나깅을 결정하는 게이트(재나깅·S=0·S=0 복구·Tier2 s_zero 적용)를
+  스누즈와 동일하게 억제한다. 적분은 계속하고, 승격 요청은 억제하지 않는다 — 창 안에서 `nagN`이
+  오르지 않아야 창이 끝난 직후 곧바로 나깅할 수 있다.
 
 ## 7. Fixture format (`fixtures/gauge/*.json`)
 

@@ -1046,15 +1046,25 @@ test("E2E: a nudge that never reached the user does not spend the re-nag backoff
   }
 })
 
-test("E2E: quiet hours spends the nudge — silence the user asked for is not a loss", async () => {
-  // The one drop that is NOT refunded. The user asked for this silence, so the nag counts as
-  // delivered-and-declined; giving it back would queue the whole quiet window up to fire the
-  // moment it ends. Without this scenario nothing distinguishes `withheld` from `lost`.
+test("E2E: quiet hours decides nothing, and the window leaves the backoff unspent", async () => {
+  // The window is now a reducer-level silence rather than a delivery-time drop, so there is no
+  // nudge to withhold and none to give back. What this pins is the consequence: the ladder is
+  // untouched inside the window, so the first beat after it nudges immediately instead of
+  // needing a full backoff period of fresh drift.
   toasts.length = 0
   notifications.length = 0
   activeTab = { id: 51, url: "https://video.test/watch?v=crow", title: "귀여운 까마귀 영상 몰아보기", active: true, windowId: 1 }
   await send({ type: "clear-log" })
-  await send({ type: "set-settings", settings: { quietHours: { enabled: true, start: "00:00", end: "23:59" } } })
+  // Derive the window from the wall clock so it covers the whole run whatever time of day CI
+  // starts. A fixed 00:00-23:59 leaves 23:59 OUTSIDE the window (inQuietHours is `cur < end`), so
+  // a run beginning after ~23:06 crosses the boundary mid-test and the window closes under it.
+  const hhmm = (at: number): string => {
+    const d = new Date(at)
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`
+  }
+  const windowStart = hhmm(Date.now() - 10 * 60_000)
+  const windowEnd = hhmm(Date.now() + 6 * 60 * 60_000) // the mocked clock advances ~1h across the beats
+  await send({ type: "set-settings", settings: { quietHours: { enabled: true, start: windowStart, end: windowEnd } } })
   try {
     await send({ type: "set-goal", goal: "쿠버네티스 인그레스 설정", minutes: null })
     let judged = false
@@ -1068,24 +1078,30 @@ test("E2E: quiet hours spends the nudge — silence the user asked for is not a 
 
     mock.timers.enable({ apis: ["Date"], now: Date.now() })
     try {
-      let suppressed = false
-      for (let i = 0; i < 200 && !suppressed; i += 1) {
+      // Drain past the floor and keep going, well beyond the first re-nag threshold.
+      let drained = false
+      for (let i = 0; i < 40 && !drained; i += 1) {
         await beat()
-        suppressed = await settleUntilStored(
-          async () => /nag suppressed \(quiet hours\)/.test((await send({ type: "get-log" })).text as string),
-          3,
-        )
+        drained = ((await send({ type: "get-state" })).s as number) === 0
       }
-      assert.ok(suppressed, "S drained to 0 and the nudge was withheld")
-      assert.equal(toasts.length + notifications.length, 0, "nothing surfaced, as asked")
-      // The suppression is logged inside `deliver`; a refund would be logged after the drain loop
-      // that called it. Asserting absence straight away would pass against a build that refunds.
-      await settle(150)
-      assert.doesNotMatch(
-        (await send({ type: "get-log" })).text as string,
-        /nag refunded/,
-        "and it is NOT given back — quiet hours is a decision, not a delivery failure",
-      )
+      assert.ok(drained, "the drift is still measured — silence is not forgiveness")
+      for (let i = 0; i < 12; i += 1) await beat() // ~12 more minutes of drift inside the window
+
+      const log = (await send({ type: "get-log" })).text as string
+      // The reducer's own trace line, not a delivery-side one: `!! nag` is written the moment a
+      // nudge is DECIDED, which is what spends the ladder. Asserting only on the delivery lines
+      // would let a future drop reason between decision and delivery slip past.
+      assert.doesNotMatch(log, /!! nag/, "no nudge was ever decided inside the window")
+      assert.doesNotMatch(log, /nag \((writer|fallback)\):/, "so none reached delivery either")
+      assert.doesNotMatch(log, /nag suppressed \(quiet hours\)/, "so there was nothing to suppress at delivery")
+      assert.equal(toasts.length + notifications.length, 0, "and nothing surfaced")
+
+      // Leaving the window: the ladder was never climbed, so the S=0 recovery gate is still open
+      // and fires on the very next beat. Spending it inside the window would have cost 6 minutes
+      // of fresh drift here — 48 after a full night.
+      await send({ type: "set-settings", settings: { quietHours: { enabled: false } } })
+      await beat(nagDelivered)
+      assert.ok(nagDelivered(), "the first beat after the window nudges, with no backoff to serve")
     } finally {
       mock.timers.reset()
     }
