@@ -68,6 +68,15 @@ IndexedDB의 gauge checkpoint는 이 구조를 직렬화한다.
 마진용이며 정상 모드에선 무시. 중복 이벤트(동일 사건 재전달)는 호출부가 event id로
 걸러 reducer에 넣지 않는다 — reducer는 들어온 이벤트를 항상 적분한다.
 
+확장 배선만 발행하고 공유 픽스처는 발행하지 않는 **배선 전용** 이벤트가 셋 더 있다. 파이썬
+트랙의 패리티 대상이 아니므로 위 표에는 넣지 않는다.
+
+| type | fields | 하는 일 |
+|---|---|---|
+| `neutral` | `pageKey, ts` | 관찰됐으나 아직 판정 전인 페이지: 직전 페이지를 그 순간까지 정산한 뒤 verdict를 비운다. 정산은 하되 떠나는 페이지에 대해 어떤 효과도 내지 않는다 |
+| `tier2_cancel` | `requestId, ts` | 응답이 stale해진 Tier2 요청의 pendingTier2 슬롯만 반환한다 |
+| `nag_undelivered` | `ts` | 생성된 나깅이 화면에 닿지 못했을 때 `nagN`을 한 칸 되돌린다. 에피소드당 한 번(`nagRefunded`로 잠금), `renagDebt`와 시각은 건드리지 않는다 |
+
 ## 4. GaugeEffect (intents)
 
 | type | fields | 언제 |

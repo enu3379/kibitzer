@@ -341,7 +341,16 @@ async function drainOutbox(): Promise<void> {
   // After the loop, never inside it: the record is ACKed by then, so a teardown here loses the
   // refund and the nag stays counted — today's behaviour. The other order could hand the count
   // back for a nag that was in fact delivered, and nudge the user twice.
-  if (lostNagPageKey != null) await refundUndeliveredNag(lostNagPageKey)
+  if (lostNagPageKey != null) {
+    // Every record is ACKed by now, so a storage failure has nothing left to corrupt — but it
+    // would otherwise escape a drain that has no other throw path, and the alarm handler that
+    // owns this promise does not await it. Swallow it into the same fail direction as a teardown.
+    try {
+      await refundUndeliveredNag(lostNagPageKey)
+    } catch (error) {
+      klog(`nag refund failed (count stands): ${String(error)}`)
+    }
+  }
 }
 
 /** Give the nag count back for a nudge that was emitted but never reached the user.
