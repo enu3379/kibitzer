@@ -278,7 +278,7 @@ async function judgeAndDispatch(pending: PendingDwell): Promise<void> {
     // and this page never got one — `mode` records why.
     logEvent("observe", { pageKey, host: urlHost, verdict: "OK", mode: "user-allow" })
     const now = Date.now()
-    await setActivePage({ pageKey, title, urlHost, score: 1, kind, localPdfPolicyRevision })
+    await setActivePage({ pageKey, title, urlHost, score: 1, kind, localPdfPolicyRevision, tierReached: 0 })
     await recordObservation({ title, urlHost, verdict: "OK", ts: now }) // recent_titles / repeat context
     await noteJudged(pageKey, title, urlHost, "OK", now, epoch, await browserPresent()) // session-summary dwell/verdict
     // No r0/tauOk: activeMargin stays null → full-speed recovery (the same event shape as
@@ -301,8 +301,11 @@ async function judgeAndDispatch(pending: PendingDwell): Promise<void> {
     }
     // Give Tier-1 the recent-visit context (mirrors the server) so it can judge the escalation
     // pattern, not just this title in isolation.
-    verdict = await tier1Rescue(goal.text, title, urlHost, titles) // Tier 1 may rescue to OK
-    tierReached = 1
+    const rescue = await tier1Rescue(goal.text, title, urlHost, titles) // Tier 1 may rescue to OK
+    verdict = rescue.verdict
+    // A keyless route or a failed call left Tier 0's DRIFT standing without a Tier-1 judgment —
+    // recording 1 there would misreport the tier history to the Tier-2 judge.
+    if (rescue.answered) tierReached = 1
   }
   // B2: the dwell + embed + Tier-1 rescue took time; the user may have navigated away or
   // changed the goal. Applying this verdict now would drive the gauge / active page for a
@@ -322,7 +325,7 @@ async function judgeAndDispatch(pending: PendingDwell): Promise<void> {
   klog(`observe ${pageKey} tier0=${tier0Verdict}(${score.toFixed(2)} ex=${parts.exemplarScore.toFixed(2)} an=${parts.anchorScore.toFixed(2)}) final=${verdict} mode=${enabled ? "ollama" : "degraded"}`)
   logEvent("observe", { pageKey, host: urlHost, tier0: tier0Verdict, score: Number(score.toFixed(3)), exemplar: Number(parts.exemplarScore.toFixed(3)), anchor: Number(parts.anchorScore.toFixed(3)), derived: Number(parts.derivedScore.toFixed(3)), verdict, mode: enabled ? "ollama" : "degraded" })
   const now = Date.now()
-  await setActivePage({ pageKey, title, urlHost, score, kind, localPdfPolicyRevision })
+  await setActivePage({ pageKey, title, urlHost, score, kind, localPdfPolicyRevision, tierReached })
   await recordObservation({ title, urlHost, verdict, ts: now }) // recent_titles / repeat context
   // Only open a timed visit interval if the user is present now — this verdict may have landed
   // after the dwell/embed while Chrome sits unfocused/idle on the same page.

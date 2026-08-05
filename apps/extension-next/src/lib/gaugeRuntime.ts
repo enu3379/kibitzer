@@ -36,7 +36,7 @@ import type { SessionGoal } from "./session.ts"
 const EXCERPT_LIMIT = 3500 // extraction cap; the Tier-2 payload re-cleans to 3000
 
 const STATE_KEY = "gauge-state"
-const ACTIVE_PAGE_KEY = "active-page"
+export const ACTIVE_PAGE_KEY = "active-page"
 const DRIFT_SINCE_KEY = "drift-since"
 
 export interface ActivePage {
@@ -46,6 +46,10 @@ export interface ActivePage {
   score: number
   kind: ObservablePageKind
   localPdfPolicyRevision: number | null
+  /** Highest tier that actually judged this page at observe time — 1 only when Tier 1
+   *  returned a verdict (Tier-2 context accuracy; issue #207). Absent on checkpoints
+   *  written before the field existed; consumers read that as 0. */
+  tierReached?: number
 }
 
 interface EffectSource {
