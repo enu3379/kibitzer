@@ -601,22 +601,26 @@ async function serviceTier2(
     await cancelTier2(token)
     return
   }
-  // No judgment came back — no Tier-2 route, or the judge call failed. Release the request
-  // WITHOUT applying a verdict.
+  // No judgment came back — no Tier-2 route (Tier 1 configured but not Tier 2), or the judge
+  // could not be reached (Ollama not running, model never pulled, machine just resumed). Fall
+  // back to the verdict we already have: Tier 0, plus Tier 1's rescue attempt if it ran.
   //
-  // It used to arrive as a plain `flow: "ok"` and take the OK branch, which is a verdict with
-  // teeth: it refunds S to rDismiss, zeroes the inertia and the accel tier, and flips the active
-  // page to OK. So a page nobody had judged was rewarded as if the judge had cleared it — and
-  // because S climbed back off 0, the whole drain repeated, asking a judge that was still absent
-  // and being "cleared" again every time. Silence from the judge is not a clean bill of health.
+  // This is the same trade degraded mode makes. The gauge chooses between "confirm first" and
+  // "nudge on Tier-0/1 alone" using its `degraded` flag, but that flag means "no tier has a
+  // provider at all" — it cannot see a Tier-2 that is configured yet unreachable. Left as an
+  // unconfirmed silence, that gap swallows every nudge: the request is re-asked on the next page,
+  // released again, and the user drifts on with the extension apparently dead. Missing a drift is
+  // acceptable; going permanently mute because a judge is offline is not.
   //
-  // Cancelling instead leaves the gauge exactly where it was: the drift is neither forgiven nor
-  // acted on, and the pending slot is freed so nothing is wedged.
+  // Still a guarded apply, not a shortcut: dispatchTier2 re-checks that this page is the one the
+  // gauge is on, and a null message routes delivery to the persona preset (the Writer was never
+  // reached either). Nagging also advances nagN, which closes the S=0 gate for the episode — so a
+  // dead judge is asked once per episode rather than on every page.
   if (outcome.unavailable) {
-    klog(`tier2 unavailable (${effect.reason}) on ${effect.pageKey} — request released, no verdict`)
+    klog(`tier2 unavailable (${effect.reason}) on ${effect.pageKey} — keeping the tier-0/1 verdict`)
     logEvent("tier2", { pageKey: effect.pageKey, reason: effect.reason, unavailable: true })
     if (outcome.providerError) void notifyProviderProblem(outcome.providerError)
-    await cancelTier2(token)
+    await dispatchTier2(token, "drift", null, goal)
     return
   }
   klog(`tier2 gate (${effect.reason}) on ${effect.pageKey} excerpt=${excerpt?.length ?? 0}c -> ${outcome.flow}`)

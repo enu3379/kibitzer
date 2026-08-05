@@ -223,9 +223,13 @@ function advance(
     // only the episode's first confirmation pays for the Writer, halving the round trip the
     // repeats can be cancelled inside of.
     //
-    // Degraded mode has no Tier-2 to ask (the confirm fails open to "ok" and would nudge
-    // NEVER), and a fresh cached drift verdict for this very page is already a confirmation —
-    // both nudge directly, exactly as the crossing gate above does.
+    // Degraded mode has no Tier-2 to ask, and a fresh cached drift verdict for this very page is
+    // already a confirmation — both nudge directly, exactly as the crossing gate above does.
+    //
+    // `degraded` only covers "no tier has a provider AT ALL". A Tier-2 that is configured but
+    // unreachable looks confirmable from here and cannot be detected without asking, so that case
+    // is handled where the answer comes back: an unavailable outcome keeps the Tier-0/1 verdict
+    // rather than being read as a clean bill of health (gaugeRuntime.serviceTier2).
     if (st.degraded || freshDrift) {
       effects.push({ type: "nag", pageKey: st.activePageKey as string });
       st = { ...st, lastNagTs: now, nagN: st.nagN + 1, renagDebt: 0 };
