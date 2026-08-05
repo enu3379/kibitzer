@@ -178,7 +178,7 @@ await import("../background.ts")
 // startupSettled, and without this the suite's first observations would stall on its 1.5 s
 // fallback timer instead. No goal exists yet, so the handler itself is a no-op.
 for (const fn of listeners["runtime.onStartup"]) await fn()
-const { extractActiveExcerpt, PROVIDER_ALERT_ID, setActivePage, testNag } = await import("../lib/gaugeRuntime.ts")
+const { ACTIVE_PAGE_KEY, extractActiveExcerpt, PROVIDER_ALERT_ID, setActivePage, testNag } = await import("../lib/gaugeRuntime.ts")
 const { getGoal } = await import("../lib/session.ts")
 
 // --- drivers -----------------------------------------------------------------------------
@@ -629,6 +629,11 @@ test("E2E: Tier 1 keyed, Tier 2 routed to a keyless provider — issue #207's si
     }
     assert.ok(judged, "the off-goal page was judged DRIFT (the failed Tier-1 rescue keeps the verdict)")
     await settle(200)
+    // The failed rescue means Tier 1 never answered, so the observe-time record — the value the
+    // Tier-2 judge is later shown as tier_reached — must say 0. The unit tests pin tier1Rescue
+    // and tier2Confirm separately; only this scenario drives the wiring between them.
+    const activePage = await kvGet<{ tierReached?: number }>(ACTIVE_PAGE_KEY)
+    assert.equal(activePage?.tierReached, 0, "a failed Tier-1 rescue must not be recorded as tier_reached=1")
 
     mock.timers.enable({ apis: ["Date"], now: Date.now() })
     try {
