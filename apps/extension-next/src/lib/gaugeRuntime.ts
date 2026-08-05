@@ -6,7 +6,7 @@ import { reduceGauge } from "../core/gauge/reducer.ts"
 import { defaultGaugeConfig } from "../core/gauge/config.ts"
 import { initGaugeState } from "../core/gauge/types.ts"
 import type { Flow, GaugeConfig, GaugeEffect, GaugeEvent, GaugeState } from "../core/gauge/types.ts"
-import { tokenMatchesPending, type Tier2Token } from "./tier2Token.ts"
+import { tokenMatchesPending, tokenPageStillActive, type Tier2Token } from "./tier2Token.ts"
 import { showKibitzerToast, type ToastPayload } from "../content/toastOverlay.ts"
 import { tier2Confirm } from "./tier12.ts"
 import { getGoal } from "./session.ts"
@@ -372,8 +372,7 @@ function dispatchTier2(
     const fresh =
       current != null &&
       current.epoch === token.epoch &&
-      state.activePageKey === token.pageKey &&
-      activePage?.pageKey === token.pageKey &&
+      tokenPageStillActive(token, state.activePageKey, activePage?.pageKey ?? null) &&
       (await effectSourceAllowed(activePage))
     if (!fresh) {
       await runEvent({ type: "tier2_cancel", requestId: token.requestId, ts: Date.now() }, goal, state)
@@ -519,7 +518,8 @@ async function serviceTier2(
   // Superseded before we even started (a newer request took the slot, or a prior run of this
   // same job already resolved it and we're a retry): nothing to service or clear — resolve so
   // the record is ACKed. The authoritative re-check happens inside dispatchTier2/cancelTier2.
-  if (!tokenMatchesPending(token, (await loadState()).pendingTier2)) {
+  const state = await loadState()
+  if (!tokenMatchesPending(token, state.pendingTier2)) {
     klog(`tier2 skipped (superseded/settled) on ${effect.pageKey}`)
     return
   }
@@ -527,7 +527,22 @@ async function serviceTier2(
   const current = await getGoal()
   // Stale before the gate even ran (user navigated away / changed the goal during the dwell):
   // don't spend an Ollama call, but DO release the pending slot so promotion isn't wedged.
-  if (!page || page.pageKey !== effect.pageKey || !goal || !current || current.epoch !== goal.epoch) {
+  //
+  // The gauge's own page has to be part of that question. Checking only the active-page RECORD
+  // missed the most common way a request goes stale: the `neutral` transition that fires when
+  // the user LEAVES a page first integrates that page right up to the moment of leaving, and its
+  // S=0 gate can open a request there — naming the page the user has already left. The record
+  // still names that same page (it is only rewritten once the NEW page finishes its dwell and is
+  // judged), so the old check matched, the job ran, and a full judge call was spent on an
+  // abandoned page — only for dispatchTier2 to discard the result seconds later on the very
+  // comparison this gate now makes up front.
+  if (
+    !page ||
+    !tokenPageStillActive(token, state.activePageKey, page.pageKey) ||
+    !goal ||
+    !current ||
+    current.epoch !== goal.epoch
+  ) {
     klog(`tier2 cancelled (stale pre-gate) on ${effect.pageKey}`)
     logEvent("tier2", { pageKey: effect.pageKey, reason: effect.reason, cancelled: true })
     await cancelTier2(token)
