@@ -41,6 +41,14 @@ export interface GaugeState {
   nagN: number; // nag ordinal this episode (reset when m<=0)
   renagDebt: number;
   lastNagTs: number | null;
+  // How many s_zero Tier-2 confirmations this episode has ASKED FOR (not how many landed).
+  // Only the first one pays for the Writer; the rest fall back to the persona preset. While
+  // the user page-hops at S=0 every request resolves after they have moved on and is
+  // cancelled, so nagN never advances and the gate re-asks on the next page — spending a
+  // two-call round trip each time and nudging on none of them. Dropping the Writer from the
+  // repeats halves that round trip, which narrows the window a hop can cancel in. Reset with
+  // nagN when the episode ends (m<=0).
+  sZeroConfirms: number;
   celebrateArmed: boolean;
   snoozedUntil: number | null;
 }
@@ -93,7 +101,12 @@ export type GaugeEffect =
   // requestId ties this effect to the exact pendingTier2 slot it opened. Two request_tier2
   // effects can be emitted in ONE reduce (promotion then s_zero, which overwrites the slot);
   // each must carry its OWN id so the wiring doesn't tag both with the final slot's id.
-  | { type: "request_tier2"; reason: Tier2Reason; tier: number; pageKey: string; requestId: number }
+  // useWriter: may this request pay for the second (message-writing) LLM call once the judge
+  // says notify? False for every promotion request — a promotion outcome escalates the accel
+  // tier and never nags, so the written message was always discarded — and for repeat s_zero
+  // confirmations within one episode (see GaugeState.sZeroConfirms). The nag then carries the
+  // persona preset instead.
+  | { type: "request_tier2"; reason: Tier2Reason; tier: number; pageKey: string; requestId: number; useWriter: boolean }
   | { type: "nag"; pageKey: string }
   | { type: "celebrate" };
 
@@ -119,6 +132,7 @@ export function initGaugeState(): GaugeState {
     nagN: 0,
     renagDebt: 0,
     lastNagTs: null,
+    sZeroConfirms: 0,
     celebrateArmed: false,
     snoozedUntil: null,
   };

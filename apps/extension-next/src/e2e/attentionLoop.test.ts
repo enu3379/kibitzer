@@ -447,6 +447,70 @@ test("E2E: goal → drift on an off-goal page → S drains to 0 → nag delivere
   }
 })
 
+test("E2E: a nag never lands on a page it is not about (the tab moved before delivery)", async () => {
+  toasts.length = 0
+  notifications.length = 0
+  // PHASE 1 — REAL time, as above: judge an off-goal page DRIFT. A distinct goal resets the gauge.
+  activeTab = { id: 21, url: "https://video.test/watch?v=fox", title: "귀여운 여우 영상 몰아보기", active: true, windowId: 1 }
+  // The klog is shared by every scenario in this file, and an earlier one already wrote a
+  // `final=DRIFT` line — without this the probe below matches THAT and returns before this page
+  // has been judged at all, leaving the drain loop with no verdict to drain (passes alone, fails
+  // in a full run). Clear before the goal is declared so the judge's own line is the first.
+  await send({ type: "clear-log" })
+  await send({ type: "set-goal", goal: "러스트 소유권 개념 정리", minutes: null })
+  let judged = false
+  for (let i = 0; i < 200 && !judged; i += 1) {
+    await settle(100)
+    await fireStartup()
+    judged = /final=DRIFT/.test((await send({ type: "get-log" })).text as string)
+  }
+  assert.ok(judged, "the off-goal page was judged DRIFT in real time")
+  await settle(200)
+
+  mock.timers.enable({ apis: ["Date"], now: Date.now() })
+  try {
+    // The gauge still holds the video page's DRIFT verdict and will nag about it. But from here
+    // every tab lookup reports a DIFFERENT page: the user switched windows in the moment between
+    // the gauge deciding and the toast being injected — the residual race the reducer can't see
+    // (and the same shape a torn-down worker's queued nag recovers into minutes later). Deep
+    // enough that nothing can exhaust it and fall back to the matching tab.
+    const elsewhere = {
+      id: 22,
+      url: "https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html",
+      title: "What Is Ownership?",
+      active: true,
+      windowId: 2,
+    }
+    tabQuerySequence = Array.from({ length: 40 }, () => elsewhere)
+
+    // Fast beats: nothing is expected to deliver, so don't burn the delivery-wait budget on each.
+    let drained = false
+    let lastS = -1
+    for (let i = 0; i < 200 && !drained; i += 1) {
+      await beat()
+      lastS = (await send({ type: "get-state" })).s as number
+      drained = lastS === 0
+    }
+    assert.ok(drained, `S still drained to 0 — suppressing the nudge must not forgive the drift (S=${lastS})`)
+    // Give a delivery every chance to land before asserting it didn't (the drain loop's fast beats
+    // return before the fire-and-forget delivery would).
+    await settleUntilStored(async () => nagDelivered(), 60)
+    assert.equal(
+      toasts.length + notifications.length,
+      0,
+      "no nudge on the innocent page the user actually has open — not as a toast, not as an OS notification",
+    )
+    assert.match(
+      (await send({ type: "get-log" })).text as string,
+      /nag suppressed \(page moved on\)/,
+      "and the drop is recorded, so a silent miss is distinguishable from a bug",
+    )
+  } finally {
+    mock.timers.reset()
+    tabQuerySequence = []
+  }
+})
+
 test("E2E: a sensitive page is dropped — never judged, no drain, no nag (P0-1 privacy)", async () => {
   mock.timers.enable({ apis: ["Date"] })
   try {

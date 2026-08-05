@@ -37,6 +37,7 @@ function accelTransition(
   config: GaugeConfig,
   effects: GaugeEffect[],
   now: number,
+  leaving: boolean,
 ): GaugeState {
   const tier = st.accelTier;
   const m = st.m;
@@ -49,9 +50,13 @@ function accelTransition(
     if (st.degraded) {
       return { ...st, accelTier: tier + 1 };
     }
-    if (st.pendingTier2 == null && !snoozed(st, now)) {
+    // Promotion is a level condition, so skipping it while leaving costs nothing: the next
+    // advance on the page the user actually lands on re-evaluates it.
+    if (st.pendingTier2 == null && !snoozed(st, now) && !leaving) {
       const requestId = st.tier2ReqSeq + 1;
-      effects.push({ type: "request_tier2", reason: "promotion", tier, pageKey: st.activePageKey as string, requestId });
+      // A promotion outcome escalates the tier and never nags, so its written message was
+      // always staged and then dropped — a Writer call spent on nothing.
+      effects.push({ type: "request_tier2", reason: "promotion", tier, pageKey: st.activePageKey as string, requestId, useWriter: false });
       return {
         ...st,
         tier2ReqSeq: requestId,
@@ -90,21 +95,51 @@ function sZeroGate(st: GaugeState, config: GaugeConfig, effects: GaugeEffect[], 
   }
   const alreadySZero =
     st.pendingTier2 != null && st.pendingTier2.reason === "s_zero" && st.pendingTier2.pageKey === st.activePageKey;
-  if (!alreadySZero) {
-    const requestId = st.tier2ReqSeq + 1;
-    effects.push({ type: "request_tier2", reason: "s_zero", tier: st.accelTier, pageKey, requestId });
-    return {
-      ...st,
-      tier2ReqSeq: requestId,
-      pendingTier2: { reason: "s_zero", tier: st.accelTier, pageKey, requestedAt: now, requestId },
-    };
-  }
+  if (!alreadySZero) return requestSZero(st, effects, now);
   return st;
+}
+
+/** Open an s_zero Tier-2 confirmation for the active page. Only the FIRST confirmation of an
+ *  episode pays for the Writer (see GaugeState.sZeroConfirms); the repeats a page-hopping user
+ *  triggers fall back to the persona preset so the round trip they keep cancelling is half as
+ *  long. Shared by both S=0 entries — the downward crossing and the already-at-zero gate — so
+ *  the two cannot diverge on which requests get written messages. */
+function requestSZero(st: GaugeState, effects: GaugeEffect[], now: number): GaugeState {
+  const requestId = st.tier2ReqSeq + 1;
+  const pageKey = st.activePageKey as string;
+  const confirms = st.sZeroConfirms ?? 0; // ?? — a checkpoint written before this field existed
+  effects.push({
+    type: "request_tier2",
+    reason: "s_zero",
+    tier: st.accelTier,
+    pageKey,
+    requestId,
+    useWriter: confirms === 0,
+  });
+  return {
+    ...st,
+    tier2ReqSeq: requestId,
+    sZeroConfirms: confirms + 1,
+    pendingTier2: { reason: "s_zero", tier: st.accelTier, pageKey, requestedAt: now, requestId },
+  };
 }
 
 /** Integrate elapsed time into (m, s), then run the accel / renag / celebration /
  *  S=0 gates. Runs for heartbeat / nav / tier2_result (§5); not for inactive. */
-function advance(state: GaugeState, now: number, config: GaugeConfig): GaugeTransition {
+function advance(
+  state: GaugeState,
+  now: number,
+  config: GaugeConfig,
+  // The user is LEAVING the page this verdict belongs to (a `neutral` settlement). Integrate it
+  // — the drift that ran until they left is real and still owes S — but emit nothing that names
+  // it and touch none of the nag bookkeeping. A nag decided here would be about a page that is
+  // already gone from the screen: it can only be delivered on top of whatever the user just
+  // opened, which is a false alarm on an innocent page. Suppressing it inside advance (rather
+  // than filtering the effects afterwards) is what keeps nagN / renagDebt / pendingTier2 from
+  // recording a nudge that never happened — otherwise the next page inherits a spent nag
+  // counter and cannot be nudged until the re-nag debt rebuilds.
+  leaving = false,
+): GaugeTransition {
   const effects: GaugeEffect[] = [];
   const delta = clamp((now - state.updatedAt) / 1000, 0, config.gapCap);
 
@@ -122,14 +157,16 @@ function advance(state: GaugeState, now: number, config: GaugeConfig): GaugeTran
   }
 
   // 2) accel transition (uses the new m)
-  st = accelTransition(st, config, effects, now);
+  st = accelTransition(st, config, effects, now, leaving);
 
   // 3) integrate the gauge
   const sBefore = st.s;
   if (state.activeVerdict === "DRIFT") {
     const drain = config.rDrain * config.accel[st.accelTier] * w * delta;
     st = { ...st, s: Math.max(0, st.s - drain), renagDebt: st.renagDebt + drain };
-    st = maybeRenag(st, config, effects, now);
+    // The debt still accrues while leaving — it is carried, not forgiven, so the page the user
+    // lands on can nudge the moment its own verdict lands.
+    if (!leaving) st = maybeRenag(st, config, effects, now);
   } else {
     // Recovery accelerates with return-inertia depth (issue #122 "F"): slow just
     // after a return (m>=0 -> boost 1), accelerating as m deepens negative, capped.
@@ -145,20 +182,25 @@ function advance(state: GaugeState, now: number, config: GaugeConfig): GaugeTran
     st = { ...st, celebrateArmed: false };
   }
 
-  // episode end (m <= 0): reset renag schedule
-  if (st.m <= 0) st = { ...st, nagN: 0, renagDebt: 0 };
+  // episode end (m <= 0): reset renag schedule (and the Writer budget for the next episode)
+  if (st.m <= 0) st = { ...st, nagN: 0, renagDebt: 0, sZeroConfirms: 0 };
 
-  // S = 0 final gate.
+  // S = 0 final gate. Both entries are skipped while `leaving`: the crossing the settlement
+  // completes belongs to the page being left, and the already-at-zero entry below picks it up
+  // on the page the user actually lands on (sBefore is 0 there, so the crossing cannot recur).
   const atZeroDrift = state.activeVerdict === "DRIFT" && st.s <= 0;
   // Honor a fresh cached Tier-2 "ok" for the active page (same window sZeroGate uses), so a
   // page Tier-2 just confirmed on-goal isn't nudged by the recovery even if Tier-0 re-flags it.
   const lj = st.lastJudgment;
   const freshOk =
     lj != null && lj.pageKey === st.activePageKey && lj.flow === "ok" && now - lj.ts <= config.freshWindow * 1000;
-  if (atZeroDrift && sBefore > 0) {
+  const freshDrift =
+    lj != null && lj.pageKey === st.activePageKey && lj.flow === "drift" && now - lj.ts <= config.freshWindow * 1000;
+  if (!leaving && atZeroDrift && sBefore > 0) {
     // Normal downward crossing into 0 → confirm via Tier-2 (or nag directly if degraded).
     st = sZeroGate(st, config, effects, now);
   } else if (
+    !leaving &&
     atZeroDrift &&
     st.nagN === 0 &&
     !snoozed(st, now) &&
@@ -166,16 +208,30 @@ function advance(state: GaugeState, now: number, config: GaugeConfig): GaugeTran
     !effects.some((e) => e.type === "nag") && // never stack on a renag/celebrate already emitted this tick
     !(st.pendingTier2 != null && st.pendingTier2.reason === "s_zero" && st.pendingTier2.pageKey === st.activePageKey)
   ) {
-    // Recover a crossing nudge that was suppressed by a snooze (or carried over by the
-    // migration): the crossing edge can't recur (sBefore is already 0) and maybeRenag needs
-    // nagN>=1, so without this the user stays stuck with no nudge. Nudge DIRECTLY, not via a
-    // Tier-2 request: under S=0 navigation churn a fresh request resolves after the user moved
-    // on, the wiring cancels it (tier2_cancel) without advancing nagN, and the gate would
-    // re-fire every heartbeat — storming requests while never nudging. S=0/DRIFT is already
-    // sustained-drift evidence; nag directly and set nagN=1, so this fires at most once and
-    // the debt-based renag takes over.
-    effects.push({ type: "nag", pageKey: st.activePageKey as string });
-    st = { ...st, lastNagTs: now, nagN: st.nagN + 1, renagDebt: 0 };
+    // S is ALREADY 0 and this page is drifting: the crossing edge can't recur (sBefore is
+    // already 0) and maybeRenag needs nagN>=1, so without this gate the user stays stuck with
+    // no nudge. The common way to get here is arriving on a fresh off-goal page after the
+    // previous one drained the gauge — including the page the user opened while leaving the
+    // one that spent it.
+    //
+    // Confirm through Tier-2 rather than nagging on Tier-0/1 alone. This gate used to nudge
+    // directly, to avoid a request the user out-navigates being cancelled without advancing
+    // nagN — re-asking on every page while nudging on none. That traded false alarms for
+    // never missing one; the product wants the opposite trade, so the cost of a miss is
+    // accepted and the unconfirmed nag is not. Two things make the churn cheaper than it was:
+    // the pre-gate now cancels an out-navigated request BEFORE spending the judge call, and
+    // only the episode's first confirmation pays for the Writer, halving the round trip the
+    // repeats can be cancelled inside of.
+    //
+    // Degraded mode has no Tier-2 to ask (the confirm fails open to "ok" and would nudge
+    // NEVER), and a fresh cached drift verdict for this very page is already a confirmation —
+    // both nudge directly, exactly as the crossing gate above does.
+    if (st.degraded || freshDrift) {
+      effects.push({ type: "nag", pageKey: st.activePageKey as string });
+      st = { ...st, lastNagTs: now, nagN: st.nagN + 1, renagDebt: 0 };
+    } else {
+      st = requestSZero(st, effects, now);
+    }
   }
 
   return { state: { ...st, updatedAt: now }, effects };
@@ -264,11 +320,16 @@ export function reduceGauge(
     }
     case "neutral": {
       // Integrate the page they were on right up to this instant (a drift that ran until the
-      // navigation still counts and can even fire its S=0 gate), then drop the verdict. With
+      // navigation still counts and still owes S), then drop the verdict. With
       // activeVerdict = null, advance() early-returns — S and m freeze — until the dwell's nav
       // event supplies the new page's verdict and integration resumes all at once. Rebasing the
       // clock via advance is what keeps the frozen interval from being back-integrated then.
-      const adv = advance(state, event.ts, config);
+      //
+      // `leaving` — this settlement decides nothing ABOUT the page being left. It used to: the
+      // S=0 gate and the re-nag could both fire here, naming a page the user had already
+      // navigated off, so the nudge landed on whatever they had just opened. The debt is
+      // carried instead, and the page they land on nudges under its own verdict.
+      const adv = advance(state, event.ts, config, true);
       return {
         state: { ...adv.state, activePageKey: event.pageKey, activeVerdict: null, activeMargin: null },
         effects: adv.effects,

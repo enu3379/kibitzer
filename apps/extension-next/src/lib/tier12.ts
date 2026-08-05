@@ -49,6 +49,11 @@ export interface Tier2Context {
   recentTitles: readonly RecentTitle[]
   excerpt: string | null
   timeContext: Record<string, unknown> | null
+  // Pay for the second (message-writing) call once the judge says notify? The gauge decides —
+  // see GaugeEffect.request_tier2.useWriter. False returns the drift verdict with no message,
+  // which the nag delivery already knows how to render from the persona preset (the same path
+  // a Writer failure lands on). Defaults to true so an omitted context behaves as before.
+  useWriter?: boolean
 }
 
 // These Cloud models reason before answering; a small budget exhausts before the
@@ -291,6 +296,10 @@ export async function tier2Confirm(
   klog(`tier2 judge: ${decision.decision} (${decision.reasonCode}, basis=${decision.basis})`)
   if (decision.decision !== "notify") return { flow: "ok", message: null }
   if (!(await safeShouldContinue(shouldContinue))) return { flow: "ok", message: null, cancelled: true }
+  // Notify confirmed, but this request may not write its own message (a promotion, or a repeat
+  // s_zero confirmation while the user page-hops at S=0). Return the verdict alone — delivery
+  // falls back to the persona preset — and skip the second round trip entirely.
+  if (ctx.useWriter === false) return { flow: "drift", message: null }
   // Notify confirmed → write the nag in the selected persona's voice.
   const persona = await activePersona()
   const maxSentences = persona.maxSentences ?? DEFAULT_MAX_SENTENCES
