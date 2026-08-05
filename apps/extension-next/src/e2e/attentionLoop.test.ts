@@ -178,7 +178,7 @@ await import("../background.ts")
 // startupSettled, and without this the suite's first observations would stall on its 1.5 s
 // fallback timer instead. No goal exists yet, so the handler itself is a no-op.
 for (const fn of listeners["runtime.onStartup"]) await fn()
-const { extractActiveExcerpt, setActivePage, testNag } = await import("../lib/gaugeRuntime.ts")
+const { extractActiveExcerpt, PROVIDER_ALERT_ID, setActivePage, testNag } = await import("../lib/gaugeRuntime.ts")
 const { getGoal } = await import("../lib/session.ts")
 
 // --- drivers -----------------------------------------------------------------------------
@@ -580,6 +580,95 @@ test("E2E: an unreachable judge still nudges — a configured-but-dead Tier 2 mu
     // Every other scenario in this file assumes the degraded (no-provider) profile.
     providerCallsFail = false
     await send({ type: "disconnect-provider", provider: "ollama" })
+  }
+})
+
+test("E2E: Tier 1 keyed, Tier 2 routed to a keyless provider — issue #207's silent-mute config still nudges", async () => {
+  // The exact configuration issue #207 (확인 1) reported as silently muting Kibitzer forever:
+  // routes are saved per tier and setRoutes never validates key presence, so tier1 can point at
+  // a provider WITH keys while tier2 points at one WITHOUT. judgeEnabled() is then true (tier1
+  // is live), so the gauge is NOT degraded and asks Tier 2 to confirm at S=0 — but that route
+  // resolves to no provider at all. Before #204/#208 the resulting silence came back as a bare
+  // "ok" verdict: the gauge refunded S and no nudge ever fired, with no error surfaced anywhere.
+  //
+  // The dead-judge scenario above cannot catch a regression here: it keys BOTH tiers and fails
+  // the network calls, exercising the "asked but no answer" path (providerError set). This
+  // configuration never asks at all — the route resolves to null and providerError is
+  // deliberately unset (a keyless route is chosen Tier-0 mode, not a malfunction).
+  toasts.length = 0
+  notifications.length = 0
+  activeTab = { id: 41, url: "https://video.test/watch?v=panda", title: "귀여운 판다 영상 몰아보기", active: true, windowId: 1 }
+  await send({ type: "clear-log" }) // shared klog: an earlier scenario's final=DRIFT would satisfy the probe below
+  // Keys for ollama only; tier2 deliberately routed to a provider that has NO keys. This is a
+  // savable configuration — the settings API accepts it exactly as the options UI would.
+  await send({ type: "add-provider-key", provider: "ollama", name: "local", value: "test-key" })
+  await send({ type: "set-routes", routes: { tier1: { provider: "ollama", model: "llama3" }, tier2: { provider: "openai", model: "gpt-5.6-luna" } } })
+  // Tier 1 IS reachable in this configuration, but a live rescue could answer OK and stop the
+  // drain. Failing the call keeps the DRIFT verdict (fail-closed) — all this test needs from
+  // Tier 1. Tier 2 is unaffected: its route resolves to no provider before any call is made.
+  providerCallsFail = true
+  // The no-alert assertion below would pass vacuously otherwise: the dead-judge scenario above
+  // already stamped the provider alert's 6h throttle. Clear it so a wrongly-fired alert would
+  // actually surface here.
+  store.delete("kibitzer:provider-alert-ts")
+  try {
+    // Without this the scenario is vacuous: were the keyless tier2 route to disable the judge
+    // outright, degraded mode's S=0 gate would nudge directly, for reasons that have nothing to
+    // do with what is tested. The mute only ever existed because judgeEnabled stays true.
+    assert.equal(
+      (await send({ type: "get-state" })).judgeEnabled,
+      true,
+      "tier1 alone keeps the judge enabled — the gauge must take the confirm-first path, not degraded mode",
+    )
+    await send({ type: "set-goal", goal: "선형대수 고유값 문제 풀이", minutes: null })
+    let judged = false
+    for (let i = 0; i < 200 && !judged; i += 1) {
+      await settle(100)
+      await fireStartup()
+      judged = /final=DRIFT/.test((await send({ type: "get-log" })).text as string)
+    }
+    assert.ok(judged, "the off-goal page was judged DRIFT (the failed Tier-1 rescue keeps the verdict)")
+    await settle(200)
+
+    mock.timers.enable({ apis: ["Date"], now: Date.now() })
+    try {
+      // Count only real nudges (intervention toasts / kbz-<token> notification ids), as the
+      // dead-judge scenario does — an OS alert must not be able to satisfy this probe.
+      const nudgeShown = (): boolean =>
+        toasts.some((t) => t.kind === "intervention") || notifications.some((n) => n.id.startsWith("kbz-"))
+      let nagged = false
+      for (let i = 0; i < 200 && !nagged; i += 1) {
+        await beat(nudgeShown)
+        nagged = nudgeShown()
+      }
+      assert.ok(
+        nagged,
+        `the nudge still arrives when Tier 2 is routed to a keyless provider (S=${(await send({ type: "get-state" })).s})`,
+      )
+      const log = (await send({ type: "get-log" })).text as string
+      assert.match(
+        log,
+        /tier2 unavailable/,
+        `no judgment was obtained — must not read as an "ok" verdict. log tail:\n${log.slice(-1800)}`,
+      )
+      // What distinguishes this from the dead-judge scenario: nothing was ever ASKED, so this
+      // is deliberate Tier-0 mode, not an error — providerError stays unset and the
+      // provider-problem OS alert must not fire.
+      assert.ok(
+        !notifications.some((n) => n.id === PROVIDER_ALERT_ID),
+        "a keyless Tier-2 route is a configuration, not a provider failure — no alert",
+      )
+    } finally {
+      mock.timers.reset()
+    }
+  } finally {
+    // Every other scenario in this file assumes the degraded (no-provider) profile.
+    providerCallsFail = false
+    await send({ type: "disconnect-provider", provider: "openai" }) // also resets the tier2 route to its default
+    await send({ type: "disconnect-provider", provider: "ollama" })
+    // Re-stamp the alert throttle the dead-judge scenario left behind, so scenarios after this
+    // one see exactly the pre-existing-suite state.
+    store.set("kibitzer:provider-alert-ts", Date.now())
   }
 })
 
