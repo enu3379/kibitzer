@@ -118,25 +118,33 @@ export async function judgeEnabled(): Promise<boolean> {
   return p.tier1 !== null || p.tier2 !== null
 }
 
+export interface Tier1RescueResult {
+  verdict: JudgeVerdict
+  /** False when Tier 1 produced no judgment — the route has no keys, or the call failed.
+   *  The DRIFT is then Tier 0's verdict standing unrescued, and the caller must not record
+   *  tierReached=1 for a tier that never answered. */
+  answered: boolean
+}
+
 /** Let Tier 1 rescue a Tier-0 DRIFT (may return OK) or confirm it. Failure keeps DRIFT. */
 export async function tier1Rescue(
   goalText: string,
   title: string,
   urlHost: string,
   recentTitles: readonly RecentTitle[] = [],
-): Promise<JudgeVerdict> {
+): Promise<Tier1RescueResult> {
   const p = await providers()
-  if (!p.tier1) return "DRIFT"
+  if (!p.tier1) return { verdict: "DRIFT", answered: false }
   try {
     const result = await p.tier1.classifyTier1(
       buildTier1Payload({ rawText: goalText }, { title, urlHost }, recentTitles),
     )
     void recordProviderOk()
-    return result.verdict
+    return { verdict: result.verdict, answered: true }
   } catch (error) {
     void recordProviderError(error)
     klog(`tier1 error (keeping DRIFT): ${String(error)}`)
-    return "DRIFT"
+    return { verdict: "DRIFT", answered: false }
   }
 }
 
@@ -254,7 +262,7 @@ export async function enrichGoal(goalText: string): Promise<string[]> {
  *  "오늘 N번째" flavor and the fallback template index). */
 export async function tier2Confirm(
   goalText: string,
-  page: { title: string; urlHost: string; score: number; kind?: "web" | "local_pdf" },
+  page: { title: string; urlHost: string; score: number; kind?: "web" | "local_pdf"; tierReached?: number },
   ctx: Tier2Context = { nagCount: 1, naggingContext: {}, recentTitles: [], excerpt: null, timeContext: null },
   shouldContinue: () => Promise<boolean> = async () => true,
 ): Promise<Tier2Outcome> {
@@ -265,9 +273,11 @@ export async function tier2Confirm(
     title: page.title,
     urlHost: page.urlHost,
     verdict: "DRIFT" as const,
-    // Reaching the Tier-2 gate means the page escalated past Tier-0 and (Tier-2 requires an
-    // Ollama provider, so) Tier-1 ran — report tier_reached=1, not a hardcoded 0.
-    tierReached: 1,
+    // The tiers route independently, so a reachable Tier 2 proves nothing about Tier 1: in a
+    // Tier-2-only setup this gate is reached with Tier 1 never asked. tier_reached must come
+    // from the observe-time record; when the record has none (pre-field checkpoints, direct
+    // callers), 0 is the value that claims nothing.
+    tierReached: page.tierReached ?? 0,
     tier0Score: page.score,
   }
   let decision
