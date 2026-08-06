@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Kibitzer",
   "version": "0.3.0",
-  "description": "목표를 선언하면 브라우징을 조용히 지켜보다, 딴짓이 쌓일 때만 슬쩍 훈수를 두는 로컬 집중 도우미. 서버 없음 — 기본 판정도 기록도 내 브라우저 안에서만.",
+  "description": "목표를 선언하면 브라우징을 조용히 지켜보다, 딴짓이 쌓일 때만 슬쩍 훈수를 두는 몰입 도우미. 기본 판정도 기록도 내 브라우저 안에서만.",
   "minimum_chrome_version": "123",
   "incognito": "not_allowed",
   "content_security_policy": {
