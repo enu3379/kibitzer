@@ -28,15 +28,17 @@ import {
   disconnectProvider,
   getJudgeSettings,
   removeProviderKey,
+  routeKeys,
   setRoutes,
   toPublicSettings,
+  type JudgeSettings,
   type ProviderId,
   type TierName,
   type TierRoute,
 } from "./lib/providers.ts"
 import { getUsage } from "./lib/usage.ts"
 import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
-import { clearProviderHealth, getProviderHealth } from "./lib/providerHealth.ts"
+import { clearProviderHealth, getProviderHealth, tiersAffectedByProviderChange } from "./lib/providerHealth.ts"
 import { clearBadge } from "./lib/badge.ts"
 import { clearEvents, exportEvents, logEvent } from "./lib/events.ts"
 import { getSettings, inQuietHours, localPdfPolicyMatches, setSettings, type Settings } from "./lib/settings.ts"
@@ -741,6 +743,20 @@ async function enableLocalPdfObservation(sourceTabId: number): Promise<EnableLoc
   }
 }
 
+/** Run a provider-settings mutation, then drop the health records of exactly the tiers
+ *  it touched (routes compared before/after; `provider` names the key pool a key change
+ *  edited, null for a pure route save). When both routes share one provider, a key
+ *  change there clears both — a single-tier change never reaches across (#205). */
+async function mutateProviderSettings(
+  provider: ProviderId | null,
+  mutate: () => Promise<JudgeSettings>,
+): Promise<JudgeSettings> {
+  const before = (await getJudgeSettings()).routes
+  const updated = await mutate()
+  await clearProviderHealth(tiersAffectedByProviderChange(provider, before, updated.routes))
+  return updated
+}
+
 async function handleMessage(message: PopupMessage): Promise<unknown> {
   if (message?.type === "get-state") {
     // A popup opened in the first moments of a relaunch must not advance the gauge across a
@@ -758,11 +774,12 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
       const quiet = await quietNow(now)
       await dispatch((await browserPresent()) ? { type: "heartbeat", quiet, ts: now } : { type: "inactive", quiet, ts: now }, goal)
     }
-    const [state, enabled, persona, health] = await Promise.all([
+    const [state, enabled, persona, health, judgeSettings] = await Promise.all([
       currentState(),
       judgeEnabled(),
       getPersonaKey(),
       getProviderHealth(),
+      getJudgeSettings(),
     ])
     // Restart-policy surfaces: a parked session the setup view can resume (경우 ②, mutually
     // exclusive with a live goal by construction) and the continue-banner event (경우 ①).
@@ -776,6 +793,12 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
       persona,
       personas: personaChoices(),
       health,
+      // Keyless routes never show as errors, but the popup's consequence line needs them
+      // to say what still works (providerHealthView's 판정 불가 computation).
+      routeKeyless: {
+        tier1: routeKeys(judgeSettings, "tier1").length === 0,
+        tier2: routeKeys(judgeSettings, "tier2").length === 0,
+      },
       suspended: suspended
         ? {
             text: suspended.goal.text,
@@ -879,8 +902,9 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
   // Provider settings (options AI 판정 pane). Key values only ever travel INTO the
   // worker; responses carry masked keys via toPublicSettings. tier12 picks up every
   // change on its next call through the settings fingerprint — no cache reset needed.
-  // Mutations also clear the recorded provider error: the toolbar "!" mark must not
-  // keep accusing a config the user just changed.
+  // Mutations also clear the recorded provider error — the toolbar "!" mark must not
+  // keep accusing a config the user just changed — but only for the tier(s) the change
+  // actually touches: fixing Tier 1's key must not erase a live Tier-2 error (#205).
   if (message?.type === "get-judge-settings") {
     return toPublicSettings(await getJudgeSettings())
   }
@@ -888,22 +912,23 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     return toPublicSettings(await connectProvider(message.provider))
   }
   if (message?.type === "disconnect-provider" && message.provider) {
-    await clearProviderHealth()
-    return toPublicSettings(await disconnectProvider(message.provider))
+    const provider = message.provider
+    return toPublicSettings(await mutateProviderSettings(provider, () => disconnectProvider(provider)))
   }
   if (message?.type === "add-provider-key" && message.provider) {
-    await clearProviderHealth()
-    return toPublicSettings(
-      await addProviderKey(message.provider, message.name ?? "", message.value ?? ""),
-    )
+    const provider = message.provider
+    const name = message.name ?? ""
+    const value = message.value ?? ""
+    return toPublicSettings(await mutateProviderSettings(provider, () => addProviderKey(provider, name, value)))
   }
   if (message?.type === "remove-provider-key" && message.provider && message.keyId) {
-    await clearProviderHealth()
-    return toPublicSettings(await removeProviderKey(message.provider, message.keyId))
+    const provider = message.provider
+    const keyId = message.keyId
+    return toPublicSettings(await mutateProviderSettings(provider, () => removeProviderKey(provider, keyId)))
   }
   if (message?.type === "set-routes") {
-    await clearProviderHealth()
-    return toPublicSettings(await setRoutes(message.routes ?? {}))
+    const routes = message.routes ?? {}
+    return toPublicSettings(await mutateProviderSettings(null, () => setRoutes(routes)))
   }
   if (message?.type === "test-route" && message.tier && message.provider) {
     return await testRoute(message.tier, message.provider, message.model ?? "")

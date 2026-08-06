@@ -1,17 +1,41 @@
 // Surfaces LLM provider health so a mid-session failure (expired key, 429, 403, timeout)
-// isn't silent. tier12 records ok/error on each call; the popup shows a warning and that
-// Kibitzer has fallen back to Tier-0-only judging. Mirrors the server's provider-call
-// status tracking (apps/server/app/core/runtime_resources.py).
+// isn't silent. tier12 records ok/error on each call; the popup and toolbar mark report
+// per tier. The tiers route to independent provider+model pairs (providers.ts), so health
+// is keyed per tier — a single global slot let a Tier-1 success overwrite a live Tier-2
+// failure (#205). Within one tier, last-write-wins is the meaning of the slot: "that
+// tier's most recent call".
 
 import { ProviderHttpError, ProviderResponseError } from "../providers/errors.ts"
+import type { ProviderId, TierName, TierRoute } from "./providers.ts"
 
-const KEY = "kibitzer:provider-health:v1"
+// v2 keys: the v1 single-slot record (kibitzer:provider-health:v1) is transient display
+// state — it is simply orphaned, not migrated.
+const KEY = {
+  tier1: "kibitzer:provider-health:tier1:v2",
+  tier2: "kibitzer:provider-health:tier2:v2",
+} as const
 
-export interface ProviderHealth {
+/** A record this old no longer describes the provider's present. Enforced here on the
+ *  read side (getProviderHealth) so the popup and the toolbar mark cannot disagree;
+ *  formatAgo (providerHealthView.ts) uses the same constant for its expiry cut. */
+export const HEALTH_TTL_MS = 24 * 60 * 60_000
+
+/** Which Tier-2 call failed. The session-recap writer records as "writer" too — one
+ *  bucket; Tier 1 has no stage distinction in the UI. */
+export type Tier2Stage = "judge" | "writer"
+
+export interface TierHealth {
   ok: boolean
   kind: string
   message: string
   ts: number
+  /** Present on tier2 error records only. */
+  stage?: Tier2Stage
+}
+
+export interface ProviderHealthSnapshot {
+  tier1: TierHealth | null
+  tier2: TierHealth | null
 }
 
 /** Classify a provider failure into a short kind + Korean note. Never includes the
@@ -31,23 +55,54 @@ export function classifyProviderError(error: unknown): { kind: string; message: 
   return { kind: "error", message: String(error).slice(0, 80) }
 }
 
-export async function recordProviderOk(): Promise<void> {
-  await chrome.storage.local.set({ [KEY]: { ok: true, kind: "", message: "", ts: Date.now() } })
+export async function recordProviderOk(tier: TierName): Promise<void> {
+  await chrome.storage.local.set({ [KEY[tier]]: { ok: true, kind: "", message: "", ts: Date.now() } })
 }
 
-export async function recordProviderError(error: unknown): Promise<void> {
+// The overloads make the stage mandatory exactly where it is meaningful: every tier2
+// error names the call that failed; tier1 records never carry one.
+export async function recordProviderError(tier: "tier1", error: unknown): Promise<void>
+export async function recordProviderError(tier: "tier2", error: unknown, stage: Tier2Stage): Promise<void>
+export async function recordProviderError(tier: TierName, error: unknown, stage?: Tier2Stage): Promise<void> {
   const { kind, message } = classifyProviderError(error)
-  await chrome.storage.local.set({ [KEY]: { ok: false, kind, message, ts: Date.now() } })
+  const record: TierHealth = { ok: false, kind, message, ts: Date.now(), ...(stage ? { stage } : {}) }
+  await chrome.storage.local.set({ [KEY[tier]]: record })
 }
 
-export async function getProviderHealth(): Promise<ProviderHealth | null> {
-  const stored = await chrome.storage.local.get(KEY)
-  const value = stored[KEY]
-  return value && typeof value.ok === "boolean" ? (value as ProviderHealth) : null
+function liveRecord(value: unknown, now: number): TierHealth | null {
+  if (!value || typeof (value as TierHealth).ok !== "boolean") return null
+  const record = value as TierHealth
+  return now - record.ts >= HEALTH_TTL_MS ? null : record
 }
 
-/** Forget the last error — called when provider settings change, so the toolbar's
- *  alert mark doesn't keep accusing a config the user just fixed. */
-export async function clearProviderHealth(): Promise<void> {
-  await chrome.storage.local.remove(KEY)
+/** Per-tier health with the 24h expiry already applied — an expired record comes back
+ *  null, so no consumer can show it. */
+export async function getProviderHealth(now: number = Date.now()): Promise<ProviderHealthSnapshot> {
+  const stored = await chrome.storage.local.get([KEY.tier1, KEY.tier2])
+  return { tier1: liveRecord(stored[KEY.tier1], now), tier2: liveRecord(stored[KEY.tier2], now) }
+}
+
+/** Forget the named tiers' records — called when provider settings change, so the
+ *  toolbar's alert mark doesn't keep accusing a config the user just fixed. Tier-scoped:
+ *  fixing Tier 1's key must not erase a still-valid Tier-2 error display. */
+export async function clearProviderHealth(tiers: readonly TierName[]): Promise<void> {
+  if (tiers.length === 0) return
+  await chrome.storage.local.remove(tiers.map((tier) => KEY[tier]))
+}
+
+/** Which tiers a provider-settings mutation invalidates health for: a key change on
+ *  provider X touches every tier routed to X (before or after — mutations can also
+ *  reroute via the automatic-route logic), and any tier whose effective route changed.
+ *  Pass provider=null for a pure route save. */
+export function tiersAffectedByProviderChange(
+  provider: ProviderId | null,
+  before: { tier1: TierRoute; tier2: TierRoute },
+  after: { tier1: TierRoute; tier2: TierRoute },
+): TierName[] {
+  return (["tier1", "tier2"] as const).filter((tier) => {
+    const b = before[tier]
+    const a = after[tier]
+    if (provider != null && (b.provider === provider || a.provider === provider)) return true
+    return b.provider !== a.provider || b.model !== a.model
+  })
 }
