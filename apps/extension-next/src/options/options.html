@@ -140,6 +140,7 @@
       button.btn.danger { color: var(--err); border-color: var(--err); }
       button.btn.danger:hover { background: var(--err-soft); }
       button.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      button.btn#ajSave { padding: 6.5px 12px; }
       .btnrow { display: flex; gap: 8px; padding: 12px 0; flex-wrap: wrap; }
       .hint { font-size: 11.5px; color: var(--page-ink-3); margin: 4px 0 12px; word-break: break-word; }
       .hint.ok { color: var(--ok-fg); } .hint.err { color: var(--err-fg); }
@@ -392,10 +393,15 @@
                 <button class="btn backbtn hidden" type="button" title="추천 목록으로">목록</button>
               </span>
             </div>
-            <p class="hint" style="margin-top: 6px">
+            <p class="hint" style="margin-top: 6px; margin-bottom: 0">
               두 Tier 모두 Ollama Cloud 무료 계정으로 충분합니다.
             </p>
           </div>
+
+          <div class="btnrow" style="padding-top: 0">
+            <button class="btn primary" id="ajSave">저장</button>
+          </div>
+          <div class="hint" id="ajResult"></div>
 
           <div class="usec">
             <div class="uhead">
@@ -410,13 +416,8 @@
               <thead><tr><th>모델</th><th>호출</th><th>입력 토큰</th><th>출력 토큰</th></tr></thead>
               <tbody id="ajUsage"></tbody>
             </table>
-            <p class="hint" style="margin-bottom: 4px">제공자 응답의 usage 필드 기준 · 로컬에만 저장됩니다.</p>
+            <p class="hint" style="margin-bottom: 4px">제공자 응답의 usage 필드 기준. 로컬에만 저장됩니다.</p>
           </div>
-
-          <div class="btnrow">
-            <button class="btn primary" id="ajSave">저장</button>
-          </div>
-          <div class="hint" id="ajResult"></div>
 
           <details class="privacy">
             <summary>어떤 데이터가 전송되나요?</summary>
