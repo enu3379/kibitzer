@@ -101,8 +101,15 @@ function render(color: string | null, alert: AlertLevel | null): void {
   void applyStatusIcon(color, alert).catch(() => renderNativeBadge(color, alert))
 }
 
+// drawToken only serializes draws by the order render() was ENTERED — but each
+// updateBadge waits on a storage read first, so an older call whose read resolves late
+// would start its render after a newer one and win the token. Gate on the dispatch
+// order instead: only the latest updateBadge/clearBadge may render at all.
+let badgeRevision = 0
+
 export function updateBadge(state: GaugeState, goal: SessionGoal | null, now: number): void {
   if (!goal) return clearBadge()
+  const revision = ++badgeRevision
   let color = GREEN
   if (state.snoozedUntil && state.snoozedUntil > now) color = GREY
   else if (state.s < 33) color = RED
@@ -110,10 +117,15 @@ export function updateBadge(state: GaugeState, goal: SessionGoal | null, now: nu
   // Provider errors ride along as a "!" mark until a call succeeds, settings change, or
   // the record expires (getProviderHealth drops expired records — same cut as the popup).
   void getProviderHealth()
-    .then((health) => render(color, providerAlertLevel(health)))
-    .catch(() => render(color, null))
+    .then((health) => {
+      if (revision === badgeRevision) render(color, providerAlertLevel(health))
+    })
+    .catch(() => {
+      if (revision === badgeRevision) render(color, null)
+    })
 }
 
 export function clearBadge(): void {
+  badgeRevision += 1 // a pending health lookup must not repaint a cleared badge
   render(null, null)
 }
