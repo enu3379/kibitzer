@@ -454,7 +454,7 @@ function renderProviderBlocks(): void {
     })
 
     if (addOpenFor === profile.id) {
-      block.appendChild(buildKeyForm(profile.id, profile.keyHint))
+      block.appendChild(buildKeyForm(profile.id, profile.keyHint, keyList.length))
     } else {
       block.appendChild(
         button("kadd", "＋ 키 추가", () => {
@@ -473,12 +473,12 @@ function renderProviderBlocks(): void {
   }
 }
 
-function buildKeyForm(provider: ProviderId, keyHint: string): HTMLElement {
+function buildKeyForm(provider: ProviderId, keyHint: string, existingKeyCount: number): HTMLElement {
   const form = el("div", "kform")
   const name = document.createElement("input")
   name.type = "text"
   name.className = "f-name"
-  name.placeholder = "이름 (선택) — 예: 서브 계정"
+  name.value = `키 ${existingKeyCount + 1}`
   const key = document.createElement("input")
   key.type = "password"
   key.className = "f-key"
