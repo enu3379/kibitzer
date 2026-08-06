@@ -281,8 +281,11 @@ async function judgeAndDispatch(pending: PendingDwell): Promise<void> {
     await setActivePage({ pageKey, title, urlHost, score: 1, kind, localPdfPolicyRevision, tierReached: 0 })
     await recordObservation({ title, urlHost, verdict: "OK", ts: now }) // recent_titles / repeat context
     await noteJudged(pageKey, title, urlHost, "OK", now, epoch, await browserPresent()) // session-summary dwell/verdict
-    // No r0/tauOk: activeMargin stays null → full-speed recovery (the same event shape as
-    // the "관련 있어요" user-override OK).
+    // No r0/tauOk: no fresh margin is stored. The reducer RETAINS a stored margin when a
+    // degraded/tier1Absent nav omits the score, but arriving on this page went through
+    // `neutral`, which nulls it — so this recovery runs at full weight unless a same-page
+    // re-judge is still holding this page's own earlier margin. (Same event shape as the
+    // "관련 있어요" user-override OK.)
     await dispatch({ type: "nav", pageKey, verdict: "OK", quiet: await quietNow(now), ts: now }, goal)
     return
   }

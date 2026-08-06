@@ -135,3 +135,29 @@ test("tier1Absent alone does NOT nag unconfirmed at S=0 — a request_tier2 stil
   ])
   assert.ok(count(degraded.effects, "nag") >= 1, "degraded still nags directly at S=0")
 })
+
+test("the already-at-zero gate confirms via Tier 2 under tier1Absent, never nags directly", () => {
+  // The downward-crossing test above never exercises the already-at-zero branch under the flag:
+  // the crossing's own s_zero request stays pending and short-circuits it. Arrive on a fresh
+  // drifting page with S ALREADY 0 and the pending slot free — the third direct-nag site
+  // (`degraded || freshDrift` inside advance) must not gain a tier1Absent arm.
+  const alreadyZero: GaugeState = {
+    ...initGaugeState(),
+    s: 0,
+    activePageKey: "p",
+    activeVerdict: "DRIFT",
+    tier1Absent: true,
+    updatedAt: 0,
+  }
+  const { st, effects } = run(alreadyZero, [{ type: "heartbeat", ts: 60_000 }])
+  assert.equal(st.s, 0)
+  assert.equal(count(effects, "nag"), 0, "no unconfirmed nag from the already-at-zero gate")
+  assert.ok(
+    effects.some((e) => e.type === "request_tier2" && e.reason === "s_zero"),
+    "the gate asks Tier 2 instead",
+  )
+  const degradedZero = run({ ...alreadyZero, tier1Absent: false, degraded: true }, [
+    { type: "heartbeat", ts: 60_000 },
+  ])
+  assert.ok(count(degradedZero.effects, "nag") >= 1, "degraded's direct nag at this gate is kept")
+})

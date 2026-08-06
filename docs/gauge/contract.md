@@ -41,7 +41,8 @@ reduceGauge(state: GaugeState, event: GaugeEvent, config: GaugeConfig) -> GaugeT
 | `activePageKey` | string \| null | null | 현재 활성 페이지 키 (`host` + `url_path_hash`) |
 | `activeVerdict` | "OK" \| "DRIFT" \| null | null | 활성 페이지의 **유효** verdict (Tier2 오버라이드 반영) |
 | `degraded` | bool | false | 축퇴 모드 (Tier1/2 미가용) |
-| `activeMargin` | float \| null | null | 축퇴 모드용 `\|r0 − tauOk\|` (정상 모드 null) |
+| `tier1Absent` | bool | false | Tier1 라우트에 제공자 없음(키 없음, 관측 시점 기준) — Tier-0 verdict가 무필터로 적분되므로 §5의 마진 가중 `w`**만** 빌린다. 승격 자동 확정·무확인 S=0 나깅은 여전히 `degraded` 전용. 키는 있으나 호출이 실패한 Tier1은 해당 없음(전속 유지). 두 티어 모두 부재면 `degraded`도 참이 되어 그쪽이 지배한다 |
+| `activeMargin` | float \| null | null | 마진 가중용 `\|r0 − tauOk\|` (`degraded`·`tier1Absent` 둘 다 아니면 null) |
 | `pendingTier2` | {reason,tier,pageKey,requestedAt} \| null | null | Tier2 응답 대기 (승격/ S=0) |
 | `lastJudgment` | {pageKey,flow,ts} \| null | null | Tier2 판정 캐시 (fresh_window) |
 | `nagN` | int | 0 | 이번 에피소드 나깅 순번 (m≤0에서 리셋) |
@@ -59,15 +60,18 @@ IndexedDB의 gauge checkpoint는 이 구조를 직렬화한다.
 
 | type | fields | source |
 |---|---|---|
-| `nav` | `pageKey, verdict("OK"\|"DRIFT"), r0?, tauOk?, degraded?, quiet?, ts` | extension Tier 0/1 observation pipeline. 관찰은 창 포커스만 보고 presence는 보지 않으므로 `quiet`를 스스로 실어 온다 |
+| `nav` | `pageKey, verdict("OK"\|"DRIFT"), r0?, tauOk?, degraded?, tier1Absent?, quiet?, ts` | extension Tier 0/1 observation pipeline. 관찰은 창 포커스만 보고 presence는 보지 않으므로 `quiet`를 스스로 실어 온다 |
 | `heartbeat` | `quiet?, ts` | presence 하트비트 틱 (활성 중). `quiet`는 조용한 시간 창을 재기록한다(생략 시 기존 값 유지) |
 | `inactive` | `quiet?, ts` | 자리 비움/탭 블러 — 적분 정지. 부재 중 유일하게 도는 틱이라 `quiet`를 함께 실어 창을 갱신한다 |
 | `tier2_result` | `flow("drift"\|"ok"), pageKey, ts` | Tier2 Judge 응답 (승격/S=0 관문) |
 | `snooze` | `until, ts` | 사용자 스누즈 |
 
-`nav`은 활성 페이지·verdict를 교체하고 즉발 효과는 없다(§4). `r0`/`tauOk`는 축퇴 모드
-마진용이며 정상 모드에선 무시. 중복 이벤트(동일 사건 재전달)는 호출부가 event id로
-걸러 reducer에 넣지 않는다 — reducer는 들어온 이벤트를 항상 적분한다.
+`nav`은 활성 페이지·verdict를 교체하고 즉발 효과는 없다(§4). `r0`/`tauOk`는 마진 가중용이며
+`degraded`·`tier1Absent` 둘 다 아니면 무시(마진은 null로 지워진다). `degraded`/`tier1Absent`는
+관측 시점의 라우트 상태를 재기록한다(생략 시 기존 값 유지) — `tier1Absent`는 라우트에
+제공자가 **없음**만 뜻하며, 키 있는 Tier1의 호출 실패는 싣지 않는다. 중복 이벤트(동일 사건
+재전달)는 호출부가 event id로 걸러 reducer에 넣지 않는다 — reducer는 들어온 이벤트를 항상
+적분한다.
 
 확장 배선만 발행하고 공유 픽스처는 발행하지 않는 **배선 전용** 이벤트가 셋 더 있다. 파이썬
 트랙의 패리티 대상이 아니므로 위 표에는 넣지 않는다.
@@ -98,7 +102,9 @@ IndexedDB의 gauge checkpoint는 이 구조를 직렬화한다.
 # advance는 Δ를 초로 변환해 적분한다:
 Δ = clamp((event.ts - state.updatedAt) / 1000, 0, config.gapCap)   # 초. inactive면 이후 Δ 정지
 d = (activeVerdict == "DRIFT") ? +1 : -1
-w = state.degraded ? f(activeMargin) : 1.0                    # f(x)=clamp((x/M)^p,0,1)
+w = (state.degraded or state.tier1Absent) ? f(activeMargin) : 1.0   # f(x)=clamp((x/M)^p,0,1)
+# tier1Absent가 빌리는 것은 이 w뿐이다. 아래 승격 자동 확정과 §5.2b/§6의 무확인 나깅은
+# 계속 degraded에만 걸린다 — Tier2가 살아 있으므로 confirm-first 유지.
 m' = m + (d - m) * (1 - exp(-Δ / tauM)) * w
 # 가속 전이(히스테리시스): m'≥T_up[tier] → 승격 후보(정상:request_tier2 emit·대기 / 축퇴:즉시 승격)
 #                          m'≤T_down[tier] → 즉시 강등.  대기 중엔 현재 tier 배율로 계속 적분.
