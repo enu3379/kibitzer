@@ -4,6 +4,8 @@ import test from "node:test"
 import type { ProviderId } from "../lib/providers.ts"
 
 import {
+  CONFIRM_COPY,
+  LOCAL_ONLY_STATUS,
   classifyAiConfig,
   confirmTierForSave,
   decideSaveClick,
@@ -89,8 +91,17 @@ test("reconcileHalfSignature keeps an acknowledged half only while it still hold
     reconcileHalfSignature("tier2:ollama", half, { ollama: keys(1), gemini: keys(1) }),
     null,
   )
-  // Removing that key again recreates the half, but does NOT re-acknowledge it.
-  assert.equal(reconcileHalfSignature(null, half, { ollama: [], gemini: keys(1) }), null)
+})
+
+test("reconcileHalfSignature never manufactures an acknowledgment", () => {
+  // The saved config IS half in every case below — a reconcile that answered with the
+  // current signature would acknowledge a half the user never saved, silencing the
+  // key-removal confirm. It may only ever keep prevSig or void it.
+  const accounts: AccountKeyLists = { ollama: [], gemini: keys(1) }
+  assert.equal(reconcileHalfSignature(null, routes("gemini", "ollama"), accounts), null)
+  assert.equal(reconcileHalfSignature(null, routes("ollama", "ollama"), accounts), null)
+  // A stale acknowledgment of a DIFFERENT half voids — it must not update to the new one.
+  assert.equal(reconcileHalfSignature("tier1:ollama", routes("gemini", "ollama"), accounts), null)
 })
 
 // --- confirm trigger matrix ------------------------------------------------------
@@ -161,6 +172,20 @@ test("first qualifying click asks, second click passes", () => {
   // The pending tier is the only state the second click needs — it always saves.
   const second = decideSaveClick("tier2", null, draft, accounts, untouched)
   assert.deepEqual(second, { action: "save" })
+})
+
+// --- verbatim copy ---------------------------------------------------------------
+
+test("status line and confirm copy are pinned verbatim — a rewording fails here", () => {
+  assert.equal(LOCAL_ONLY_STATUS, "AI 미사용 — 로컬 판정과 준비된 훈수 문구만으로 동작 중이에요")
+  assert.equal(
+    CONFIRM_COPY.tier1,
+    "Tier 1이 키 없는 프로바이더를 가리켜요 — 멀쩡한 페이지에서 훈수를 받을 수도 있어요. 한 번 더 누르면 그대로 저장해요.",
+  )
+  assert.equal(
+    CONFIRM_COPY.tier2,
+    "Tier 2가 키 없는 프로바이더를 가리켜요 — 내용 확인 없이 준비된 문구로만 훈수하게 돼요. 한 번 더 누르면 그대로 저장해요.",
+  )
 })
 
 test("a click with nothing to confirm saves immediately", () => {

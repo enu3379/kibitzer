@@ -737,6 +737,10 @@ async function runRouteTest(tier: TierName): Promise<void> {
     provider: d.provider,
     model: d.model,
   })) as RouteTestResult | undefined
+  // A test result is new information about the premise the pending confirm was built
+  // on — and both branches below may overwrite the confirm copy in ajResult. Disarm
+  // the two-step button rather than leave "그대로 저장" armed with its reason gone.
+  resetPendingConfirm()
   if (result?.ok) {
     chips[tier] = { kind: "ok", chip: "✓ 방금 전", text: `정상 — ${result.detail}` }
     if (ajResult.classList.contains("err")) {
