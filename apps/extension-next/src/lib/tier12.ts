@@ -118,6 +118,20 @@ export async function judgeEnabled(): Promise<boolean> {
   return p.tier1 !== null || p.tier2 !== null
 }
 
+export interface TierAvailability {
+  tier1: boolean
+  tier2: boolean
+}
+
+/** Per-tier "does this route resolve to a provider" — the same makeTier/providers() answer the
+ *  judge calls use, so callers (background's nav dispatch) never re-derive routeKeys themselves.
+ *  False means the route's provider has no keys; it says nothing about whether a keyed provider
+ *  is currently reachable. */
+export async function tierAvailability(): Promise<TierAvailability> {
+  const p = await providers()
+  return { tier1: p.tier1 !== null, tier2: p.tier2 !== null }
+}
+
 export interface Tier1RescueResult {
   verdict: JudgeVerdict
   /** False when Tier 1 produced no judgment — the route has no keys, or the call failed.
@@ -234,15 +248,26 @@ export async function testRoute(
 }
 
 /** Expand the goal into cross-lingual search phrases via Tier 1 (retries the parse once,
- *  matching the server). Empty array if Ollama is off or the call fails. */
+ *  matching the server). Empty array if no provider is available or the call fails.
+ *
+ *  Tier-1 route resolving to NO provider (no keys) → the one enrichment call per goal
+ *  declaration runs through the Tier-2 route instead (issue #207 결정 C): without it a
+ *  Tier-2-only setup loses the cross-lingual derived phrases and Tier 0 weakens exactly where
+ *  it has no rescue filter. Boundary: this is a fallback for a route that DOES NOT EXIST,
+ *  never a retry-elsewhere for a keyed route whose call fails — automatic failover between
+ *  providers is a separate open question (#207 확인 3) and must not creep in here. Enrichment
+ *  also participates in provider health NOT AT ALL (neither ok nor error, fallback call
+ *  included): it is a one-shot enhancement, not a judge, and must not flip the popup's
+ *  health line either way. */
 export async function enrichGoal(goalText: string): Promise<string[]> {
   const p = await providers()
-  if (!p.tier1) return []
+  const judge = p.tier1 ?? p.tier2
+  if (!judge) return []
   const prompt = buildEnrichmentPrompt(goalText, MAX_PHRASES)
   let lastError: unknown = null
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const content = await p.tier1.completeGoalEnrichment(prompt, ENRICH_TIMEOUT_MS)
+      const content = await judge.completeGoalEnrichment(prompt, ENRICH_TIMEOUT_MS)
       return withRawResponseDebug(content, "goal enrichment", "content_json", () => (
         parseEnrichmentResponse(content, MAX_PHRASES)
       ))

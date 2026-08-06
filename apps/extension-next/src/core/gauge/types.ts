@@ -34,7 +34,19 @@ export interface GaugeState {
   activePageKey: string | null;
   activeVerdict: Verdict | null; // effective verdict (Tier2 override applied)
   degraded: boolean;
-  activeMargin: number | null; // |r0 - tauOk| for degraded mode
+  // Tier 1's route resolves to NO provider (no keys) at observe time, so Tier-0 DRIFT verdicts
+  // stand with no rescue filter (issue #207). The ONLY thing this flag does is apply the
+  // margin-confidence weight to integration in advance() (drain AND recovery), exactly as
+  // degraded mode applies it. It does NOT borrow degraded's other behaviors: accel
+  // auto-promotion and the unconfirmed S=0 nag stay keyed on `degraded` alone — in the
+  // Tier-2-only configuration Tier 2 is alive, so confirm-first is preserved. It does NOT mean
+  // "Tier 1 failed": a keyed route whose call fails keeps full weight (the rescue ran and kept
+  // DRIFT deliberately — a different policy from a route that does not exist). When BOTH tiers
+  // are absent `degraded` is also true and governs; this flag changes behavior only while
+  // degraded is false. Absent on checkpoints written before the field existed ⇒ read as false
+  // (`=== true`, like quiet).
+  tier1Absent: boolean;
+  activeMargin: number | null; // |r0 - tauOk| for margin damping (degraded mode, or tier1Absent)
   pendingTier2: PendingTier2 | null;
   tier2ReqSeq: number; // monotonic source of PendingTier2.requestId (never reused within a state's life)
   lastJudgment: Judgment | null;
@@ -93,7 +105,10 @@ export interface GaugeConfig {
 
 /** GaugeEvent — contract §3 (discriminated union on `type`). ts is epoch ms. */
 export type GaugeEvent =
-  | { type: "nav"; pageKey: string; verdict: Verdict; r0?: number; tauOk?: number; degraded?: boolean; quiet?: boolean; ts: number }
+  // `tier1Absent` re-stamps GaugeState.tier1Absent from the live route settings at observe time
+  // (omitted ⇒ keep what's stored, the same way `degraded` behaves). See GaugeState.tier1Absent
+  // for what the flag does — and deliberately does not — change.
+  | { type: "nav"; pageKey: string; verdict: Verdict; r0?: number; tauOk?: number; degraded?: boolean; tier1Absent?: boolean; quiet?: boolean; ts: number }
   // `quiet` re-stamps GaugeState.quiet from the live setting (omitted ⇒ keep what's stored, the
   // same way `nav` carries `degraded`). Every event that can DECIDE a nag carries it, and the
   // once-a-minute tick carries it whether the user is present or away — `inactive` integrates
@@ -150,6 +165,7 @@ export function initGaugeState(): GaugeState {
     activePageKey: null,
     activeVerdict: null,
     degraded: false,
+    tier1Absent: false,
     activeMargin: null,
     pendingTier2: null,
     tier2ReqSeq: 0,

@@ -18,8 +18,10 @@ function clamp(x: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, x));
 }
 
-/** Degraded-mode speed multiplier f(margin) = clamp((|margin|/M)^p, 0, 1). With no
- *  margin available, fall back to full weight (1.0) — matches the Python track. */
+/** Margin-confidence speed multiplier f(margin) = clamp((|margin|/M)^p, 0, 1). With no
+ *  margin available, fall back to full weight (1.0) — matches the Python track. Applied when
+ *  no LLM filtered the Tier-0 verdict: degraded mode (no tier has a provider), and the
+ *  tier1Absent Tier-2-only configuration (see GaugeState.tier1Absent). */
 function marginWeight(state: GaugeState, config: GaugeConfig): number {
   if (state.activeMargin == null || config.degradedM <= 0) return 1.0;
   return clamp(Math.pow(Math.abs(state.activeMargin) / config.degradedM, config.degradedP), 0, 1);
@@ -163,7 +165,11 @@ function advance(
   }
 
   const d = state.activeVerdict === "DRIFT" ? 1 : -1;
-  const w = state.degraded ? marginWeight(state, config) : 1.0;
+  // The weight — and ONLY the weight — is shared with degraded mode when Tier 1 is absent: the
+  // Tier-0 verdict integrated here had no rescue filter in either case, so its distance from the
+  // threshold is the confidence there is. Everything else in this function (accel auto-promotion,
+  // the unconfirmed S=0 nag) keys on `degraded` alone. `=== true`: absent on old checkpoints.
+  const w = state.degraded || state.tier1Absent === true ? marginWeight(state, config) : 1.0;
 
   // 1) inertia
   let st: GaugeState = { ...state };
@@ -334,7 +340,10 @@ export function reduceGauge(
         activeVerdict: event.verdict,
       };
       if (event.degraded != null) st = { ...st, degraded: event.degraded };
-      if (st.degraded) {
+      if (event.tier1Absent != null) st = { ...st, tier1Absent: event.tier1Absent };
+      // Margin is stored whenever some consumer will weight by it: degraded mode (which implies
+      // both tiers absent, so it wins precedence) or the Tier-2-only tier1Absent configuration.
+      if (st.degraded || st.tier1Absent === true) {
         if (event.r0 != null && event.tauOk != null) st = { ...st, activeMargin: Math.abs(event.r0 - event.tauOk) };
       } else {
         st = { ...st, activeMargin: null };

@@ -21,7 +21,7 @@ import { embedText, embedTexts, judgeTier0 } from "./lib/tier0.ts"
 import { addExemplar, admissionEligible, admitAnchor, loadRefs, setDerived } from "./lib/relevance.ts"
 import { filterDerivedPhrases, MAX_PHRASES } from "./lib/goalEnrichment.ts"
 import { currentState, dispatch, enterNeutral, flushOutbox, PROVIDER_ALERT_ID, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
-import { enrichGoal, judgeEnabled, testRoute, tier1Rescue } from "./lib/tier12.ts"
+import { enrichGoal, judgeEnabled, testRoute, tier1Rescue, tierAvailability } from "./lib/tier12.ts"
 import {
   addProviderKey,
   connectProvider,
@@ -290,7 +290,10 @@ async function judgeAndDispatch(pending: PendingDwell): Promise<void> {
   const tauOk = judgeSettings.tauOk
   const refs = await loadRefs()
   const { score, verdict: tier0Verdict, vector: titleVec, parts } = await judgeTier0(goal.text, title, tauOk, refs)
-  const enabled = await judgeEnabled()
+  // Availability read at observe time, so the flags below reflect the CURRENT settings (a key
+  // added or removed mid-session changes the very next nav), same as `degraded: !enabled`.
+  const available = await tierAvailability()
+  const enabled = available.tier1 || available.tier2
   let verdict = tier0Verdict
   let tierReached = 0
   if (verdict === "DRIFT" && enabled) {
@@ -334,7 +337,10 @@ async function judgeAndDispatch(pending: PendingDwell): Promise<void> {
   await dispatch(
     // `quiet` off the settings already read for tauOk: observation is gated on window focus, not
     // on presence, so this dispatch can land while the once-a-minute tick is paused.
-    { type: "nav", pageKey, verdict, r0: score, tauOk, quiet: inQuietHours(judgeSettings.quietHours, now), degraded: !enabled, ts: now },
+    // `tier1Absent` — Tier-0 verdicts unfiltered by a Tier-1 rescue because that route resolves
+    // to no provider (GaugeState.tier1Absent). Route-level absence only: a keyed Tier-1 whose
+    // call failed above leaves this false on purpose.
+    { type: "nav", pageKey, verdict, r0: score, tauOk, quiet: inQuietHours(judgeSettings.quietHours, now), degraded: !enabled, tier1Absent: !available.tier1, ts: now },
     goal,
   )
 }

@@ -1,0 +1,51 @@
+{
+  "name": "tier1-absent-margin-damping",
+  "kind": "golden",
+  "description": "Issue #207 'F': Tier 1's route resolves to no provider (nav carries tier1Absent=true) while Tier 2 works, so the unfiltered Tier-0 DRIFT integrates under the margin weight, exactly as degraded mode would. r0=0.54 vs tauOk=0.59 stores margin 0.05, w=(0.05/0.25)^3=0.008: the same 60s heartbeat that drains 6.0 in fixture 01 drains 0.048 here. Only the weight is borrowed — degraded stays false, and nothing auto-promotes or nags.",
+  "config": {
+    "rDrain": 0.1,
+    "rRecover": 0.1,
+    "accel": [1.0, 1.5, 2.5],
+    "tauM": 300,
+    "tUp": [0.5, 0.8],
+    "tDown": [0.2, 0.5],
+    "kRecover": 2,
+    "recoverGamma": 3.0,
+    "recoverFMax": 6.0,
+    "gapCap": 90,
+    "rRenag": 40,
+    "bBackoff": 2.0,
+    "rRenagMax": 320,
+    "cArm": 20,
+    "cCelebrate": 80,
+    "rDismiss": 30,
+    "bRefund": 10,
+    "freshWindow": 600,
+    "degradedP": 3,
+    "degradedM": 0.25
+  },
+  "initial_state": {
+    "s": 100,
+    "m": 0,
+    "accelTier": 0,
+    "updatedAt": 0,
+    "degraded": false
+  },
+  "events": [
+    { "type": "nav", "pageKey": "example.com/drift", "verdict": "DRIFT", "r0": 0.54, "tauOk": 0.59, "tier1Absent": true, "ts": 0 },
+    { "type": "heartbeat", "ts": 60000 }
+  ],
+  "tolerance": 1e-6,
+  "expected": {
+    "final_state": {
+      "s": 99.952,
+      "m": 0.0014501539753761455,
+      "accelTier": 0,
+      "updatedAt": 60000,
+      "degraded": false,
+      "tier1Absent": true,
+      "activeMargin": 0.05
+    },
+    "effects_contain": []
+  }
+}

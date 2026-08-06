@@ -18,7 +18,7 @@ const store: Record<string, unknown> = {}
   },
 }
 
-const { safeShouldContinue, tier1Rescue, tier2Confirm } = await import("./tier12.ts")
+const { enrichGoal, safeShouldContinue, tier1Rescue, tier2Confirm } = await import("./tier12.ts")
 
 test("safeShouldContinue preserves a successful policy result", async () => {
   assert.equal(await safeShouldContinue(async () => true), true)
@@ -175,6 +175,103 @@ test("the Tier-2 judge is told the observe-time tier_reached, never an assumed 1
     })
     assert.equal(outcome.flow, "ok")
     assert.equal(sentTierReached(requestBodies[2]), 0)
+  } finally {
+    ;(globalThis as { fetch: unknown }).fetch = realFetch
+  }
+})
+
+// Goal enrichment routing (issue #207 결정 C): the one enrichment call per goal declaration may
+// fall back to the Tier-2 route when Tier 1's route resolves to NO provider — and only then.
+// A keyed Tier 1 whose call fails gets no retry elsewhere (automatic failover is #207 확인 3,
+// deliberately out of scope), and enrichment never touches provider health in any direction.
+
+const HEALTH_KEY = "kibitzer:provider-health:v1"
+const enrichResponse = (): Response =>
+  new Response(
+    JSON.stringify({ message: { content: '{"phrases": ["파이썬 알고리즘 풀이", "python algorithm practice"]}' } }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  )
+
+test("a keyed Tier-1 route runs goal enrichment itself, as before", async () => {
+  const { setRoutes } = await import("./providers.ts")
+  // Fingerprint bust (see the tests above): a fresh model makes providers() rebuild under
+  // this test's fetch mock.
+  await setRoutes({ tier1: { provider: "ollama", model: "gpt-oss:20b" } })
+  const requests: { url: string; model: unknown }[] = []
+  const realFetch = globalThis.fetch
+  ;(globalThis as { fetch: unknown }).fetch = async (url: unknown, init?: { body?: unknown }) => {
+    requests.push({ url: String(url), model: (JSON.parse(String(init?.body)) as { model: unknown }).model })
+    return enrichResponse()
+  }
+  try {
+    const phrases = await enrichGoal("파이썬 알고리즘 문제 풀이")
+    assert.equal(phrases.length, 2)
+    assert.equal(requests.length, 1)
+    assert.equal(requests[0].model, "gpt-oss:20b", "the Tier-1 route's own model was asked")
+  } finally {
+    ;(globalThis as { fetch: unknown }).fetch = realFetch
+  }
+})
+
+test("a keyless Tier-1 route sends goal enrichment through the Tier-2 route instead", async () => {
+  const { setRoutes } = await import("./providers.ts")
+  // The Tier-2-only configuration: tier1 → a provider with no stored keys, tier2 keyed.
+  await setRoutes({
+    tier1: { provider: "gemini", model: "gemini-3.1-flash-lite" },
+    tier2: { provider: "ollama", model: "qwen3.5:397b" },
+  })
+  const healthBefore = JSON.stringify(store[HEALTH_KEY] ?? null)
+  const requests: { url: string; model: unknown }[] = []
+  const realFetch = globalThis.fetch
+  ;(globalThis as { fetch: unknown }).fetch = async (url: unknown, init?: { body?: unknown }) => {
+    requests.push({ url: String(url), model: (JSON.parse(String(init?.body)) as { model: unknown }).model })
+    return enrichResponse()
+  }
+  try {
+    const phrases = await enrichGoal("파이썬 알고리즘 문제 풀이")
+    assert.equal(phrases.length, 2, "enrichment still produced derived phrases")
+    assert.equal(requests.length, 1)
+    assert.equal(requests[0].model, "qwen3.5:397b", "the call went to the Tier-2 route's model")
+    assert.ok(requests[0].url.includes("ollama.com"), "…via the Tier-2 route's provider")
+    assert.equal(JSON.stringify(store[HEALTH_KEY] ?? null), healthBefore, "no health record, even on success")
+  } finally {
+    ;(globalThis as { fetch: unknown }).fetch = realFetch
+  }
+})
+
+test("a failing fallback enrichment call yields [] and leaves provider health untouched", async () => {
+  const { setRoutes } = await import("./providers.ts")
+  await setRoutes({ tier2: { provider: "ollama", model: "gemma4:31b" } }) // fingerprint bust, tier1 stays keyless
+  const healthBefore = JSON.stringify(store[HEALTH_KEY] ?? null)
+  const realFetch = globalThis.fetch
+  ;(globalThis as { fetch: unknown }).fetch = async () => {
+    throw new Error("ECONNREFUSED")
+  }
+  try {
+    const phrases = await enrichGoal("파이썬 알고리즘 문제 풀이")
+    assert.deepEqual(phrases, [], "failure degrades to no derived phrases")
+    assert.equal(JSON.stringify(store[HEALTH_KEY] ?? null), healthBefore, "enrichment never records an error")
+  } finally {
+    ;(globalThis as { fetch: unknown }).fetch = realFetch
+  }
+})
+
+test("with BOTH routes keyless, goal enrichment makes no call at all", async () => {
+  const { setRoutes } = await import("./providers.ts")
+  await setRoutes({
+    tier1: { provider: "gemini", model: "gemini-3.1-flash-lite" },
+    tier2: { provider: "gemini", model: "gemini-3.6-flash" },
+  })
+  let calls = 0
+  const realFetch = globalThis.fetch
+  ;(globalThis as { fetch: unknown }).fetch = async () => {
+    calls += 1
+    throw new Error("must not be called")
+  }
+  try {
+    const phrases = await enrichGoal("파이썬 알고리즘 문제 풀이")
+    assert.deepEqual(phrases, [])
+    assert.equal(calls, 0, "no provider ⇒ no network")
   } finally {
     ;(globalThis as { fetch: unknown }).fetch = realFetch
   }

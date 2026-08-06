@@ -747,6 +747,32 @@ creation AND only on the page that caused it" (user-decided — supersedes the 5
 drain TTL for nags, which that work should absorb), and whether celebrate gets an
 age cap at all.
 
+### D19 — Tier-2-only softening: enrichment fallback + borrowed margin damping → DECIDED (2026-08-06)
+
+Issue #207: when Tier 1's route resolves to no provider but Tier 2's does, Tier-0
+false positives stand unrescued AND goal enrichment silently returns `[]`, so the
+gauge drains on innocent pages and expensive Tier-2 confirmations fire more often.
+Two decisions (C and F in the issue), both scoped by the same boundary:
+
+- **C — goal enrichment falls back to the Tier 2 route** (`tier12.enrichGoal`):
+  one call per goal declaration, negligible cost, and it restores the cross-lingual
+  derived phrases exactly where Tier 0 has no rescue filter. Enrichment still
+  participates in provider health NOT AT ALL (neither ok nor error), fallback call
+  included.
+- **F — margin damping borrowed from degraded mode**: a `nav` now carries
+  `tier1Absent` (route-level absence, from the same `providers()` answer the judge
+  calls use), and `advance()` applies `marginWeight` to drain AND recovery when it
+  is set — the closer the Tier-0 score sits to `tauOk`, the slower the gauge moves.
+  ONLY the weight is borrowed: accel auto-promotion and the unconfirmed S=0 nag
+  remain keyed on `degraded` (both tiers absent). Tier 2 is alive here, so
+  confirm-first stays. New shared fixture `06-tier1-absent-margin-damping`;
+  existing fixtures untouched.
+
+**Boundary (both C and F):** this covers a route that DOES NOT EXIST (no keys),
+never a keyed route whose call fails — a failing Tier 1 already ran and kept DRIFT
+deliberately (fail-closed), and automatic failover between providers is a separate
+open question (#207 확인 3) that this change must not pre-empt.
+
 ### D14 — Serverless cutover scope and preservation → RESOLVED (2026-07-24)
 
 The active product becomes the single TypeScript MV3 runtime in
@@ -1294,3 +1320,11 @@ the extension badge.
   nags (>5 min / no session) dropped at drain. Options toggle, popup banner +
   이어가기 UI, `05-inactive` shared fixture, sessionRestore/session/settings
   tests.
+- 2026-08-06: D19 decided and implemented — Tier-2-only softening (#207 C+F):
+  goal enrichment falls back to the Tier 2 route when Tier 1's route resolves
+  to no provider (health-recording still none), and the gauge borrows degraded
+  mode's margin damping (drain AND recovery — only the weight; auto-promotion
+  and the unconfirmed S=0 nag stay degraded-only) via a new `tier1Absent` nav
+  flag. Boundary: route absence only — a keyed-but-failing Tier 1 gets neither
+  the fallback nor the damping (failover stays open as #207 확인 3). New shared
+  fixture `06-tier1-absent-margin-damping`; existing fixtures byte-identical.
