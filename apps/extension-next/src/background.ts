@@ -743,17 +743,37 @@ async function enableLocalPdfObservation(sourceTabId: number): Promise<EnableLoc
   }
 }
 
+/** The identity of a provider's key pool: key ids are minted per add and never edited,
+ *  so an unchanged id list means no key change happened at all. */
+function keyPoolFingerprint(settings: JudgeSettings, provider: ProviderId): string {
+  return JSON.stringify((settings.accounts[provider]?.keys ?? []).map((k) => k.id))
+}
+
 /** Run a provider-settings mutation, then drop the health records of exactly the tiers
  *  it touched (routes compared before/after; `provider` names the key pool a key change
  *  edited, null for a pure route save). When both routes share one provider, a key
- *  change there clears both — a single-tier change never reaches across (#205). */
+ *  change there clears both — a single-tier change never reaches across (#205).
+ *
+ *  Naming a provider is not touching it: several mutations can be no-ops (disconnecting
+ *  ollama is deliberately refused in providers.ts, empty key values are rejected, an
+ *  unknown keyId removes nothing), and a no-op must not clear a live error mark — so the
+ *  provider rule only applies when its key pool actually changed.
+ *
+ *  The before-snapshot and the mutation are two separate lock acquisitions, so a
+ *  concurrent mutation can land between them and merge into this call's diff. That can
+ *  only OVER-clear — never miss a clear — and the cost is bounded: a display record
+ *  vanishes and regenerates on the tier's next failing call. Not worth restructuring. */
 async function mutateProviderSettings(
   provider: ProviderId | null,
   mutate: () => Promise<JudgeSettings>,
 ): Promise<JudgeSettings> {
-  const before = (await getJudgeSettings()).routes
+  const before = await getJudgeSettings()
   const updated = await mutate()
-  await clearProviderHealth(tiersAffectedByProviderChange(provider, before, updated.routes))
+  const keysChanged =
+    provider != null && keyPoolFingerprint(before, provider) !== keyPoolFingerprint(updated, provider)
+  await clearProviderHealth(
+    tiersAffectedByProviderChange(keysChanged ? provider : null, before.routes, updated.routes),
+  )
   return updated
 }
 

@@ -72,6 +72,8 @@ export async function recordProviderError(tier: TierName, error: unknown, stage?
 function liveRecord(value: unknown, now: number): TierHealth | null {
   if (!value || typeof (value as TierHealth).ok !== "boolean") return null
   const record = value as TierHealth
+  // A corrupt ts would compare as NaN — never expiring, and rendering "NaN시간 전".
+  if (typeof record.ts !== "number") return null
   return now - record.ts >= HEALTH_TTL_MS ? null : record
 }
 

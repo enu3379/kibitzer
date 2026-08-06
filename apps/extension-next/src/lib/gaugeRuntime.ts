@@ -719,8 +719,10 @@ async function notifyProviderProblem(message: string): Promise<void> {
   const last = typeof stored[PROVIDER_ALERT_TS_KEY] === "number" ? stored[PROVIDER_ALERT_TS_KEY] : 0
   const now = Date.now()
   if (now - last < PROVIDER_ALERT_THROTTLE_MS) return
-  await chrome.storage.local.set({ [PROVIDER_ALERT_TS_KEY]: now })
+  // Read before stamping the throttle — a rejection here must not silently consume the
+  // 6h window with no notification shown.
   const [settings, health] = await Promise.all([getJudgeSettings(), getProviderHealth()])
+  await chrome.storage.local.set({ [PROVIDER_ALERT_TS_KEY]: now })
   try {
     chrome.notifications.create(PROVIDER_ALERT_ID, {
       type: "basic",

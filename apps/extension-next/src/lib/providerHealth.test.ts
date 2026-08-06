@@ -79,6 +79,15 @@ test("a record older than 24h reads as absent; a younger one does not", async ()
   assert.equal(expired.tier2, null)
 })
 
+test("a record with a corrupt ts reads as absent, not as live-forever", async () => {
+  reset()
+  store["kibitzer:provider-health:tier1:v2"] = { ok: false, kind: "auth", message: "x", ts: "어제" }
+  store["kibitzer:provider-health:tier2:v2"] = { ok: false, kind: "auth", message: "x" }
+  const health = await getProviderHealth()
+  assert.equal(health.tier1, null, "a non-numeric ts would compare as NaN and never expire")
+  assert.equal(health.tier2, null)
+})
+
 test("clearProviderHealth is tier-scoped — clearing tier1 leaves tier2's record intact", async () => {
   reset()
   await recordProviderError("tier1", new Error("boom"))

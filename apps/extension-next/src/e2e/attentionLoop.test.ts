@@ -613,6 +613,12 @@ test("E2E: an unreachable judge still nudges — a configured-but-dead Tier 2 mu
     // this: Ollama is the default provider and disconnecting it is a deliberate no-op
     // (providers.ts), so the key has to be removed by id.
     providerCallsFail = false
+    // That no-op is also the pin for clear scoping: a mutation that changed NOTHING (keys
+    // and routes identical) must not clear the live per-tier error records above.
+    await send({ type: "disconnect-provider", provider: "ollama" })
+    const afterNoop = (await send({ type: "get-state" })).health as Record<string, { ok: boolean } | null>
+    assert.equal(afterNoop.tier2?.ok, false, "a no-op provider mutation must leave the live tier2 error intact")
+    assert.equal(afterNoop.tier1?.ok, false, "and tier1's")
     if (keyId) await send({ type: "remove-provider-key", provider: "ollama", keyId })
     assert.equal(
       (await send({ type: "get-state" })).judgeEnabled,
