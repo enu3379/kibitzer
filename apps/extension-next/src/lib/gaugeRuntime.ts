@@ -719,12 +719,12 @@ async function notifyProviderProblem(message: string): Promise<void> {
   const last = typeof stored[PROVIDER_ALERT_TS_KEY] === "number" ? stored[PROVIDER_ALERT_TS_KEY] : 0
   const now = Date.now()
   if (now - last < PROVIDER_ALERT_THROTTLE_MS) return
-  // Read before stamping the throttle — a rejection here must not silently consume the
-  // 6h window with no notification shown.
   const [settings, health] = await Promise.all([getJudgeSettings(), getProviderHealth()])
-  await chrome.storage.local.set({ [PROVIDER_ALERT_TS_KEY]: now })
   try {
-    chrome.notifications.create(PROVIDER_ALERT_ID, {
+    // The throttle must only ever be consumed by a notification that was actually shown —
+    // so the create is awaited (MV3's callback-less form returns a Promise; unawaited, a
+    // rejection would escape this catch) and the stamp happens after it succeeds.
+    await chrome.notifications.create(PROVIDER_ALERT_ID, {
       type: "basic",
       iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
       title: "Kibitzer — AI 판정 오류",
@@ -733,6 +733,7 @@ async function notifyProviderProblem(message: string): Promise<void> {
         hasLiveError: health.tier1 != null && !health.tier1.ok,
       }),
     })
+    await chrome.storage.local.set({ [PROVIDER_ALERT_TS_KEY]: now })
   } catch {
     // No notifications permission / platform limit — the toolbar mark still shows.
   }
