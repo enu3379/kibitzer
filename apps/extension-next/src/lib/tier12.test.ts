@@ -251,8 +251,17 @@ test("a Tier-2 writer failure records stage 'writer' — the nag still fires on 
   assert.equal(health.tier2?.stage, "writer", "within the tier the latest call wins the slot")
 })
 
-test("enrichGoal records Tier-1 health like any other Tier-1 call", async () => {
+test("enrichGoal deliberately records NO provider health — success and failure alike", async () => {
+  // Goal expansion is an internal pipeline stage the user doesn't know exists; its health
+  // participation was reverted by product decision (see the comment in enrichGoal). Both
+  // directions matter: an enrichment success clearing a genuine rescue error would be a
+  // false all-clear, and an enrichment failure has no actionable surface of its own.
   const { setRoutes } = await import("./providers.ts")
+  const { recordProviderError, recordProviderOk } = await import("./providerHealth.ts")
+
+  // Self-contained fixture: live errors on both tiers, seeded directly.
+  await recordProviderError("tier1", new Error("rescue down"))
+  await recordProviderError("tier2", new Error("writer down"), "writer")
   await setRoutes({ tier1: { provider: "ollama", model: "nemotron-3-super" } })
   const realFetch = globalThis.fetch
   ;(globalThis as { fetch: unknown }).fetch = async () =>
@@ -261,15 +270,17 @@ test("enrichGoal records Tier-1 health like any other Tier-1 call", async () => 
       { status: 200, headers: { "content-type": "application/json" } },
     )
   try {
-    const phrases = await enrichGoal("리팩터링")
-    assert.equal(phrases.length, 2)
+    assert.equal((await enrichGoal("리팩터링")).length, 2)
   } finally {
     ;(globalThis as { fetch: unknown }).fetch = realFetch
   }
-  assert.equal((await getProviderHealth()).tier1?.ok, true)
+  let health = await getProviderHealth()
+  assert.equal(health.tier1?.ok, false, "an enrichment success must not clear a rescue error")
+  assert.equal(health.tier2?.stage, "writer", "nor touch the other tier")
 
-  // And a total failure (both attempts) records a tier1 error — without touching the
-  // Tier-2 writer error the previous test left in place.
+  // Flip the fixture to clean records: a totally failed enrichment must not dirty them.
+  await recordProviderOk("tier1")
+  await recordProviderOk("tier2")
   await setRoutes({ tier1: { provider: "ollama", model: "nemotron-3-nano:30b" } })
   ;(globalThis as { fetch: unknown }).fetch = async () => {
     throw new Error("ECONNREFUSED")
@@ -279,8 +290,7 @@ test("enrichGoal records Tier-1 health like any other Tier-1 call", async () => 
   } finally {
     ;(globalThis as { fetch: unknown }).fetch = realFetch
   }
-  const health = await getProviderHealth()
-  assert.equal(health.tier1?.ok, false)
-  assert.equal(health.tier1?.stage, undefined, "tier1 records carry no stage")
-  assert.equal(health.tier2?.stage, "writer", "the other tier's record is untouched")
+  health = await getProviderHealth()
+  assert.equal(health.tier1?.ok, true, "a failed enrichment must not record a tier1 error")
+  assert.equal(health.tier2?.ok, true)
 })

@@ -243,18 +243,19 @@ export async function enrichGoal(goalText: string): Promise<string[]> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const content = await p.tier1.completeGoalEnrichment(prompt, ENRICH_TIMEOUT_MS)
-      const phrases = withRawResponseDebug(content, "goal enrichment", "content_json", () => (
+      return withRawResponseDebug(content, "goal enrichment", "content_json", () => (
         parseEnrichmentResponse(content, MAX_PHRASES)
       ))
-      void recordProviderOk("tier1")
-      return phrases
     } catch (error) {
       lastError = error
     }
   }
-  // A Tier-1 call like any other — recorded so an enrichment-only failure (a goal is
-  // declared long before any rescue runs) still surfaces in the popup/toolbar.
-  void recordProviderError("tier1", lastError)
+  // Deliberately records NO provider health — neither ok nor error. Goal expansion is an
+  // internal pipeline stage the user doesn't know exists, so surfacing its failure as
+  // "빠른 판정 오류" has no actionable value; a genuinely broken tier1 route is surfaced
+  // honestly by the next rescue call (which fires on every drifting page) within minutes.
+  // Recording ok would be worse than silence: an enrichment success clearing a genuine
+  // rescue error (they parse different response shapes) would be a false all-clear.
   klog(`goal enrichment failed: ${String(lastError)}`)
   return []
 }

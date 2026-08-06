@@ -1,6 +1,7 @@
 // Surfaces LLM provider health so a mid-session failure (expired key, 429, 403, timeout)
-// isn't silent. tier12 records ok/error on each call; the popup and toolbar mark report
-// per tier. The tiers route to independent provider+model pairs (providers.ts), so health
+// isn't silent. tier12 records ok/error on its rescue/judge/writer calls (goal enrichment
+// deliberately abstains — see enrichGoal); the popup and toolbar mark report per tier.
+// The tiers route to independent provider+model pairs (providers.ts), so health
 // is keyed per tier — a single global slot let a Tier-1 success overwrite a live Tier-2
 // failure (#205). Within one tier, last-write-wins is the meaning of the slot: "that
 // tier's most recent call".
