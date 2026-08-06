@@ -76,8 +76,8 @@
       input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
       input:disabled { opacity: .45; }
       .times { display: flex; gap: 6px; align-items: center; color: var(--page-ink-3); }
-      .times input { width: 82px; font-variant-numeric: tabular-nums; }
-
+      .times input { width: 86px; font-variant-numeric: tabular-nums; padding-left: 9px; padding-right: 0px; text-align: center; }
+      .times input::-webkit-calendar-picker-indicator { margin: 0; padding: 0;}
       /* sensitivity presets */
       .seg-block { display: flex; flex-direction: column; gap: 7px; padding: 12px 0; }
       .seg-block > b { font-size: 13px; font-weight: 650; }
@@ -261,7 +261,7 @@
         </svg>
         <span class="name">Kibitzer 설정</span>
       </div>
-      <p class="lede">판정 감도·알림·말투·AI 판정·데이터를 여기서 관리합니다. 목표 선언과 훈수 응답은 툴바 팝업에서.</p>
+      <p class="lede">판정 감도·알림·말투·AI 판정·데이터를 여기서 관리합니다. 목표 선언은 툴바 팝업에서.</p>
 
       <div class="layout">
         <nav class="tabs" role="tablist" aria-label="설정 분류" aria-orientation="vertical">
@@ -284,7 +284,7 @@
               <button class="segbtn" data-level="standard" role="radio" aria-checked="true">중간</button>
               <button class="segbtn" data-level="strict" role="radio" aria-checked="false">엄격</button>
             </div>
-            <small id="sensHint">권장 기본값 — 벤치마크로 맞춘 균형점입니다.</small>
+            <small id="sensHint">권장 기본값 — 대부분의 상황에 적합합니다.</small>
           </div>
         </div>
         <div class="card">
@@ -416,7 +416,7 @@
               <thead><tr><th>모델</th><th>호출</th><th>입력 토큰</th><th>출력 토큰</th></tr></thead>
               <tbody id="ajUsage"></tbody>
             </table>
-            <p class="hint" style="margin-bottom: 4px">제공자 응답의 usage 필드 기준. 로컬에만 저장됩니다.</p>
+            <p class="hint" style="margin-bottom: 4px">표시된 사용량은 AI 제공사의 집계 기준이며 실제와 다를 수 있습니다. 사용 내역은 수집되지 않습니다.</p>
           </div>
 
           <details class="privacy">
@@ -433,14 +433,14 @@
       <!-- 데이터 -->
       <section class="pane" id="pane-data" role="tabpanel" aria-labelledby="tab-data" data-pane="data">
         <div class="card">
-          <h3>데이터 · 로컬에만 저장됨</h3>
+          <h3>데이터 · 기기에만 저장됨</h3>
           <div class="btnrow">
             <button class="btn" id="exportLog">디버그 로그 파일</button>
             <button class="btn" id="exportEvents">이벤트 JSON</button>
             <button class="btn" id="openReplay">리플레이 열기</button>
           </div>
           <div class="row">
-            <span class="lab"><b>모든 활동 데이터 삭제</b><small>게이지·이력·학습·이벤트·나깅 기록을 전부 지웁니다 (목표·키·말투는 유지)</small></span>
+            <span class="lab"><b>모든 활동 데이터 삭제</b><small>몰입 게이지·사용 이력·이벤트·훈수 기록을 전부 지웁니다 (목표·API 키·말투 등 설정은 유지)</small></span>
             <button class="btn danger" id="wipe">삭제</button>
           </div>
         </div>
@@ -448,6 +448,7 @@
         </div>
       </div>
     </div>
-    <script type="module" src="options.js"></script>
+    <!-- <script type="module" src="options.js"></script> -->
+    <script type="module" src="../../dist/options/options.js"></script>
   </body>
 </html>
