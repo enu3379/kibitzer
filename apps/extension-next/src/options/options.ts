@@ -6,6 +6,16 @@ import { sampleLinesFor } from "../lib/personaSampleLines.ts"
 import { PROVIDER_PROFILES, type ProviderId, type TierName } from "../lib/providers.ts"
 
 import {
+  CONFIRM_COPY,
+  LOCAL_ONLY_STATUS,
+  classifyAiConfig,
+  decideSaveClick,
+  halfSignature,
+  keylessTiers,
+  reconcileHalfSignature,
+} from "./aiTabState.ts"
+
+import {
   SENSITIVITY_PRESETS,
   sensitivityLevelFor,
   type SensitivityLevel,
@@ -67,6 +77,7 @@ const pquoteTag = $<HTMLElement>("pquoteTag")
 const pquoteTxt = $<HTMLElement>("pquoteTxt")
 const ajProviders = $<HTMLElement>("ajProviders")
 const ajConnect = $<HTMLElement>("ajConnect")
+const ajLocalOnly = $<HTMLElement>("ajLocalOnly")
 const ajRouteWarn = $<HTMLElement>("ajRouteWarn")
 const ajUsage = $<HTMLElement>("ajUsage")
 const ajSave = $<HTMLButtonElement>("ajSave")
@@ -113,7 +124,11 @@ async function init(): Promise<void> {
   if (state?.personas) {
     renderPersonas(state.personas, state.persona)
   }
-  applyJudge((await send({ type: "get-judge-settings" })) as JudgeView)
+  const judgeView = (await send({ type: "get-judge-settings" })) as JudgeView
+  // A half state already standing at load counts as acknowledged — the amber banner
+  // covers it; the soft confirm is reserved for half-ness created after this point.
+  lastSavedHalfSig = halfSignature(judgeView.routes, judgeView.accounts)
+  applyJudge(judgeView)
   await loadUsage()
 }
 
@@ -300,6 +315,9 @@ allowList.addEventListener("change", () => void saveDomainLists())
 const TIERS: readonly TierName[] = ["tier1", "tier2"]
 const TIER_LABEL: Record<TierName, string> = { tier1: "Tier 1", tier2: "Tier 2" }
 
+// 상태줄 문구는 판정 로직·테스트와 같은 모듈(aiTabState.ts)에 산다.
+ajLocalOnly.textContent = LOCAL_ONLY_STATUS
+
 interface RouteDraft {
   provider: ProviderId
   model: string
@@ -317,6 +335,13 @@ const draft: Record<TierName, RouteDraft> = {
   tier2: { provider: "ollama", model: "", custom: false },
 }
 const chips: Record<TierName, ChipState> = { tier1: staleChip(), tier2: staleChip() }
+/** Tiers whose route the user edited in this draft (dropdowns, custom input, back). */
+const draftTouched: Record<TierName, boolean> = { tier1: false, tier2: false }
+/** Half-signature of the last acknowledged save. Only a load or a successful save sets
+ *  it; account changes can merely void it (reconcileHalfSignature), so half-ness created
+ *  by key removal/disconnect still reads as new at the next save. */
+let lastSavedHalfSig: string | null = null
+let pendingConfirmTier: TierName | null = null
 let addOpenFor: ProviderId | null = null
 let connectOpen = false
 let usageDays = 1
@@ -363,9 +388,23 @@ function fmtDate(ts: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
+/** A pending soft confirm only survives an unchanged premise — any draft edit, account
+ *  change, or fresh saved state hands the button back to the plain 저장 step. */
+function resetPendingConfirm(): void {
+  if (pendingConfirmTier === null) return
+  pendingConfirmTier = null
+  ajSave.textContent = "저장"
+  ajSave.classList.remove("confirm")
+  if (ajResult.classList.contains("warn")) {
+    ajResult.className = "hint"
+    ajResult.textContent = ""
+  }
+}
+
 /** Saved routes arrived (init/save/disconnect) — rebuild the drafts from them. */
 function applyJudge(view: JudgeView): void {
   judge = view
+  resetPendingConfirm()
   for (const tier of TIERS) {
     const route = view.routes[tier]
     draft[tier] = {
@@ -374,6 +413,7 @@ function applyJudge(view: JudgeView): void {
       custom: !presetsFor(route.provider, tier).includes(route.model),
     }
     chips[tier] = staleChip()
+    draftTouched[tier] = false
   }
   renderJudge()
 }
@@ -381,6 +421,8 @@ function applyJudge(view: JudgeView): void {
 /** Account change (connect/key add/remove) — adopt automatic saved-route changes only
  *  when that tier's draft was untouched, and otherwise preserve the user's draft. */
 function applyAccounts(view: JudgeView): void {
+  lastSavedHalfSig = reconcileHalfSignature(lastSavedHalfSig, view.routes, view.accounts)
+  resetPendingConfirm()
   const previous = judge
   if (previous) {
     for (const tier of TIERS) {
@@ -424,9 +466,13 @@ function renderProviderBlocks(): void {
       head.appendChild(
         button("punlink", "연결 해제", () => {
           if (!confirm(`${profile.label} 연결을 해제할까요? 등록된 키도 함께 삭제됩니다.`)) return
-          void send({ type: "disconnect-provider", provider: profile.id }).then((view) =>
-            applyJudge(view as JudgeView),
-          )
+          void send({ type: "disconnect-provider", provider: profile.id }).then((raw) => {
+            const view = raw as JudgeView
+            // A disconnect is an account change even though it also rewrites routes:
+            // half-ness it creates must confirm at the next save, not self-acknowledge.
+            lastSavedHalfSig = reconcileHalfSignature(lastSavedHalfSig, view.routes, view.accounts)
+            applyJudge(view)
+          })
         }),
       )
     }
@@ -579,6 +625,8 @@ function renderRoutes(): void {
       d.custom = false
       d.model = presetsFor(d.provider, tier)[0]
       chips[tier] = staleChip()
+      draftTouched[tier] = true
+      resetPendingConfirm()
       renderRoutes()
     }
 
@@ -602,6 +650,8 @@ function renderRoutes(): void {
     else model.value = presets.includes(d.model) ? d.model : presets[0]
 
     model.onchange = () => {
+      draftTouched[tier] = true
+      resetPendingConfirm()
       if (model.value === "__custom") {
         d.custom = true
         d.model = ""
@@ -615,6 +665,8 @@ function renderRoutes(): void {
     }
     input.oninput = () => {
       d.model = input.value.trim()
+      draftTouched[tier] = true
+      resetPendingConfirm()
       if (chips[tier].kind !== "unknown") {
         chips[tier] = staleChip()
         renderChip(tier)
@@ -624,6 +676,8 @@ function renderRoutes(): void {
       d.custom = false
       d.model = presetsFor(d.provider, tier)[0]
       chips[tier] = staleChip()
+      draftTouched[tier] = true
+      resetPendingConfirm()
       renderRoutes()
     }
 
@@ -637,16 +691,19 @@ const TIER_KEYLESS_IMPACT: Record<TierName, string> = {
   tier2: "내용을 읽지 않고 준비된 문구로 훈수해요.",
 }
 
-/** 라우트가 키 없는 제공자를 가리키면 모델 지정 섹션 상단에 안내 배너를 띄운다.
- *  저장된 키 목록과 화면의 드래프트 제공자만 보고 판정 — 런타임 상태·헬스와 무관.
- *  오류가 아니라 설정이 반쪽이라는 안내: 이 상태로도 훈수는 정상 동작한다. */
+/** 탭 상태 신호는 한 번에 하나만: 키가 아예 없으면 상단의 회색 상태줄(AI 미사용은
+ *  광고된 정상 모드 — 경고가 아님), 키가 있는데 어떤 라우트가 그걸 비껴가면 앰버
+ *  배너(반쪽 구성), 둘 다 키가 있으면 아무것도 없음. 저장된 키 목록과 화면의 드래프트
+ *  제공자만 보고 판정 — 런타임 상태·헬스와 무관. 반쪽이어도 훈수는 정상 동작한다. */
 function renderRouteWarnings(): void {
   if (!judge) return
+  const state = classifyAiConfig(draft, judge.accounts)
+  ajLocalOnly.classList.toggle("hidden", state !== "unused")
   ajRouteWarn.textContent = ""
+  if (state !== "half") return
   const banner = el("div", "route-banner")
-  for (const tier of TIERS) {
+  for (const tier of keylessTiers(draft, judge.accounts)) {
     const provider = draft[tier].provider
-    if ((judge.accounts[provider] ?? []).length > 0) continue
     const line = el("span", "ln")
     line.appendChild(el("b", undefined, TIER_LABEL[tier]))
     line.appendChild(
@@ -656,7 +713,7 @@ function renderRouteWarnings(): void {
     )
     banner.appendChild(line)
   }
-  if (banner.childElementCount > 0) ajRouteWarn.appendChild(banner)
+  ajRouteWarn.appendChild(banner)
 }
 
 function renderChip(tier: TierName): void {
@@ -701,6 +758,19 @@ for (const chipEl of document.querySelectorAll<HTMLButtonElement>(".stchip")) {
 }
 
 ajSave.addEventListener("click", async () => {
+  if (judge) {
+    const decision = decideSaveClick(pendingConfirmTier, lastSavedHalfSig, draft, judge.accounts, draftTouched)
+    if (decision.action === "confirm") {
+      // Gentle friction, not a block: hold the save once and say what a half config
+      // means. The next click (or any draft edit, which resets this) goes through.
+      pendingConfirmTier = decision.tier
+      ajSave.textContent = "그대로 저장"
+      ajSave.classList.add("confirm")
+      ajResult.className = "hint warn"
+      ajResult.textContent = CONFIRM_COPY[decision.tier]
+      return
+    }
+  }
   const view = (await send({
     type: "set-routes",
     routes: {
@@ -708,6 +778,8 @@ ajSave.addEventListener("click", async () => {
       tier2: { provider: draft.tier2.provider, model: draft.tier2.model },
     },
   })) as JudgeView
+  // The confirmed (or clean) save acknowledges whatever half state it committed.
+  lastSavedHalfSig = halfSignature(view.routes, view.accounts)
   applyJudge(view)
   const r = view.routes
   ajResult.className = "hint ok"

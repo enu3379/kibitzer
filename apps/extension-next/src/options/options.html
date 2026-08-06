@@ -141,10 +141,16 @@
       button.btn.danger:hover { background: var(--err-soft); }
       button.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
       button.btn#ajSave { padding: 6.5px 12px; }
+      /* 저장 버튼의 확인 단계 — 오류(빨강)가 아니라 반쪽 구성 안내(앰버)라 배너 톤과 맞춘다 */
+      button.btn.primary.confirm { background: var(--warn-soft); color: var(--warn-fg); border: 1px solid var(--warn-line); }
       .btnrow { display: flex; gap: 8px; padding: 12px 0; flex-wrap: wrap; }
       .hint { font-size: 11.5px; color: var(--page-ink-3); margin: 4px 0 12px; word-break: break-word; }
       .hint.ok { color: var(--ok-fg); } .hint.err { color: var(--err-fg); }
+      .hint.warn { color: var(--warn-fg); }
       .hidden { display: none !important; }
+
+      /* AI 판정: 상단 상태줄 — 키 0개(로컬 전용) 상태 전용. 정상 모드 안내라 힌트 톤 */
+      .ajstatus { font-size: 11.5px; color: var(--page-ink-3); margin: 2px 0 0; }
 
       /* AI 판정: 연결된 제공자 블록 */
       .psec { padding: 10px 0 12px; }
@@ -359,6 +365,8 @@
       <section class="pane" id="pane-ai" role="tabpanel" aria-labelledby="tab-ai" data-pane="ai">
         <div class="card">
           <h3>AI 판정</h3>
+          <!-- 키가 하나도 없을 때만 — 로컬 전용은 광고된 정상 모드라 경고 톤을 쓰지 않는다 -->
+          <p class="ajstatus hidden" id="ajLocalOnly" role="status"></p>
 
           <div class="psec">
             <span class="seclabel">연결된 제공자</span>
