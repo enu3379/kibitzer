@@ -76,7 +76,7 @@
       input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
       input:disabled { opacity: .45; }
       .times { display: flex; gap: 6px; align-items: center; color: var(--page-ink-3); }
-      .times input { width: 86px; font-variant-numeric: tabular-nums; padding-left: 9px; padding-right: 0px; text-align: center; }
+      .times input { width: 96px; font-variant-numeric: tabular-nums; padding-left: 6px; padding-right: 7px; text-align: center; }
       .times input::-webkit-calendar-picker-indicator { margin: 0; padding: 0;}
       /* sensitivity presets */
       .seg-block { display: flex; flex-direction: column; gap: 7px; padding: 12px 0; }
@@ -361,7 +361,7 @@
           <h3>AI 판정</h3>
 
           <div class="psec">
-            <span class="seclabel">연결된 제공자</span>
+            <span class="seclabel">연결된 AI 서비스</span>
             <div id="ajProviders"></div>
             <div id="ajConnect"></div>
           </div>
@@ -448,7 +448,6 @@
         </div>
       </div>
     </div>
-    <!-- <script type="module" src="options.js"></script> -->
-    <script type="module" src="../../dist/options/options.js"></script>
+    <script type="module" src="options.js"></script>
   </body>
 </html>
