@@ -139,10 +139,10 @@ export async function tier1Rescue(
     const result = await p.tier1.classifyTier1(
       buildTier1Payload({ rawText: goalText }, { title, urlHost }, recentTitles),
     )
-    void recordProviderOk()
+    void recordProviderOk("tier1")
     return { verdict: result.verdict, answered: true }
   } catch (error) {
-    void recordProviderError(error)
+    void recordProviderError("tier1", error)
     klog(`tier1 error (keeping DRIFT): ${String(error)}`)
     return { verdict: "DRIFT", answered: false }
   }
@@ -250,6 +250,12 @@ export async function enrichGoal(goalText: string): Promise<string[]> {
       lastError = error
     }
   }
+  // Deliberately records NO provider health — neither ok nor error. Goal expansion is an
+  // internal pipeline stage the user doesn't know exists, so surfacing its failure as
+  // "빠른 판정 오류" has no actionable value; a genuinely broken tier1 route is surfaced
+  // honestly by the next rescue call (which fires on every drifting page) within minutes.
+  // Recording ok would be worse than silence: an enrichment success clearing a genuine
+  // rescue error (they parse different response shapes) would be a false all-clear.
   klog(`goal enrichment failed: ${String(lastError)}`)
   return []
 }
@@ -292,9 +298,9 @@ export async function tier2Confirm(
       ctx.timeContext,
     )
     decision = await p.tier2.decideTier2(reviewPayload)
-    void recordProviderOk()
+    void recordProviderOk("tier2")
   } catch (error) {
-    void recordProviderError(error)
+    void recordProviderError("tier2", error, "judge")
     klog(`tier2 judge error (no verdict, request released): ${String(error)}`)
     return {
       flow: "ok",
@@ -323,10 +329,10 @@ export async function tier2Confirm(
   try {
     if (!(await safeShouldContinue(shouldContinue))) return { flow: "ok", message: null, cancelled: true }
     const message = await p.tier2.writeTier2Message(messagePayload, composeWriterPrompt(persona))
-    void recordProviderOk()
+    void recordProviderOk("tier2")
     return { flow: "drift", message: clampSentences(message, maxSentences) }
   } catch (error) {
-    void recordProviderError(error)
+    void recordProviderError("tier2", error, "writer")
     klog(`tier2 writer error (persona fallback template): ${String(error)}`)
     const fallbackTitle = page.title || page.urlHost || "현재 페이지"
     const message = pickFallback(persona, ctx.nagCount, {
@@ -379,10 +385,11 @@ export async function writeSessionSummary(
     const message = await p.tier2.writeTier2Message(payload, composeSummaryPrompt(persona), {
       temperature: SUMMARY_TEMPERATURE,
     })
-    void recordProviderOk()
+    void recordProviderOk("tier2")
     return clampSentences(message, dice.bonus ? SUMMARY_MAX_SENTENCES + 1 : SUMMARY_MAX_SENTENCES)
   } catch (error) {
-    void recordProviderError(error)
+    // The recap writer shares the Writer's health bucket — one "writer" stage in the UI.
+    void recordProviderError("tier2", error, "writer")
     klog(`session summary writer error (static fallback): ${String(error)}`)
     return null
   }

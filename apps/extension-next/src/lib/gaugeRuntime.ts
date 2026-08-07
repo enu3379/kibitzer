@@ -20,6 +20,9 @@ import { describeObservableUrl, type ObservablePageKind } from "./url.ts"
 import { browserPresent } from "./presence.ts"
 import { extractPageExcerpt } from "../content/pageExcerpt.ts"
 import { updateBadge } from "./badge.ts"
+import { getProviderHealth } from "./providerHealth.ts"
+import { providerAlertBody } from "./providerHealthView.ts"
+import { getJudgeSettings, profileFor, routeKeys } from "./providers.ts"
 import { deleteRecord, drainRecords, kvDeleteIf, kvGet, kvPutAndAppend, kvSet, kvUpdate, kvWriteAndClear, OUTBOX_STORE } from "./db.ts"
 import { logEvent } from "./events.ts"
 import { clearRelevance } from "./relevance.ts"
@@ -690,7 +693,8 @@ async function serviceTier2(
   }
   klog(`tier2 gate (${effect.reason}) on ${effect.pageKey} excerpt=${excerpt?.length ?? 0}c -> ${outcome.flow}`)
   logEvent("tier2", { pageKey: effect.pageKey, reason: effect.reason, flow: outcome.flow, excerpt: excerpt?.length ?? 0 })
-  if (outcome.providerError) void notifyProviderProblem(outcome.providerError)
+  // No providerError check here: it is only ever set together with `unavailable`, so the
+  // alert already fired in the branch above.
   // Apply guarded: dispatchTier2 re-checks (serialized) that the pending slot, goal revision,
   // and active page still match before applying — else it releases the slot (tier2_cancel)
   // with no side effect on whatever page the user is on now. The Writer message is staged
@@ -706,21 +710,30 @@ const PROVIDER_ALERT_THROTTLE_MS = 6 * 60 * 60_000
 /** OS notification for "the LLM judge is broken, so a nag was swallowed" — throttled
  *  hard (6h) so a dead key doesn't turn into a notification storm, and gated on
  *  presence like every other nudge (never pop over another app). The id deliberately
- *  does NOT start with "kbz-" so the nag feedback handlers ignore it. */
+ *  does NOT start with "kbz-" so the nag feedback handlers ignore it. Fires only from
+ *  the Tier-2 judge-failure path; the body names the Tier-2 route's provider and says
+ *  what Tier 1 can still do at this moment (providerAlertBody). */
 async function notifyProviderProblem(message: string): Promise<void> {
   if (!(await browserPresent())) return
   const stored = await chrome.storage.local.get(PROVIDER_ALERT_TS_KEY)
   const last = typeof stored[PROVIDER_ALERT_TS_KEY] === "number" ? stored[PROVIDER_ALERT_TS_KEY] : 0
   const now = Date.now()
   if (now - last < PROVIDER_ALERT_THROTTLE_MS) return
-  await chrome.storage.local.set({ [PROVIDER_ALERT_TS_KEY]: now })
+  const [settings, health] = await Promise.all([getJudgeSettings(), getProviderHealth()])
   try {
-    chrome.notifications.create(PROVIDER_ALERT_ID, {
+    // The throttle must only ever be consumed by a notification that was actually shown —
+    // so the create is awaited (MV3's callback-less form returns a Promise; unawaited, a
+    // rejection would escape this catch) and the stamp happens after it succeeds.
+    await chrome.notifications.create(PROVIDER_ALERT_ID, {
       type: "basic",
       iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
       title: "Kibitzer — AI 판정 오류",
-      message: `${message} · 지금은 제목 유사도만으로 판정합니다. 알림을 누르면 설정이 열립니다.`,
+      message: providerAlertBody(profileFor(settings.routes.tier2.provider).label, message, {
+        keyless: routeKeys(settings, "tier1").length === 0,
+        hasLiveError: health.tier1 != null && !health.tier1.ok,
+      }),
     })
+    await chrome.storage.local.set({ [PROVIDER_ALERT_TS_KEY]: now })
   } catch {
     // No notifications permission / platform limit — the toolbar mark still shows.
   }

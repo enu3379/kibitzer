@@ -8,12 +8,17 @@
 import type { GaugeState } from "../core/gauge/types.ts"
 import type { SessionGoal } from "./session.ts"
 import { getProviderHealth } from "./providerHealth.ts"
+import { providerAlertLevel } from "./providerHealthView.ts"
 
 const GREEN = "#1f9d6b" // focused
 const AMBER = "#e0a100" // slipping
 const RED = "#d1495b" // drifting
 const GREY = "#8a8a90" // snoozed
-const ALERT_RED = "#d1495b" // provider-error mark (top-left, opposite the status dot)
+// Provider-error mark (top-left, opposite the status dot): red = Tier 2 down (nags lose
+// their judge), amber = only Tier 1 down (false-positive filter gone). Red wins.
+const ALERT_COLOR = { red: "#d1495b", amber: AMBER } as const
+
+type AlertLevel = keyof typeof ALERT_COLOR
 
 const ICON_SIZES = [16, 32] as const
 
@@ -38,16 +43,15 @@ function drawStatusDot(ctx: OffscreenCanvasRenderingContext2D, size: number, col
   ctx.fill()
 }
 
-/** Small "!" in a red disc at the TOP-LEFT corner (the status dot owns the top-right):
- *  the LLM provider is failing and judging fell back to Tier-0. Drawn geometrically —
- *  text glyphs smear at 16px. */
-function drawProviderAlert(ctx: OffscreenCanvasRenderingContext2D, size: number): void {
+/** Small "!" in a coloured disc at the TOP-LEFT corner (the status dot owns the
+ *  top-right): an LLM tier is failing. Drawn geometrically — text glyphs smear at 16px. */
+function drawProviderAlert(ctx: OffscreenCanvasRenderingContext2D, size: number, color: string): void {
   const r = Math.max(3.5, size * 0.22)
   const cx = r
   const cy = r
   ctx.beginPath()
   ctx.arc(cx, cy, r, 0, Math.PI * 2)
-  ctx.fillStyle = ALERT_RED
+  ctx.fillStyle = color
   ctx.fill()
   ctx.fillStyle = "#ffffff"
   const w = Math.max(1, r * 0.32)
@@ -61,7 +65,7 @@ function drawProviderAlert(ctx: OffscreenCanvasRenderingContext2D, size: number)
 // clobber a newer one: only the call holding the latest token gets to setIcon.
 let drawToken = 0
 
-async function applyStatusIcon(color: string | null, alert: boolean): Promise<void> {
+async function applyStatusIcon(color: string | null, alert: AlertLevel | null): Promise<void> {
   const token = ++drawToken
   const bases = await loadBaseIcons()
   const imageData: Record<number, ImageData> = {}
@@ -72,7 +76,7 @@ async function applyStatusIcon(color: string | null, alert: boolean): Promise<vo
     const base = bases.get(size)
     if (base) ctx.drawImage(base, 0, 0, size, size)
     if (color) drawStatusDot(ctx, size, color)
-    if (alert) drawProviderAlert(ctx, size)
+    if (alert) drawProviderAlert(ctx, size, ALERT_COLOR[alert])
     imageData[size] = ctx.getImageData(0, 0, size, size)
   }
   if (token !== drawToken) return
@@ -80,34 +84,48 @@ async function applyStatusIcon(color: string | null, alert: boolean): Promise<vo
   await chrome.action.setBadgeText({ text: "" }) // keep the native badge box off
 }
 
-function renderNativeBadge(color: string | null, alert: boolean): void {
+function renderNativeBadge(color: string | null, alert: AlertLevel | null): void {
   try {
-    // The native fallback has one slot — the error mark outranks the status dot.
+    // The native fallback has one slot — the error mark outranks the status dot, with
+    // the same red-over-amber priority the drawn mark has.
     void chrome.action.setBadgeText({ text: alert ? "!" : color ? "●" : "" })
-    const badgeColor = alert ? ALERT_RED : color
+    const badgeColor = alert ? ALERT_COLOR[alert] : color
     if (badgeColor) void chrome.action.setBadgeBackgroundColor({ color: badgeColor })
   } catch {
     // action API unavailable — nothing to do.
   }
 }
 
-function render(color: string | null, alert: boolean): void {
+function render(color: string | null, alert: AlertLevel | null): void {
   if (typeof OffscreenCanvas === "undefined") return renderNativeBadge(color, alert)
   void applyStatusIcon(color, alert).catch(() => renderNativeBadge(color, alert))
 }
 
+// drawToken only serializes draws by the order render() was ENTERED — but each
+// updateBadge waits on a storage read first, so an older call whose read resolves late
+// would start its render after a newer one and win the token. Gate on the dispatch
+// order instead: only the latest updateBadge/clearBadge may render at all.
+let badgeRevision = 0
+
 export function updateBadge(state: GaugeState, goal: SessionGoal | null, now: number): void {
   if (!goal) return clearBadge()
+  const revision = ++badgeRevision
   let color = GREEN
   if (state.snoozedUntil && state.snoozedUntil > now) color = GREY
   else if (state.s < 33) color = RED
   else if (state.s < 66) color = AMBER
-  // Provider errors ride along as a "!" mark until a call succeeds or settings change.
+  // Provider errors ride along as a "!" mark until a call succeeds, settings change, or
+  // the record expires (getProviderHealth drops expired records — same cut as the popup).
   void getProviderHealth()
-    .then((health) => render(color, health != null && !health.ok))
-    .catch(() => render(color, false))
+    .then((health) => {
+      if (revision === badgeRevision) render(color, providerAlertLevel(health))
+    })
+    .catch(() => {
+      if (revision === badgeRevision) render(color, null)
+    })
 }
 
 export function clearBadge(): void {
-  render(null, false)
+  badgeRevision += 1 // a pending health lookup must not repaint a cleared badge
+  render(null, null)
 }

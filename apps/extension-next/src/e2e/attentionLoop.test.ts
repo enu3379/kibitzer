@@ -164,7 +164,9 @@ const chrome = {
         return snapshot
       },
       set: async (obj: Record<string, unknown>) => void Object.entries(obj).forEach(([k, v]) => store.set(k, v)),
-      remove: async (key: string) => void store.delete(key),
+      remove: async (keys: string | string[]) => {
+        for (const key of Array.isArray(keys) ? keys : [keys]) store.delete(key)
+      },
     },
   },
   offscreen: { createDocument: async () => {}, hasDocument: async () => true, closeDocument: async () => {} },
@@ -587,6 +589,21 @@ test("E2E: an unreachable judge still nudges — a configured-but-dead Tier 2 mu
       )
       const log = (await send({ type: "get-log" })).text as string
       assert.match(log, /tier2 unavailable/, `unconfirmed, not a verdict. log tail:\n${log.slice(-1800)}`)
+      // Both tiers failed their calls here, and each failure sits in ITS OWN health slot —
+      // under the single-slot model the later call simply overwrote the earlier one (#205).
+      const health = (await send({ type: "get-state" })).health as Record<
+        string,
+        { ok: boolean; stage?: string } | null
+      >
+      assert.equal(health.tier1?.ok, false, "the failed Tier-1 rescue is recorded under tier1")
+      assert.equal(health.tier2?.ok, false, "the failed Tier-2 judge is recorded under tier2")
+      assert.equal(health.tier2?.stage, "judge", "and names the call that failed")
+      // The OS alert names the Tier-2 route's provider, and — Tier 1 having a live error at
+      // this moment — uses the both-tiers-down body variant.
+      const alert = notifications.find((n) => n.id === PROVIDER_ALERT_ID)
+      assert.ok(alert, "the Tier-2 judge failure raises the OS alert")
+      assert.match(String(alert?.opts.message), /^정밀 판정\(Ollama Cloud\) 오류: /)
+      assert.match(String(alert?.opts.message), /빠른 판정에도 오류가 있어/)
     } finally {
       mock.timers.reset()
     }
@@ -596,6 +613,12 @@ test("E2E: an unreachable judge still nudges — a configured-but-dead Tier 2 mu
     // this: Ollama is the default provider and disconnecting it is a deliberate no-op
     // (providers.ts), so the key has to be removed by id.
     providerCallsFail = false
+    // That no-op is also the pin for clear scoping: a mutation that changed NOTHING (keys
+    // and routes identical) must not clear the live per-tier error records above.
+    await send({ type: "disconnect-provider", provider: "ollama" })
+    const afterNoop = (await send({ type: "get-state" })).health as Record<string, { ok: boolean } | null>
+    assert.equal(afterNoop.tier2?.ok, false, "a no-op provider mutation must leave the live tier2 error intact")
+    assert.equal(afterNoop.tier1?.ok, false, "and tier1's")
     if (keyId) await send({ type: "remove-provider-key", provider: "ollama", keyId })
     assert.equal(
       (await send({ type: "get-state" })).judgeEnabled,
@@ -695,6 +718,10 @@ test("E2E: Tier 1 keyed, Tier 2 routed to a keyless provider — issue #207's si
     // Every other scenario in this file assumes the degraded (no-provider) profile.
     providerCallsFail = false
     await send({ type: "disconnect-provider", provider: "openai" }) // also resets the tier2 route to its default
+    // Health clearing is tier-scoped now: disconnecting openai touches only tier2's route,
+    // so the tier1 error record (the failed rescue above) must survive that change (#205).
+    const afterDisconnect = (await send({ type: "get-state" })).health as Record<string, { ok: boolean } | null>
+    assert.equal(afterDisconnect.tier1?.ok, false, "a tier2-only settings change leaves tier1's record intact")
     // That default is ollama again, so tier1 AND tier2 both route there and any surviving ollama
     // key leaves the judge enabled for every later scenario. `disconnect-provider` cannot retract
     // it — ollama is the default provider and disconnecting it is a deliberate no-op
@@ -705,6 +732,10 @@ test("E2E: Tier 1 keyed, Tier 2 routed to a keyless provider — issue #207's si
       false,
       "the route must be gone again, or every later scenario silently runs non-degraded",
     )
+    // The ollama key change touches every tier routed to ollama — both, after the
+    // disconnect above — so nothing stale survives into the later scenarios.
+    const afterKeys = (await send({ type: "get-state" })).health as Record<string, unknown>
+    assert.equal(afterKeys.tier1, null, "removing the routed provider's key clears that tier's record")
     // Re-stamp the alert throttle the dead-judge scenario left behind, so scenarios after this
     // one see exactly the pre-existing-suite state.
     store.set("kibitzer:provider-alert-ts", Date.now())

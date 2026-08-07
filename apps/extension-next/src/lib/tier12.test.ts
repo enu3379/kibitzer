@@ -18,7 +18,8 @@ const store: Record<string, unknown> = {}
   },
 }
 
-const { safeShouldContinue, tier1Rescue, tier2Confirm } = await import("./tier12.ts")
+const { enrichGoal, safeShouldContinue, tier1Rescue, tier2Confirm } = await import("./tier12.ts")
+const { getProviderHealth } = await import("./providerHealth.ts")
 
 test("safeShouldContinue preserves a successful policy result", async () => {
   assert.equal(await safeShouldContinue(async () => true), true)
@@ -178,4 +179,118 @@ test("the Tier-2 judge is told the observe-time tier_reached, never an assumed 1
   } finally {
     ;(globalThis as { fetch: unknown }).fetch = realFetch
   }
+})
+
+// Health is recorded per tier at the real call sites (#205). Each block below busts the
+// provider cache via setRoutes so its own fetch mock is the one the provider binds.
+
+test("a Tier-1 success leaves a live Tier-2 judge error standing — the #205 headline, end to end", async () => {
+  const { setRoutes } = await import("./providers.ts")
+  // Break the Tier-2 judge first.
+  await setRoutes({ tier2: { provider: "ollama", model: "gemma4:31b" } })
+  const realFetch = globalThis.fetch
+  ;(globalThis as { fetch: unknown }).fetch = async () => {
+    throw new Error("ECONNREFUSED")
+  }
+  try {
+    await tier2Confirm("파이썬 알고리즘 문제 풀이", { title: "귀여운 고양이 영상", urlHost: "video.test", score: 0.2 })
+  } finally {
+    ;(globalThis as { fetch: unknown }).fetch = realFetch
+  }
+  let health = await getProviderHealth()
+  assert.equal(health.tier2?.ok, false)
+  assert.equal(health.tier2?.stage, "judge", "the failing Tier-2 call is named")
+
+  // Now a SUCCESSFUL Tier-1 call — under the single-slot model this erased the error above.
+  await setRoutes({ tier1: { provider: "ollama", model: "gpt-oss:20b" } })
+  ;(globalThis as { fetch: unknown }).fetch = async () =>
+    new Response(
+      JSON.stringify({ message: { content: '{"verdict": "ok", "reason": "on goal"}' } }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )
+  try {
+    const rescue = await tier1Rescue("파이썬 알고리즘 문제 풀이", "파이썬 DFS 문제", "algo.test")
+    assert.equal(rescue.answered, true)
+  } finally {
+    ;(globalThis as { fetch: unknown }).fetch = realFetch
+  }
+  health = await getProviderHealth()
+  assert.equal(health.tier1?.ok, true)
+  assert.equal(health.tier2?.ok, false, "the Tier-2 error must survive the Tier-1 success")
+  assert.equal(health.tier2?.stage, "judge")
+})
+
+test("a Tier-2 writer failure records stage 'writer' — the nag still fires on the fallback template", async () => {
+  const { setRoutes } = await import("./providers.ts")
+  await setRoutes({ tier2: { provider: "ollama", model: "qwen3.5:397b" } })
+  let calls = 0
+  const realFetch = globalThis.fetch
+  ;(globalThis as { fetch: unknown }).fetch = async () => {
+    calls += 1
+    // Judge (1st call) confirms the drift; the Writer (2nd call) dies.
+    if (calls > 1) throw new Error("ECONNRESET")
+    return new Response(
+      JSON.stringify({
+        message: { content: '{"decision": "notify", "reason_code": "off_goal", "basis": "title"}' },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )
+  }
+  try {
+    const outcome = await tier2Confirm("파이썬 알고리즘 문제 풀이", {
+      title: "귀여운 고양이 영상 몰아보기",
+      urlHost: "video.test",
+      score: 0.2,
+    })
+    assert.equal(outcome.flow, "drift", "a writer failure must not swallow the confirmed nag")
+  } finally {
+    ;(globalThis as { fetch: unknown }).fetch = realFetch
+  }
+  const health = await getProviderHealth()
+  assert.equal(health.tier2?.ok, false)
+  assert.equal(health.tier2?.stage, "writer", "within the tier the latest call wins the slot")
+})
+
+test("enrichGoal deliberately records NO provider health — success and failure alike", async () => {
+  // Goal expansion is an internal pipeline stage the user doesn't know exists; its health
+  // participation was reverted by product decision (see the comment in enrichGoal). Both
+  // directions matter: an enrichment success clearing a genuine rescue error would be a
+  // false all-clear, and an enrichment failure has no actionable surface of its own.
+  const { setRoutes } = await import("./providers.ts")
+  const { recordProviderError, recordProviderOk } = await import("./providerHealth.ts")
+
+  // Self-contained fixture: live errors on both tiers, seeded directly.
+  await recordProviderError("tier1", new Error("rescue down"))
+  await recordProviderError("tier2", new Error("writer down"), "writer")
+  await setRoutes({ tier1: { provider: "ollama", model: "nemotron-3-super" } })
+  const realFetch = globalThis.fetch
+  ;(globalThis as { fetch: unknown }).fetch = async () =>
+    new Response(
+      JSON.stringify({ message: { content: '{"phrases": ["extract method pattern", "리팩터링 기법 정리"]}' } }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )
+  try {
+    assert.equal((await enrichGoal("리팩터링")).length, 2)
+  } finally {
+    ;(globalThis as { fetch: unknown }).fetch = realFetch
+  }
+  let health = await getProviderHealth()
+  assert.equal(health.tier1?.ok, false, "an enrichment success must not clear a rescue error")
+  assert.equal(health.tier2?.stage, "writer", "nor touch the other tier")
+
+  // Flip the fixture to clean records: a totally failed enrichment must not dirty them.
+  await recordProviderOk("tier1")
+  await recordProviderOk("tier2")
+  await setRoutes({ tier1: { provider: "ollama", model: "nemotron-3-nano:30b" } })
+  ;(globalThis as { fetch: unknown }).fetch = async () => {
+    throw new Error("ECONNREFUSED")
+  }
+  try {
+    assert.deepEqual(await enrichGoal("리팩터링"), [])
+  } finally {
+    ;(globalThis as { fetch: unknown }).fetch = realFetch
+  }
+  health = await getProviderHealth()
+  assert.equal(health.tier1?.ok, true, "a failed enrichment must not record a tier1 error")
+  assert.equal(health.tier2?.ok, true)
 })

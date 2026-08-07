@@ -4,6 +4,8 @@
 
 import { bandOf, formatDurationKo } from "../lib/sessionStats.ts"
 import { sundialSVG } from "../lib/sundial.ts"
+import { buildProviderWarn } from "../lib/providerHealthView.ts"
+import type { ProviderHealthSnapshot } from "../lib/providerHealth.ts"
 import type { HostSlice, SessionReport } from "../lib/sessionReport.ts"
 import type { ComparisonDelta, SessionComparison } from "../lib/sessionHistory.ts"
 import type { CardId } from "../lib/reportCards.ts"
@@ -16,7 +18,8 @@ interface StateResponse {
   judgeEnabled?: boolean
   persona?: string
   personas?: Array<{ key: string; name: string }>
-  health?: { ok: boolean; kind: string; message: string; ts: number } | null
+  health?: ProviderHealthSnapshot | null
+  routeKeyless?: { tier1: boolean; tier2: boolean } | null
   // Restart policy (sessionRestore): a parked session the setup view offers to resume (②)
   // and the continue-banner event shown over the active view (①).
   suspended?: { text: string; minutes: number | null; downFrom: number; showHint: boolean } | null
@@ -126,13 +129,25 @@ function personaName(state: StateResponse | null): string {
 }
 
 function renderProviderWarn(state: StateResponse): void {
-  const judgeOn = Boolean(state.judgeEnabled)
-  const health = state.health
-  if (judgeOn && health && !health.ok) {
-    providerWarnEl.textContent = `⚠ LLM 오류: ${health.message} · Tier-0(제목 유사도)만 동작 중`
-    providerWarnEl.hidden = false
-  } else {
-    providerWarnEl.hidden = true
+  const model = buildProviderWarn(
+    state.health ?? { tier1: null, tier2: null },
+    state.routeKeyless ?? { tier1: false, tier2: false },
+    Date.now(),
+  )
+  providerWarnEl.replaceChildren()
+  providerWarnEl.hidden = model.facts.length === 0
+  if (model.facts.length === 0) return
+  for (const fact of model.facts) {
+    const line = document.createElement("div")
+    line.className = fact.tone === "amber" ? "hint warn" : "hint err"
+    line.textContent = fact.text // textContent: the message carries provider error text
+    providerWarnEl.appendChild(line)
+  }
+  if (model.consequence) {
+    const line = document.createElement("div")
+    line.className = "hint gray"
+    line.textContent = model.consequence
+    providerWarnEl.appendChild(line)
   }
 }
 

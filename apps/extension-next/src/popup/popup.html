@@ -47,6 +47,11 @@
       .mode.on { color: #1f9d6b; }
       .hint { font-size: 11px; color: #999; margin: 6px 0 0; word-break: break-word; }
       .hint.err { color: #d1495b; }
+      .hint.warn { color: light-dark(#ad7d15, #d9a441); }
+      .hint.gray { color: #999; }
+      /* Provider warn block: per-tier fact lines + one consequence line. */
+      #providerWarn .hint { margin: 3px 0 0; }
+      #providerWarn { margin-top: 3px; }
       label { display: block; font-size: 12px; color: #888; margin-bottom: 10px; }
       input { width: 100%; box-sizing: border-box; padding: 8px 9px; margin-top: 4px;
         border: 1px solid #8884; border-radius: 8px; background: transparent; color: inherit; font: inherit; }
@@ -180,7 +185,7 @@
       </div>
       <div class="mode" id="mode"></div>
       <div class="mode" id="personaActive"></div>
-      <div class="hint err" id="providerWarn" hidden></div>
+      <div id="providerWarn" hidden></div>
       <div class="row">
         <button id="edit" class="ghost">목표 변경</button>
         <button id="pause" class="ghost">일시정지</button>
