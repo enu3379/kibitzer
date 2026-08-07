@@ -811,7 +811,7 @@ const copyText = async (text: string): Promise<boolean> => {
 
 $<HTMLButtonElement>("contactUs").addEventListener("click", async () => {
   const text = CONTACT_EMAILS.map((e) => `<${e}>`).join(", ")
-  showContactToast((await copyText(text)) ? "복사되었습니다" : "복사하지 못했습니다")
+  showContactToast((await copyText(text)) ? "이메일 주소가 복사되었습니다" : "이메일 주소를 복사하지 못했습니다")
 })
 
 void init()
