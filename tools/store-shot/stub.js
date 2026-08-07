@@ -190,7 +190,8 @@
       "--ok-fg:#175f3b;--err:#bf4540;--err-soft:#f7e2e0;--err-fg:#8f322c;" +
       "--sd-ink:#6e6960;--sd-ink3:#9b968c;--sd-line:#e6e3dc;--sd-leaf:#5aa63c;--sd-bg:#ffffff}" +
       (scene === "ai"
-        ? ".kadd,.connectbtn,.privacy-link{display:none!important}.store-ai-note{margin:0 0 10px;" +
+        ? ".kadd,.connectbtn,.privacy-link,.usec,.privacy{display:none!important}" +
+          ".store-ai-note{border-top:1px solid var(--line-soft);padding-top:10px;margin:0 0 10px;" +
           "font-size:11.5px;line-height:1.55;color:var(--page-ink-2)}"
         : "");
     document.head.appendChild(s);
