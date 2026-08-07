@@ -350,6 +350,7 @@ const draft: Record<TierName, RouteDraft> = {
   tier2: { provider: "ollama", model: "", custom: false },
 }
 const chips: Record<TierName, ChipState> = { tier1: staleChip(), tier2: staleChip() }
+const routeTestTokens: Record<TierName, number> = { tier1: 0, tier2: 0 }
 let aiPreference = true
 let runtimeHealth: ProviderHealthSnapshot = { tier1: null, tier2: null }
 let addOpenFor: ProviderId | null = null
@@ -359,6 +360,12 @@ let configActionError: string | null = null
 
 function staleChip(): ChipState {
   return { kind: "unknown", chip: "– 테스트", text: "이 라우팅으로 실제 호출을 확인합니다" }
+}
+
+function routeTestFingerprint(tier: TierName): string {
+  const route = draft[tier]
+  const keyIds = (judge?.accounts[route.provider] ?? []).map((key) => key.id)
+  return JSON.stringify([route.provider, route.model, keyIds])
 }
 
 function profileOf(id: ProviderId): (typeof PROVIDER_PROFILES)[number] {
@@ -711,6 +718,7 @@ function renderRoutes(): void {
       if (model.value === "__custom") {
         d.custom = true
         d.model = ""
+        chips[tier] = staleChip()
         renderRoutes()
         input.focus()
       } else {
@@ -806,14 +814,22 @@ function renderChip(tier: TierName): void {
 async function runRouteTest(tier: TierName): Promise<void> {
   if (chips[tier].kind === "testing") return
   const d = draft[tier]
+  const token = ++routeTestTokens[tier]
+  const fingerprint = routeTestFingerprint(tier)
   chips[tier] = { kind: "testing", chip: "… 확인 중", text: "확인 중 — 첫 호출은 느릴 수 있어요" }
   renderChip(tier)
-  const result = (await send({
-    type: "test-route",
-    tier,
-    provider: d.provider,
-    model: d.model,
-  })) as RouteTestResult | undefined
+  let result: RouteTestResult | undefined
+  try {
+    result = (await send({
+      type: "test-route",
+      tier,
+      provider: d.provider,
+      model: d.model,
+    })) as RouteTestResult | undefined
+  } catch {
+    result = { ok: false, detail: "테스트 요청에 실패했습니다. 잠시 후 다시 시도해 주세요." }
+  }
+  if (token !== routeTestTokens[tier] || fingerprint !== routeTestFingerprint(tier)) return
   if (result?.ok) {
     chips[tier] = { kind: "ok", chip: "✓ 방금 전", text: `정상 — ${result.detail}` }
     runtimeHealth[tier] = null
@@ -864,11 +880,34 @@ ajEnabled.addEventListener("click", async () => {
     aiPreference &&
     !confirm("AI 판정을 끌까요?\n판정 품질이 낮아지고 훈수 메시지가 단순해져요.")
   ) return
-  aiPreference = !aiPreference
+  const nextPreference = !aiPreference
+  ajEnabled.disabled = true
   configActionError = null
-  await saveSettings({ aiJudgmentEnabled: aiPreference })
-  if (!aiPreference) runtimeHealth = { tier1: null, tier2: null }
-  renderAiControls()
+  try {
+    let savedView: JudgeView | null = null
+    if (nextPreference) {
+      savedView = (await send({
+        type: "set-routes",
+        routes: {
+          tier1: { provider: draft.tier1.provider, model: draft.tier1.model },
+          tier2: { provider: draft.tier2.provider, model: draft.tier2.model },
+        },
+      })) as JudgeView
+      const accepted = TIERS.every((tier) =>
+        savedView?.routes[tier].provider === draft[tier].provider &&
+        savedView?.routes[tier].model === draft[tier].model
+      )
+      if (!accepted) throw new Error("route save rejected")
+    }
+    await saveSettings({ aiJudgmentEnabled: nextPreference })
+    aiPreference = nextPreference
+    if (!aiPreference) runtimeHealth = { tier1: null, tier2: null }
+    if (savedView) applyJudge(savedView)
+    else renderAiControls()
+  } catch {
+    configActionError = "AI 판정 설정을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요."
+    renderAiControls()
+  }
 })
 
 $<HTMLButtonElement>("openSiteSettings").addEventListener("click", () => {

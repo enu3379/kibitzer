@@ -100,6 +100,32 @@ test("a failed candidate-key validation does not save the key or stamp runtime h
   }
 })
 
+test("non-Ollama connection probes retain the reasoning-model output budget", async () => {
+  const requests: Array<Record<string, unknown>> = []
+  const realFetch = globalThis.fetch
+  ;(globalThis as { fetch: unknown }).fetch = async (_url: unknown, init?: { body?: unknown }) => {
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+    requests.push(body)
+    const content = body.model === "probe-tier1"
+      ? '{"verdict":"OK","reason":"on goal"}'
+      : '{"decision":"defer","reason_code":"insufficient_evidence","basis":"title"}'
+    return new Response(JSON.stringify({
+      choices: [{ message: { content }, finish_reason: "stop" }],
+    }), { status: 200, headers: { "content-type": "application/json" } })
+  }
+  try {
+    const result = await testCandidateKey("openai", "candidate-openai-key", {
+      tier1: "probe-tier1",
+      tier2: "probe-tier2",
+    })
+    assert.equal(result.ok, true)
+    assert.equal(requests.length, 2)
+    assert.ok(requests.every((request) => request.max_completion_tokens === 4096))
+  } finally {
+    ;(globalThis as { fetch: unknown }).fetch = realFetch
+  }
+})
+
 test("with no Tier-2 route the outcome is UNAVAILABLE, not a clean verdict", async () => {
   // `flow: "ok"` is a real judgment — "this page does not warrant a nudge" — and the gauge acts
   // on it: refund S, zero the inertia and accel tier, flip the page to OK. Nothing was asked

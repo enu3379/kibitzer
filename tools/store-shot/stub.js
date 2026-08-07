@@ -113,10 +113,10 @@
 
   var JUDGE = {
     accounts: {
-      ollama: [{ id: "store-demo", name: "Ollama Cloud", masked: "oll…demo", addedAt: Date.now() }],
+      ollama: [{ id: "store-demo", name: "Ollama Cloud", masked: "oll…demo", addedAt: 1_786_060_800_000 }],
     },
     routes: {
-      tier1: { provider: "ollama", model: "nemotron-3-super" },
+      tier1: { provider: "ollama", model: "nemotron-3-nano:30b" },
       tier2: { provider: "ollama", model: "minimax-m3" },
     },
   };

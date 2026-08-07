@@ -60,7 +60,12 @@ export interface Tier2Context {
 // These Cloud models reason before answering; a small budget exhausts before the
 // JSON verdict (output_exhausted). Match the server's Judge budget.
 const JUDGE_BUDGETS = { timeoutMs: 60_000, maxOutputTokens: 4096, writerMaxOutputTokens: 2048 } as const
-const CONNECTION_PROBE_BUDGETS = { timeoutMs: 20_000, maxOutputTokens: 256, writerMaxOutputTokens: 256 } as const
+const CONNECTION_PROBE_TIMEOUT_MS = 30_000
+const OLLAMA_CONNECTION_PROBE_BUDGETS = {
+  timeoutMs: CONNECTION_PROBE_TIMEOUT_MS,
+  maxOutputTokens: 256,
+  writerMaxOutputTokens: 256,
+} as const
 
 function buildJudgeProvider(
   provider: ProviderId,
@@ -69,7 +74,15 @@ function buildJudgeProvider(
   probe = false,
 ): JudgeProvider {
   const profile = profileFor(provider)
-  const budgets = probe ? CONNECTION_PROBE_BUDGETS : JUDGE_BUDGETS
+  // Ollama's native API can explicitly disable reasoning, so its setup probe can use a
+  // genuinely small output budget. Other providers keep the normal judge budget: for some
+  // reasoning models the compatibility API counts hidden thought tokens against the output
+  // cap, and 256 would reject a valid model before it emits the JSON verdict.
+  const budgets = probe
+    ? profile.format === "ollama"
+      ? OLLAMA_CONNECTION_PROBE_BUDGETS
+      : { ...JUDGE_BUDGETS, timeoutMs: CONNECTION_PROBE_TIMEOUT_MS }
+    : JUDGE_BUDGETS
   const onUsage = (tokensIn: number, tokensOut: number): void => {
     void recordUsage(provider, model, tokensIn, tokensOut)
   }
@@ -433,6 +446,7 @@ export async function writeSessionSummary(
     const message = await p.tier2.writeTier2Message(payload, composeSummaryPrompt(persona), {
       temperature: SUMMARY_TEMPERATURE,
     })
+    if (!(await judgeEnabled())) return null
     void recordProviderOk("tier2")
     return clampSentences(message, dice.bonus ? SUMMARY_MAX_SENTENCES + 1 : SUMMARY_MAX_SENTENCES)
   } catch (error) {

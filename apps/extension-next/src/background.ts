@@ -313,8 +313,11 @@ async function judgeAndDispatch(pending: PendingDwell): Promise<void> {
   // B2: the dwell + embed + Tier-1 rescue took time; the user may have navigated away or
   // changed the goal. Applying this verdict now would drive the gauge / active page for a
   // page they left. Drop it — the page they're on now gets its own dwell + judge.
-  if (!(await currentJudgingTab(pageKey, kind, localPdfPolicyRevision, epoch))) {
-    klog(`judge dropped (page/goal moved on) ${pageKey}`)
+  if (
+    (enabled && !(await judgeEnabled())) ||
+    !(await currentJudgingTab(pageKey, kind, localPdfPolicyRevision, epoch))
+  ) {
+    klog(`judge dropped (page/goal/AI policy moved on) ${pageKey}`)
     // This page was never actually judged (lastObservedKey was set optimistically at entry).
     // Clear the debounce marker so returning to it later re-judges, instead of observe()
     // silently debouncing it as "already judged" — which would leave it never re-judged.
@@ -355,7 +358,7 @@ async function enrichGoalDerived(goal: SessionGoal): Promise<void> {
     if (phrases.length === 0) return
     const derived = await filterDerivedPhrases(phrases, goal.text, MAX_PHRASES, embedTexts)
     const current = await getGoal()
-    if (!current || current.epoch !== goal.epoch) return // goal changed meanwhile
+    if (!current || current.epoch !== goal.epoch || !(await judgeEnabled())) return
     await setDerived(derived.map((d) => d.vector))
     klog(`goal enriched: ${derived.length} phrases [${derived.map((d) => d.phrase).join(" · ")}]`)
     logEvent("enrich", { count: derived.length, phrases: derived.map((d) => d.phrase) })
@@ -940,14 +943,11 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
   }
   if (message?.type === "disconnect-provider" && message.provider) {
     const provider = message.provider
-    const current = await getJudgeSettings()
-    if (
-      (await getSettings()).aiJudgmentEnabled &&
-      (current.routes.tier1.provider === provider || current.routes.tier2.provider === provider)
-    ) {
-      return toPublicSettings(current)
-    }
-    return toPublicSettings(await mutateProviderSettings(provider, () => disconnectProvider(provider)))
+    const protectRoutedProvider = (await getSettings()).aiJudgmentEnabled
+    return toPublicSettings(await mutateProviderSettings(
+      provider,
+      () => disconnectProvider(provider, protectRoutedProvider),
+    ))
   }
   if (message?.type === "test-and-add-provider-key" && message.provider) {
     const provider = message.provider
@@ -971,20 +971,16 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
   if (message?.type === "remove-provider-key" && message.provider && message.keyId) {
     const provider = message.provider
     const keyId = message.keyId
-    const current = await getJudgeSettings()
-    const keys = current.accounts[provider]?.keys ?? []
-    const removesLastRoutedKey =
-      keys.length === 1 &&
-      keys[0]?.id === keyId &&
-      (current.routes.tier1.provider === provider || current.routes.tier2.provider === provider)
-    if ((await getSettings()).aiJudgmentEnabled && removesLastRoutedKey) {
-      return toPublicSettings(current)
-    }
-    return toPublicSettings(await mutateProviderSettings(provider, () => removeProviderKey(provider, keyId)))
+    const protectRoutedLastKey = (await getSettings()).aiJudgmentEnabled
+    return toPublicSettings(await mutateProviderSettings(
+      provider,
+      () => removeProviderKey(provider, keyId, protectRoutedLastKey),
+    ))
   }
   if (message?.type === "set-routes") {
     const routes = message.routes ?? {}
-    return toPublicSettings(await mutateProviderSettings(null, () => setRoutes(routes)))
+    const requireComplete = (await getSettings()).aiJudgmentEnabled
+    return toPublicSettings(await mutateProviderSettings(null, () => setRoutes(routes, requireComplete)))
   }
   if (message?.type === "test-route" && message.tier && message.provider) {
     return await testRoute(message.tier, message.provider, message.model ?? "")

@@ -429,7 +429,8 @@ function dispatchTier2(
       current != null &&
       current.epoch === token.epoch &&
       tokenPageStillActive(token, state.activePageKey, activePage?.pageKey ?? null) &&
-      (await effectSourceAllowed(activePage))
+      (await effectSourceAllowed(activePage)) &&
+      (await judgeEnabled())
     if (!fresh) {
       await runEvent({ type: "tier2_cancel", requestId: token.requestId, ts: Date.now() }, goal, state)
       return

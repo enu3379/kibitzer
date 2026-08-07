@@ -756,9 +756,10 @@ is later removed. This replaces the earlier direction of accepting half configur
 softening their consequences (#207/#219).
 
 Users may explicitly turn AI judgment off without deleting their keys or routes. OFF gates
-all LLM work — goal enrichment, Tier-1 rescue, Tier-2 confirmation/message writing, and
-session recap — and the UI warns that judgment quality drops and prepared nudge copy replaces
-generated messages. Provider/test failures remain errors while AI is enabled. The store
+all runtime LLM work — goal enrichment, Tier-1 rescue, Tier-2 confirmation/message writing,
+and session recap — and the UI warns that judgment quality drops and prepared nudge copy replaces
+generated messages. A user-initiated candidate-key connection test is the sole setup-time
+exception and contacts both selected tier models before saving the key. Provider/test failures remain errors while AI is enabled. The store
 listing leads with AI usage while disclosing the opt-out and its quality tradeoff; no numeric
 quality-loss claim is made until the full Tier-0-only vs two-tier pipeline is benchmarked.
 

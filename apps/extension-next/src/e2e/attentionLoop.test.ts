@@ -641,8 +641,8 @@ test("E2E: an unreachable judge still nudges — a configured-but-dead Tier 2 mu
 
 test("E2E: a half-configured AI setup is disabled and falls back to local judging", async () => {
   // The exact configuration issue #207 (확인 1) reported as silently muting Kibitzer forever:
-  // routes are saved per tier and setRoutes never validates key presence, so tier1 can point at
-  // a provider WITH keys while tier2 points at one WITHOUT. judgeEnabled() is then true (tier1
+  // old/migrated routes can leave tier1 pointing at a provider WITH keys while tier2 points at
+  // one WITHOUT. Earlier judgeEnabled() then returned true (because tier1
   // is live), so the gauge is NOT degraded and asks Tier 2 to confirm at S=0 — but that route
   // resolves to no provider at all. Before #204/#208 the resulting silence came back as a bare
   // "ok" verdict: the gauge refunded S and no nudge ever fired, with no error surfaced anywhere.
@@ -655,13 +655,16 @@ test("E2E: a half-configured AI setup is disabled and falls back to local judgin
   notifications.length = 0
   activeTab = { id: 41, url: "https://video.test/watch?v=panda", title: "귀여운 판다 영상 몰아보기", active: true, windowId: 1 }
   await send({ type: "clear-log" }) // shared klog: an earlier scenario's final=DRIFT would satisfy the probe below
-  // Keys for ollama only; tier2 deliberately routed to a provider that has NO keys. This is a
-  // savable configuration — the settings API accepts it exactly as the options UI would.
+  // Recreate a stale/migrated half configuration while AI is OFF; the options UI and the
+  // background save boundary both reject creating it while AI is ON.
+  await send({ type: "set-settings", settings: { aiJudgmentEnabled: false } })
+  // Keys for ollama only; tier2 deliberately routed to a provider that has NO keys.
   const keyed = await send({ type: "add-provider-key", provider: "ollama", name: "local", value: "test-key" })
   // Every ollama key present now, not just the one just added: `makeTier` returns a live provider
   // whenever the ROUTED provider has any key at all, so one stray key keeps the judge enabled.
   const ollamaKeyIds = ((keyed.accounts as Record<string, Array<{ id: string }>>)?.ollama ?? []).map((a) => a.id)
   await send({ type: "set-routes", routes: { tier1: { provider: "ollama", model: "llama3" }, tier2: { provider: "openai", model: "gpt-5.6-luna" } } })
+  await send({ type: "set-settings", settings: { aiJudgmentEnabled: true } })
   // Tier 1 IS reachable in this configuration, but a live rescue could answer OK and stop the
   // drain. Failing the call keeps the DRIFT verdict (fail-closed) — all this test needs from
   // Tier 1. Tier 2 is unaffected: its route resolves to no provider before any call is made.

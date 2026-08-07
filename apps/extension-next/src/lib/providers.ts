@@ -382,10 +382,17 @@ export function connectProvider(provider: ProviderId): Promise<JudgeSettings> {
 
 /** Disconnect removes the account AND its keys; tiers routed to it fall back to the
  *  Ollama defaults. Ollama itself is the built-in default and cannot be disconnected. */
-export function disconnectProvider(provider: ProviderId): Promise<JudgeSettings> {
+export function disconnectProvider(
+  provider: ProviderId,
+  protectRoutedProvider = false,
+): Promise<JudgeSettings> {
   return withSettingsLock(async () => {
     const settings = await readJudgeSettings()
     if (provider === "ollama") return settings
+    if (
+      protectRoutedProvider &&
+      (settings.routes.tier1.provider === provider || settings.routes.tier2.provider === provider)
+    ) return settings
     delete settings.accounts[provider]
     for (const tier of ["tier1", "tier2"] as const) {
       if (settings.routes[tier].provider === provider) {
@@ -421,10 +428,17 @@ export function addProviderKey(
 export function removeProviderKey(
   provider: ProviderId,
   keyId: string,
+  protectRoutedLastKey = false,
 ): Promise<JudgeSettings> {
   return withSettingsLock(async () => {
     const settings = await readJudgeSettings()
     const account = settings.accounts[provider]
+    const removesLastRoutedKey =
+      protectRoutedLastKey &&
+      account?.keys.length === 1 &&
+      account.keys[0]?.id === keyId &&
+      (settings.routes.tier1.provider === provider || settings.routes.tier2.provider === provider)
+    if (removesLastRoutedKey) return settings
     if (account) account.keys = account.keys.filter((k) => k.id !== keyId)
     applyAutomaticRoutes(settings)
     return saveJudgeSettings(settings)
@@ -433,6 +447,7 @@ export function removeProviderKey(
 
 export function setRoutes(
   routes: Partial<Record<TierName, Partial<TierRoute>>>,
+  requireComplete = false,
 ): Promise<JudgeSettings> {
   return withSettingsLock(async () => {
     const settings = await readJudgeSettings()
@@ -441,6 +456,13 @@ export function setRoutes(
       if (!patch) continue
       settings.routes[tier] = coerceRoute({ ...settings.routes[tier], ...patch }, tier)
     }
+    if (
+      requireComplete &&
+      (["tier1", "tier2"] as const).some((tier) => {
+        const route = settings.routes[tier]
+        return !route.model.trim() || (settings.accounts[route.provider]?.keys.length ?? 0) === 0
+      })
+    ) return await readJudgeSettings()
     settings.routesManuallyConfigured = true
     return saveJudgeSettings(settings)
   })

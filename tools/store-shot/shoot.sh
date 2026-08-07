@@ -5,7 +5,12 @@ set -e
 D="${0:A:h}"
 URL="$1"; OUT="$2"; W="$3"; H="$4"
 TMP="$D/.raw-$(basename "$OUT")"
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+CHROME_BIN="${CHROME_BIN:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
+if [[ ! -x "$CHROME_BIN" ]]; then
+  echo "Chrome executable not found: $CHROME_BIN" >&2
+  exit 1
+fi
+"$CHROME_BIN" \
   --headless=new --disable-gpu --hide-scrollbars \
   --force-device-scale-factor=2 --window-size="$W,$H" \
   --virtual-time-budget=4000 --allow-file-access-from-files \
