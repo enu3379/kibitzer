@@ -31,6 +31,7 @@ python scripts/gen-personas.py   # → apps/extension-next/src/lib/personas.data
 - `fixtures/gauge/` — shared reducer contract fixtures used by extension-next tests
 - `docs/` — design docs, planning notes, handoff docs, progress log
 - `scripts/` — `gen-personas.py` + historical benchmark fixture data
+- `tools/store-shot/` — headless-Chrome rig that re-renders the Chrome Web Store screenshots and promo images into `docs/screenshots/`
 
 ## Workflow rules (operational minimum)
 

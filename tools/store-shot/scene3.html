@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="scenes.css" />
+    <style>
+      /* The popup lays out at its real 296px width. 1.08× keeps the whole summary in frame. */
+      .panel { padding: 18px; }
+      .panel .clip { width: 320px; height: 654px; overflow: hidden; }
+      .panel iframe { width: 296px; height: 605px; transform: scale(1.08); transform-origin: top left; }
+    </style>
+  </head>
+  <body>
+    <div class="split">
+      <div class="copy">
+        <div class="brand"><span>Kibitzer</span><span class="dot"></span><b>몰입 훈수꾼</b></div>
+        <h1>세션을 끝내면<br /><span class="mark">시간이 어디로 샜는지</span><br />숫자로 남습니다</h1>
+        <p class="sub">
+          유효 페이지 비율, 실제로 목표에 쓴 시간, 받은 훈수 횟수.<br />
+          고른 말투가 마지막에 한 줄 평을 남깁니다.
+        </p>
+        <div class="chips">
+          <span class="chip">지난 세션과 비교</span>
+          <span class="chip">MVP · 빌런</span>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="panel">
+          <div class="clip"><iframe class="fit" src="popup/popup.html?scene=summary"></iframe></div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

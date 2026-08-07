@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<style>
+  /* Scene 1 predates scenes.css and still carries its own type scale — the brand row is
+     30px here against 21px in scenes 2–5, which is why its dot renders roughly twice as wide.
+     Kept as-is so this file reproduces the shipped store-1-popup.png; only the brand dot moved
+     from the sundial leaf green it used to hardcode (#5aa63c) to the shared brand green. */
+  @font-face {
+    font-family: "Gowun Dodum";
+    src: url("assets/fonts/GowunDodum-Regular.woff2") format("woff2");
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1280px; height: 800px; overflow: hidden; }
+  body {
+    font-family: "Gowun Dodum", "Apple SD Gothic Neo", sans-serif;
+    background:
+      radial-gradient(900px 600px at 82% 40%, #ffffff 0%, rgba(255,255,255,0) 60%),
+      linear-gradient(135deg, #f7f5ef 0%, #edeade 100%);
+    color: #4a463e;
+    display: flex; align-items: center;
+  }
+  .copy { width: 560px; padding-left: 96px; }
+  .brand { font-size: 30px; letter-spacing: 0.5px; color: #6e6960; }
+  .brand .leaf { color: #2b9e57; }
+  h1 { font-size: 46px; line-height: 1.35; font-weight: 400; margin: 22px 0 26px; color: #3c3931; }
+  h1 b { font-weight: 400; border-bottom: 3px solid #5aa63c66; }
+  .sub { font-size: 20px; line-height: 1.7; color: #6e6960; }
+  .badges { margin-top: 40px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .badge {
+    font-size: 15px; color: #6e6960; background: #ffffffaa;
+    border: 1px solid #e6e3dc; border-radius: 999px; padding: 7px 14px;
+  }
+  .stage { flex: 1; display: flex; justify-content: center; }
+  .frame-card {
+    transform: scale(1.55); transform-origin: center;
+    border-radius: 14px; overflow: hidden; background: #fff;
+    border: 1px solid #e6e3dc;
+    box-shadow: 0 18px 50px -18px rgba(60, 57, 49, 0.35);
+  }
+  iframe { display: block; width: 296px; height: 356px; border: 0; }
+</style>
+</head>
+<body>
+  <div class="copy">
+    <div class="brand">Kibitzer<span class="leaf"> ●</span> 몰입 훈수꾼</div>
+    <h1>목표를 선언하면<br>조용히 지켜보다,<br>딴짓이 쌓일 때만<br><b>슬쩍 훈수</b></h1>
+    <div class="sub">차단하지 않습니다. 몰입 게이지가 닳는 걸<br>지켜보다가, 화면 구석에서 한마디 건넬 뿐.</div>
+    <div class="badges">
+      <span class="badge">서버 없음 · 내 브라우저 안에서만</span>
+      <span class="badge">비차단 훈수</span>
+    </div>
+  </div>
+  <div class="stage">
+    <div class="frame-card"><iframe src="popup/popup.html"></iframe></div>
+  </div>
+</body>
+</html>

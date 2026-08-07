@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      @font-face {
+        font-family: "Gowun Dodum";
+        font-weight: 400;
+        src: url("assets/fonts/GowunDodum-Regular.woff2") format("woff2");
+      }
+      :root { --accent: #10B981; --page-ink: #1F2937; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; width: 900px; height: 420px; background: #fff;
+        font-family: "Gowun Dodum", -apple-system, sans-serif; color: #2f2d28; }
+      .row { display: flex; gap: 0; padding: 26px 0 0; }
+      .col { flex: 1; text-align: center; }
+      .col h2 { font-size: 17px; font-weight: 400; margin: 0 0 4px; }
+      .col p { font-size: 12.5px; color: #6e6960; margin: 0 0 14px; line-height: 1.5; min-height: 38px; }
+      .big { height: 180px; display: flex; align-items: center; justify-content: center; }
+      .real { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 10px;
+        font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
+      img.icon { width: 168px; height: 168px; image-rendering: auto; }
+    </style>
+  </head>
+  <body>
+    <div class="row">
+      <div class="col">
+        <h2>기준 — 툴바 아이콘</h2>
+        <p>icon-128.png<br />검은 반원 얼굴 · 밝은 눈</p>
+        <div class="big"><img class="icon" src="icons/icon-128.png" alt="" /></div>
+        <div class="real"><img src="icons/icon-128.png" style="width:30px;height:30px" alt="" /><span>Kibitzer</span></div>
+      </div>
+
+      <div class="col">
+        <h2>현재 — 설정 페이지</h2>
+        <p>흰 얼굴 윤곽선 · 검은 눈 (명암 반전)<br />손 폭 2.6 &lt; 눈 지름 3.4</p>
+        <div class="big">
+          <svg width="180" height="152" viewBox="0 0 26 22" fill="none">
+            <circle cx="9.5" cy="7" r="1.7" fill="var(--page-ink)" />
+            <circle cx="16.5" cy="7" r="1.7" fill="var(--page-ink)" />
+            <path d="M6 10 C6 5.2 9 3 13 3 C17 3 20 5.2 20 10" stroke="var(--page-ink)" stroke-width="1.8" fill="none" />
+            <rect x="3" y="10" width="20" height="9" rx="2.4" fill="var(--accent)" />
+            <rect x="7.6" y="9" width="2.6" height="2.4" rx="1.2" fill="var(--page-ink)" />
+            <rect x="15.8" y="9" width="2.6" height="2.4" rx="1.2" fill="var(--page-ink)" />
+          </svg>
+        </div>
+        <div class="real">
+          <svg width="30" height="25" viewBox="0 0 26 22" fill="none">
+            <circle cx="9.5" cy="7" r="1.7" fill="var(--page-ink)" />
+            <circle cx="16.5" cy="7" r="1.7" fill="var(--page-ink)" />
+            <path d="M6 10 C6 5.2 9 3 13 3 C17 3 20 5.2 20 10" stroke="var(--page-ink)" stroke-width="1.8" fill="none" />
+            <rect x="3" y="10" width="20" height="9" rx="2.4" fill="var(--accent)" />
+            <rect x="7.6" y="9" width="2.6" height="2.4" rx="1.2" fill="var(--page-ink)" />
+            <rect x="15.8" y="9" width="2.6" height="2.4" rx="1.2" fill="var(--page-ink)" />
+          </svg>
+          <span>Kibitzer 설정</span>
+        </div>
+      </div>
+
+      <div class="col">
+        <h2>제안 — 아이콘 비율 이식</h2>
+        <p>R = 8.66 기준 눈 r 0.231R · (±0.365R, −0.317R)<br />손 0.423R 폭을 ±0.788R에</p>
+        <div class="big">
+          <svg width="180" height="152" viewBox="0 0 26 22" fill="none">
+            <path d="M4.34 10 A8.66 8.66 0 0 1 21.66 10 Z" fill="var(--page-ink)" />
+            <circle cx="9.84" cy="7.25" r="2.0" fill="#F9FAFB" />
+            <circle cx="16.16" cy="7.25" r="2.0" fill="#F9FAFB" />
+            <rect x="3" y="10" width="20" height="9" rx="2.4" fill="var(--accent)" />
+            <rect x="4.32" y="8.6" width="3.66" height="3.5" rx="1.75" fill="var(--page-ink)" />
+            <rect x="18.02" y="8.6" width="3.66" height="3.5" rx="1.75" fill="var(--page-ink)" />
+          </svg>
+        </div>
+        <div class="real">
+          <svg width="30" height="25" viewBox="0 0 26 22" fill="none">
+            <path d="M4.34 10 A8.66 8.66 0 0 1 21.66 10 Z" fill="var(--page-ink)" />
+            <circle cx="9.84" cy="7.25" r="2.0" fill="#F9FAFB" />
+            <circle cx="16.16" cy="7.25" r="2.0" fill="#F9FAFB" />
+            <rect x="3" y="10" width="20" height="9" rx="2.4" fill="var(--accent)" />
+            <rect x="4.32" y="8.6" width="3.66" height="3.5" rx="1.75" fill="var(--page-ink)" />
+            <rect x="18.02" y="8.6" width="3.66" height="3.5" rx="1.75" fill="var(--page-ink)" />
+          </svg>
+          <span>Kibitzer 설정</span>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
