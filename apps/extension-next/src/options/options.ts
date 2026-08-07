@@ -772,4 +772,39 @@ wipe.addEventListener("click", async () => {
   setTimeout(() => (wipe.textContent = "삭제"), 1500)
 })
 
+// Footer — "Contact Us" copies both developer addresses in <addr>, <addr> form.
+const CONTACT_EMAILS = ["kimdenya1@gmail.com", "enu3379@gmail.com"]
+const contactToast = $<HTMLElement>("contactToast")
+let contactToastTimer: ReturnType<typeof setTimeout> | undefined
+
+const showContactToast = (msg: string) => {
+  contactToast.textContent = msg
+  contactToast.classList.add("on")
+  clearTimeout(contactToastTimer)
+  contactToastTimer = setTimeout(() => contactToast.classList.remove("on"), 1800)
+}
+
+const copyText = async (text: string): Promise<boolean> => {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    // Clipboard API can reject when the page is not focused — fall back to execCommand.
+    const ta = document.createElement("textarea")
+    ta.value = text
+    ta.setAttribute("readonly", "")
+    ta.style.cssText = "position:fixed;top:0;left:0;opacity:0"
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand("copy")
+    ta.remove()
+    return ok
+  }
+}
+
+$<HTMLButtonElement>("contactUs").addEventListener("click", async () => {
+  const text = CONTACT_EMAILS.map((e) => `<${e}>`).join(", ")
+  showContactToast((await copyText(text)) ? "복사되었습니다" : "복사하지 못했습니다")
+})
+
 void init()
