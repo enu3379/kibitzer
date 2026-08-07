@@ -123,6 +123,32 @@ test("verdict action (related feedback) flips an existing entry and creates a mi
   assert.deepEqual(create.open, { pageKey: "z", since: 0 })
 })
 
+test("closing the focused window ends the interval — later heartbeats credit the destroyed page nothing", () => {
+  const v = run([
+    judged("a", 0, "DRIFT"),
+    { type: "inactive", ts: 30_000 }, // the window holding page A was destroyed
+    { type: "heartbeat", ts: 90_000 }, // the 1-min beats keep coming on the surviving window
+    { type: "heartbeat", ts: 150_000 },
+    { type: "heartbeat", ts: 210_000 },
+  ])
+  assert.equal(v.entries.a.ms, 30_000, "a page that no longer exists accrues no further time")
+  assert.equal(v.open, null, "and no interval is left open for a heartbeat to reopen")
+})
+
+test("after a window close the SURVIVING judged page resumes the interval, not the destroyed one", () => {
+  const v = run([
+    judged("a", 0), // page in the window that will be closed
+    judged("b", 10_000), // page in the other window — judged earlier this session
+    { type: "observe", pageKey: "a", ts: 20_000 }, // back on A: A owns the open interval
+    { type: "inactive", ts: 40_000 }, // A's window is destroyed
+    { type: "observe", pageKey: "b", ts: 40_000 }, // the resync hands over to the survivor
+    { type: "heartbeat", ts: 100_000 },
+    { type: "inactive", ts: 130_000 },
+  ])
+  assert.equal(v.entries.a.ms, 30_000) // 0→10k plus 20k→40k, and nothing after the close
+  assert.equal(v.entries.b.ms, 100_000) // 10k→20k plus 40k→130k on the surviving window
+})
+
 test("an epoch mismatch resets the tracker", () => {
   const old = run([judged("a", 0)], null, EPOCH)
   const next = reduceVisits(old, judged("b", 1_000), EPOCH + 1)

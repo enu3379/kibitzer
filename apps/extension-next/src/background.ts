@@ -5,7 +5,18 @@
 //   → gauge (degraded mode) → S drains on drift → S=0 → real nag notification.
 // A 1-min alarm feeds heartbeats so dwell time (not click count) drives the gauge.
 
-import { getGoal, setGoal, type SessionGoal } from "./lib/session.ts"
+import { getGoal, getSuspendedSession, setGoal, takeSuspendedSession, type SessionGoal } from "./lib/session.ts"
+import {
+  clearRestoreNotice,
+  dismissRestoreBannerForever,
+  getRestoreNotice,
+  handleBrowserStartup,
+  isSuspendHintSeen,
+  markSuspendHintSeen,
+  noteAlive,
+  resumeSuspendedSession,
+  startupSettled,
+} from "./lib/sessionRestore.ts"
 import { embedText, embedTexts, judgeTier0 } from "./lib/tier0.ts"
 import { addExemplar, admissionEligible, admitAnchor, loadRefs, setDerived } from "./lib/relevance.ts"
 import { filterDerivedPhrases, MAX_PHRASES } from "./lib/goalEnrichment.ts"
@@ -28,18 +39,20 @@ import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
 import { clearProviderHealth, getProviderHealth } from "./lib/providerHealth.ts"
 import { clearBadge } from "./lib/badge.ts"
 import { clearEvents, exportEvents, logEvent } from "./lib/events.ts"
-import { getSettings, setSettings, type Settings } from "./lib/settings.ts"
+import { getSettings, inQuietHours, localPdfPolicyMatches, setSettings, type Settings } from "./lib/settings.ts"
 import { clearStore, kvGet, kvSet, OBS_STORE } from "./lib/db.ts"
-import { DwellScheduler } from "./lib/dwellScheduler.ts"
+import { DwellScheduler, PENDING_DWELL_KEY } from "./lib/dwellScheduler.ts"
+import { isPendingDwell, PENDING_DWELL_VERSION, type PendingDwell } from "./lib/dwell.ts"
 import { markNagActed, recentTitles, recordObservation } from "./lib/history.ts"
-import { clearVisits, noteHeartbeat, noteInactive, noteJudged, noteObserve, noteVerdict } from "./lib/visits.ts"
+import { clearVisits, getVisits, noteHeartbeat, noteInactive, noteJudged, noteObserve, noteVerdict } from "./lib/visits.ts"
 import { clearSessionSummary, dismissSessionSummary, finalizeSession, generateSummaryComment, getSessionSummary } from "./lib/sessionSummary.ts"
 import { clearSessionHistory } from "./lib/sessionHistory.ts"
 import { clearLog, exportLog, klog, logText } from "./lib/klog.ts"
 import { isUserAllowedUrl, isUserBlockedUrl, shouldDropUrl } from "./lib/domainFilter.ts"
 import { getDomainLists, initDomainLists, setDomainLists } from "./lib/domainLists.ts"
 import { truncateCodePoints } from "./providers/judgeParsing.ts"
-import { hostOf, pageKeyOf } from "./lib/url.ts"
+import { describeObservableUrl } from "./lib/url.ts"
+import { maybeOpenLocalPdfPrompt } from "./lib/localPdfPrompt.ts"
 import { browserPresent, isFocusedWindow } from "./lib/presence.ts"
 
 const HEARTBEAT_ALARM = "kibitzer-next-heartbeat"
@@ -59,18 +72,62 @@ let lastObservedKey: string | null = null
 const OBSERVE_DWELL_MS = 5000
 const dwell = new DwellScheduler({
   dwellMs: OBSERVE_DWELL_MS,
-  judge: (pending) => judgeAndDispatch(pending.url, pending.title, pending.obsKey),
+  judge: judgeAndDispatch,
 })
+
+async function holdLocalPdfDisabled(goal: SessionGoal): Promise<void> {
+  const disabledKey = "local-pdf#disabled"
+  // A judged PDF may have an open visit interval. OFF means observation stops now, even if
+  // the gauge was already neutral or a stale observe later tries to resume the interval.
+  await noteInactive(Date.now(), goal.epoch)
+  // Cancel BEFORE the debounce below: the page just left may still have a dwell pending, and
+  // an early return here would let it fire against this PDF and be dropped — leaving the
+  // gauge frozen on that page with nothing armed (same defect as the main observe debounce).
+  await dwell.cancel()
+  if (lastObservedKey === disabledKey) return
+  lastObservedKey = disabledKey
+  klog("drop (local-pdf disabled)")
+  await enterNeutral(disabledKey, goal)
+}
+
+/** True iff the gauge pipeline already accounts for this observation: it is integrating
+ *  this very page's verdict, or this exact observation's dwell is still pending. Only those
+ *  states make the lastObservedKey debounce safe to honor — lastObservedKey is written by
+ *  judgeAndDispatch, not by observe, so after judged-X → unjudged-Y → back-to-X within Y's
+ *  dwell the key still names X while the gauge holds Y with a null verdict; Y's dwell then
+ *  fires against the wrong active tab and is dropped, leaving NOTHING armed. An early return
+ *  on the bare key match in that state froze S indefinitely (no drain, no recovery, no drift
+ *  detection) until some unrelated event happened to observe a different key. */
+async function gaugeAccountsFor(pageKey: string, obsKey: string): Promise<boolean> {
+  const state = await currentState()
+  if (state.activePageKey === pageKey && state.activeVerdict != null) return true
+  const pending = await kvGet<unknown>(PENDING_DWELL_KEY)
+  return isPendingDwell(pending) && pending.obsKey === obsKey
+}
 
 /** Entry for every observation trigger (nav / activate / SPA). Debounces per page, pauses
  *  immediately on sensitive pages, and otherwise schedules the judgement after a dwell so
  *  transient pages don't count. */
 async function observe(url: string | undefined, title: string | undefined): Promise<void> {
+  // Restored-tab events can beat the onStartup restart decision; observing then would
+  // enterNeutral/nav-integrate up to gapCap of the shutdown gap under the pre-shutdown
+  // verdict. One microtask in steady state (the barrier is long resolved).
+  await startupSettled
   const goal = await getGoal()
-  if (!goal || !url || !title) return
+  if (!goal || !url) return
+  const descriptor = describeObservableUrl(url)
+  let localPdfSettings: Settings | null = null
+  if (descriptor?.kind === "local_pdf") {
+    localPdfSettings = await getSettings()
+    if (!localPdfSettings.observeLocalPdfs) {
+      await holdLocalPdfDisabled(goal)
+      void maybeOpenLocalPdfPrompt(descriptor.pageKey).catch(() => klog("local-pdf prompt unavailable"))
+      return
+    }
+  }
+  if (!title) return
   title = truncateCodePoints(title, TITLE_MAX_CHARS)
-  const pageKey = pageKeyOf(url)
-  if (!pageKey) {
+  if (!descriptor) {
     // Non-http(s) internal pages (chrome://newtab, chrome://extensions, about:blank, the web
     // store, …) get no page key, so they can never be judged. Treat them exactly like the
     // sensitive drop below: cancel any pending dwell and hold the gauge NEUTRAL — otherwise
@@ -86,28 +143,46 @@ async function observe(url: string | undefined, title: string | undefined): Prom
     }
     const internalPageKey = `internal#${protocol}`
     const obsKey = `${internalPageKey}\n${title}`
-    if (obsKey === lastObservedKey) return // same internal page storming — already held
+    // Cancel BEFORE the storm debounce: returning to an already-held internal page must still
+    // kill the dwell of the page just left, or that dwell fires against this chrome:// tab,
+    // is dropped, and the gauge freezes on the abandoned page with nothing armed.
     await dwell.cancel() // drop any prior page's pending dwell; this page never counts
+    // Close the visit interval of the page just left — also before the debounce, mirroring
+    // holdLocalPdfDisabled. This branch returns before the noteObserve below, so without an
+    // explicit close the tracker still believed the judged page was being attended and the
+    // 1-min heartbeat kept crediting it dwell for as long as the user sat on this chrome://
+    // page — inflating the session summary's valid time and longest-dwell page. (The gauge
+    // was already safe: the enterNeutral below holds it.)
+    await noteInactive(Date.now(), goal.epoch)
+    if (obsKey === lastObservedKey) return // same internal page storming — already held
     lastObservedKey = obsKey
     klog(`drop (internal) ${protocol}`)
     await enterNeutral(internalPageKey, goal)
     return
   }
+  const { pageKey } = descriptor
   // Visit tracking must see every observation trigger — including a presence-resume on the
   // same page, which the lastObservedKey debounce below hides. The reducer only reopens an
   // interval for already-judged pages, so this can't credit unjudged/sensitive pages (internal
   // pages returned above, before this point).
-  void noteObserve(pageKey, Date.now(), goal.epoch)
+  await noteObserve(pageKey, Date.now(), goal.epoch)
   // Debounce on pageKey+title, not pageKey alone: an SPA route change that keeps the
   // path but swaps the title (YouTube video → video) still re-judges, while an update
-  // storm on the identical page is collapsed (the old S 0↔30 yo-yo guard).
-  const obsKey = `${pageKey}\n${title}`
-  if (obsKey === lastObservedKey) return
+  // storm on the identical page is collapsed (the old S 0↔30 yo-yo guard). The key match
+  // alone is NOT proof the gauge still reflects this page (see gaugeAccountsFor) — a tab/
+  // window bounce back to a judged page within another page's dwell used to early-return
+  // here and freeze the gauge on the abandoned page. Honor the debounce only while the
+  // gauge demonstrably accounts for this observation; otherwise re-enter the pipeline
+  // (enterNeutral no-ops for a page whose verdict we still hold, and schedule() replaces
+  // the stale checkpoint atomically, so re-entry is idempotent).
+  const localPdfPolicyRevision = localPdfSettings?.localPdfPolicyRevision ?? null
+  const obsKey = `${pageKey}\n${title}${localPdfPolicyRevision == null ? "" : `\npolicy:${localPdfPolicyRevision}`}`
+  if (obsKey === lastObservedKey && (await gaugeAccountsFor(pageKey, obsKey))) return
   // Privacy gate: sensitive pages pause the gauge immediately — no dwell, no judging.
   // The user lists load once per worker lifetime; awaiting the memoized init here keeps the
   // synchronous gate accurate from the very first observation after a wake.
   await initDomainLists()
-  if (shouldDropUrl(url)) {
+  if (descriptor.kind === "web" && shouldDropUrl(url)) {
     await dwell.cancel() // drop any prior page's pending dwell; this page never counts
     lastObservedKey = obsKey
     // The page must never be NAMED anywhere durable — not in this log line, and not as the
@@ -132,29 +207,58 @@ async function observe(url: string | undefined, title: string | undefined): Prom
   await enterNeutral(pageKey, goal)
   // A new candidate atomically REPLACES the previous checkpoint (a single durable write) —
   // no cancel-then-schedule gap where a teardown in between would leave nothing to recover.
-  await dwell.schedule(url, title, obsKey)
+  const candidate = {
+    version: PENDING_DWELL_VERSION,
+    pageKey,
+    title,
+    urlHost: descriptor.urlHost,
+    kind: descriptor.kind,
+    localPdfPolicyRevision,
+    obsKey,
+  } satisfies Parameters<typeof dwell.schedule>[0]
+  await dwell.schedule(candidate)
+  // An OFF edge can interleave with any await above or inside schedule(). Remove only this
+  // stale revision; an OFF→ON observation has a different token and must keep its checkpoint.
+  if (localPdfPolicyRevision != null && !(await localPdfPolicyMatches(localPdfPolicyRevision))) {
+    await dwell.cancelCandidate(candidate)
+    await noteInactive(Date.now(), goal.epoch)
+  }
 }
 
-/** True iff, after the async embed/rescue, we are STILL judging the same page under the same
- *  goal session — i.e. the user hasn't navigated away and the goal hasn't been changed/cleared.
- *  Guards against applying a stale verdict to whatever page/goal is current now (B2). */
-async function stillJudging(pageKey: string, epoch: number): Promise<boolean> {
+/** Return the current tab only while it still matches this candidate and privacy/opt-in
+ *  policy. Re-run after slow model calls so an OFF toggle or navigation always wins. */
+async function currentJudgingTab(
+  pageKey: string,
+  kind: PendingDwell["kind"],
+  localPdfPolicyRevision: number | null,
+  epoch: number,
+): Promise<chrome.tabs.Tab | null> {
   const goal = await getGoal()
-  if (!goal || goal.epoch !== epoch) return false // goal changed or cleared mid-judge
+  if (!goal || goal.epoch !== epoch) return null
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
-  return !!tab?.url && pageKeyOf(tab.url) === pageKey // still on the judged page
+  if (!tab?.url) return null
+  const current = describeObservableUrl(tab.url)
+  if (!current || current.pageKey !== pageKey || current.kind !== kind) return null
+  if (kind === "local_pdf") {
+    return localPdfPolicyRevision != null && (await localPdfPolicyMatches(localPdfPolicyRevision)) ? tab : null
+  }
+  await initDomainLists()
+  return shouldDropUrl(tab.url) ? null : tab
 }
 
 /** Embed title vs goal (Tier 0), optionally rescue via Tier 1 (Ollama), and feed the
  *  verdict into the gauge — invoked by the dwell scheduler once the dwell has elapsed. */
-async function judgeAndDispatch(url: string, title: string, obsKey: string): Promise<void> {
+async function judgeAndDispatch(pending: PendingDwell): Promise<void> {
   const goal = await getGoal()
   if (!goal) return
-  const pageKey = pageKeyOf(url)
-  if (!pageKey) return
+  const { pageKey, title, urlHost, obsKey, kind, localPdfPolicyRevision } = pending
   const epoch = goal.epoch
   lastObservedKey = obsKey
-  const urlHost = hostOf(url)
+  const initialTab = await currentJudgingTab(pageKey, kind, localPdfPolicyRevision, epoch)
+  if (!initialTab) {
+    if (lastObservedKey === obsKey) lastObservedKey = null
+    return
+  }
   // User allowlist (options 사이트 pane): this host is always on-goal — skip the Tier-0
   // embed and the Tier-1/2 judges entirely and dispatch OK (no LLM spend, S recovers).
   // The blocklist (static or user) wins inside isUserAllowedUrl. The page is still recorded
@@ -162,9 +266,9 @@ async function judgeAndDispatch(url: string, title: string, obsKey: string): Pro
   // session summary stay correct. The memoized init covers a reconcile() that reaches here
   // before any observe() ran in a fresh worker.
   await initDomainLists()
-  if (isUserAllowedUrl(url)) {
+  if (kind === "web" && initialTab.url && isUserAllowedUrl(initialTab.url)) {
     // B2 (same as below): the dwell took time; drop the verdict if the user moved on.
-    if (!(await stillJudging(pageKey, epoch))) {
+    if (!(await currentJudgingTab(pageKey, kind, localPdfPolicyRevision, epoch))) {
       klog(`judge dropped (page/goal moved on) ${pageKey}`)
       if (lastObservedKey === obsKey) lastObservedKey = null
       return
@@ -174,30 +278,40 @@ async function judgeAndDispatch(url: string, title: string, obsKey: string): Pro
     // and this page never got one — `mode` records why.
     logEvent("observe", { pageKey, host: urlHost, verdict: "OK", mode: "user-allow" })
     const now = Date.now()
-    await setActivePage({ pageKey, title, urlHost, score: 1 })
+    await setActivePage({ pageKey, title, urlHost, score: 1, kind, localPdfPolicyRevision, tierReached: 0 })
     await recordObservation({ title, urlHost, verdict: "OK", ts: now }) // recent_titles / repeat context
     await noteJudged(pageKey, title, urlHost, "OK", now, epoch, await browserPresent()) // session-summary dwell/verdict
     // No r0/tauOk: activeMargin stays null → full-speed recovery (the same event shape as
     // the "관련 있어요" user-override OK).
-    await dispatch({ type: "nav", pageKey, verdict: "OK", ts: now }, goal)
+    await dispatch({ type: "nav", pageKey, verdict: "OK", quiet: await quietNow(now), ts: now }, goal)
     return
   }
-  const tauOk = (await getSettings()).tauOk
+  const judgeSettings = await getSettings()
+  const tauOk = judgeSettings.tauOk
   const refs = await loadRefs()
   const { score, verdict: tier0Verdict, vector: titleVec, parts } = await judgeTier0(goal.text, title, tauOk, refs)
   const enabled = await judgeEnabled()
   let verdict = tier0Verdict
   let tierReached = 0
   if (verdict === "DRIFT" && enabled) {
+    const titles = await recentTitles()
+    // Do not start a provider request after a local-PDF OFF edge that landed during Tier 0.
+    if (!(await currentJudgingTab(pageKey, kind, localPdfPolicyRevision, epoch))) {
+      if (lastObservedKey === obsKey) lastObservedKey = null
+      return
+    }
     // Give Tier-1 the recent-visit context (mirrors the server) so it can judge the escalation
     // pattern, not just this title in isolation.
-    verdict = await tier1Rescue(goal.text, title, urlHost, await recentTitles()) // Tier 1 may rescue to OK
-    tierReached = 1
+    const rescue = await tier1Rescue(goal.text, title, urlHost, titles) // Tier 1 may rescue to OK
+    verdict = rescue.verdict
+    // A keyless route or a failed call left Tier 0's DRIFT standing without a Tier-1 judgment —
+    // recording 1 there would misreport the tier history to the Tier-2 judge.
+    if (rescue.answered) tierReached = 1
   }
   // B2: the dwell + embed + Tier-1 rescue took time; the user may have navigated away or
   // changed the goal. Applying this verdict now would drive the gauge / active page for a
   // page they left. Drop it — the page they're on now gets its own dwell + judge.
-  if (!(await stillJudging(pageKey, epoch))) {
+  if (!(await currentJudgingTab(pageKey, kind, localPdfPolicyRevision, epoch))) {
     klog(`judge dropped (page/goal moved on) ${pageKey}`)
     // This page was never actually judged (lastObservedKey was set optimistically at entry).
     // Clear the debounce marker so returning to it later re-judges, instead of observe()
@@ -212,13 +326,15 @@ async function judgeAndDispatch(url: string, title: string, obsKey: string): Pro
   klog(`observe ${pageKey} tier0=${tier0Verdict}(${score.toFixed(2)} ex=${parts.exemplarScore.toFixed(2)} an=${parts.anchorScore.toFixed(2)}) final=${verdict} mode=${enabled ? "ollama" : "degraded"}`)
   logEvent("observe", { pageKey, host: urlHost, tier0: tier0Verdict, score: Number(score.toFixed(3)), exemplar: Number(parts.exemplarScore.toFixed(3)), anchor: Number(parts.anchorScore.toFixed(3)), derived: Number(parts.derivedScore.toFixed(3)), verdict, mode: enabled ? "ollama" : "degraded" })
   const now = Date.now()
-  await setActivePage({ pageKey, title, urlHost, score })
+  await setActivePage({ pageKey, title, urlHost, score, kind, localPdfPolicyRevision, tierReached })
   await recordObservation({ title, urlHost, verdict, ts: now }) // recent_titles / repeat context
   // Only open a timed visit interval if the user is present now — this verdict may have landed
   // after the dwell/embed while Chrome sits unfocused/idle on the same page.
   await noteJudged(pageKey, title, urlHost, verdict, now, epoch, await browserPresent()) // session-summary dwell/verdict
   await dispatch(
-    { type: "nav", pageKey, verdict, r0: score, tauOk, degraded: !enabled, ts: now },
+    // `quiet` off the settings already read for tauOk: observation is gated on window focus, not
+    // on presence, so this dispatch can land while the once-a-minute tick is paused.
+    { type: "nav", pageKey, verdict, r0: score, tauOk, quiet: inQuietHours(judgeSettings.quietHours, now), degraded: !enabled, ts: now },
     goal,
   )
 }
@@ -251,6 +367,14 @@ async function ensureHeartbeat(): Promise<void> {
   // delay the next heartbeat up to a full minute every time the goal is (re)declared.
   const existing = await chrome.alarms.get(HEARTBEAT_ALARM)
   if (!existing) await chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 1 })
+}
+
+/** Is `ts` inside the user's quiet hours? The reducer has no clock and no settings, so the
+ *  heartbeat resolves this and carries the answer — see GaugeState.quiet. Delivery consults the
+ *  setting again at the exact moment it would show something; this is only about what the gauge
+ *  is allowed to DECIDE, so a boundary that lands mid-tick costs at most one tick of lag. */
+async function quietNow(ts: number): Promise<boolean> {
+  return inQuietHours((await getSettings()).quietHours, ts)
 }
 
 // Presence (Chrome focused AND idle-active) is defined once in ./lib/presence.ts so the gauge
@@ -343,25 +467,57 @@ chrome.runtime.onInstalled.addListener((details) => {
 // Kick the user domain-lists load early so the synchronous privacy gate is warm before the
 // first observation (observe/judge also await the memoized init as a readiness barrier).
 void initDomainLists()
-void flushOutbox()
-void dwell.reconcile()
-chrome.runtime.onStartup.addListener(() => {
+// The first drain/reconcile waits for the restart decision (startupSettled: resolved by
+// handleBrowserStartup, or after a short fallback on plain SW wakes where onStartup never
+// fires). An eager module-level flush used to race the suspend decision — with 자동 유지 OFF
+// and a short gap, a young pre-shutdown nag could deliver in the ms before the suspend
+// committed and stripped its goal. The 1-min heartbeat still bounds recovery latency.
+void startupSettled.then(() => {
   void flushOutbox()
   void dwell.reconcile()
+})
+chrome.runtime.onStartup.addListener(() => {
+  void (async () => {
+    // The restart policy first: a suspend must land before the startup drain, so queued
+    // pre-shutdown effects meet the no-session/TTL guards instead of a delivery attempt.
+    await handleBrowserStartup().catch(() => undefined)
+    void flushOutbox()
+    void dwell.reconcile()
+    // Closing the LAST window quits Chrome on Windows, so windows.onRemoved can lose its race with
+    // the teardown and the open interval / active verdict survive on disk pointing at a page from
+    // the previous run. Re-sync once here so they are settled before the first heartbeat can resume
+    // crediting them. Runs AFTER the restart policy: a suspend leaves no goal (resync no-ops), and
+    // a continue leaves the clock already rebased, so the re-sync only has to settle an orphaned
+    // page hold — never the shutdown gap itself.
+    void resyncActivePage("startup").catch(() => klog("startup resync skipped"))
+  })()
 })
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== HEARTBEAT_ALARM) return
-  void getGoal().then(async (goal) => {
+  void (async () => {
+    // A relaunch replays the missed heartbeat alarm almost immediately, racing the restart
+    // decision on BOTH of its inputs: its noteAlive(now) would mask the real gap (a multi-day
+    // downtime measuring ≈0 → session wrongly continued), and its dispatch would integrate up
+    // to gapCap of the gap under the pre-shutdown verdict before the rebase/suspend commits.
+    // One microtask in steady state (the barrier is long resolved).
+    await startupSettled
+    const goal = await getGoal()
     if (!goal) return
     // Only drain while Chrome is focused and the user is active; otherwise pause.
     const present = await browserPresent()
     await notePresence(present) // record presence transitions off the same signal the gauge uses
     const now = Date.now()
+    void noteAlive(now) // durable last-alive marker — the restart-gap measurement (sessionRestore)
     // Once-a-minute durable checkpoint for the visit tracker (bounds teardown loss).
     void (present ? noteHeartbeat(now, goal.epoch) : noteInactive(now, goal.epoch))
-    await dispatch({ type: present ? "heartbeat" : "inactive", ts: now }, goal)
-  })
+    // Carry the quiet window into the gauge so it decides nothing during it. Read here rather than
+    // in the reducer, which has no clock and no settings. Both branches carry it: `inactive`
+    // integrates nothing, but while the user is away it is the only tick that fires, and a later
+    // `nav` decides under whatever was last stamped.
+    const quiet = await quietNow(now)
+    await dispatch(present ? { type: "heartbeat", quiet, ts: now } : { type: "inactive", quiet, ts: now }, goal)
+  })()
 })
 
 chrome.idle.setDetectionInterval(60)
@@ -391,6 +547,91 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
     }
     return observeActiveTab()
   })
+})
+
+// Closing a whole window DESTROYS the page the visit tracker and the gauge are still
+// attributing time to, and Chrome fires no observation for it: tabs.onActivated only covers
+// closing a tab, and the surviving window's active tab may never produce an observe (it can be
+// an internal page, or a restored tab that never reloads). Left alone, the 1-min heartbeat kept
+// crediting dwell to a page that no longer exists and kept integrating its stale verdict into S.
+//
+// No tabId/windowId is stored in the visit or gauge state (both key on pageKey alone), so
+// ownership of the open interval can't be tested by id. Instead re-query which tab is active NOW
+// and act only on a MISMATCH — closing a background window then stays a true no-op, where an
+// unconditional pause would rebase the gauge clock and silently forgive a minute of real drift.
+async function resyncActivePage(reason: "window-close" | "startup", closedWindowId?: number): Promise<void> {
+  const goal = await getGoal()
+  if (!goal) return
+  // A tab belonging to the window that just closed is NOT a survivor. Clicking the X on an
+  // unfocused window focuses it first, so `lastFocusedWindow` can still resolve to the window
+  // being torn down and hand back its own doomed tab — which would look like a match and turn
+  // the whole re-sync into a no-op, leaving exactly the leak this handler exists to close.
+  const survivor = async (): Promise<chrome.tabs.Tab | undefined> => {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+      return tab && tab.windowId !== closedWindowId ? tab : undefined
+    } catch {
+      // The last window closing races Chrome's teardown — treat it as "no surviving page".
+      return undefined
+    }
+  }
+  const tab = await survivor()
+  const survivorKey = tab?.url ? (describeObservableUrl(tab.url)?.pageKey ?? null) : null
+  const visits = await getVisits()
+  const trackedOpen = visits?.epoch === goal.epoch ? (visits.open ?? null) : null
+  const openOrphaned = trackedOpen != null && trackedOpen.pageKey !== survivorKey
+  // Close the interval at once: the destroyed page must not be credited one more second.
+  if (openOrphaned) await noteInactive(Date.now(), goal.epoch)
+  const state = await currentState()
+  const gaugeOrphaned = state.activeVerdict != null && state.activePageKey !== survivorKey
+  // Always trace: the gauge half is silent whenever the hold is already NEUTRAL (a freshly opened
+  // window sits on an internal page, which neutralizes it), so without this line a working re-sync
+  // and one that never fired are indistinguishable in the log. Report why each half did nothing —
+  // "nothing was open/held" and "what is open/held belongs to the survivor" are both correct
+  // no-ops, and a single "kept" label made them unreadable against a genuine miss. The survivor is
+  // described by KIND only, never by key: it may be a sensitive or user-blocked page, and this log
+  // is exportable to ~/Downloads (the privacy scenarios in the e2e suite assert exactly that).
+  klog(
+    `resync (${reason}) survivor=${tab ? (survivorKey ? "observable" : "internal") : "none"}` +
+      ` visits=${openOrphaned ? "closed" : trackedOpen == null ? "none" : "match"}` +
+      ` gauge=${gaugeOrphaned ? "neutral" : state.activeVerdict == null ? "none" : "match"}`,
+  )
+  // One question decides both halves below: was the user actually there for the time we are about
+  // to account for? Unknown → present, per presence.ts.
+  const present = await browserPresent()
+  if (gaugeOrphaned) {
+    // `neutral` integrates up to now and only THEN drops the verdict. That is right for a window
+    // the user closed while watching it — the tail is real attention, and plain `inactive` would
+    // discard up to a minute of true drift.
+    //
+    // It is wrong whenever the user was not there for that tail, and there are two such cases.
+    // At STARTUP the gap is the browser having been shut. And a window can be closed from the
+    // taskbar long after the user walked away, in which case the tail is away-time. Both would
+    // otherwise bill gapCap's worth (90s) of DRIFT the user never spent — at launch that can even
+    // nag about a page from the last session. Rebase the clock first so the hold integrates
+    // nothing. (The 1-min heartbeat already pauses the same way while away.)
+    if (reason === "startup" || !present) await dispatch({ type: "inactive", ts: Date.now() }, goal)
+    // The hold key is opaque on purpose: the survivor may be a sensitive page, and the hold's
+    // pageKey is echoed by the klog trace and the exportable `tick` event (same reason the
+    // internal / sensitive drops in observe() use opaque constants).
+    await enterNeutral(reason === "startup" ? "startup#resync" : "window#closed", goal)
+  }
+  if (!openOrphaned && !gaugeOrphaned) return
+  // Hand the session over to the surviving window so it is never wedged. Never start a dwell for
+  // attention that isn't happening, though: a window can be closed from the taskbar (or by
+  // window.close()) while Chrome is unfocused, and every other observe() entry point is
+  // focus/presence gated. A later focus/idle-active edge re-observes through the existing paths.
+  if (!present) return
+  // Re-read rather than reusing the snapshot above: several awaits have passed, and handing a
+  // stale tab to observe() would overwrite a fresher dwell checkpoint with a reset deadline.
+  const current = await survivor()
+  if (current) await observe(current.url, current.title)
+}
+
+chrome.windows.onRemoved.addListener((windowId) => {
+  // Best-effort: the last window's close races Chrome's teardown, and this must never take the
+  // pipeline down with it (visits.note is already best-effort for the same reason).
+  void resyncActivePage("window-close", windowId).catch(() => klog("window-close resync skipped"))
 })
 
 // Feedback from the OS-notification fallback (buttons: 0=related, 1=break), routed
@@ -424,6 +665,8 @@ interface PopupMessage {
   kind?: string
   persona?: string
   displayToken?: number
+  sourceTabId?: number
+  action?: string // restore-banner-action: "default-off" | "never-show"
   settings?: Partial<Settings>
   // provider settings (options AI 판정 pane)
   provider?: ProviderId
@@ -438,8 +681,71 @@ interface PopupMessage {
   lists?: { block?: string[]; allow?: string[] }
 }
 
+async function applySettingsPatch(
+  patch: Partial<Settings>,
+  reobserveActiveTab = true,
+): Promise<Settings> {
+  const before = await getSettings()
+  const next = await setSettings(patch)
+  // Compare the revision, not the boolean: it is minted inside setSettings' write queue and
+  // bumped once per edge, so an OFF→ON pair that lands between these two reads still counts.
+  if (before.localPdfPolicyRevision !== next.localPdfPolicyRevision) {
+    // A setting change supersedes both a checkpointed and an already-running PDF judge.
+    // Re-observe the current tab so OFF holds it neutral and ON begins a fresh full dwell.
+    await dwell.cancel()
+    lastObservedKey = null
+    if (reobserveActiveTab && await getGoal()) void observeActiveTab()
+  }
+  return next
+}
+
+interface EnableLocalPdfResult {
+  ok: boolean
+  settingEnabled: boolean
+}
+
+async function enableLocalPdfObservation(sourceTabId: number): Promise<EnableLocalPdfResult> {
+  let settingEnabled = false
+  try {
+    settingEnabled = (await getSettings()).observeLocalPdfs
+    const initialTab = await chrome.tabs.get(sourceTabId)
+    const initialDescriptor = initialTab.url ? describeObservableUrl(initialTab.url) : null
+    if (initialDescriptor?.kind !== "local_pdf") return { ok: false, settingEnabled }
+
+    const next = await applySettingsPatch({ observeLocalPdfs: true }, false)
+    settingEnabled = next.observeLocalPdfs
+    if (!settingEnabled) return { ok: false, settingEnabled }
+
+    // This click establishes a fresh source-PDF observation even if another settings event
+    // won the OFF→ON race first. Do not inherit an earlier dwell deadline.
+    await dwell.cancel()
+    lastObservedKey = null
+    await chrome.windows.update(initialTab.windowId, { focused: true })
+    await chrome.tabs.update(sourceTabId, { active: true })
+
+    // Navigation can race the window switch. Re-read both identity and active state before
+    // observing so an old PDF snapshot can never schedule dwell for the wrong page.
+    const currentTab = await chrome.tabs.get(sourceTabId)
+    const currentDescriptor = currentTab.url ? describeObservableUrl(currentTab.url) : null
+    const [activeTab] = await chrome.tabs.query({ active: true, windowId: currentTab.windowId })
+    if (
+      currentDescriptor?.kind !== "local_pdf" ||
+      activeTab?.id !== sourceTabId ||
+      !currentTab.url
+    ) return { ok: false, settingEnabled }
+
+    await observe(currentTab.url, currentTab.title)
+    return { ok: true, settingEnabled }
+  } catch {
+    return { ok: false, settingEnabled }
+  }
+}
+
 async function handleMessage(message: PopupMessage): Promise<unknown> {
   if (message?.type === "get-state") {
+    // A popup opened in the first moments of a relaunch must not advance the gauge across a
+    // not-yet-decided restart gap (same reasoning as the heartbeat alarm's gate).
+    await startupSettled
     const goal = await getGoal()
     // Advance the gauge to "now" so the popup shows a live value between the 1-min heartbeat
     // alarms (a nag can still fire here if S reaches 0) — but gate on presence exactly like the
@@ -447,13 +753,20 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     // after being away integrated the whole un-rebased gap at full DRIFT drain. `inactive`
     // rebases the reducer clock without integrating. (No notePresence here — per the alarm's
     // comment, only the alarm heartbeat logs presence transitions.)
-    if (goal) await dispatch({ type: (await browserPresent()) ? "heartbeat" : "inactive", ts: Date.now() }, goal)
+    if (goal) {
+      const now = Date.now()
+      const quiet = await quietNow(now)
+      await dispatch((await browserPresent()) ? { type: "heartbeat", quiet, ts: now } : { type: "inactive", quiet, ts: now }, goal)
+    }
     const [state, enabled, persona, health] = await Promise.all([
       currentState(),
       judgeEnabled(),
       getPersonaKey(),
       getProviderHealth(),
     ])
+    // Restart-policy surfaces: a parked session the setup view can resume (경우 ②, mutually
+    // exclusive with a live goal by construction) and the continue-banner event (경우 ①).
+    const suspended = goal ? null : await getSuspendedSession()
     return {
       goal,
       s: Math.round(state.s),
@@ -463,7 +776,40 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
       persona,
       personas: personaChoices(),
       health,
+      suspended: suspended
+        ? {
+            text: suspended.goal.text,
+            minutes: suspended.goal.availableMinutes,
+            downFrom: suspended.downFrom,
+            showHint: !(await isSuspendHintSeen()),
+          }
+        : null,
+      restoreNotice: goal ? await getRestoreNotice(goal) : null,
     }
+  }
+  if (message?.type === "resume-session") {
+    const goal = await resumeSuspendedSession()
+    if (goal) {
+      void ensureHeartbeat()
+      lastObservedKey = null // re-judge the active page under the resumed goal
+      void observeActiveTab()
+    }
+    return { goal: goal ?? (await getGoal()) }
+  }
+  if (message?.type === "restore-banner-action") {
+    // "잇지 않음을 기본으로" flips the setting (future restarts suspend, so the banner has no
+    // trigger left); "다시 보지 않기" suppresses the banner forever without changing behavior.
+    if (message.action === "default-off") {
+      await applySettingsPatch({ sessionAutoContinue: false })
+      await clearRestoreNotice()
+    } else if (message.action === "never-show") {
+      await dismissRestoreBannerForever()
+    }
+    return { ok: true }
+  }
+  if (message?.type === "suspend-hint-seen") {
+    await markSuspendHintSeen()
+    return { ok: true }
   }
   // Pause = 30-min quiet (same as the "30분 조용히" toast); resume = clear the snooze by
   // setting its expiry to now. Both reuse the gauge's snooze action; no-op with no goal.
@@ -500,7 +846,11 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     return await getSettings()
   }
   if (message?.type === "set-settings") {
-    return await setSettings(message.settings ?? {})
+    return await applySettingsPatch(message.settings ?? {})
+  }
+  if (message?.type === "enable-local-pdf-observation") {
+    if (!Number.isSafeInteger(message.sourceTabId)) return { ok: false }
+    return await enableLocalPdfObservation(message.sourceTabId as number)
   }
   // User domain lists (options 사이트 pane). set-domain-lists normalizes/dedupes, persists,
   // and refreshes the synchronous privacy gate in this worker; rejected (non-host) entries
@@ -515,6 +865,8 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     // Wipe activity data (gauge, history, learned vectors, events, observations, log,
     // visit tracker, cached session summary); keep the goal, Ollama config, persona,
     // and settings.
+    await dwell.cancel()
+    lastObservedKey = null
     await resetState()
     await clearEvents()
     await clearStore(OBS_STORE)
@@ -573,6 +925,7 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     await setGoal("", null)
     await resetState()
     await clearVisits()
+    void clearRestoreNotice()
     lastObservedKey = null
     clearBadge()
     logEvent("goal", { text: null, minutes: null, revision: null })
@@ -593,6 +946,32 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     return { ok: true }
   }
   if (message?.type === "set-goal") {
+    // Declaring a NEW goal instead of resuming a parked session closes that session quietly:
+    // its stats enter the session history (next session's "지난번 대비" comparison) but the
+    // summary view never pops. MUST run before the resetState/clearVisits below wipes the
+    // snapshot sources. The session's end time is when the browser went down — not now.
+    if ((message.goal ?? "").trim()) {
+      // take (atomic, serialized) FIRST so a concurrent resume-session can't revive a session
+      // this handler is about to close; the finalize is then best-effort — a transient storage
+      // failure must not abort the set-goal (the popup would hang on a never-sent response)
+      // and only costs the closed session its history entry.
+      const suspended = await takeSuspendedSession()
+      if (suspended) {
+        try {
+          const summary = await finalizeSession(suspended.goal, suspended.downFrom)
+          await dismissSessionSummary() // quiet close — recorded, never surfaced
+          logEvent("session-end", {
+            epoch: suspended.goal.epoch,
+            silent: true,
+            pages_total: summary.stats.pagesTotal,
+            pages_ok: summary.stats.pagesOk,
+            valid_ms: summary.stats.validMs,
+          })
+        } catch (error) {
+          klog(`suspended-session quiet close failed (no history entry): ${String(error)}`)
+        }
+      }
+    }
     const previous = await getGoal()
     const goal: SessionGoal | null = await setGoal(
       message.goal ?? "",
@@ -604,6 +983,7 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     if (!goal || previous?.epoch !== goal.epoch) {
       await resetState()
       await clearVisits() // stale dwell aggregates must not bleed into the next session
+      void clearRestoreNotice() // a continue-banner belongs to the session it interrupted
       // A fresh session supersedes the previous session's cached summary; a plain clear
       // (goal null) keeps it so the summary survives until a new goal starts.
       if (goal) await clearSessionSummary()
@@ -647,16 +1027,23 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
         // are loaded before the drop gate below runs.
         await initDomainLists()
         const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
-        const pageKey = tab?.url && !shouldDropUrl(tab.url) ? pageKeyOf(tab.url) : null
+        const descriptor = tab?.url ? describeObservableUrl(tab.url) : null
+        const permitted =
+          descriptor?.kind === "local_pdf"
+            ? (await getSettings()).observeLocalPdfs
+            : descriptor?.kind === "web" && !!tab?.url && !shouldDropUrl(tab.url)
         // Title ingress that bypasses observe() — clamp here too.
         const tabTitle = truncateCodePoints(tab?.title ?? "", TITLE_MAX_CHARS)
-        if (pageKey) {
+        if (descriptor && permitted) {
+          const { pageKey, urlHost } = descriptor
           klog(`related → OK recover ${pageKey}`)
-          await dispatch({ type: "nav", pageKey, verdict: "OK", ts: now }, goal)
+          // Carries the window like every other nav: advance runs BEFORE the verdict is replaced,
+          // so this can settle a held DRIFT and decide a nag on the way through.
+          await dispatch({ type: "nav", pageKey, verdict: "OK", quiet: await quietNow(now), ts: now }, goal)
           // The user override also flips the page in the session-summary tracker (open a timed
           // interval only if present — a notification-button click can arrive with Chrome unfocused).
           const present = await browserPresent()
-          void noteVerdict(pageKey, tabTitle, tab?.url ? hostOf(tab.url) : "", "OK", now, goal.epoch, present)
+          void noteVerdict(pageKey, tabTitle, urlHost, "OK", now, goal.epoch, present)
           // Learn: add this page's embedding as a goal exemplar so this class of page
           // stops drifting at Tier-0 (the user-taught relevance loop).
           if (tabTitle && tab?.url) {

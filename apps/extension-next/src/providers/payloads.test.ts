@@ -94,6 +94,19 @@ test("Tier 2 review payload cleans excerpts and keeps the trust-boundary shape",
   })
 })
 
+test("Tier 2 review payload keeps tier_reached=0 — a tier that never ran is 0, not null", () => {
+  const payload = buildTier2ReviewPayload(
+    { rawText: "논문 읽기" },
+    { title: "Dictionary", urlHost: "example.test", verdict: "DRIFT", tierReached: 0, tier0Score: 0.2 },
+    [],
+    null,
+    [],
+    null,
+  )
+  const current = payload.current as Record<string, unknown>
+  assert.equal(current.tier_reached, 0)
+})
+
 test("Tier 2 message payload maps the TypeScript decision to wire keys", () => {
   assert.deepEqual(
     buildTier2MessagePayload(

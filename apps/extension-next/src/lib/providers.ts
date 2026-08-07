@@ -25,6 +25,8 @@ export type WireFormat = "ollama" | "openai" | "claude"
 export interface ProviderProfile {
   id: ProviderId
   label: string
+  /** Stable provider name used when automatically naming an API key. */
+  keyNamePrefix: string
   chatUrl: string
   format: WireFormat
   /** Options-UI key placeholder, e.g. "sk-or-v1-…". */
@@ -43,6 +45,7 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
   {
     id: "ollama",
     label: "Ollama Cloud",
+    keyNamePrefix: "Ollama",
     chatUrl: "https://ollama.com/api/chat",
     format: "ollama",
     keyHint: "ollama.com API 키",
@@ -58,6 +61,7 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
   {
     id: "gemini",
     label: "Gemini",
+    keyNamePrefix: "Gemini",
     chatUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
     format: "openai",
     keyHint: "AIza…",
@@ -70,6 +74,7 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
   {
     id: "openrouter",
     label: "OpenRouter",
+    keyNamePrefix: "OpenRouter",
     chatUrl: "https://openrouter.ai/api/v1/chat/completions",
     format: "openai",
     keyHint: "sk-or-v1-…",
@@ -92,6 +97,7 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
   {
     id: "deepseek",
     label: "DeepSeek",
+    keyNamePrefix: "DeepSeek",
     chatUrl: "https://api.deepseek.com/v1/chat/completions",
     format: "openai",
     keyHint: "sk-…",
@@ -102,6 +108,7 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
   {
     id: "claude",
     label: "Claude",
+    keyNamePrefix: "Claude",
     chatUrl: "https://api.anthropic.com/v1/messages",
     format: "claude",
     keyHint: "sk-ant-…",
@@ -112,6 +119,7 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
   {
     id: "openai",
     label: "OpenAI",
+    keyNamePrefix: "OpenAI",
     chatUrl: "https://api.openai.com/v1/chat/completions",
     format: "openai",
     keyHint: "sk-…",
@@ -124,6 +132,7 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
   {
     id: "kimi",
     label: "Kimi (Moonshot)",
+    keyNamePrefix: "Kimi",
     chatUrl: "https://api.moonshot.ai/v1/chat/completions",
     format: "openai",
     keyHint: "sk-…",
@@ -139,12 +148,37 @@ export function profileFor(id: ProviderId): ProviderProfile {
   return profile
 }
 
+/** Default API-key label: provider plus local calendar date and that provider's key number. */
+export function defaultProviderKeyName(
+  provider: ProviderId,
+  existingKeyCount: number,
+  date: Date = new Date(),
+): string {
+  const yymmdd = [date.getFullYear() % 100, date.getMonth() + 1, date.getDate()]
+    .map((part) => String(part).padStart(2, "0"))
+    .join("")
+  return `${profileFor(provider).keyNamePrefix}-${yymmdd}-${existingKeyCount + 1}`
+}
+
 const PROVIDER_IDS = new Set<string>(PROVIDER_PROFILES.map((p) => p.id))
 
 // --- storage ---------------------------------------------------------------------
 
 const SETTINGS_KEY = "kibitzer:providers:v1"
 const LEGACY_OLLAMA_KEY = "kibitzer:ollama:v2"
+
+// Service-worker message handlers may overlap. Keep every settings read that can write
+// migration metadata, and every read-modify-write mutation, in one FIFO chain.
+let settingsOperationTail: Promise<void> = Promise.resolve()
+
+function withSettingsLock<T>(operation: () => Promise<T>): Promise<T> {
+  const result = settingsOperationTail.then(operation)
+  settingsOperationTail = result.then(
+    () => undefined,
+    () => undefined,
+  )
+  return result
+}
 
 export type TierName = "tier1" | "tier2"
 
@@ -170,6 +204,10 @@ export interface JudgeSettings {
   /** A provider is "connected" iff it has an entry here (keys may still be empty). */
   accounts: Partial<Record<ProviderId, ProviderAccount>>
   routes: { tier1: TierRoute; tier2: TierRoute }
+  /** Automatic key-based suggestions stop permanently after the user saves routes. */
+  routesManuallyConfigured: boolean
+  /** The first keyed non-Ollama provider remains preferred while it still has a key. */
+  automaticRouteProvider: ProviderId
 }
 
 export function defaultRoute(tier: TierName, provider: ProviderId = "ollama"): TierRoute {
@@ -213,12 +251,29 @@ function coerce(value: unknown): JudgeSettings {
   }
   // Ollama is the built-in default provider — always connected.
   accounts.ollama ??= { keys: [] }
+  const routes = {
+    tier1: coerceRoute(v.routes?.tier1, "tier1"),
+    tier2: coerceRoute(v.routes?.tier2, "tier2"),
+  }
+  const hasNonDefaultRoute = (["tier1", "tier2"] as const).some((tier) => {
+    const fallback = defaultRoute(tier)
+    return routes[tier].provider !== fallback.provider || routes[tier].model !== fallback.model
+  })
+  const hasExistingKeys = Object.values(accounts).some((account) => (account?.keys.length ?? 0) > 0)
+  const inferredAutomaticProvider =
+    routes.tier1.provider === routes.tier2.provider ? routes.tier1.provider : "ollama"
   return {
     accounts,
-    routes: {
-      tier1: coerceRoute(v.routes?.tier1, "tier1"),
-      tier2: coerceRoute(v.routes?.tier2, "tier2"),
-    },
+    routes,
+    // Existing non-default routes predate this flag and must be treated as a user choice.
+    routesManuallyConfigured:
+      typeof v.routesManuallyConfigured === "boolean"
+        ? v.routesManuallyConfigured
+        : hasNonDefaultRoute || hasExistingKeys,
+    automaticRouteProvider:
+      typeof v.automaticRouteProvider === "string" && PROVIDER_IDS.has(v.automaticRouteProvider)
+        ? (v.automaticRouteProvider as ProviderId)
+        : inferredAutomaticProvider,
   }
 }
 
@@ -237,23 +292,46 @@ function fromLegacy(value: unknown): JudgeSettings {
     }))
   const model = (raw: unknown, tier: TierName): string =>
     typeof raw === "string" && raw.trim() ? raw.trim() : defaultRoute(tier).model
+  const routes = {
+    tier1: { provider: "ollama" as const, model: model(legacy.tier1Model, "tier1") },
+    tier2: { provider: "ollama" as const, model: model(legacy.tier2Model, "tier2") },
+  }
   return {
     accounts: { ollama: { keys } },
-    routes: {
-      tier1: { provider: "ollama", model: model(legacy.tier1Model, "tier1") },
-      tier2: { provider: "ollama", model: model(legacy.tier2Model, "tier2") },
-    },
+    routes,
+    routesManuallyConfigured: (["tier1", "tier2"] as const).some(
+      (tier) => routes[tier].model !== defaultRoute(tier).model,
+    ),
+    automaticRouteProvider: "ollama",
   }
 }
 
-export async function getJudgeSettings(): Promise<JudgeSettings> {
+async function readJudgeSettings(): Promise<JudgeSettings> {
   const stored = await chrome.storage.local.get([SETTINGS_KEY, LEGACY_OLLAMA_KEY])
-  if (stored[SETTINGS_KEY] !== undefined) return coerce(stored[SETTINGS_KEY])
+  if (stored[SETTINGS_KEY] !== undefined) {
+    const raw = stored[SETTINGS_KEY] as Partial<JudgeSettings> | null
+    const settings = coerce(raw)
+    const hasAutomaticMetadata =
+      raw !== null &&
+      typeof raw === "object" &&
+      typeof raw.routesManuallyConfigured === "boolean" &&
+      typeof raw.automaticRouteProvider === "string" &&
+      PROVIDER_IDS.has(raw.automaticRouteProvider)
+    if (!hasAutomaticMetadata) {
+      applyAutomaticRoutes(settings)
+      return saveJudgeSettings(settings)
+    }
+    return settings
+  }
   const migrated = coerce(
     stored[LEGACY_OLLAMA_KEY] !== undefined ? fromLegacy(stored[LEGACY_OLLAMA_KEY]) : {},
   )
   await chrome.storage.local.set({ [SETTINGS_KEY]: migrated })
   return migrated
+}
+
+export function getJudgeSettings(): Promise<JudgeSettings> {
+  return withSettingsLock(readJudgeSettings)
 }
 
 async function saveJudgeSettings(settings: JudgeSettings): Promise<JudgeSettings> {
@@ -262,66 +340,110 @@ async function saveJudgeSettings(settings: JudgeSettings): Promise<JudgeSettings
   return merged
 }
 
+/** Pick the first provider the user supplied a key for. Ollama Cloud always wins once
+ *  it has a key; otherwise the earliest non-Ollama key establishes a stable default. */
+function suggestedProvider(settings: JudgeSettings): ProviderId {
+  if ((settings.accounts.ollama?.keys.length ?? 0) > 0) return "ollama"
+
+  const preferred = settings.automaticRouteProvider
+  if (preferred !== "ollama" && (settings.accounts[preferred]?.keys.length ?? 0) > 0) {
+    return preferred
+  }
+
+  let first: { provider: ProviderId; addedAt: number } | null = null
+  for (const [id, account] of Object.entries(settings.accounts)) {
+    if (id === "ollama") continue
+    const addedAt = account?.keys[0]?.addedAt
+    if (addedAt === undefined) continue
+    // Object insertion order breaks the rare Date.now() tie in favor of the provider
+    // whose account/key was created first.
+    if (!first || addedAt < first.addedAt) first = { provider: id as ProviderId, addedAt }
+  }
+  return first?.provider ?? "ollama"
+}
+
+function applyAutomaticRoutes(settings: JudgeSettings): void {
+  if (settings.routesManuallyConfigured) return
+  const provider = suggestedProvider(settings)
+  settings.automaticRouteProvider = provider
+  settings.routes.tier1 = defaultRoute("tier1", provider)
+  settings.routes.tier2 = defaultRoute("tier2", provider)
+}
+
 // --- mutations (options UI) ------------------------------------------------------
 
-export async function connectProvider(provider: ProviderId): Promise<JudgeSettings> {
-  const settings = await getJudgeSettings()
-  settings.accounts[provider] ??= { keys: [] }
-  return saveJudgeSettings(settings)
+export function connectProvider(provider: ProviderId): Promise<JudgeSettings> {
+  return withSettingsLock(async () => {
+    const settings = await readJudgeSettings()
+    settings.accounts[provider] ??= { keys: [] }
+    return saveJudgeSettings(settings)
+  })
 }
 
 /** Disconnect removes the account AND its keys; tiers routed to it fall back to the
  *  Ollama defaults. Ollama itself is the built-in default and cannot be disconnected. */
-export async function disconnectProvider(provider: ProviderId): Promise<JudgeSettings> {
-  if (provider === "ollama") return getJudgeSettings()
-  const settings = await getJudgeSettings()
-  delete settings.accounts[provider]
-  for (const tier of ["tier1", "tier2"] as const) {
-    if (settings.routes[tier].provider === provider) {
-      settings.routes[tier] = defaultRoute(tier)
+export function disconnectProvider(provider: ProviderId): Promise<JudgeSettings> {
+  return withSettingsLock(async () => {
+    const settings = await readJudgeSettings()
+    if (provider === "ollama") return settings
+    delete settings.accounts[provider]
+    for (const tier of ["tier1", "tier2"] as const) {
+      if (settings.routes[tier].provider === provider) {
+        settings.routes[tier] = defaultRoute(tier)
+      }
     }
-  }
-  return saveJudgeSettings(settings)
+    applyAutomaticRoutes(settings)
+    return saveJudgeSettings(settings)
+  })
 }
 
-export async function addProviderKey(
+export function addProviderKey(
   provider: ProviderId,
   name: string,
   value: string,
 ): Promise<JudgeSettings> {
   const trimmed = value.trim()
   if (!trimmed) return getJudgeSettings()
-  const settings = await getJudgeSettings()
-  const account = (settings.accounts[provider] ??= { keys: [] })
-  account.keys.push({
-    id: crypto.randomUUID(),
-    name: name.trim(),
-    value: trimmed,
-    addedAt: Date.now(),
+  return withSettingsLock(async () => {
+    const settings = await readJudgeSettings()
+    const account = (settings.accounts[provider] ??= { keys: [] })
+    account.keys.push({
+      id: crypto.randomUUID(),
+      name: name.trim() || defaultProviderKeyName(provider, account.keys.length),
+      value: trimmed,
+      addedAt: Date.now(),
+    })
+    applyAutomaticRoutes(settings)
+    return saveJudgeSettings(settings)
   })
-  return saveJudgeSettings(settings)
 }
 
-export async function removeProviderKey(
+export function removeProviderKey(
   provider: ProviderId,
   keyId: string,
 ): Promise<JudgeSettings> {
-  const settings = await getJudgeSettings()
-  const account = settings.accounts[provider]
-  if (account) account.keys = account.keys.filter((k) => k.id !== keyId)
-  return saveJudgeSettings(settings)
+  return withSettingsLock(async () => {
+    const settings = await readJudgeSettings()
+    const account = settings.accounts[provider]
+    if (account) account.keys = account.keys.filter((k) => k.id !== keyId)
+    applyAutomaticRoutes(settings)
+    return saveJudgeSettings(settings)
+  })
 }
 
-export async function setRoutes(
+export function setRoutes(
   routes: Partial<Record<TierName, Partial<TierRoute>>>,
 ): Promise<JudgeSettings> {
-  const settings = await getJudgeSettings()
-  for (const tier of ["tier1", "tier2"] as const) {
-    const patch = routes[tier]
-    if (!patch) continue
-    settings.routes[tier] = coerceRoute({ ...settings.routes[tier], ...patch }, tier)
-  }
-  return saveJudgeSettings(settings)
+  return withSettingsLock(async () => {
+    const settings = await readJudgeSettings()
+    for (const tier of ["tier1", "tier2"] as const) {
+      const patch = routes[tier]
+      if (!patch) continue
+      settings.routes[tier] = coerceRoute({ ...settings.routes[tier], ...patch }, tier)
+    }
+    settings.routesManuallyConfigured = true
+    return saveJudgeSettings(settings)
+  })
 }
 
 // --- read-side helpers -----------------------------------------------------------

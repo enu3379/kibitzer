@@ -12,7 +12,11 @@ export interface QuietHours {
 export interface Settings {
   tauOk: number // Tier-0 OK threshold; one of SENSITIVITY_PRESETS (higher = stricter, more drift)
   quietHours: QuietHours
-  ttsEnabled: boolean // speak the nag via Web Speech
+  observeLocalPdfs: boolean // opt-in: use Chrome's local-PDF tab title for judging
+  localPdfPolicyRevision: number // increments on every ON/OFF edge; invalidates stale async work
+  // Browser fully quit + relaunched within RESTORE_GAP_MS → the in-flight session continues
+  // seamlessly (경우 ①). OFF: any restart parks the session as resumable (경우 ②).
+  sessionAutoContinue: boolean
 }
 
 export type SensitivityLevel = "lenient" | "standard" | "strict"
@@ -50,7 +54,9 @@ export function snapTauOk(tauOk: number): number {
 export const DEFAULT_SETTINGS: Settings = {
   tauOk: SENSITIVITY_PRESETS.standard,
   quietHours: { enabled: false, start: "22:00", end: "08:00" },
-  ttsEnabled: false,
+  observeLocalPdfs: false,
+  localPdfPolicyRevision: 0,
+  sessionAutoContinue: true,
 }
 
 function coerce(value: Partial<Settings> | undefined): Settings {
@@ -62,7 +68,18 @@ function coerce(value: Partial<Settings> | undefined): Settings {
       start: typeof q?.start === "string" ? q.start : DEFAULT_SETTINGS.quietHours.start,
       end: typeof q?.end === "string" ? q.end : DEFAULT_SETTINGS.quietHours.end,
     },
-    ttsEnabled: Boolean(value?.ttsEnabled),
+    observeLocalPdfs: Boolean(value?.observeLocalPdfs),
+    localPdfPolicyRevision:
+      typeof value?.localPdfPolicyRevision === "number" &&
+      Number.isSafeInteger(value.localPdfPolicyRevision) &&
+      value.localPdfPolicyRevision >= 0
+        ? value.localPdfPolicyRevision
+        : DEFAULT_SETTINGS.localPdfPolicyRevision,
+    // Default-true: Boolean(value?.x) would silently flip absent legacy records to false.
+    sessionAutoContinue:
+      typeof value?.sessionAutoContinue === "boolean"
+        ? value.sessionAutoContinue
+        : DEFAULT_SETTINGS.sessionAutoContinue,
   }
 }
 
@@ -71,11 +88,29 @@ export async function getSettings(): Promise<Settings> {
   return coerce(stored[SETTINGS_KEY] as Partial<Settings> | undefined)
 }
 
-export async function setSettings(patch: Partial<Settings>): Promise<Settings> {
-  const current = await getSettings()
-  const merged = coerce({ ...current, ...patch, quietHours: { ...current.quietHours, ...patch.quietHours } })
-  await chrome.storage.local.set({ [SETTINGS_KEY]: merged })
-  return merged
+let settingsWriteQueue: Promise<void> = Promise.resolve()
+
+export function setSettings(patch: Partial<Settings>): Promise<Settings> {
+  const operation = settingsWriteQueue.then(async () => {
+    const current = await getSettings()
+    const requested = coerce({ ...current, ...patch, quietHours: { ...current.quietHours, ...patch.quietHours } })
+    const merged = {
+      ...requested,
+      // Callers cannot forge or roll back this token. Every policy edge invalidates async
+      // observations, provider calls not yet started, and queued notifications from before it.
+      localPdfPolicyRevision:
+        current.localPdfPolicyRevision + (current.observeLocalPdfs === requested.observeLocalPdfs ? 0 : 1),
+    }
+    await chrome.storage.local.set({ [SETTINGS_KEY]: merged })
+    return merged
+  })
+  settingsWriteQueue = operation.then(() => undefined, () => undefined)
+  return operation
+}
+
+export async function localPdfPolicyMatches(revision: number): Promise<boolean> {
+  const settings = await getSettings()
+  return settings.observeLocalPdfs && settings.localPdfPolicyRevision === revision
 }
 
 /** True if `now` falls within the quiet-hours window (handles windows crossing midnight). */

@@ -7,7 +7,7 @@ import { showKibitzerToast } from "../content/toastOverlay.ts"
 import { sundialSVG } from "../lib/sundial.ts"
 import { bandOf } from "../lib/sessionStats.ts"
 import { PERSONAS, PERSONA_DEFAULT } from "../lib/personas.data.ts"
-import { DEFAULT_PERSONA_KEYS } from "../lib/personas.ts"
+import { DEFAULT_PERSONA_KEYS, fillTemplate } from "../lib/personas.ts"
 
 interface WizardState {
   persona?: string
@@ -50,7 +50,12 @@ const next = $<HTMLButtonElement>("next")
 const nav = $("nav")
 let cur = 0
 
-for (let i = 0; i < 5; i++) {
+// Step indices (see onboarding.html section order); the done screen is index 6.
+const STEP_PIN = 3
+const STEP_AI = 4
+const STEP_PERSONA = 5
+
+for (let i = 0; i < 6; i++) {
   const d = document.createElement("button")
   d.setAttribute("aria-label", `${i + 1}단계`)
   d.addEventListener("click", () => go(i))
@@ -60,25 +65,24 @@ for (let i = 0; i < 5; i++) {
 function go(i: number): void {
   const leaving = cur
   cur = Math.max(0, Math.min(steps.length - 1, i))
-  if (leaving === 3 && cur !== 3) void saveEnteredKey() // pasted a key, hit 다음 — keep it
+  if (leaving === STEP_AI && cur !== STEP_AI) void saveEnteredKey() // pasted a key, hit 다음 — keep it
   steps.forEach((s, j) => (s.hidden = j !== cur))
   ;[...dots.children].forEach((d, j) =>
     j === cur ? d.setAttribute("aria-current", "step") : d.removeAttribute("aria-current"),
   )
-  count.textContent = cur < 5 ? `${cur + 1} / 5` : "완료"
+  count.textContent = cur < 6 ? `${cur + 1} / 6` : "완료"
   prev.style.visibility = cur === 0 ? "hidden" : "visible"
-  nav.style.display = cur === 5 ? "none" : "flex"
-  next.textContent = cur === 4 ? "마무리 →" : "다음 →"
-  if (cur === 3) void refreshAiStatus()
-  if (cur === 4) void refreshPin()
+  nav.style.display = cur === 6 ? "none" : "flex"
+  next.textContent = cur === STEP_PERSONA ? "마무리 →" : "다음 →"
+  if (cur === STEP_AI) void refreshAiStatus()
+  if (cur === STEP_PIN || cur === STEP_PERSONA) void refreshPin()
+  syncPinUi(false)
 }
 prev.addEventListener("click", () => go(cur - 1))
 next.addEventListener("click", () => go(cur + 1))
 
 // --- persona copy (real fallback templates, demo context) --------------------------
-
-const fillTemplate = (template: string, ctx: Record<string, string>): string =>
-  template.replace(/\{(\w+)\}/g, (_, key: string) => ctx[key] ?? "")
+// fillTemplate is the shared particle-aware fill: "{goal}이" + "논문 정리" → "논문 정리가".
 
 let currentPersona = PERSONA_DEFAULT
 
@@ -171,7 +175,108 @@ $("tryToast").addEventListener("click", () =>
   firePracticeToast("연습 훈수입니다. 진짜 훈수도 정확히 이 자리에, 이렇게 옵니다.", "답하거나, 닫거나, 그냥 두면 사라집니다"),
 )
 
-// --- step 4: Ollama Cloud connect (PR #158 provider API, inlined) ------------------
+// --- step 4: toolbar pin — persuade, detect, quietly celebrate ---------------------
+
+// Chrome offers no API to pin programmatically; all we can do is show the two clicks
+// and watch for them. getUserSettings/onUserSettingsChanged landed after our
+// @types/chrome pin; feature-detect instead of typing.
+type ActionUserSettings = {
+  getUserSettings?: () => Promise<{ isOnToolbar?: boolean }>
+  onUserSettingsChanged?: { addListener(cb: (change: { isOnToolbar?: boolean }) => void): void }
+}
+const actionApi = extension ? (chrome.action as unknown as ActionUserSettings) : undefined
+
+const pinFresh = $("pinFresh")
+const pinPre = $("pinPre")
+const pinLive = $("pinLive")
+const pindemo = $("pindemo")
+const nudge = $("nudge")
+const pinReminder = $("pinReminder")
+
+let pinOn = false
+let pinInitial: boolean | null = null // first observed value — true means "arrived already pinned"
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+
+// Looping two-click demo: puzzle highlight → menu drops → pin fills → icon pops in.
+const DEMO_PHASES = ["p0", "p1", "p2", "p3", "p3"] as const
+let demoTimer: number | null = null
+let demoIdx = 0
+
+function stopPinDemo(freezeDone = false): void {
+  if (demoTimer !== null) clearTimeout(demoTimer)
+  demoTimer = null
+  if (freezeDone) pindemo.className = "pindemo p3"
+}
+
+function startPinDemo(): void {
+  if (demoTimer !== null) return // already looping
+  if (reducedMotion) {
+    pindemo.className = "pindemo p2" // static frame: menu open, both callouts visible
+    return
+  }
+  const tick = (): void => {
+    pindemo.className = `pindemo ${DEMO_PHASES[demoIdx]}`
+    demoIdx = (demoIdx + 1) % DEMO_PHASES.length
+    demoTimer = window.setTimeout(tick, demoIdx === 0 ? 1600 : 1100)
+  }
+  demoIdx = 0
+  tick()
+}
+
+// `celebrate` is true only on a live unpinned→pinned transition; any later sync
+// (step navigation, polling) renders the settled state without replaying the moment.
+function syncPinUi(celebrate: boolean): void {
+  const pre = pinOn && pinInitial === true // never teach pinning to the already-pinned
+  pinFresh.hidden = pre
+  pinPre.hidden = !pre
+  pinLive.classList.toggle("on", pinOn)
+  pinReminder.hidden = pinOn
+  nudge.classList.toggle("on", pinOn)
+  nudge.hidden = cur !== STEP_PIN || pre || (pinOn && !celebrate) // stays for the fade-out beat
+  if (cur === STEP_PIN && !pre) {
+    if (pinOn) stopPinDemo(true)
+    else startPinDemo()
+  } else {
+    stopPinDemo()
+  }
+  if (celebrate && cur === STEP_PIN) {
+    next.classList.remove("pulse")
+    void next.offsetWidth // restart the animation when it already ran once
+    next.classList.add("pulse")
+  }
+}
+next.addEventListener("animationend", () => next.classList.remove("pulse"))
+
+function onPinState(on: boolean): void {
+  const first = pinInitial === null
+  if (first) pinInitial = on
+  if (!first && on === pinOn) return
+  const celebrate = !first && on
+  pinOn = on
+  syncPinUi(celebrate)
+}
+
+async function refreshPin(): Promise<void> {
+  try {
+    const settings = await actionApi?.getUserSettings?.()
+    if (settings) onPinState(Boolean(settings.isOnToolbar))
+  } catch {
+    // API unavailable (old Chrome) — the drawn instructions stay useful without detection.
+  }
+}
+
+// Chrome 130+ pushes the change the instant the user pins; older Chromes rely on the
+// slow tick below plus the focus listener.
+try {
+  actionApi?.onUserSettingsChanged?.addListener((change) => {
+    if (typeof change?.isOnToolbar === "boolean") onPinState(change.isOnToolbar)
+    else void refreshPin()
+  })
+} catch {
+  // Event missing — polling covers it.
+}
+
+// --- step 5: Ollama Cloud connect (PR #158 provider API, inlined) ------------------
 
 const aiStatus = $("aiStatus")
 const aiStatusText = $("aiStatusText")
@@ -179,15 +284,41 @@ const keyInput = $<HTMLInputElement>("key")
 const testKeys = $<HTMLButtonElement>("testKeys")
 const keysResult = $("keysResult")
 const addedKeys = new Set<string>() // key values already saved this session (no double-add)
+type AiTestState = "idle" | "testing" | "success" | "failure"
+let aiTestState: AiTestState = "idle"
+let judgeConfigured = false
+
+function renderAiStatus(): void {
+  const highlighted = judgeConfigured || aiTestState === "testing" || aiTestState === "success"
+  aiStatus.classList.toggle("on", highlighted)
+  aiStatus.classList.toggle("failed", aiTestState === "failure")
+  if (aiTestState === "testing") {
+    aiStatusText.textContent = "AI 연결 확인 중… 첫 호출은 느릴 수 있어요"
+  } else if (aiTestState === "failure") {
+    aiStatusText.textContent = "AI 연결 테스트에 실패했습니다. API 키와 모델 설정을 확인하거나 잠시 후 다시 시도해 주세요."
+  } else if (aiTestState === "success" || judgeConfigured) {
+    aiStatusText.textContent = "AI 연결됨 ✓  페이지 내용까지 읽고 판정합니다"
+  } else {
+    aiStatusText.textContent = "지금은 페이지 제목만 분석 중"
+  }
+}
+
+function showKeyTestResult(text: string, kind?: "ok" | "err"): void {
+  keysResult.textContent = text
+  keysResult.className = `ai-test-detail${kind ? ` ${kind}` : ""}`
+  keysResult.setAttribute("aria-hidden", String(!text))
+  aiStatus.classList.toggle("has-detail", Boolean(text))
+}
+
+function withoutTestVerdict(detail: string): string {
+  return detail.replace(/\s+\((?:OK|DRIFT)\)(?=\s*(?:·|$))/u, "")
+}
 
 async function refreshAiStatus(): Promise<void> {
   const st = await send<WizardState>({ type: "get-state" })
   if (!st) return
-  const on = Boolean(st.judgeEnabled)
-  aiStatus.classList.toggle("on", on)
-  aiStatusText.textContent = on
-    ? "AI 판정 연결됨 ✓ — 페이지 내용까지 읽고 판정합니다"
-    : "지금은 제목 판정만 동작 중 (Tier-0)"
+  judgeConfigured = Boolean(st.judgeEnabled)
+  renderAiStatus()
 }
 
 // add-provider-key persists immediately (options-page semantics); rotation/extra
@@ -198,58 +329,70 @@ async function saveEnteredKey(): Promise<boolean> {
   if (!addedKeys.has(value)) {
     await send({ type: "add-provider-key", provider: "ollama", name: "", value })
     addedKeys.add(value)
-    void refreshAiStatus()
+    await refreshAiStatus()
   }
   return true
 }
 
 testKeys.addEventListener("click", async () => {
-  if (!(await saveEnteredKey())) {
-    keysResult.className = "result err"
-    keysResult.textContent = "키가 비어 있어요. 위 링크에서 발급한 키를 붙여넣어 주세요."
+  if (testKeys.disabled) return
+  if (!keyInput.value.trim()) {
+    showKeyTestResult("API 키가 비어 있어요. 위 링크에서 발급한 키를 붙여넣어 주세요.", "err")
     return
   }
-  keysResult.className = "result"
-  keysResult.textContent = "테스트 중… (첫 호출은 느릴 수 있어요)"
+  aiTestState = "testing"
+  showKeyTestResult("")
+  renderAiStatus()
+  aiStatus.setAttribute("aria-busy", "true")
   testKeys.disabled = true
-  // Exercise the ACTUAL routes (provider+model per tier) the pipeline will use.
-  const judge = await send<JudgeView>({ type: "get-judge-settings" })
-  const tiers = [
-    { tier: "tier1", route: judge?.routes?.tier1 },
-    { tier: "tier2", route: judge?.routes?.tier2 },
-  ]
-  const [r1, r2] = await Promise.all(
-    tiers.map(({ tier, route }) =>
-      send<RouteTestResult>({
-        type: "test-route",
-        tier,
-        provider: route?.provider ?? "ollama",
-        model: route?.model ?? "",
-      }),
-    ),
-  )
-  testKeys.disabled = false
-  if (r1?.ok && r2?.ok) {
-    keysResult.className = "result ok"
-    keysResult.textContent = `연결 OK — Tier 1 ${r1.detail} · Tier 2 ${r2.detail}`
-  } else {
-    const failures = [r1?.ok ? null : `Tier 1: ${r1?.detail ?? "응답 없음"}`, r2?.ok ? null : `Tier 2: ${r2?.detail ?? "응답 없음"}`]
-    keysResult.className = "result err"
-    keysResult.textContent = `실패 — ${failures.filter(Boolean).join(" · ")}`
+  try {
+    await saveEnteredKey()
+    // Exercise the ACTUAL routes (provider+model per tier) the pipeline will use.
+    const judge = await send<JudgeView>({ type: "get-judge-settings" })
+    const tiers = [
+      { tier: "tier1", route: judge?.routes?.tier1 },
+      { tier: "tier2", route: judge?.routes?.tier2 },
+    ]
+    const [r1, r2] = await Promise.all(
+      tiers.map(({ tier, route }) =>
+        send<RouteTestResult>({
+          type: "test-route",
+          tier,
+          provider: route?.provider ?? "ollama",
+          model: route?.model ?? "",
+        }),
+      ),
+    )
+    if (r1?.ok && r2?.ok) {
+      aiTestState = "success"
+      showKeyTestResult(`Tier 1 · ${withoutTestVerdict(r1.detail)}\nTier 2 · ${r2.detail}`, "ok")
+    } else {
+      aiTestState = "failure"
+      const failures = [r1?.ok ? null : `Tier 1: ${r1?.detail ?? "응답 없음"}`, r2?.ok ? null : `Tier 2: ${r2?.detail ?? "응답 없음"}`]
+      showKeyTestResult(`실패 — ${failures.filter(Boolean).join(" · ")}`, "err")
+    }
+    renderAiStatus()
+  } catch {
+    aiTestState = "failure"
+    showKeyTestResult("실패 — 응답을 받지 못했습니다.", "err")
+    renderAiStatus()
+  } finally {
+    testKeys.disabled = false
+    aiStatus.removeAttribute("aria-busy")
   }
 })
 
 $("openSettingsAi").addEventListener("click", () => {
-  if (extension) void chrome.runtime.openOptionsPage()
+  if (extension) void chrome.tabs.create({ url: chrome.runtime.getURL("options/options.html#ai") })
 })
 
 const skip = $("skip")
-skip.addEventListener("click", () => go(4))
+skip.addEventListener("click", () => go(STEP_PERSONA))
 skip.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" || e.key === " ") go(4)
+  if (e.key === "Enter" || e.key === " ") go(STEP_PERSONA)
 })
 
-// --- step 5: persona picker + toolbar-pin detection --------------------------------
+// --- step 6: persona picker --------------------------------------------------------
 
 const pgrid = $("pgrid")
 const sample = $("sample")
@@ -292,24 +435,6 @@ function renderPersonas(): void {
     pgrid.appendChild(b)
   }
   renderSample(currentPersona)
-}
-
-const pinstate = $("pinstate")
-
-// getUserSettings landed after our @types/chrome pin; feature-detect instead of typing.
-type ActionUserSettings = { getUserSettings?: () => Promise<{ isOnToolbar?: boolean }> }
-
-async function refreshPin(): Promise<void> {
-  if (!extension) return
-  try {
-    const settings = await (chrome.action as unknown as ActionUserSettings).getUserSettings?.()
-    if (!settings) return
-    const on = Boolean(settings.isOnToolbar)
-    pinstate.textContent = on ? "고정 감지됨 ✓" : "미고정"
-    pinstate.classList.toggle("on", on)
-  } catch {
-    // API unavailable (old Chrome) — the hint stays useful without live detection.
-  }
 }
 
 // --- done: live popup embed --------------------------------------------------------
@@ -357,14 +482,15 @@ $("closeTab").addEventListener("click", () => {
 // --- live refresh loop -------------------------------------------------------------
 
 // One slow tick keeps the visible step honest: AI status while the user is off
-// connecting keys, pin state while they hover the puzzle menu.
+// connecting keys, pin state while they hover the puzzle menu (and as the polling
+// fallback for Chromes without onUserSettingsChanged).
 window.setInterval(() => {
-  if (cur === 3) void refreshAiStatus()
-  if (cur === 4) void refreshPin()
+  if (cur === STEP_AI) void refreshAiStatus()
+  if (cur === STEP_PIN || cur === STEP_PERSONA) void refreshPin()
 }, 2000)
 window.addEventListener("focus", () => {
-  if (cur === 3) void refreshAiStatus()
-  if (cur === 4) void refreshPin()
+  if (cur === STEP_AI) void refreshAiStatus()
+  if (cur === STEP_PIN || cur === STEP_PERSONA) void refreshPin()
 })
 
 // --- init --------------------------------------------------------------------------
@@ -375,9 +501,12 @@ void (async () => {
   renderPersonas()
   $("miniToastMsg").textContent = demoNagMessage()
 })()
-// Deep link: #step-N or ?step=N (0–5) opens on that step, so settings/docs links can
+// Ask once up front so an already-pinned arrival (Chrome's auto-pin experiment, or a
+// user who pinned on their own) sees the completed variant, never the instructions.
+void refreshPin()
+// Deep link: #step-N or ?step=N (0–6) opens on that step, so settings/docs links can
 // jump straight to e.g. the AI-connect step. Anything else starts from the beginning.
 const stepParam =
-  new URLSearchParams(location.search).get("step") ?? /^#step-([0-5])$/.exec(location.hash)?.[1]
+  new URLSearchParams(location.search).get("step") ?? /^#step-([0-6])$/.exec(location.hash)?.[1]
 const initialStep = Number(stepParam ?? "0")
-go(Number.isInteger(initialStep) && initialStep >= 0 && initialStep <= 5 ? initialStep : 0)
+go(Number.isInteger(initialStep) && initialStep >= 0 && initialStep <= 6 ? initialStep : 0)

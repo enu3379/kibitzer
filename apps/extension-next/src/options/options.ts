@@ -1,9 +1,14 @@
-// Options page: sensitivity, quiet hours, voice, persona, AI judge providers, and data
+// Options page: sensitivity, quiet hours, persona, AI judge providers, and data
 // controls. All state lives in the service worker; this page just reads/writes via
 // messages — key values travel INTO the worker only, responses carry masked keys.
 
 import { sampleLinesFor } from "../lib/personaSampleLines.ts"
-import { PROVIDER_PROFILES, type ProviderId, type TierName } from "../lib/providers.ts"
+import {
+  defaultProviderKeyName,
+  PROVIDER_PROFILES,
+  type ProviderId,
+  type TierName,
+} from "../lib/providers.ts"
 
 import {
   SENSITIVITY_PRESETS,
@@ -53,7 +58,8 @@ const sensHint = $<HTMLElement>("sensHint")
 const quietSw = $<HTMLButtonElement>("quietSw")
 const quietStart = $<HTMLInputElement>("quietStart")
 const quietEnd = $<HTMLInputElement>("quietEnd")
-const ttsSw = $<HTMLButtonElement>("ttsSw")
+const localPdfSw = $<HTMLButtonElement>("localPdfSw")
+const restoreSw = $<HTMLButtonElement>("restoreSw")
 const blockList = $<HTMLTextAreaElement>("blockList")
 const allowList = $<HTMLTextAreaElement>("allowList")
 const blockCount = $<HTMLElement>("blockCount")
@@ -66,6 +72,7 @@ const pquoteTag = $<HTMLElement>("pquoteTag")
 const pquoteTxt = $<HTMLElement>("pquoteTxt")
 const ajProviders = $<HTMLElement>("ajProviders")
 const ajConnect = $<HTMLElement>("ajConnect")
+const ajRouteWarn = $<HTMLElement>("ajRouteWarn")
 const ajUsage = $<HTMLElement>("ajUsage")
 const ajSave = $<HTMLButtonElement>("ajSave")
 const ajResult = $<HTMLElement>("ajResult")
@@ -83,7 +90,7 @@ async function saveSettings(patch: Partial<Settings>): Promise<void> {
 
 const SENS_HINTS: Record<SensitivityLevel, string> = {
   lenient: "확실히 벗어났을 때만 이탈로 봅니다. 훈수가 줄어듭니다.",
-  standard: "권장 기본값 — 벤치마크로 맞춘 균형점입니다.",
+  standard: "권장 기본값 — 대부분의 상황에 적합합니다.",
   strict: "조금만 벗어나도 이탈로 봅니다. 훈수가 잦아질 수 있습니다.",
 }
 
@@ -103,7 +110,8 @@ async function init(): Promise<void> {
   quietStart.value = settings.quietHours.start
   quietEnd.value = settings.quietHours.end
   quietStart.disabled = quietEnd.disabled = !settings.quietHours.enabled
-  setChecked(ttsSw, settings.ttsEnabled)
+  setChecked(localPdfSw, settings.observeLocalPdfs)
+  setChecked(restoreSw, settings.sessionAutoContinue)
   renderDomainLists((await send({ type: "get-domain-lists" })) as DomainLists)
 
   const state = (await send({ type: "get-state" })) as StateResponse
@@ -247,10 +255,16 @@ const saveQuiet = (): void =>
 quietStart.addEventListener("change", saveQuiet)
 quietEnd.addEventListener("change", saveQuiet)
 
-ttsSw.addEventListener("click", () => {
-  const on = !isChecked(ttsSw)
-  setChecked(ttsSw, on)
-  void saveSettings({ ttsEnabled: on })
+localPdfSw.addEventListener("click", () => {
+  const on = !isChecked(localPdfSw)
+  setChecked(localPdfSw, on)
+  void saveSettings({ observeLocalPdfs: on })
+})
+
+restoreSw.addEventListener("click", () => {
+  const on = !isChecked(restoreSw)
+  setChecked(restoreSw, on)
+  void saveSettings({ sessionAutoContinue: on })
 })
 
 // --- 사이트 목록 (감시 제외 / 항상 OK) ---------------------------------------------
@@ -286,7 +300,7 @@ async function saveDomainLists(): Promise<void> {
 blockList.addEventListener("change", () => void saveDomainLists())
 allowList.addEventListener("change", () => void saveDomainLists())
 
-// --- AI 판정 (연결된 제공자 · 판정 라우팅 · 사용량) --------------------------------
+// --- AI 판정 (연결된 제공자 · 모델 지정 · 사용량) --------------------------------
 
 const TIERS: readonly TierName[] = ["tier1", "tier2"]
 const TIER_LABEL: Record<TierName, string> = { tier1: "Tier 1", tier2: "Tier 2" }
@@ -369,8 +383,25 @@ function applyJudge(view: JudgeView): void {
   renderJudge()
 }
 
-/** Account change (connect/key add/remove) — keep unsaved routing drafts, reset chips. */
+/** Account change (connect/key add/remove) — adopt automatic saved-route changes only
+ *  when that tier's draft was untouched, and otherwise preserve the user's draft. */
 function applyAccounts(view: JudgeView): void {
+  const previous = judge
+  if (previous) {
+    for (const tier of TIERS) {
+      const oldRoute = previous.routes[tier]
+      const d = draft[tier]
+      const draftWasUntouched = d.provider === oldRoute.provider && d.model === oldRoute.model
+      const route = view.routes[tier]
+      if (draftWasUntouched && (route.provider !== oldRoute.provider || route.model !== oldRoute.model)) {
+        draft[tier] = {
+          provider: route.provider,
+          model: route.model,
+          custom: !presetsFor(route.provider, tier).includes(route.model),
+        }
+      }
+    }
+  }
   judge = view
   for (const tier of TIERS) chips[tier] = staleChip()
   renderJudge()
@@ -428,7 +459,7 @@ function renderProviderBlocks(): void {
     })
 
     if (addOpenFor === profile.id) {
-      block.appendChild(buildKeyForm(profile.id, profile.keyHint))
+      block.appendChild(buildKeyForm(profile.id, profile.keyHint, keyList.length))
     } else {
       block.appendChild(
         button("kadd", "＋ 키 추가", () => {
@@ -447,12 +478,14 @@ function renderProviderBlocks(): void {
   }
 }
 
-function buildKeyForm(provider: ProviderId, keyHint: string): HTMLElement {
+function buildKeyForm(provider: ProviderId, keyHint: string, existingKeyCount: number): HTMLElement {
   const form = el("div", "kform")
   const name = document.createElement("input")
   name.type = "text"
   name.className = "f-name"
-  name.placeholder = "이름 (선택) — 예: 서브 계정"
+  const defaultName = defaultProviderKeyName(provider, existingKeyCount)
+  name.placeholder = defaultName
+  name.value = defaultName
   const key = document.createElement("input")
   key.type = "password"
   key.className = "f-key"
@@ -603,6 +636,34 @@ function renderRoutes(): void {
 
     renderChip(tier)
   }
+  renderRouteWarnings()
+}
+
+const TIER_KEYLESS_IMPACT: Record<TierName, string> = {
+  tier1: "멀쩡한 페이지도 가끔 딴길로 볼 수 있어요.",
+  tier2: "내용을 읽지 않고 준비된 문구로 훈수해요.",
+}
+
+/** 라우트가 키 없는 제공자를 가리키면 모델 지정 섹션 상단에 안내 배너를 띄운다.
+ *  저장된 키 목록과 화면의 드래프트 제공자만 보고 판정 — 런타임 상태·헬스와 무관.
+ *  오류가 아니라 설정이 반쪽이라는 안내: 이 상태로도 훈수는 정상 동작한다. */
+function renderRouteWarnings(): void {
+  if (!judge) return
+  ajRouteWarn.textContent = ""
+  const banner = el("div", "route-banner")
+  for (const tier of TIERS) {
+    const provider = draft[tier].provider
+    if ((judge.accounts[provider] ?? []).length > 0) continue
+    const line = el("span", "ln")
+    line.appendChild(el("b", undefined, TIER_LABEL[tier]))
+    line.appendChild(
+      document.createTextNode(
+        ` — ${profileOf(provider).label}에 등록된 키가 없어 이 단계를 건너뜁니다. ${TIER_KEYLESS_IMPACT[tier]}`,
+      ),
+    )
+    banner.appendChild(line)
+  }
+  if (banner.childElementCount > 0) ajRouteWarn.appendChild(banner)
 }
 
 function renderChip(tier: TierName): void {
@@ -716,6 +777,41 @@ wipe.addEventListener("click", async () => {
   await send({ type: "delete-all-data" })
   wipe.textContent = "삭제됨 ✓"
   setTimeout(() => (wipe.textContent = "삭제"), 1500)
+})
+
+// Footer — "Contact Us" copies both developer addresses in <addr>, <addr> form.
+const CONTACT_EMAILS = ["kimdenya1@gmail.com", "enu3379@gmail.com"]
+const contactToast = $<HTMLElement>("contactToast")
+let contactToastTimer: ReturnType<typeof setTimeout> | undefined
+
+const showContactToast = (msg: string) => {
+  contactToast.textContent = msg
+  contactToast.classList.add("on")
+  clearTimeout(contactToastTimer)
+  contactToastTimer = setTimeout(() => contactToast.classList.remove("on"), 1800)
+}
+
+const copyText = async (text: string): Promise<boolean> => {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    // Clipboard API can reject when the page is not focused — fall back to execCommand.
+    const ta = document.createElement("textarea")
+    ta.value = text
+    ta.setAttribute("readonly", "")
+    ta.style.cssText = "position:fixed;top:0;left:0;opacity:0"
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand("copy")
+    ta.remove()
+    return ok
+  }
+}
+
+$<HTMLButtonElement>("contactUs").addEventListener("click", async () => {
+  const text = CONTACT_EMAILS.map((e) => `<${e}>`).join(", ")
+  showContactToast((await copyText(text)) ? "복사되었습니다" : "복사하지 못했습니다")
 })
 
 void init()

@@ -20,3 +20,23 @@ export interface Tier2Token {
 export function tokenMatchesPending(token: Tier2Token, pending: PendingTier2 | null): boolean {
   return pending != null && pending.requestId === token.requestId
 }
+
+/** True iff this request's page is still BOTH the page the gauge is integrating and the page
+ *  the active-page record names.
+ *
+ *  Two sources, because they answer different questions and lag differently. The gauge's
+ *  `activePageKey` moves the instant the user leaves a page (the `neutral` hold rewrites it),
+ *  while the active-page RECORD is only rewritten once the next page has survived its full
+ *  dwell and been judged — several seconds later, if ever. So the record alone still names the
+ *  abandoned page right after a leave, and cannot answer "has the user moved on?".
+ *
+ *  Shared by the pre-gate (before spending a judge call) and the apply guard, deliberately: a
+ *  request the pre-gate lets through must be one the apply guard can still use. They drifted
+ *  apart once — see the pre-gate's comment in gaugeRuntime.serviceTier2. */
+export function tokenPageStillActive(
+  token: Tier2Token,
+  gaugePageKey: string | null,
+  activeRecordPageKey: string | null,
+): boolean {
+  return gaugePageKey === token.pageKey && activeRecordPageKey === token.pageKey
+}

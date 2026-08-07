@@ -39,6 +39,68 @@ test("a heartbeat while NEUTRAL freezes S and m (no drain, no recover)", () => {
   assert.equal(st.updatedAt, 120_000, "the clock is still rebased so the hold isn't back-integrated later")
 })
 
+// Leaving a page settles it but decides NOTHING about it. Anything decided here would name a
+// page that is already off the screen, so it could only be delivered on top of whatever the user
+// just opened — a comment about page A on innocent page B. The debt is carried instead, so the
+// page they land on can nudge under its own verdict as soon as that verdict exists.
+
+test("leaving a page never nags about it, however far the settlement drains S", () => {
+  // Degraded so the S=0 gate would nudge on the spot rather than asking a judge, and low enough
+  // that the settlement is certain to cross zero.
+  const leaving = reduceGauge(
+    drifting({ s: 0.5, degraded: true, m: 0.6, activeMargin: 0.2 }),
+    { type: "neutral", pageKey: "news", ts: 60_000 },
+    config,
+  )
+  assert.equal(leaving.state.s, 0, "the drift up to the navigation still drains S to the floor")
+  assert.deepEqual(leaving.effects, [], "but nothing is decided about the page being left")
+})
+
+test("leaving does not spend the nag budget — the page they land on can still be nudged", () => {
+  // The bookkeeping half. A nag emitted here would be dropped at delivery (it has nowhere valid
+  // to show), yet nagN/renagDebt would still record it as sent — and the next page could then
+  // not be nudged until the re-nag debt rebuilt, minutes later.
+  const leaving = reduceGauge(
+    drifting({ s: 0.5, degraded: true, m: 0.6, activeMargin: 0.2 }),
+    { type: "neutral", pageKey: "news", ts: 60_000 },
+    config,
+  ).state
+  assert.equal(leaving.nagN, 0, "no nag was sent, so none is counted")
+  assert.ok(leaving.renagDebt > 0, "the drift debt is carried, not forgiven")
+
+  // The new page is judged off-goal: it is nudged straight away, on its own verdict.
+  const judged = reduceGauge(leaving, { type: "nav", pageKey: "news", verdict: "DRIFT", ts: 60_000 }, config).state
+  const { effects } = reduceGauge(judged, { type: "heartbeat", ts: 70_000 }, config)
+  const nag = effects.find((e) => e.type === "nag")
+  assert.equal(nag?.pageKey, "news", `expected a nag for the page now open; got ${JSON.stringify(effects)}`)
+})
+
+test("leaving does not fire a RE-nag about the page being left either", () => {
+  // The debt-based re-nag needs nagN >= 1, so every case above (nagN 0) is blind to it — yet a
+  // user already nudged once is exactly who it targets, and it fired on the settlement just like
+  // the S=0 gate did. Debt starts past the first threshold (rRenag = 40) so it is due right now.
+  const leaving = reduceGauge(
+    drifting({ nagN: 1, renagDebt: 45, lastNagTs: 0 }),
+    { type: "neutral", pageKey: "news", ts: 60_000 },
+    config,
+  )
+  assert.deepEqual(leaving.effects, [], "no re-nag about a page the user has left")
+  assert.equal(leaving.state.nagN, 1, "the re-nag schedule is untouched, not consumed")
+  assert.ok(leaving.state.renagDebt > 45, "and the debt keeps growing, so the next page is due one")
+})
+
+test("leaving does not open a Tier-2 request for the abandoned page", () => {
+  // Not just wasted: the request would hold the single pending slot until it was cancelled,
+  // delaying the confirmation the page they actually land on needs.
+  const leaving = reduceGauge(
+    drifting({ s: 0.5, m: 0.9 }), // m high enough to also tempt a promotion request
+    { type: "neutral", pageKey: "news", ts: 60_000 },
+    config,
+  )
+  assert.deepEqual(leaving.effects, [], "no request_tier2 for a page the user has left")
+  assert.equal(leaving.state.pendingTier2, null, "and the slot stays free for the next page")
+})
+
 test("nav after a neutral hold resumes integration from the nav, not the hold start", () => {
   // Freeze at t=0, sit neutral for 2 min, then the judge lands OK.
   let st = reduceGauge(drifting({ s: 40 }), { type: "neutral", pageKey: "news", ts: 0 }, config).state

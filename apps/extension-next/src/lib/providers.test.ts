@@ -23,6 +23,7 @@ const store: Record<string, unknown> = {}
 const {
   addProviderKey,
   connectProvider,
+  defaultProviderKeyName,
   disconnectProvider,
   getJudgeSettings,
   maskKeyValue,
@@ -35,14 +36,124 @@ function reset(): void {
   for (const key of Object.keys(store)) delete store[key]
 }
 
+test("default API key names use the provider, local date, and provider-specific sequence", () => {
+  const date = new Date(2026, 7, 1)
+  assert.equal(defaultProviderKeyName("ollama", 0, date), "Ollama-260801-1")
+  assert.equal(defaultProviderKeyName("claude", 2, date), "Claude-260801-3")
+  assert.equal(defaultProviderKeyName("openai", 1, date), "OpenAI-260801-2")
+})
+
 test("fresh install defaults to Ollama routes with the preset defaults", async () => {
   reset()
   const settings = await getJudgeSettings()
   assert.deepEqual(settings.routes.tier1, { provider: "ollama", model: "nemotron-3-nano:30b" })
   assert.deepEqual(settings.routes.tier2, { provider: "ollama", model: "minimax-m3" })
   assert.deepEqual(settings.accounts.ollama, { keys: [] })
+  assert.equal(settings.routesManuallyConfigured, false)
   // migrated result is persisted
   assert.ok(store["kibitzer:providers:v1"])
+})
+
+test("the first keyed non-Ollama provider automatically supplies both route defaults", async () => {
+  reset()
+  const settings = await addProviderKey("gemini", "", "gemini-key")
+  assert.deepEqual(settings.routes.tier1, { provider: "gemini", model: "gemini-3.1-flash-lite" })
+  assert.deepEqual(settings.routes.tier2, { provider: "gemini", model: "gemini-3.6-flash" })
+})
+
+test("additional non-Ollama providers do not replace the first keyed provider", async () => {
+  reset()
+  await addProviderKey("openrouter", "", "openrouter-key")
+  const settings = await addProviderKey("gemini", "", "gemini-key")
+  assert.equal(settings.routes.tier1.provider, "openrouter")
+  assert.equal(settings.routes.tier2.provider, "openrouter")
+})
+
+test("adding an Ollama key restores both automatic routes to Ollama defaults", async () => {
+  reset()
+  await addProviderKey("deepseek", "", "deepseek-key")
+  const settings = await addProviderKey("ollama", "", "ollama-key")
+  assert.deepEqual(settings.routes.tier1, { provider: "ollama", model: "nemotron-3-nano:30b" })
+  assert.deepEqual(settings.routes.tier2, { provider: "ollama", model: "minimax-m3" })
+})
+
+test("saved manual routes disable all later key-based suggestions", async () => {
+  reset()
+  await addProviderKey("gemini", "", "gemini-key")
+  await setRoutes({
+    tier1: { provider: "gemini", model: "gemini-3.1-flash-lite" },
+    tier2: { provider: "gemini", model: "gemini-3.6-flash" },
+  })
+  const settings = await addProviderKey("ollama", "", "ollama-key")
+  assert.equal(settings.routesManuallyConfigured, true)
+  assert.equal(settings.routes.tier1.provider, "gemini")
+  assert.equal(settings.routes.tier2.provider, "gemini")
+})
+
+test("concurrent route save and key add preserve both mutations", async () => {
+  reset()
+  await Promise.all([
+    setRoutes({
+      tier1: { provider: "openai", model: "gpt-5.4-nano" },
+      tier2: { provider: "openai", model: "gpt-5.6-luna" },
+    }),
+    addProviderKey("gemini", "", "gemini-key"),
+  ])
+
+  const settings = await getJudgeSettings()
+  assert.equal(settings.routesManuallyConfigured, true)
+  assert.equal(settings.routes.tier1.provider, "openai")
+  assert.equal(settings.routes.tier2.provider, "openai")
+  assert.equal(settings.accounts.gemini?.keys[0]?.value, "gemini-key")
+})
+
+test("stored routes from before the manual flag preserve non-default user choices", async () => {
+  reset()
+  store["kibitzer:providers:v1"] = {
+    accounts: { ollama: { keys: [] }, claude: { keys: [] } },
+    routes: {
+      tier1: { provider: "claude", model: "claude-haiku-4-5" },
+      tier2: { provider: "claude", model: "claude-sonnet-5" },
+    },
+  }
+  const settings = await addProviderKey("ollama", "", "ollama-key")
+  assert.equal(settings.routesManuallyConfigured, true)
+  assert.equal(settings.routes.tier1.provider, "claude")
+  assert.equal(settings.routes.tier2.provider, "claude")
+})
+
+test("existing keyed v1 settings conservatively preserve a possible manual route", async () => {
+  reset()
+  store["kibitzer:providers:v1"] = {
+    accounts: {
+      ollama: { keys: [] },
+      gemini: { keys: [{ id: "g1", name: "", value: "gemini-key", addedAt: 1 }] },
+    },
+    routes: {
+      tier1: { provider: "ollama", model: "nemotron-3-nano:30b" },
+      tier2: { provider: "ollama", model: "minimax-m3" },
+    },
+  }
+  const settings = await getJudgeSettings()
+  assert.equal(settings.routesManuallyConfigured, true)
+  assert.equal(settings.automaticRouteProvider, "ollama")
+  assert.equal(settings.routes.tier1.provider, "ollama")
+  assert.equal(settings.routes.tier2.provider, "ollama")
+})
+
+test("removing the first key does not dislodge the first provider while another key remains", async () => {
+  reset()
+  let settings = await addProviderKey("gemini", "first", "gemini-a")
+  const firstGeminiKey = settings.accounts.gemini?.keys[0]
+  assert.ok(firstGeminiKey)
+  await addProviderKey("openai", "", "openai-a")
+  await addProviderKey("gemini", "second", "gemini-b")
+
+  settings = await removeProviderKey("gemini", firstGeminiKey.id)
+  assert.equal(settings.automaticRouteProvider, "gemini")
+  assert.equal(settings.accounts.gemini?.keys.length, 1)
+  assert.equal(settings.routes.tier1.provider, "gemini")
+  assert.equal(settings.routes.tier2.provider, "gemini")
 })
 
 test("legacy kibitzer:ollama:v2 migrates keys and models, keeping the legacy record", async () => {
@@ -81,6 +192,13 @@ test("add/remove key round-trips; masked view never carries the value", async ()
 
   settings = await removeProviderKey("openrouter", key.id)
   assert.equal(settings.accounts.openrouter?.keys.length, 0)
+})
+
+test("a blank key name is saved as the provider/date/sequence default", async () => {
+  reset()
+  const settings = await addProviderKey("ollama", "   ", "key-a")
+  const name = settings.accounts.ollama?.keys[0]?.name
+  assert.match(name ?? "", /^Ollama-\d{6}-1$/)
 })
 
 test("blank key value is ignored", async () => {

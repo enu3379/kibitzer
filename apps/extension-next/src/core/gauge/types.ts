@@ -40,8 +40,30 @@ export interface GaugeState {
   nagN: number; // nag ordinal this episode (reset when m<=0)
   renagDebt: number;
   lastNagTs: number | null;
+  // How many s_zero Tier-2 confirmations this episode has ASKED FOR (not how many landed).
+  // Only the first one pays for the Writer; the rest fall back to the persona preset. While
+  // the user page-hops at S=0 every request resolves after they have moved on and is
+  // cancelled, so nagN never advances and the gate re-asks on the next page — spending a
+  // two-call round trip each time and nudging on none of them. Dropping the Writer from the
+  // repeats halves that round trip, which narrows the window a hop can cancel in. Reset with
+  // nagN when the episode ends (m<=0).
+  sZeroConfirms: number;
+  // Has this episode already had one nudge given back? The count is committed when a nag is
+  // EMITTED, but delivery happens later and can legitimately fail (see GaugeEvent's
+  // nag_undelivered), so a nudge the user never saw would otherwise spend a rung of the backoff
+  // ladder — and, if it was the episode's first, shut the S=0 recovery gate for good. Exactly one
+  // is restored per episode: a page that can never host a nudge would otherwise re-emit and
+  // re-refund on every heartbeat, forever. Reset with nagN when the episode ends (m<=0).
+  nagRefunded: boolean;
   celebrateArmed: boolean;
   snoozedUntil: number | null;
+  // Are we inside the user's configured quiet hours? Carried in state because the reducer has no
+  // clock and no settings: the wiring re-reads the window and stamps it here. Every event that can
+  // decide a nag carries a fresh value, and the once-a-minute tick carries one whether the user is
+  // present or away, so the flag trails the real boundary by at most that tick. Delivery still
+  // consults the setting exactly — this flag exists so nothing is DECIDED during the window, not
+  // to gate the display.
+  quiet: boolean;
 }
 
 /** GaugeConfig — contract §8 placeholder knobs. Seconds / per-second units. */
@@ -70,9 +92,14 @@ export interface GaugeConfig {
 
 /** GaugeEvent — contract §3 (discriminated union on `type`). ts is epoch ms. */
 export type GaugeEvent =
-  | { type: "nav"; pageKey: string; verdict: Verdict; r0?: number; tauOk?: number; degraded?: boolean; ts: number }
-  | { type: "heartbeat"; ts: number }
-  | { type: "inactive"; ts: number }
+  | { type: "nav"; pageKey: string; verdict: Verdict; r0?: number; tauOk?: number; degraded?: boolean; quiet?: boolean; ts: number }
+  // `quiet` re-stamps GaugeState.quiet from the live setting (omitted ⇒ keep what's stored, the
+  // same way `nav` carries `degraded`). Every event that can DECIDE a nag carries it, and the
+  // once-a-minute tick carries it whether the user is present or away — `inactive` integrates
+  // nothing, but it is the only tick that fires while they are gone, so it is what keeps the flag
+  // from going stale for the length of a night.
+  | { type: "heartbeat"; quiet?: boolean; ts: number }
+  | { type: "inactive"; quiet?: boolean; ts: number }
   | { type: "tier2_result"; flow: Flow; pageKey: string; ts: number }
   // Clear a pending Tier-2 request that resolved stale (page/goal moved on) without applying
   // a verdict — releases the pendingTier2 slot so promotion can request again, with no
@@ -85,6 +112,12 @@ export type GaugeEvent =
   // page the user has left can't keep moving S on a stale verdict. Wiring-only; the shared
   // parity fixtures never emit it.
   | { type: "neutral"; pageKey: string; ts: number }
+  // A nag this reducer counted never reached the user. The count is committed when the effect is
+  // EMITTED, but the wiring delivers it afterwards and can legitimately fail — Chrome lost focus,
+  // the tab is now a sensitive page, the tab is no longer the page the nudge is about. Give the
+  // count back so the backoff ladder is not spent on a nudge nobody saw. Does NOT integrate: this
+  // is a correction, not a passage of time. Wiring-only; the shared parity fixtures never emit it.
+  | { type: "nag_undelivered"; ts: number }
   | { type: "snooze"; until: number; ts: number };
 
 /** GaugeEffect — contract §4 (intents; shadow mode records but does not act). */
@@ -92,7 +125,12 @@ export type GaugeEffect =
   // requestId ties this effect to the exact pendingTier2 slot it opened. Two request_tier2
   // effects can be emitted in ONE reduce (promotion then s_zero, which overwrites the slot);
   // each must carry its OWN id so the wiring doesn't tag both with the final slot's id.
-  | { type: "request_tier2"; reason: Tier2Reason; tier: number; pageKey: string; requestId: number }
+  // useWriter: may this request pay for the second (message-writing) LLM call once the judge
+  // says notify? False for every promotion request — a promotion outcome escalates the accel
+  // tier and never nags, so the written message was always discarded — and for repeat s_zero
+  // confirmations within one episode (see GaugeState.sZeroConfirms). The nag then carries the
+  // persona preset instead.
+  | { type: "request_tier2"; reason: Tier2Reason; tier: number; pageKey: string; requestId: number; useWriter: boolean }
   | { type: "nag"; pageKey: string }
   | { type: "celebrate" };
 
@@ -118,7 +156,10 @@ export function initGaugeState(): GaugeState {
     nagN: 0,
     renagDebt: 0,
     lastNagTs: null,
+    sZeroConfirms: 0,
+    nagRefunded: false,
     celebrateArmed: false,
     snoozedUntil: null,
+    quiet: false,
   };
 }

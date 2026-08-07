@@ -15,7 +15,10 @@ import {
   type RecentTitle,
   type TopDriftHost,
 } from "../providers/payloads.ts"
+import { withRawResponseDebug } from "../providers/responseDebug.ts"
 import type { JudgeProvider, JudgeVerdict } from "../providers/types.ts"
+import { buildEnrichmentPrompt, ENRICH_TIMEOUT_MS, MAX_PHRASES, parseEnrichmentResponse } from "./goalEnrichment.ts"
+import { klog } from "./klog.ts"
 import {
   getJudgeSettings,
   profileFor,
@@ -35,9 +38,7 @@ import {
 } from "./personas.ts"
 import { detectSpecial, type SessionStats } from "./sessionStats.ts"
 import type { SummaryDice } from "./summaryDice.ts"
-import { klog } from "./klog.ts"
 import { classifyProviderError, recordProviderError, recordProviderOk } from "./providerHealth.ts"
-import { buildEnrichmentPrompt, ENRICH_TIMEOUT_MS, MAX_PHRASES, parseEnrichmentResponse } from "./goalEnrichment.ts"
 
 /** History-derived context for the Tier-2 writer (built by gaugeRuntime from the nag /
  *  visit logs). `nagCount` is the 1-based ordinal of the nag about to be produced.
@@ -48,6 +49,11 @@ export interface Tier2Context {
   recentTitles: readonly RecentTitle[]
   excerpt: string | null
   timeContext: Record<string, unknown> | null
+  // Pay for the second (message-writing) call once the judge says notify? The gauge decides —
+  // see GaugeEffect.request_tier2.useWriter. False returns the drift verdict with no message,
+  // which the nag delivery already knows how to render from the persona preset (the same path
+  // a Writer failure lands on). Defaults to true so an omitted context behaves as before.
+  useWriter?: boolean
 }
 
 // These Cloud models reason before answering; a small budget exhausts before the
@@ -112,31 +118,46 @@ export async function judgeEnabled(): Promise<boolean> {
   return p.tier1 !== null || p.tier2 !== null
 }
 
+export interface Tier1RescueResult {
+  verdict: JudgeVerdict
+  /** False when Tier 1 produced no judgment — the route has no keys, or the call failed.
+   *  The DRIFT is then Tier 0's verdict standing unrescued, and the caller must not record
+   *  tierReached=1 for a tier that never answered. */
+  answered: boolean
+}
+
 /** Let Tier 1 rescue a Tier-0 DRIFT (may return OK) or confirm it. Failure keeps DRIFT. */
 export async function tier1Rescue(
   goalText: string,
   title: string,
   urlHost: string,
   recentTitles: readonly RecentTitle[] = [],
-): Promise<JudgeVerdict> {
+): Promise<Tier1RescueResult> {
   const p = await providers()
-  if (!p.tier1) return "DRIFT"
+  if (!p.tier1) return { verdict: "DRIFT", answered: false }
   try {
     const result = await p.tier1.classifyTier1(
       buildTier1Payload({ rawText: goalText }, { title, urlHost }, recentTitles),
     )
     void recordProviderOk()
-    return result.verdict
+    return { verdict: result.verdict, answered: true }
   } catch (error) {
     void recordProviderError(error)
     klog(`tier1 error (keeping DRIFT): ${String(error)}`)
-    return "DRIFT"
+    return { verdict: "DRIFT", answered: false }
   }
 }
 
 export interface Tier2Outcome {
   flow: "drift" | "ok"
   message: string | null
+  /** Policy changed before a not-yet-started provider boundary; caller cancels the job. */
+  cancelled?: boolean
+  /** No judgment was obtained — the tier has no route configured, or the judge call failed.
+   *  Distinct from `flow: "ok"`, which is a real verdict ("this page does not warrant a nudge").
+   *  Both used to arrive as a bare "ok", so the caller applied the OK branch and rewarded a page
+   *  nobody had actually judged. Callers must treat this as "unknown", never as a verdict. */
+  unavailable?: boolean
   /** Set when the judge call itself failed (nag suppressed by fail-open) — lets the
    *  caller tell the user why judging went quiet. Not set for a mere writer failure
    *  (a fallback-template nag still fires) or when the route has no keys (deliberate
@@ -147,6 +168,17 @@ export interface Tier2Outcome {
 export interface RouteTestResult {
   ok: boolean
   detail: string
+}
+
+/** Treat a failed policy/state read as cancellation at provider boundaries. */
+export async function safeShouldContinue(
+  shouldContinue: () => Promise<boolean>,
+): Promise<boolean> {
+  try {
+    return await shouldContinue()
+  } catch {
+    return false
+  }
 }
 
 function errorText(error: unknown): string {
@@ -211,7 +243,9 @@ export async function enrichGoal(goalText: string): Promise<string[]> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const content = await p.tier1.completeGoalEnrichment(prompt, ENRICH_TIMEOUT_MS)
-      return parseEnrichmentResponse(content, MAX_PHRASES)
+      return withRawResponseDebug(content, "goal enrichment", "content_json", () => (
+        parseEnrichmentResponse(content, MAX_PHRASES)
+      ))
     } catch (error) {
       lastError = error
     }
@@ -228,22 +262,27 @@ export async function enrichGoal(goalText: string): Promise<string[]> {
  *  "오늘 N번째" flavor and the fallback template index). */
 export async function tier2Confirm(
   goalText: string,
-  page: { title: string; urlHost: string; score: number },
+  page: { title: string; urlHost: string; score: number; kind?: "web" | "local_pdf"; tierReached?: number },
   ctx: Tier2Context = { nagCount: 1, naggingContext: {}, recentTitles: [], excerpt: null, timeContext: null },
+  shouldContinue: () => Promise<boolean> = async () => true,
 ): Promise<Tier2Outcome> {
   const p = await providers()
-  if (!p.tier2) return { flow: "ok", message: null }
+  // No Tier-2 route (or its provider has no key): nothing was asked, so there is no verdict.
+  if (!p.tier2) return { flow: "ok", message: null, unavailable: true }
   const observation = {
     title: page.title,
     urlHost: page.urlHost,
     verdict: "DRIFT" as const,
-    // Reaching the Tier-2 gate means the page escalated past Tier-0 and (Tier-2 requires an
-    // Ollama provider, so) Tier-1 ran — report tier_reached=1, not a hardcoded 0.
-    tierReached: 1,
+    // The tiers route independently, so a reachable Tier 2 proves nothing about Tier 1: in a
+    // Tier-2-only setup this gate is reached with Tier 1 never asked. tier_reached must come
+    // from the observe-time record; when the record has none (pre-field checkpoints, direct
+    // callers), 0 is the value that claims nothing.
+    tierReached: page.tierReached ?? 0,
     tier0Score: page.score,
   }
   let decision
   try {
+    if (!(await safeShouldContinue(shouldContinue))) return { flow: "ok", message: null, cancelled: true }
     const reviewPayload = buildTier2ReviewPayload(
       { rawText: goalText },
       observation,
@@ -256,11 +295,21 @@ export async function tier2Confirm(
     void recordProviderOk()
   } catch (error) {
     void recordProviderError(error)
-    klog(`tier2 judge error (fail-open to ok, no nag): ${String(error)}`)
-    return { flow: "ok", message: null, providerError: classifyProviderError(error).message }
+    klog(`tier2 judge error (no verdict, request released): ${String(error)}`)
+    return {
+      flow: "ok",
+      message: null,
+      unavailable: true, // the judge was asked and did not answer — still not a verdict
+      providerError: classifyProviderError(error).message,
+    }
   }
   klog(`tier2 judge: ${decision.decision} (${decision.reasonCode}, basis=${decision.basis})`)
   if (decision.decision !== "notify") return { flow: "ok", message: null }
+  if (!(await safeShouldContinue(shouldContinue))) return { flow: "ok", message: null, cancelled: true }
+  // Notify confirmed, but this request may not write its own message (a promotion, or a repeat
+  // s_zero confirmation while the user page-hops at S=0). Return the verdict alone — delivery
+  // falls back to the persona preset — and skip the second round trip entirely.
+  if (ctx.useWriter === false) return { flow: "drift", message: null }
   // Notify confirmed → write the nag in the selected persona's voice.
   const persona = await activePersona()
   const maxSentences = persona.maxSentences ?? DEFAULT_MAX_SENTENCES
@@ -272,16 +321,18 @@ export async function tier2Confirm(
     ctx.naggingContext,
   )
   try {
+    if (!(await safeShouldContinue(shouldContinue))) return { flow: "ok", message: null, cancelled: true }
     const message = await p.tier2.writeTier2Message(messagePayload, composeWriterPrompt(persona))
     void recordProviderOk()
     return { flow: "drift", message: clampSentences(message, maxSentences) }
   } catch (error) {
     void recordProviderError(error)
     klog(`tier2 writer error (persona fallback template): ${String(error)}`)
+    const fallbackTitle = page.title || page.urlHost || "현재 페이지"
     const message = pickFallback(persona, ctx.nagCount, {
       goal: goalText,
-      title: page.title || page.urlHost || "현재 페이지",
-      host: page.urlHost || "현재 페이지",
+      title: fallbackTitle,
+      host: page.kind === "local_pdf" ? fallbackTitle : (page.urlHost || "현재 페이지"),
     })
     return { flow: "drift", message: message ? clampSentences(message, maxSentences) : message }
   }

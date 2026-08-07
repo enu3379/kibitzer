@@ -698,6 +698,54 @@ its sole job was to confirm the design runs correctly (byte-identical to TS over
 benchmark), which is done. Work proceeds **TypeScript-only**; the Python reducer is a
 frozen reference deleted with the server. Canonical roadmap: `docs/ts-migration-plan.md`.
 
+### D17 — Local PDF observation: explicit opt-in, title-only → DECIDED (2026-08-03)
+
+Kibitzer may observe a full-page local PDF opened in Chrome only after the user
+enables **로컬 PDF 제목 관측** in settings. The default is OFF. The observation
+uses Chrome's tab title (document metadata title when Chrome exposes it,
+otherwise the filename), the non-path host label `local-pdf`, and the normal
+Tier-0/1/2 title pipeline. It never parses PDF bytes, reads an excerpt, or stores
+or sends the raw `file:` URL. A connected Tier-1/2 provider may receive the PDF
+title under the same disclosure as web-page titles. Prompt/onboarding behavior
+is deliberately deferred to a separate follow-up decision and PR.
+
+### D18 — Browser-restart session policy: 5-minute continue window + resumable suspension → DECIDED (2026-08-04)
+
+Sessions still never expire on their own; what a full browser quit means is now an
+explicit decision made once per relaunch (`lib/sessionRestore.ts`, on
+`runtime.onStartup` only — never a mere SW wake), measured against a durable
+last-alive marker the 1-min heartbeat writes:
+
+- **≤ 5 min AND 자동 유지 ON (default)** → the session continues. The reducer clock
+  is rebased via an `inactive` event (the old behavior integrated up to `gapCap`
+  90 s of the downtime under the pre-shutdown verdict), and the wall-clock anchors
+  (`goal.startedAt`, `drift-since`) shift past the gap so the sundial/time-budget/
+  drift-minutes never count time the browser was closed. First encounters get an
+  auto-opened popup banner (버튼: 잇지 않음을 기본으로 / 다시 보지 않기).
+- **> 5 min, or 자동 유지 OFF (any gap — OFF means always park)** → the goal record
+  moves to a suspended-session key; `getGoal()` returning null stops every
+  observation path, while gauge state/visits/history stay intact. The popup setup
+  view offers **직전 세션 이어가기** (완전 연속: same epoch, stats and gauge carry
+  on; startedAt shifted past the downtime). Declaring a new goal instead closes the
+  parked session quietly — history entry recorded at its shutdown time, no summary
+  view. A first-encounter callout explains resumability (작은 ✕로 1회 해제).
+
+Hardening that rode along: outbox nag/celebrate records older than 5 min (or with
+no live session) are ACK-dropped at drain, so a pre-shutdown nag can't pop on
+relaunch hours later. Every gauge-advancing startup entry point (module-level
+outbox flush, the heartbeat alarm — whose replayed post-relaunch firing would
+otherwise overwrite the last-alive marker and mask the gap as ≈0 — plus observe
+and the popup's get-state) waits on a `startupSettled` barrier (restore decision
+committed, or a 1.5 s fallback on plain SW wakes; the decision clears the fallback
+at entry so a slow cold start can't reopen the race). New shared fixture
+`05-inactive-rebases-clock-no-integration` pins the §5 `inactive` rebase-only rule.
+
+Deferred to the delivery-gate workstream (the 훈수-misplacement handoff prompt on
+the user's desk): continue-path queued-nag delivery narrows to "≤3 min from
+creation AND only on the page that caused it" (user-decided — supersedes the 5-min
+drain TTL for nags, which that work should absorb), and whether celebrate gets an
+age cap at all.
+
 ### D14 — Serverless cutover scope and preservation → RESOLVED (2026-07-24)
 
 The active product becomes the single TypeScript MV3 runtime in
@@ -1237,3 +1285,12 @@ the extension badge.
   sample-line copy decision. This cleanup pass: duplicate gauge "D9" block
   deduped and renumbered to D16, D9/D10 marked superseded by D14, status
   header refreshed.
+- 2026-08-04: D18 decided and implemented — browser-restart session policy
+  (`lib/sessionRestore.ts`): ≤5-min relaunch continues the session with the
+  reducer clock rebased (no more gapCap-worth of downtime integrated under the
+  pre-shutdown verdict) and wall-clock anchors shifted; longer gaps (or 자동
+  유지 OFF) park the session as resumable from the popup (완전 연속, same
+  epoch). Quiet close when a new goal replaces a parked session. Stale outbox
+  nags (>5 min / no session) dropped at drain. Options toggle, popup banner +
+  이어가기 UI, `05-inactive` shared fixture, sessionRestore/session/settings
+  tests.
