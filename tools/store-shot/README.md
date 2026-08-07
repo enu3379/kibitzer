@@ -30,7 +30,7 @@ cd ../../tools/store-shot
 | `scene1.html` | 팝업 히어로. 유일하게 `scenes.css`를 안 쓰고 자체 타입 스케일을 갖는다 |
 | `scene2.html` | 훈수 말풍선. 브라우저 창은 와이어프레임이고 말풍선만 진짜다 (`toast.js`) |
 | `scene3.html` | 세션 종료 요약 (팝업 `?scene=summary`) |
-| `scene4.html` `scene5.html` | 옵션 페이지 말투 탭 / 사이트 탭 |
+| `scene4.html` `scene5.html` | 옵션 페이지 말투 탭 / AI 판정 탭 |
 | `promo-tile.html` `promo-marquee.html` | 프로모 이미지. 인라인 SVG 한 덩어리 |
 | `logo-compare.html` | 툴바 아이콘 · 옵션 헤더 로고 비교용 |
 | `stub.js` | 서비스워커 없이 UI가 렌더되도록 만든 가짜 chrome API |
@@ -39,7 +39,7 @@ cd ../../tools/store-shot
 ## 알아 둘 것
 
 - **장면 상태는 `?scene=`으로 고른다.** `stub.js`가 그 값으로 고정 픽스처를 돌려준다 —
-  `summary`면 종료 요약, 없으면 진행 중 세션, `persona`/`sites`는 옵션 탭. 목표 문구·게이지
+  `summary`면 종료 요약, 없으면 진행 중 세션, `persona`/`ai`는 옵션 탭. 목표 문구·게이지
   숫자·MVP/빌런을 바꾸려면 `stub.js`의 상수를 고치면 된다.
 - **캡처 호스트가 다크 모드면 옵션 페이지가 통째로 어두워진다.** `stub.js`가 캐스케이드
   맨 끝에 라이트 토큰을 다시 선언해서 막고 있고, 말풍선은 `scene2.html`이 `matchMedia`를

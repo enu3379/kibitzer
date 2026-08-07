@@ -689,11 +689,17 @@ async function applySettingsPatch(
 ): Promise<Settings> {
   const before = await getSettings()
   const next = await setSettings(patch)
+  const aiModeChanged = before.aiJudgmentEnabled !== next.aiJudgmentEnabled
+  const localPdfChanged = before.localPdfPolicyRevision !== next.localPdfPolicyRevision
+  if (aiModeChanged) {
+    // The mode edge invalidates old provider failures.
+    await clearProviderHealth(["tier1", "tier2"])
+  }
   // Compare the revision, not the boolean: it is minted inside setSettings' write queue and
   // bumped once per edge, so an OFF→ON pair that lands between these two reads still counts.
-  if (before.localPdfPolicyRevision !== next.localPdfPolicyRevision) {
-    // A setting change supersedes both a checkpointed and an already-running PDF judge.
-    // Re-observe the current tab so OFF holds it neutral and ON begins a fresh full dwell.
+  if (aiModeChanged || localPdfChanged) {
+    // Either policy edge supersedes the pending page judge. A fresh observation adopts
+    // local-only/AI mode and, for PDFs, OFF holds neutral while ON begins a full dwell.
     await dwell.cancel()
     lastObservedKey = null
     if (reobserveActiveTab && await getGoal()) void observeActiveTab()

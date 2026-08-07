@@ -247,7 +247,8 @@
       .info-tip:hover .info-pop, .info-tip:focus-within .info-pop { visibility: visible; opacity: 1; }
 
       .ai-actions { align-items: center; }
-      .ai-enable { margin-left: auto; min-height: 32px; }
+      .ai-actions .action-spacer { flex: 1 1 auto; }
+      .ai-enable { min-height: 32px; }
       .ai-enable.on { background: var(--accent-soft); color: var(--ok-fg); border-color: var(--accent); }
       .privacy-link { border-top: 1px solid var(--line-soft); padding: 11px 0; font-size: 11.5px;
         color: var(--page-ink-2); }
@@ -462,6 +463,7 @@
 
           <div class="btnrow ai-actions" style="padding-top: 0">
             <button class="btn primary" id="ajSave">저장</button>
+            <span class="action-spacer" aria-hidden="true"></span>
             <button class="btn ai-enable" id="ajEnabled" type="button" aria-pressed="false">AI 판정 꺼짐</button>
           </div>
           <div class="hint" id="ajResult"></div>

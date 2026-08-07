@@ -762,6 +762,7 @@ ajEnabled.addEventListener("click", async () => {
   if (!judge || !isAiConfigComplete(draft, judge.accounts)) return
   aiPreference = !aiPreference
   await saveSettings({ aiJudgmentEnabled: aiPreference })
+  if (!aiPreference) runtimeHealth = { tier1: null, tier2: null }
   renderAiControls()
 })
 

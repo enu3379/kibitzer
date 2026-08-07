@@ -100,7 +100,10 @@
   var SETTINGS = {
     tauOk: 0.59,
     quietHours: { enabled: false, start: "22:00", end: "08:00" },
-    ttsEnabled: false,
+    observeLocalPdfs: false,
+    localPdfPolicyRevision: 0,
+    sessionAutoContinue: true,
+    aiJudgmentEnabled: true,
   };
 
   var DOMAIN_LISTS = {
@@ -109,7 +112,9 @@
   };
 
   var JUDGE = {
-    accounts: {},
+    accounts: {
+      ollama: [{ id: "store-demo", name: "Ollama Cloud", masked: "oll…demo", addedAt: Date.now() }],
+    },
     routes: {
       tier1: { provider: "ollama", model: "nemotron-3-super" },
       tier2: { provider: "ollama", model: "minimax-m3" },
@@ -193,6 +198,12 @@
       setTimeout(function () {
         var more = document.getElementById("sumMore");
         if (more && more.getAttribute("aria-expanded") !== "true") more.click();
+      }, 120);
+    }
+    if (scene === "ai") {
+      setTimeout(function () {
+        var info = document.querySelector('[aria-label="Tier 2 전송 데이터 안내"]');
+        if (info) info.focus();
       }, 120);
     }
   });

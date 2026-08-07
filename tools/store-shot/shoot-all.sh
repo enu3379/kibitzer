@@ -10,7 +10,7 @@ for n in 1 2 3 4 5; do
     2) f=store-2-toast ;;
     3) f=store-3-summary ;;
     4) f=store-4-persona ;;
-    5) f=store-5-privacy ;;
+    5) f=store-5-ai ;;
   esac
   "$D/shoot.sh" "file://$D/scene$n.html" "$OUT/$f.png" 1280 800
 done

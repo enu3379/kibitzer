@@ -8,7 +8,7 @@ import { initGaugeState } from "../core/gauge/types.ts"
 import type { Flow, GaugeConfig, GaugeEffect, GaugeEvent, GaugeState } from "../core/gauge/types.ts"
 import { tokenMatchesPending, tokenPageStillActive, type Tier2Token } from "./tier2Token.ts"
 import { showKibitzerToast, type ToastPayload } from "../content/toastOverlay.ts"
-import { tier2Confirm } from "./tier12.ts"
+import { judgeEnabled, tier2Confirm } from "./tier12.ts"
 import { getGoal } from "./session.ts"
 import { activePersona, clampSentences, DEFAULT_MAX_SENTENCES, pickCelebrate, pickFallback } from "./personas.ts"
 import { klog } from "./klog.ts"
@@ -622,8 +622,8 @@ async function serviceTier2(
     await cancelTier2(token)
     return
   }
-  if (!(await effectSourceAllowed(page))) {
-    klog(`tier2 cancelled (local-pdf disabled) on ${effect.pageKey}`)
+  if (!(await effectSourceAllowed(page)) || !(await judgeEnabled())) {
+    klog(`tier2 cancelled (source or AI policy changed) on ${effect.pageKey}`)
     logEvent("tier2", { pageKey: effect.pageKey, reason: effect.reason, cancelled: true })
     await cancelTier2(token)
     return
@@ -648,7 +648,7 @@ async function serviceTier2(
           current_page_drift_minutes: drift,
         }
       : null
-  if (!(await effectSourceAllowed(page))) {
+  if (!(await effectSourceAllowed(page)) || !(await judgeEnabled())) {
     await cancelTier2(token)
     return
   }
@@ -664,8 +664,12 @@ async function serviceTier2(
     excerpt,
     timeContext,
     useWriter: effect.useWriter,
-  }, () => effectSourceAllowed(page))
+  }, async () => (await effectSourceAllowed(page)) && (await judgeEnabled()))
   if (outcome.cancelled) {
+    await cancelTier2(token)
+    return
+  }
+  if (!(await judgeEnabled())) {
     await cancelTier2(token)
     return
   }
