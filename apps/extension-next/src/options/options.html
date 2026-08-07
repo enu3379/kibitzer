@@ -308,13 +308,18 @@
   <body>
     <div class="frame">
       <div class="head">
+        <!-- Geometry traced off icons/icon-128.png so the mark reads as the same character:
+             a solid semicircular head of radius R peeking over the monitor, eyes r 0.231R at
+             (cx ± 0.365R, cy − 0.317R), hands 0.423R wide at cx ± 0.788R. Here R = 8.66,
+             which is 0.433 × the monitor's width, as in the icon. The eyes take --page rather
+             than a fixed white so they stay cut-outs when --page-ink flips in dark mode. -->
         <svg width="30" height="25" viewBox="0 0 26 22" fill="none" aria-hidden="true">
-          <circle cx="9.5" cy="7" r="1.7" fill="var(--page-ink)" />
-          <circle cx="16.5" cy="7" r="1.7" fill="var(--page-ink)" />
-          <path d="M6 10 C6 5.2 9 3 13 3 C17 3 20 5.2 20 10" stroke="var(--page-ink)" stroke-width="1.8" fill="none" />
+          <path d="M4.34 10 A8.66 8.66 0 0 1 21.66 10 Z" fill="var(--page-ink)" />
+          <circle cx="9.84" cy="7.25" r="2" fill="var(--page)" />
+          <circle cx="16.16" cy="7.25" r="2" fill="var(--page)" />
           <rect x="3" y="10" width="20" height="9" rx="2.4" fill="var(--accent)" />
-          <rect x="7.6" y="9" width="2.6" height="2.4" rx="1.2" fill="var(--page-ink)" />
-          <rect x="15.8" y="9" width="2.6" height="2.4" rx="1.2" fill="var(--page-ink)" />
+          <rect x="4.32" y="8.6" width="3.66" height="3.5" rx="1.75" fill="var(--page-ink)" />
+          <rect x="18.02" y="8.6" width="3.66" height="3.5" rx="1.75" fill="var(--page-ink)" />
         </svg>
         <span class="name">Kibitzer 설정</span>
       </div>
