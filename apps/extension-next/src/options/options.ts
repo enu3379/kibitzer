@@ -3,7 +3,12 @@
 // messages — key values travel INTO the worker only, responses carry masked keys.
 
 import { sampleLinesFor } from "../lib/personaSampleLines.ts"
-import { PROVIDER_PROFILES, type ProviderId, type TierName } from "../lib/providers.ts"
+import {
+  defaultProviderKeyName,
+  PROVIDER_PROFILES,
+  type ProviderId,
+  type TierName,
+} from "../lib/providers.ts"
 
 import {
   SENSITIVITY_PRESETS,
@@ -454,7 +459,7 @@ function renderProviderBlocks(): void {
     })
 
     if (addOpenFor === profile.id) {
-      block.appendChild(buildKeyForm(profile.id, profile.keyHint))
+      block.appendChild(buildKeyForm(profile.id, profile.keyHint, keyList.length))
     } else {
       block.appendChild(
         button("kadd", "＋ 키 추가", () => {
@@ -473,12 +478,14 @@ function renderProviderBlocks(): void {
   }
 }
 
-function buildKeyForm(provider: ProviderId, keyHint: string): HTMLElement {
+function buildKeyForm(provider: ProviderId, keyHint: string, existingKeyCount: number): HTMLElement {
   const form = el("div", "kform")
   const name = document.createElement("input")
   name.type = "text"
   name.className = "f-name"
-  name.placeholder = "이름 (선택) — 예: 서브 계정"
+  const defaultName = defaultProviderKeyName(provider, existingKeyCount)
+  name.placeholder = defaultName
+  name.value = defaultName
   const key = document.createElement("input")
   key.type = "password"
   key.className = "f-key"
