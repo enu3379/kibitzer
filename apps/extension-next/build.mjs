@@ -1,10 +1,11 @@
 import { build, context } from "esbuild"
 import { cpSync, mkdirSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const watch = process.argv.includes("--watch")
 const extensionRoot = dirname(fileURLToPath(import.meta.url))
+const repoRoot = resolve(extensionRoot, "../..")
 const distDir = join(extensionRoot, "dist")
 
 const options = {
@@ -33,6 +34,7 @@ function copyStatic() {
   mkdirSync(join(distDir, "onboarding"), { recursive: true })
   mkdirSync(join(distDir, "localPdfPrompt"), { recursive: true })
   mkdirSync(join(distDir, "assets", "ort"), { recursive: true })
+  mkdirSync(join(distDir, "LICENSES"), { recursive: true })
   cpSync(join(extensionRoot, "manifest.json"), join(distDir, "manifest.json"))
   cpSync(join(extensionRoot, "src/popup/popup.html"), join(distDir, "popup/popup.html"))
   cpSync(join(extensionRoot, "src/options/options.html"), join(distDir, "options/options.html"))
@@ -47,6 +49,9 @@ function copyStatic() {
     join(extensionRoot, "node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm"),
     join(distDir, "assets/ort/ort-wasm-simd-threaded.wasm"),
   )
+  // Licensing files shipped with the packaged extension.
+  cpSync(join(repoRoot, "docs/THIRD_PARTY_NOTICES.txt"), join(distDir, "THIRD_PARTY_NOTICES.txt"))
+  cpSync(join(repoRoot, "LICENSES/Apache-2.0.txt"), join(distDir, "LICENSES/Apache-2.0.txt"))
 }
 
 if (watch) {
