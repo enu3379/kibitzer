@@ -171,7 +171,7 @@ Completed:
   channel-staging decisions (ad-hoc signing requirement, Homebrew cask
   deferred per the 2026-09-01 Gatekeeper policy). Statuses refreshed for the
   #69/#71/#74 closures, `331a0ba`, and draft #106.
-- Landed previously local-only records: `docs/security-review-2026-07-15.md`,
+- Landed the previously local-only non-prompt-injection security audit,
   `docs/handoff-refactor-predist.md` (the corrected 2026-07-15 reconciled
   work order from `chore/predist-audit-docs`, superseding the unreconciled
   draft), `docs/persona-voice-revamp.md`, and the
@@ -491,8 +491,7 @@ Completed:
   - return to `idle` on session end;
   - `GET /health` mode reporting;
   - macOS LaunchAgent install/uninstall scripts.
-- Created [Idle Daemon Plan](idle-daemon-plan.md),
-  [Windows Idle Tray Plan](windows-idle-tray-plan.md), and
+- Created the now-retired idle-daemon and Windows-tray plans, and
   [2026-07-07 Alignment/Dwell Handoff](handoff-2026-07-07-alignment-dwell.md).
 - Opened PR #1 for the macOS idle daemon work, marked it ready, and merged it to
   `main` as merge commit `0317467`.

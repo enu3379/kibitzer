@@ -4,7 +4,7 @@ Date: 2026-07-15. Target: Ollama Chat 호환 `minimax-m3`.
 Calls: 10 personas × 5 synthetic scenarios = 50.
 
 원자료: [results.json](results.json). 재현 스크립트:
-[`scripts/eval_persona_voice.py`](../../../scripts/eval_persona_voice.py).
+[`scripts/eval_persona_voice.py`](https://github.com/enu3379/kibitzer/blob/pre-serverless-cutover-2026-07-24/scripts/eval_persona_voice.py).
 
 ## 방법
 

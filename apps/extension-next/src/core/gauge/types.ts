@@ -1,7 +1,6 @@
 // Gauge v0 core types — the reference implementation of docs/gauge/contract.md.
 // Field names are camelCase and match the shared fixture JSON byte-for-byte
-// (fixtures/gauge/*.json). The Python track maps these to snake_case; TypeScript
-// consumes the JSON shape directly.
+// (fixtures/gauge/*.json).
 
 export type Verdict = "OK" | "DRIFT";
 export type Flow = "drift" | "ok";
