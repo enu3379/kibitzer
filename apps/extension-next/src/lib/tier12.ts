@@ -60,28 +60,36 @@ export interface Tier2Context {
 // These Cloud models reason before answering; a small budget exhausts before the
 // JSON verdict (output_exhausted). Match the server's Judge budget.
 const JUDGE_BUDGETS = { timeoutMs: 60_000, maxOutputTokens: 4096, writerMaxOutputTokens: 2048 } as const
+const CONNECTION_PROBE_BUDGETS = { timeoutMs: 20_000, maxOutputTokens: 256, writerMaxOutputTokens: 256 } as const
 
 function buildJudgeProvider(
   provider: ProviderId,
   model: string,
   keys: readonly string[],
+  probe = false,
 ): JudgeProvider {
   const profile = profileFor(provider)
+  const budgets = probe ? CONNECTION_PROBE_BUDGETS : JUDGE_BUDGETS
   const onUsage = (tokensIn: number, tokensOut: number): void => {
     void recordUsage(provider, model, tokensIn, tokensOut)
   }
   if (profile.format === "ollama") {
     return new OllamaChatJudgeProvider({
-      apiUrl: profile.chatUrl, model, apiKeys: keys, ...JUDGE_BUDGETS, onUsage,
+      apiUrl: profile.chatUrl,
+      model,
+      apiKeys: keys,
+      ...budgets,
+      ...(probe ? { judgeThink: false } : {}),
+      onUsage,
     })
   }
   if (profile.format === "claude") {
     return new ClaudeChatJudgeProvider({
-      chatUrl: profile.chatUrl, model, apiKeys: keys, ...JUDGE_BUDGETS, onUsage,
+      chatUrl: profile.chatUrl, model, apiKeys: keys, ...budgets, onUsage,
     })
   }
   return new OpenAIChatJudgeProvider({
-    chatUrl: profile.chatUrl, model, apiKeys: keys, ...JUDGE_BUDGETS, ...(profile.wire ?? {}), onUsage,
+    chatUrl: profile.chatUrl, model, apiKeys: keys, ...budgets, ...(profile.wire ?? {}), onUsage,
   })
 }
 
@@ -216,14 +224,14 @@ async function testRouteWithKeys(
   if (!trimmed) return { ok: false, detail: "모델명이 비어 있어요" }
   const startedAt = Date.now()
   try {
-    const judge = buildJudgeProvider(provider, trimmed, keys)
+    const judge = buildJudgeProvider(provider, trimmed, keys, true)
     if (tier === "tier1") {
       const r1 = await judge.classifyTier1(
         buildTier1Payload({ rawText: "테스트" }, { title: "예시 페이지", urlHost: "example.com" }, []),
       )
       return { ok: true, detail: `${trimmed} ✓ (${r1.verdict}) · ${elapsed(startedAt)}` }
     }
-    await judge.confirmTier2(
+    await judge.decideTier2(
       buildTier2ReviewPayload(
         { rawText: "테스트" },
         { title: "예시 페이지", urlHost: "example.com", verdict: "DRIFT", tierReached: 0, tier0Score: 0.3 },
@@ -266,8 +274,10 @@ export async function testCandidateKey(
     const missing = { ok: false, detail: "API 키를 입력해 주세요" }
     return { ok: false, tiers: { tier1: missing, tier2: missing } }
   }
-  const tier1 = await testRouteWithKeys("tier1", provider, models.tier1, [key])
-  const tier2 = await testRouteWithKeys("tier2", provider, models.tier2, [key])
+  const [tier1, tier2] = await Promise.all([
+    testRouteWithKeys("tier1", provider, models.tier1, [key]),
+    testRouteWithKeys("tier2", provider, models.tier2, [key]),
+  ])
   return { ok: tier1.ok && tier2.ok, tiers: { tier1, tier2 } }
 }
 

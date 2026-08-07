@@ -38,28 +38,42 @@ test("safeShouldContinue treats a failed policy read as cancellation", async () 
 test("candidate-key validation forces the unsaved key through both tiers without storing it", async () => {
   const candidate = "candidate-only-secret"
   const authorizations: string[] = []
-  let call = 0
+  const requestBodies: Array<Record<string, unknown>> = []
+  const responders: Array<(response: Response) => void> = []
   const realFetch = globalThis.fetch
-  ;(globalThis as { fetch: unknown }).fetch = async (_url: unknown, init?: { headers?: unknown }) => {
+  ;(globalThis as { fetch: unknown }).fetch = async (_url: unknown, init?: { headers?: unknown; body?: unknown }) => {
     authorizations.push(String((init?.headers as Record<string, unknown> | undefined)?.authorization ?? ""))
-    call += 1
-    const content = call === 1
-      ? '{"verdict":"OK","reason":"on goal"}'
-      : '{"confirm_drift":false,"message":null}'
-    return new Response(JSON.stringify({ message: { content } }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
+    requestBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
+    return await new Promise<Response>((resolve) => {
+      responders.push(resolve)
     })
   }
   try {
-    const result = await testCandidateKey("ollama", candidate, {
+    const pending = testCandidateKey("ollama", candidate, {
       tier1: "candidate-tier1",
       tier2: "candidate-tier2",
     })
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    assert.equal(responders.length, 2, "both tier probes must start in parallel")
+    for (let index = 0; index < responders.length; index += 1) {
+      const body = requestBodies[index]
+      const content = body?.model === "candidate-tier1"
+        ? '{"verdict":"OK","reason":"on goal"}'
+        : '{"decision":"defer","reason_code":"insufficient_evidence","basis":"title"}'
+      responders[index](new Response(JSON.stringify({ message: { content } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }))
+    }
+    const result = await pending
     assert.equal(result.ok, true)
     assert.equal(result.tiers.tier1.ok, true)
     assert.equal(result.tiers.tier2.ok, true)
     assert.deepEqual(authorizations, [`Bearer ${candidate}`, `Bearer ${candidate}`])
+    for (const body of requestBodies) {
+      assert.equal(body.think, false, "Ollama connection probes must disable reasoning")
+      assert.equal((body.options as Record<string, unknown>).num_predict, 256)
+    }
     assert.ok(!JSON.stringify(store).includes(candidate), "the candidate must not reach persistent storage")
     assert.deepEqual(await getProviderHealth(), { tier1: null, tier2: null })
   } finally {
