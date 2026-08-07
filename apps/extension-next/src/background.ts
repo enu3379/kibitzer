@@ -939,6 +939,13 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
   }
   if (message?.type === "disconnect-provider" && message.provider) {
     const provider = message.provider
+    const current = await getJudgeSettings()
+    if (
+      (await getSettings()).aiJudgmentEnabled &&
+      (current.routes.tier1.provider === provider || current.routes.tier2.provider === provider)
+    ) {
+      return toPublicSettings(current)
+    }
     return toPublicSettings(await mutateProviderSettings(provider, () => disconnectProvider(provider)))
   }
   if (message?.type === "add-provider-key" && message.provider) {
@@ -950,6 +957,15 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
   if (message?.type === "remove-provider-key" && message.provider && message.keyId) {
     const provider = message.provider
     const keyId = message.keyId
+    const current = await getJudgeSettings()
+    const keys = current.accounts[provider]?.keys ?? []
+    const removesLastRoutedKey =
+      keys.length === 1 &&
+      keys[0]?.id === keyId &&
+      (current.routes.tier1.provider === provider || current.routes.tier2.provider === provider)
+    if ((await getSettings()).aiJudgmentEnabled && removesLastRoutedKey) {
+      return toPublicSettings(current)
+    }
     return toPublicSettings(await mutateProviderSettings(provider, () => removeProviderKey(provider, keyId)))
   }
   if (message?.type === "set-routes") {

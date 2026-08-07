@@ -188,7 +188,11 @@
       "--surface:#ffffff;--surface-2:#eef3f0;--line:#dce4df;--line-soft:#e7ede9;" +
       "--accent:#1e7a4c;--accent-ink:#ffffff;--accent-soft:#e2f1e8;" +
       "--ok-fg:#175f3b;--err:#bf4540;--err-soft:#f7e2e0;--err-fg:#8f322c;" +
-      "--sd-ink:#6e6960;--sd-ink3:#9b968c;--sd-line:#e6e3dc;--sd-leaf:#5aa63c;--sd-bg:#ffffff}";
+      "--sd-ink:#6e6960;--sd-ink3:#9b968c;--sd-line:#e6e3dc;--sd-leaf:#5aa63c;--sd-bg:#ffffff}" +
+      (scene === "ai"
+        ? ".kadd,.connectbtn,.privacy-link{display:none!important}.store-ai-note{margin:0 0 10px;" +
+          "font-size:11.5px;line-height:1.55;color:var(--page-ink-2)}"
+        : "");
     document.head.appendChild(s);
   });
 
@@ -202,6 +206,23 @@
     }
     if (scene === "ai") {
       setTimeout(function () {
+        var tierHint = document.querySelector(".msec > .hint");
+        if (tierHint) {
+          tierHint.textContent = "데이터는 AI 제공자에게만 전송되며 Kibitzer는 사용자 정보를 수집하지 않습니다.";
+        }
+        var actions = document.querySelector(".ai-actions");
+        if (actions && !document.querySelector(".store-ai-note")) {
+          var note = document.createElement("p");
+          note.className = "store-ai-note";
+          note.appendChild(document.createTextNode("AI에게 보여주고 싶지 않은 사이트는 제외할 수 있어요."));
+          note.appendChild(document.createElement("br"));
+          note.appendChild(
+            document.createTextNode(
+              "은행 · 결제 · 정부 · 메일 등 주요 민감 정보 사이트는 처음부터 제외되어 있습니다.",
+            ),
+          );
+          actions.insertAdjacentElement("afterend", note);
+        }
         var info = document.querySelector('[aria-label="Tier 2 전송 데이터 안내"]');
         if (info) info.focus();
       }, 120);

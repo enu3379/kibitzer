@@ -622,6 +622,17 @@ test("E2E: an unreachable judge still nudges — a configured-but-dead Tier 2 mu
     if (keyId) await send({ type: "remove-provider-key", provider: "ollama", keyId })
     assert.equal(
       (await send({ type: "get-state" })).judgeEnabled,
+      true,
+      "an enabled AI route must reject removal of its only API key",
+    )
+    // Product policy forbids removing the only key used by an enabled AI route. Cleanup follows
+    // the same supported path as a user: switch to local-only mode, remove the key, then restore
+    // the preference so the next scenario starts from the normal default.
+    await send({ type: "set-settings", settings: { aiJudgmentEnabled: false } })
+    if (keyId) await send({ type: "remove-provider-key", provider: "ollama", keyId })
+    await send({ type: "set-settings", settings: { aiJudgmentEnabled: true } })
+    assert.equal(
+      (await send({ type: "get-state" })).judgeEnabled,
       false,
       "the route must be gone again, or every later scenario silently runs non-degraded",
     )
@@ -721,7 +732,9 @@ test("E2E: a half-configured AI setup is disabled and falls back to local judgin
     // key leaves the judge enabled for every later scenario. `disconnect-provider` cannot retract
     // it — ollama is the default provider and disconnecting it is a deliberate no-op
     // (providers.ts) — so the keys have to go by id.
+    await send({ type: "set-settings", settings: { aiJudgmentEnabled: false } })
     for (const keyId of ollamaKeyIds) await send({ type: "remove-provider-key", provider: "ollama", keyId })
+    await send({ type: "set-settings", settings: { aiJudgmentEnabled: true } })
     assert.equal(
       (await send({ type: "get-state" })).judgeEnabled,
       false,

@@ -13,9 +13,11 @@ import {
 import {
   DISABLED_COPY,
   INCOMPLETE_COPY,
+  canToggleAiPreference,
   effectiveAiEnabled,
   incompleteTiers,
   isAiConfigComplete,
+  providerIsRouted,
 } from "./aiTabState.ts"
 
 import {
@@ -348,6 +350,7 @@ let runtimeHealth: ProviderHealthSnapshot = { tier1: null, tier2: null }
 let addOpenFor: ProviderId | null = null
 let connectOpen = false
 let usageDays = 1
+let configActionError: string | null = null
 
 function staleChip(): ChipState {
   return { kind: "unknown", chip: "– 테스트", text: "이 라우팅으로 실제 호출을 확인합니다" }
@@ -394,6 +397,7 @@ function fmtDate(ts: number): string {
 /** Saved routes arrived (init/save/disconnect) — rebuild the drafts from them. */
 function applyJudge(view: JudgeView): void {
   judge = view
+  configActionError = null
   for (const tier of TIERS) {
     const route = view.routes[tier]
     draft[tier] = {
@@ -426,6 +430,7 @@ function applyAccounts(view: JudgeView): void {
     }
   }
   judge = view
+  configActionError = null
   for (const tier of TIERS) chips[tier] = staleChip()
   renderJudge()
 }
@@ -438,6 +443,7 @@ function renderJudge(): void {
 
 function renderProviderBlocks(): void {
   if (!judge) return
+  const savedRoutes = judge.routes
   ajProviders.textContent = ""
   for (const profile of PROVIDER_PROFILES) {
     const keyList = judge.accounts[profile.id]
@@ -451,6 +457,13 @@ function renderProviderBlocks(): void {
     if (profile.id !== "ollama") {
       head.appendChild(
         button("punlink", "연결 해제", () => {
+          const usedByDraftOrSaved =
+            providerIsRouted(profile.id, draft) || providerIsRouted(profile.id, savedRoutes)
+          if (aiPreference && usedByDraftOrSaved) {
+            configActionError = `${profile.label} 연결은 현재 AI 판정에 사용 중이에요. 먼저 AI 판정을 비활성화해 주세요.`
+            renderAiControls()
+            return
+          }
           if (!confirm(`${profile.label} 연결을 해제할까요? 등록된 키도 함께 삭제됩니다.`)) return
           void send({ type: "disconnect-provider", provider: profile.id }).then((raw) =>
             applyJudge(raw as JudgeView),
@@ -472,6 +485,15 @@ function renderProviderBlocks(): void {
       row.appendChild(meta)
       row.appendChild(el("span", "kdate", fmtDate(key.addedAt)))
       const del = button("kdel", "✕", () => {
+        const usedByDraftOrSaved =
+          providerIsRouted(profile.id, draft) || providerIsRouted(profile.id, savedRoutes)
+        const isLastRoutedKey = keyList.length === 1 && usedByDraftOrSaved
+        if (aiPreference && isLastRoutedKey) {
+          configActionError = `${profile.label}의 마지막 API 키는 AI 판정이 켜진 동안 삭제할 수 없어요. 먼저 AI 판정을 비활성화해 주세요.`
+          renderAiControls()
+          return
+        }
+        if (!confirm(`${key.name || `키 ${index + 1}`}을 삭제할까요?`)) return
         void send({ type: "remove-provider-key", provider: profile.id, keyId: key.id }).then(
           (view) => applyAccounts(view as JudgeView),
         )
@@ -605,6 +627,7 @@ function renderRoutes(): void {
     }
     prov.value = d.provider
     prov.onchange = () => {
+      configActionError = null
       d.provider = prov.value as ProviderId
       d.custom = false
       d.model = presetsFor(d.provider, tier)[0]
@@ -632,6 +655,7 @@ function renderRoutes(): void {
     else model.value = presets.includes(d.model) ? d.model : presets[0]
 
     model.onchange = () => {
+      configActionError = null
       if (model.value === "__custom") {
         d.custom = true
         d.model = ""
@@ -645,6 +669,7 @@ function renderRoutes(): void {
       }
     }
     input.oninput = () => {
+      configActionError = null
       d.model = input.value.trim()
       if (chips[tier].kind !== "unknown") {
         chips[tier] = staleChip()
@@ -653,6 +678,7 @@ function renderRoutes(): void {
       renderAiControls()
     }
     back.onclick = () => {
+      configActionError = null
       d.custom = false
       d.model = presetsFor(d.provider, tier)[0]
       chips[tier] = staleChip()
@@ -672,21 +698,36 @@ function renderAiControls(): void {
   if (!judge) return
   const complete = isAiConfigComplete(draft, judge.accounts)
   const active = effectiveAiEnabled(aiPreference, draft, judge.accounts)
-  ajSave.disabled = !complete
-  ajSave.title = complete ? "" : "Tier 1과 Tier 2의 모델·키를 모두 설정해야 저장할 수 있어요."
-  ajEnabled.disabled = !complete
+  const routeTestFailed = TIERS.some((tier) => chips[tier].kind === "err")
+  const ready = complete && !routeTestFailed
+  ajSave.disabled = !ready
+  ajSave.title = !complete
+    ? "Tier 1과 Tier 2의 모델·키를 모두 설정해야 저장할 수 있어요."
+    : routeTestFailed
+      ? "오류가 난 Tier를 수정하거나 다시 테스트해 정상 응답을 확인해 주세요."
+      : ""
+  // An incomplete setup cannot be activated, but a still-ON preference must always
+  // retain an escape hatch to explicit local-only mode.
+  ajEnabled.disabled = !canToggleAiPreference(aiPreference, complete, routeTestFailed)
   ajEnabled.setAttribute("aria-pressed", String(active))
   ajEnabled.classList.toggle("on", active)
-  ajEnabled.textContent = active ? "AI 판정 켜짐" : "AI 판정 꺼짐"
+  ajEnabled.textContent = active
+    ? "AI 판정 켜짐"
+    : aiPreference
+      ? "AI 판정 비활성화"
+      : "AI 판정 꺼짐"
 
   ajAlerts.textContent = ""
   if (!complete) {
     appendAiAlert(INCOMPLETE_COPY, true)
     const missing = incompleteTiers(draft, judge.accounts).map((tier) => TIER_LABEL[tier]).join(" · ")
     appendAiAlert(`${missing}의 모델과 API 키를 확인해 주세요.`, true)
-  } else if (!aiPreference) {
+  }
+  if (!aiPreference) {
     appendAiAlert(DISABLED_COPY, false)
   }
+
+  if (configActionError) appendAiAlert(configActionError, true)
 
   for (const tier of TIERS) {
     if (chips[tier].kind === "err") {
@@ -744,7 +785,11 @@ for (const chipEl of document.querySelectorAll<HTMLButtonElement>(".stchip")) {
 }
 
 ajSave.addEventListener("click", async () => {
-  if (!judge || !isAiConfigComplete(draft, judge.accounts)) return
+  if (
+    !judge ||
+    !isAiConfigComplete(draft, judge.accounts) ||
+    TIERS.some((tier) => chips[tier].kind === "err")
+  ) return
   const view = (await send({
     type: "set-routes",
     routes: {
@@ -759,8 +804,16 @@ ajSave.addEventListener("click", async () => {
 })
 
 ajEnabled.addEventListener("click", async () => {
-  if (!judge || !isAiConfigComplete(draft, judge.accounts)) return
+  if (!judge) return
+  const complete = isAiConfigComplete(draft, judge.accounts)
+  const routeTestFailed = TIERS.some((tier) => chips[tier].kind === "err")
+  if (!aiPreference && (!complete || routeTestFailed)) return
+  if (
+    aiPreference &&
+    !confirm("AI 판정을 끌까요?\n판정 품질이 낮아지고 훈수 메시지가 단순해져요.")
+  ) return
   aiPreference = !aiPreference
+  configActionError = null
   await saveSettings({ aiJudgmentEnabled: aiPreference })
   if (!aiPreference) runtimeHealth = { tier1: null, tier2: null }
   renderAiControls()

@@ -5,9 +5,11 @@ import type { ProviderId } from "../lib/providers.ts"
 import {
   DISABLED_COPY,
   INCOMPLETE_COPY,
+  canToggleAiPreference,
   effectiveAiEnabled,
   incompleteTiers,
   isAiConfigComplete,
+  providerIsRouted,
   type AccountKeyLists,
   type RouteDrafts,
 } from "./aiTabState.ts"
@@ -43,10 +45,24 @@ test("effective activation also honors the explicit user preference", () => {
   assert.equal(effectiveAiEnabled(true, routes("ollama", "gemini"), accounts), false)
 })
 
+test("destructive provider controls can tell whether a key is used by either tier", () => {
+  const split = routes("ollama", "gemini")
+  assert.equal(providerIsRouted("ollama", split), true)
+  assert.equal(providerIsRouted("gemini", split), true)
+  assert.equal(providerIsRouted("openai", split), false)
+})
+
+test("an incomplete ON preference keeps the escape hatch to local-only mode", () => {
+  assert.equal(canToggleAiPreference(true, false, false), true)
+  assert.equal(canToggleAiPreference(false, false, false), false)
+  assert.equal(canToggleAiPreference(false, true, true), false)
+  assert.equal(canToggleAiPreference(false, true, false), true)
+})
+
 test("warning copy is pinned", () => {
   assert.equal(
     INCOMPLETE_COPY,
-    "AI 판정이 꺼져 있어요. Tier 1·2를 모두 설정하면 더 정확한 판정과 자연스러운 훈수를 사용할 수 있어요.",
+    "AI 판정이 꺼져 있어요. Tier 1·2의 모델과 API 키를 모두 설정하거나 AI 판정을 비활성화해 주세요.",
   )
   assert.equal(
     DISABLED_COPY,
