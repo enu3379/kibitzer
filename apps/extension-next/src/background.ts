@@ -21,7 +21,7 @@ import { embedText, embedTexts, judgeTier0 } from "./lib/tier0.ts"
 import { addExemplar, admissionEligible, admitAnchor, loadRefs, setDerived } from "./lib/relevance.ts"
 import { filterDerivedPhrases, MAX_PHRASES } from "./lib/goalEnrichment.ts"
 import { currentState, dispatch, enterNeutral, flushOutbox, PROVIDER_ALERT_ID, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
-import { enrichGoal, judgeEnabled, testRoute, tier1Rescue } from "./lib/tier12.ts"
+import { enrichGoal, judgeEnabled, testCandidateKey, testRoute, tier1Rescue } from "./lib/tier12.ts"
 import {
   addProviderKey,
   connectProvider,
@@ -678,6 +678,7 @@ interface PopupMessage {
   value?: string
   keyId?: string
   routes?: Partial<Record<TierName, Partial<TierRoute>>>
+  models?: Partial<Record<TierName, string>>
   days?: number
   // user domain lists (options 사이트 pane)
   lists?: { block?: string[]; allow?: string[] }
@@ -947,6 +948,19 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
       return toPublicSettings(current)
     }
     return toPublicSettings(await mutateProviderSettings(provider, () => disconnectProvider(provider)))
+  }
+  if (message?.type === "test-and-add-provider-key" && message.provider) {
+    const provider = message.provider
+    const tested = await testCandidateKey(provider, message.value ?? "", {
+      tier1: message.models?.tier1 ?? "",
+      tier2: message.models?.tier2 ?? "",
+    })
+    if (!tested.ok) return { ...tested, view: null }
+    const view = await mutateProviderSettings(
+      provider,
+      () => addProviderKey(provider, message.name ?? "", message.value ?? ""),
+    )
+    return { ...tested, view: toPublicSettings(view) }
   }
   if (message?.type === "add-provider-key" && message.provider) {
     const provider = message.provider

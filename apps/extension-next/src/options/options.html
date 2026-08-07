@@ -197,6 +197,8 @@
       .kform input.f-name { flex: 1 1 130px; }
       .kform input.f-key { flex: 2 1 190px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
       .kform .btn { padding: 6px 12px; }
+      .kform .ktest { flex: 1 0 100%; margin: 1px 0 0; font-size: 11.5px; color: var(--page-ink-3); }
+      .kform .ktest.err { color: var(--err-fg); }
       .krot { font-size: 11px; color: var(--page-ink-3); margin: 2px 0 0; }
       .connectbtn { all: unset; box-sizing: border-box; cursor: pointer; display: block; width: 100%; text-align: center;
         padding: 8px 0; border: 1.5px dashed var(--line); border-radius: 10px; font-size: 12.5px; font-weight: 650;
@@ -276,13 +278,6 @@
       .utable td:first-child .sub { display: block; font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", sans-serif;
         color: var(--page-ink-3); font-size: 10.5px; }
       .uempty { font-size: 11.5px; color: var(--page-ink-3); padding: 6px 0; }
-
-      details.privacy { border-top: 1px solid var(--line-soft); margin-top: 2px; }
-      details.privacy summary { cursor: pointer; font-size: 12px; font-weight: 650; color: var(--page-ink-2);
-        padding: 10px 0; list-style-position: inside; }
-      details.privacy summary:hover { color: var(--accent); }
-      details.privacy summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-      details.privacy p { margin: 0 0 10px; }
 
       /* page footer — centered, pinned to the bottom of the viewport on short panes */
       .sitefoot { flex: none; border-top: 1px solid var(--line-soft); padding: 22px 24px 26px;
@@ -491,14 +486,6 @@
             <p class="hint" style="margin-bottom: 4px">표시된 사용량은 AI 제공사의 집계 기준이며 실제와 다를 수 있습니다. 사용 내역은 수집되지 않습니다.</p>
           </div>
 
-          <details class="privacy">
-            <summary>어떤 데이터가 전송되나요?</summary>
-            <p class="hint">
-              목표, 현재 제목·호스트, 최대 3,000자의 현재 페이지 요약, 최근 페이지 제목·판정,
-              시간·훈수 횟수 맥락이 연결된 AI 제공자로 전송될 수 있습니다.
-              원본 URL, 저장된 벡터, 전체 이벤트 로그는 전송하지 않습니다.
-            </p>
-          </details>
         </div>
       </section>
 

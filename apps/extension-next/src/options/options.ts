@@ -58,6 +58,11 @@ interface RouteTestResult {
   ok: boolean
   detail: string
 }
+interface CandidateKeyTestResult {
+  ok: boolean
+  tiers: Record<TierName, RouteTestResult>
+  view: JudgeView | null
+}
 interface UsageRow {
   provider: ProviderId
   model: string
@@ -536,30 +541,77 @@ function buildKeyForm(provider: ProviderId, keyHint: string, existingKeyCount: n
   key.className = "f-key"
   key.placeholder = keyHint
   key.autocomplete = "off"
-  const commit = (): void => {
+  const status = el("p", "ktest")
+  const add = button("btn primary", "추가", () => void commit())
+  const cancel = button("btn", "취소", () => {
+    addOpenFor = null
+    renderJudge()
+  })
+  let testing = false
+  const modelsForCandidate = (): Record<TierName, string> => ({
+    tier1: draft.tier1.provider === provider
+      ? draft.tier1.model
+      : presetsFor(provider, "tier1")[0],
+    tier2: draft.tier2.provider === provider
+      ? draft.tier2.model
+      : presetsFor(provider, "tier2")[0],
+  })
+  const commit = async (): Promise<void> => {
+    if (testing) return
     if (!key.value.trim()) {
       key.focus()
       return
     }
-    void send({ type: "add-provider-key", provider, name: name.value, value: key.value }).then(
-      (view) => {
-        addOpenFor = null
-        applyAccounts(view as JudgeView)
-      },
-    )
+    testing = true
+    add.disabled = cancel.disabled = name.disabled = key.disabled = true
+    add.textContent = "Tier 1·2 확인 중…"
+    status.className = "ktest"
+    status.textContent = "새 키만 사용해 두 모델을 확인하고 있어요. 첫 호출은 느릴 수 있습니다."
+    const models = modelsForCandidate()
+    try {
+      const tested = (await send({
+        type: "test-and-add-provider-key",
+        provider,
+        name: name.value,
+        value: key.value,
+        models,
+      })) as CandidateKeyTestResult
+      if (!tested.ok) {
+        const failures = TIERS
+          .filter((tier) => !tested.tiers[tier].ok)
+          .map((tier) => `${TIER_LABEL[tier]} — ${tested.tiers[tier].detail}`)
+        status.className = "ktest err"
+        status.textContent = `${failures.join(" / ")} · 키와 모델을 다시 확인해 주세요.`
+        return
+      }
+      const view = tested.view
+      if (!view) throw new Error("validated key was not saved")
+      addOpenFor = null
+      applyAccounts(view)
+      for (const tier of TIERS) {
+        if (draft[tier].provider !== provider || draft[tier].model !== models[tier]) continue
+        chips[tier] = {
+          kind: "ok",
+          chip: "✓ 방금 전",
+          text: `정상 — ${tested.tiers[tier].detail}`,
+        }
+        renderChip(tier)
+      }
+      renderAiControls()
+    } catch {
+      status.className = "ktest err"
+      status.textContent = "테스트 요청에 실패했습니다. 잠시 후 다시 시도해 주세요."
+    } finally {
+      testing = false
+      add.disabled = cancel.disabled = name.disabled = key.disabled = false
+      add.textContent = "추가"
+      if (addOpenFor === provider) key.focus()
+    }
   }
   key.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") commit()
+    if (e.key === "Enter") void commit()
   })
-  form.append(
-    name,
-    key,
-    button("btn primary", "추가", commit),
-    button("btn", "취소", () => {
-      addOpenFor = null
-      renderJudge()
-    }),
-  )
+  form.append(name, key, add, cancel, status)
   queueMicrotask(() => name.focus())
   return form
 }

@@ -175,6 +175,11 @@ export interface RouteTestResult {
   detail: string
 }
 
+export interface CandidateKeyTestResult {
+  ok: boolean
+  tiers: Record<TierName, RouteTestResult>
+}
+
 /** Treat a failed policy/state read as cancellation at provider boundaries. */
 export async function safeShouldContinue(
   shouldContinue: () => Promise<boolean>,
@@ -200,22 +205,18 @@ function elapsed(startedAt: number): string {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
 }
 
-/** One real round-trip for one tier's route, using the provider's SAVED key pool and the
- *  given (possibly not-yet-saved) model. Reports success or a readable error, without
- *  saving — drives the options page's per-tier status chips. */
-export async function testRoute(
+async function testRouteWithKeys(
   tier: TierName,
   provider: ProviderId,
   model: string,
+  keys: readonly string[],
 ): Promise<RouteTestResult> {
-  const settings = await getJudgeSettings()
-  const keys = (settings.accounts[provider]?.keys ?? []).map((k) => k.value)
   if (keys.length === 0) return { ok: false, detail: "키 없음 — 먼저 키를 추가하세요" }
   const trimmed = model.trim()
   if (!trimmed) return { ok: false, detail: "모델명이 비어 있어요" }
-  const judge = buildJudgeProvider(provider, trimmed, keys)
   const startedAt = Date.now()
   try {
+    const judge = buildJudgeProvider(provider, trimmed, keys)
     if (tier === "tier1") {
       const r1 = await judge.classifyTier1(
         buildTier1Payload({ rawText: "테스트" }, { title: "예시 페이지", urlHost: "example.com" }, []),
@@ -236,6 +237,38 @@ export async function testRoute(
   } catch (error) {
     return { ok: false, detail: errorText(error) }
   }
+}
+
+/** One real round-trip for one tier's route, using the provider's SAVED key pool and the
+ *  given (possibly not-yet-saved) model. Reports success or a readable error, without
+ *  saving — drives the options page's per-tier status chips. */
+export async function testRoute(
+  tier: TierName,
+  provider: ProviderId,
+  model: string,
+): Promise<RouteTestResult> {
+  const settings = await getJudgeSettings()
+  const keys = (settings.accounts[provider]?.keys ?? []).map((k) => k.value)
+  return await testRouteWithKeys(tier, provider, model, keys)
+}
+
+/** Validate an unsaved candidate key against both tier models. The key is deliberately
+ *  passed as a one-item pool, so an existing saved key can never rotate in and create a
+ *  false success. Setup failures are returned inline only: no provider-health record is
+ *  written and the candidate key never touches storage here. */
+export async function testCandidateKey(
+  provider: ProviderId,
+  value: string,
+  models: Record<TierName, string>,
+): Promise<CandidateKeyTestResult> {
+  const key = value.trim()
+  if (!key) {
+    const missing = { ok: false, detail: "API 키를 입력해 주세요" }
+    return { ok: false, tiers: { tier1: missing, tier2: missing } }
+  }
+  const tier1 = await testRouteWithKeys("tier1", provider, models.tier1, [key])
+  const tier2 = await testRouteWithKeys("tier2", provider, models.tier2, [key])
+  return { ok: tier1.ok && tier2.ok, tiers: { tier1, tier2 } }
 }
 
 /** Expand the goal into cross-lingual search phrases via Tier 1 (retries the parse once,

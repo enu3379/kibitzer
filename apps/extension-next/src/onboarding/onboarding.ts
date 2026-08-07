@@ -8,6 +8,7 @@ import { sundialSVG } from "../lib/sundial.ts"
 import { bandOf } from "../lib/sessionStats.ts"
 import { PERSONAS, PERSONA_DEFAULT } from "../lib/personas.data.ts"
 import { DEFAULT_PERSONA_KEYS, fillTemplate } from "../lib/personas.ts"
+import { defaultRoute } from "../lib/providers.ts"
 
 interface WizardState {
   persona?: string
@@ -24,6 +25,12 @@ interface JudgeView {
 interface RouteTestResult {
   ok: boolean
   detail: string
+}
+
+interface CandidateKeyCommitResult {
+  ok: boolean
+  tiers: { tier1: RouteTestResult; tier2: RouteTestResult }
+  view: JudgeView | null
 }
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
@@ -63,9 +70,7 @@ for (let i = 0; i < 6; i++) {
 }
 
 function go(i: number): void {
-  const leaving = cur
   cur = Math.max(0, Math.min(steps.length - 1, i))
-  if (leaving === STEP_AI && cur !== STEP_AI) void saveEnteredKey() // pasted a key, hit 다음 — keep it
   steps.forEach((s, j) => (s.hidden = j !== cur))
   ;[...dots.children].forEach((d, j) =>
     j === cur ? d.setAttribute("aria-current", "step") : d.removeAttribute("aria-current"),
@@ -283,7 +288,6 @@ const aiStatusText = $("aiStatusText")
 const keyInput = $<HTMLInputElement>("key")
 const testKeys = $<HTMLButtonElement>("testKeys")
 const keysResult = $("keysResult")
-const addedKeys = new Set<string>() // key values already saved this session (no double-add)
 type AiTestState = "idle" | "testing" | "success" | "failure"
 let aiTestState: AiTestState = "idle"
 let judgeConfigured = false
@@ -321,19 +325,6 @@ async function refreshAiStatus(): Promise<void> {
   renderAiStatus()
 }
 
-// add-provider-key persists immediately (options-page semantics); rotation/extra
-// providers stay in the options UI. Returns false when there is nothing to save.
-async function saveEnteredKey(): Promise<boolean> {
-  const value = keyInput.value.trim()
-  if (!value) return false
-  if (!addedKeys.has(value)) {
-    await send({ type: "add-provider-key", provider: "ollama", name: "", value })
-    addedKeys.add(value)
-    await refreshAiStatus()
-  }
-  return true
-}
-
 testKeys.addEventListener("click", async () => {
   if (testKeys.disabled) return
   if (!keyInput.value.trim()) {
@@ -346,26 +337,23 @@ testKeys.addEventListener("click", async () => {
   aiStatus.setAttribute("aria-busy", "true")
   testKeys.disabled = true
   try {
-    await saveEnteredKey()
-    // Exercise the ACTUAL routes (provider+model per tier) the pipeline will use.
-    const judge = await send<JudgeView>({ type: "get-judge-settings" })
-    const tiers = [
-      { tier: "tier1", route: judge?.routes?.tier1 },
-      { tier: "tier2", route: judge?.routes?.tier2 },
-    ]
-    const [r1, r2] = await Promise.all(
-      tiers.map(({ tier, route }) =>
-        send<RouteTestResult>({
-          type: "test-route",
-          tier,
-          provider: route?.provider ?? "ollama",
-          model: route?.model ?? "",
-        }),
-      ),
-    )
-    if (r1?.ok && r2?.ok) {
+    const result = await send<CandidateKeyCommitResult>({
+      type: "test-and-add-provider-key",
+      provider: "ollama",
+      name: "",
+      value: keyInput.value,
+      models: {
+        tier1: defaultRoute("tier1", "ollama").model,
+        tier2: defaultRoute("tier2", "ollama").model,
+      },
+    })
+    const r1 = result?.tiers.tier1
+    const r2 = result?.tiers.tier2
+    if (result?.ok && result.view && r1?.ok && r2?.ok) {
       aiTestState = "success"
       showKeyTestResult(`Tier 1 · ${withoutTestVerdict(r1.detail)}\nTier 2 · ${r2.detail}`, "ok")
+      keyInput.value = ""
+      await refreshAiStatus()
     } else {
       aiTestState = "failure"
       const failures = [r1?.ok ? null : `Tier 1: ${r1?.detail ?? "응답 없음"}`, r2?.ok ? null : `Tier 2: ${r2?.detail ?? "응답 없음"}`]

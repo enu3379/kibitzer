@@ -18,7 +18,7 @@ const store: Record<string, unknown> = {}
   },
 }
 
-const { enrichGoal, safeShouldContinue, tier1Rescue, tier2Confirm } = await import("./tier12.ts")
+const { enrichGoal, safeShouldContinue, testCandidateKey, tier1Rescue, tier2Confirm } = await import("./tier12.ts")
 const { getProviderHealth } = await import("./providerHealth.ts")
 
 test("safeShouldContinue preserves a successful policy result", async () => {
@@ -33,6 +33,57 @@ test("safeShouldContinue treats a failed policy read as cancellation", async () 
     }),
     false,
   )
+})
+
+test("candidate-key validation forces the unsaved key through both tiers without storing it", async () => {
+  const candidate = "candidate-only-secret"
+  const authorizations: string[] = []
+  let call = 0
+  const realFetch = globalThis.fetch
+  ;(globalThis as { fetch: unknown }).fetch = async (_url: unknown, init?: { headers?: unknown }) => {
+    authorizations.push(String((init?.headers as Record<string, unknown> | undefined)?.authorization ?? ""))
+    call += 1
+    const content = call === 1
+      ? '{"verdict":"OK","reason":"on goal"}'
+      : '{"confirm_drift":false,"message":null}'
+    return new Response(JSON.stringify({ message: { content } }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })
+  }
+  try {
+    const result = await testCandidateKey("ollama", candidate, {
+      tier1: "candidate-tier1",
+      tier2: "candidate-tier2",
+    })
+    assert.equal(result.ok, true)
+    assert.equal(result.tiers.tier1.ok, true)
+    assert.equal(result.tiers.tier2.ok, true)
+    assert.deepEqual(authorizations, [`Bearer ${candidate}`, `Bearer ${candidate}`])
+    assert.ok(!JSON.stringify(store).includes(candidate), "the candidate must not reach persistent storage")
+    assert.deepEqual(await getProviderHealth(), { tier1: null, tier2: null })
+  } finally {
+    ;(globalThis as { fetch: unknown }).fetch = realFetch
+  }
+})
+
+test("a failed candidate-key validation does not save the key or stamp runtime health", async () => {
+  const candidate = "rejected-candidate-secret"
+  const realFetch = globalThis.fetch
+  ;(globalThis as { fetch: unknown }).fetch = async () => new Response("unauthorized", { status: 401 })
+  try {
+    const result = await testCandidateKey("ollama", candidate, {
+      tier1: "candidate-tier1",
+      tier2: "candidate-tier2",
+    })
+    assert.equal(result.ok, false)
+    assert.equal(result.tiers.tier1.ok, false)
+    assert.equal(result.tiers.tier2.ok, false)
+    assert.ok(!JSON.stringify(store).includes(candidate), "a rejected candidate must not reach storage")
+    assert.deepEqual(await getProviderHealth(), { tier1: null, tier2: null })
+  } finally {
+    ;(globalThis as { fetch: unknown }).fetch = realFetch
+  }
 })
 
 test("with no Tier-2 route the outcome is UNAVAILABLE, not a clean verdict", async () => {
