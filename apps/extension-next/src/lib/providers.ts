@@ -25,6 +25,8 @@ export type WireFormat = "ollama" | "openai" | "claude"
 export interface ProviderProfile {
   id: ProviderId
   label: string
+  /** Stable provider name used when automatically naming an API key. */
+  keyNamePrefix: string
   chatUrl: string
   format: WireFormat
   /** Options-UI key placeholder, e.g. "sk-or-v1-…". */
@@ -43,6 +45,7 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
   {
     id: "ollama",
     label: "Ollama Cloud",
+    keyNamePrefix: "Ollama",
     chatUrl: "https://ollama.com/api/chat",
     format: "ollama",
     keyHint: "ollama.com API 키",
@@ -58,6 +61,7 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
   {
     id: "gemini",
     label: "Gemini",
+    keyNamePrefix: "Gemini",
     chatUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
     format: "openai",
     keyHint: "AIza…",
@@ -70,6 +74,7 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
   {
     id: "openrouter",
     label: "OpenRouter",
+    keyNamePrefix: "OpenRouter",
     chatUrl: "https://openrouter.ai/api/v1/chat/completions",
     format: "openai",
     keyHint: "sk-or-v1-…",
@@ -92,6 +97,7 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
   {
     id: "deepseek",
     label: "DeepSeek",
+    keyNamePrefix: "DeepSeek",
     chatUrl: "https://api.deepseek.com/v1/chat/completions",
     format: "openai",
     keyHint: "sk-…",
@@ -102,6 +108,7 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
   {
     id: "claude",
     label: "Claude",
+    keyNamePrefix: "Claude",
     chatUrl: "https://api.anthropic.com/v1/messages",
     format: "claude",
     keyHint: "sk-ant-…",
@@ -112,6 +119,7 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
   {
     id: "openai",
     label: "OpenAI",
+    keyNamePrefix: "OpenAI",
     chatUrl: "https://api.openai.com/v1/chat/completions",
     format: "openai",
     keyHint: "sk-…",
@@ -124,6 +132,7 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
   {
     id: "kimi",
     label: "Kimi (Moonshot)",
+    keyNamePrefix: "Kimi",
     chatUrl: "https://api.moonshot.ai/v1/chat/completions",
     format: "openai",
     keyHint: "sk-…",
@@ -137,6 +146,18 @@ export function profileFor(id: ProviderId): ProviderProfile {
   const profile = PROVIDER_PROFILES.find((p) => p.id === id)
   if (!profile) throw new Error(`unknown provider: ${id}`)
   return profile
+}
+
+/** Default API-key label: provider plus local calendar date and that provider's key number. */
+export function defaultProviderKeyName(
+  provider: ProviderId,
+  existingKeyCount: number,
+  date: Date = new Date(),
+): string {
+  const yymmdd = [date.getFullYear() % 100, date.getMonth() + 1, date.getDate()]
+    .map((part) => String(part).padStart(2, "0"))
+    .join("")
+  return `${profileFor(provider).keyNamePrefix}-${yymmdd}-${existingKeyCount + 1}`
 }
 
 const PROVIDER_IDS = new Set<string>(PROVIDER_PROFILES.map((p) => p.id))
@@ -388,7 +409,7 @@ export function addProviderKey(
     const account = (settings.accounts[provider] ??= { keys: [] })
     account.keys.push({
       id: crypto.randomUUID(),
-      name: name.trim(),
+      name: name.trim() || defaultProviderKeyName(provider, account.keys.length),
       value: trimmed,
       addedAt: Date.now(),
     })

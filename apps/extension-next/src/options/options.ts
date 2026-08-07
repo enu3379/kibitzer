@@ -3,7 +3,12 @@
 // messages — key values travel INTO the worker only, responses carry masked keys.
 
 import { sampleLinesFor } from "../lib/personaSampleLines.ts"
-import { PROVIDER_PROFILES, type ProviderId, type TierName } from "../lib/providers.ts"
+import {
+  defaultProviderKeyName,
+  PROVIDER_PROFILES,
+  type ProviderId,
+  type TierName,
+} from "../lib/providers.ts"
 
 import {
   SENSITIVITY_PRESETS,
@@ -478,7 +483,9 @@ function buildKeyForm(provider: ProviderId, keyHint: string, existingKeyCount: n
   const name = document.createElement("input")
   name.type = "text"
   name.className = "f-name"
-  name.value = `키 ${existingKeyCount + 1}`
+  const defaultName = defaultProviderKeyName(provider, existingKeyCount)
+  name.placeholder = defaultName
+  name.value = defaultName
   const key = document.createElement("input")
   key.type = "password"
   key.className = "f-key"

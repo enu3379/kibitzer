@@ -23,6 +23,7 @@ const store: Record<string, unknown> = {}
 const {
   addProviderKey,
   connectProvider,
+  defaultProviderKeyName,
   disconnectProvider,
   getJudgeSettings,
   maskKeyValue,
@@ -34,6 +35,13 @@ const {
 function reset(): void {
   for (const key of Object.keys(store)) delete store[key]
 }
+
+test("default API key names use the provider, local date, and provider-specific sequence", () => {
+  const date = new Date(2026, 7, 1)
+  assert.equal(defaultProviderKeyName("ollama", 0, date), "Ollama-260801-1")
+  assert.equal(defaultProviderKeyName("claude", 2, date), "Claude-260801-3")
+  assert.equal(defaultProviderKeyName("openai", 1, date), "OpenAI-260801-2")
+})
 
 test("fresh install defaults to Ollama routes with the preset defaults", async () => {
   reset()
@@ -184,6 +192,13 @@ test("add/remove key round-trips; masked view never carries the value", async ()
 
   settings = await removeProviderKey("openrouter", key.id)
   assert.equal(settings.accounts.openrouter?.keys.length, 0)
+})
+
+test("a blank key name is saved as the provider/date/sequence default", async () => {
+  reset()
+  const settings = await addProviderKey("ollama", "   ", "key-a")
+  const name = settings.accounts.ollama?.keys[0]?.name
+  assert.match(name ?? "", /^Ollama-\d{6}-1$/)
 })
 
 test("blank key value is ignored", async () => {
