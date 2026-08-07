@@ -117,3 +117,11 @@ UX/analysis parity follow-ups remain tracked in
 as already implemented.
 See [docs/progress.md](docs/progress.md) for the detailed log and
 [docs/ts-migration-plan.md](docs/ts-migration-plan.md) for the migration plan.
+
+## License
+Copyright © 2026 Kibitzer. All rights reserved.
+
+This product includes the following third-party component:
+- dragonkue-KoEn-E5-Tiny/model_O4.onnx
+  Licensed under the Apache License 2.0.
+See [THIRD_PARTY_NOTICES.txt](docs/THIRD_PARTY_NOTICES.txt) for details.
