@@ -151,6 +151,8 @@
       .hidden { display: none !important; }
 
       /* AI 판정: 설정 카드 상단에 붙어 있는 상태 안내 */
+      .ai-title { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+      .ai-title .description { color: var(--page-ink-3); font-size: 11.5px; font-weight: 400; }
       .ai-alerts { position: sticky; top: 0; z-index: 3; margin: 2px -4px 8px; }
       .ai-alert { border-left: 3px solid var(--warn-line); border-radius: 0 9px 9px 0;
         padding: 9px 12px; font-size: 11.5px; background: var(--warn-soft); color: var(--warn-fg); }
@@ -421,7 +423,7 @@
       <!-- AI 판정 -->
       <section class="pane" id="pane-ai" role="tabpanel" aria-labelledby="tab-ai" data-pane="ai">
         <div class="card">
-          <h3>AI 판정</h3>
+          <h3 class="ai-title">AI 판정<span class="description">AI를 활용해 목표 이탈 여부를 더 정확하게 판정합니다.</span></h3>
           <div class="ai-alerts" id="ajAlerts" role="status" aria-live="polite"></div>
 
           <div class="psec">
