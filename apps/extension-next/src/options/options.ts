@@ -85,7 +85,7 @@ async function saveSettings(patch: Partial<Settings>): Promise<void> {
 
 const SENS_HINTS: Record<SensitivityLevel, string> = {
   lenient: "확실히 벗어났을 때만 이탈로 봅니다. 훈수가 줄어듭니다.",
-  standard: "권장 기본값 — 벤치마크로 맞춘 균형점입니다.",
+  standard: "권장 기본값 — 대부분의 상황에 적합합니다.",
   strict: "조금만 벗어나도 이탈로 봅니다. 훈수가 잦아질 수 있습니다.",
 }
 
