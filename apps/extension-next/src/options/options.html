@@ -140,12 +140,24 @@
       button.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
       button.btn.danger { color: var(--err); border-color: var(--err); }
       button.btn.danger:hover { background: var(--err-soft); }
+      button.btn:disabled { cursor: not-allowed; opacity: .45; }
+      button.btn:disabled:hover { border-color: var(--line); }
       button.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
       button.btn#ajSave { padding: 6.5px 12px; }
       .btnrow { display: flex; gap: 8px; padding: 12px 0; flex-wrap: wrap; }
       .hint { font-size: 11.5px; color: var(--page-ink-3); margin: 4px 0 12px; word-break: break-word; }
       .hint.ok { color: var(--ok-fg); } .hint.err { color: var(--err-fg); }
+      .hint.warn { color: var(--warn-fg); }
       .hidden { display: none !important; }
+
+      /* AI 판정: 설정 카드 상단에 붙어 있는 상태 안내 */
+      .ai-title { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+      .ai-title .description { color: var(--page-ink-3); font-size: 11.5px; font-weight: 400; }
+      .ai-alerts { position: sticky; top: 0; z-index: 3; margin: 2px -4px 8px; }
+      .ai-alert { border-left: 3px solid var(--warn-line); border-radius: 0 9px 9px 0;
+        padding: 9px 12px; font-size: 11.5px; background: var(--warn-soft); color: var(--warn-fg); }
+      .ai-alert.err { border-left-color: var(--err); background: var(--err-soft); color: var(--err-fg); }
+      .ai-alert + .ai-alert { margin-top: 5px; }
 
       /* AI 판정: 연결된 제공자 블록 */
       .psec { padding: 10px 0 12px; }
@@ -185,6 +197,8 @@
       .kform input.f-name { flex: 1 1 130px; }
       .kform input.f-key { flex: 2 1 190px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
       .kform .btn { padding: 6px 12px; }
+      .kform .ktest { flex: 1 0 100%; margin: 1px 0 0; font-size: 11.5px; color: var(--page-ink-3); }
+      .kform .ktest.err { color: var(--err-fg); }
       .krot { font-size: 11px; color: var(--page-ink-3); margin: 2px 0 0; }
       .connectbtn { all: unset; box-sizing: border-box; cursor: pointer; display: block; width: 100%; text-align: center;
         padding: 8px 0; border: 1.5px dashed var(--line); border-radius: 10px; font-size: 12.5px; font-weight: 650;
@@ -222,6 +236,30 @@
       .mctl input { flex: 1; min-width: 0; font-size: 12.5px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
       .mctl .backbtn { flex: none; padding: 6px 10px; font-size: 12px; }
 
+      /* Tier별 전송 데이터 도움말 — hover뿐 아니라 키보드 focus에서도 열린다. */
+      .info-tip { position: relative; display: inline-flex; flex: none; }
+      .info-trigger { all: unset; box-sizing: border-box; cursor: help; width: 17px; height: 17px;
+        border: 1px solid var(--line); border-radius: 50%; color: var(--page-ink-3); font-size: 11px;
+        font-weight: 750; line-height: 15px; text-align: center; }
+      .info-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .info-pop { position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%);
+        width: 290px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px;
+        background: var(--surface); color: var(--page-ink-2); box-shadow: 0 8px 24px rgba(0,0,0,.16);
+        font-size: 11.5px; line-height: 1.5; visibility: hidden; opacity: 0; pointer-events: none;
+        transition: opacity .14s ease; z-index: 6; }
+      .info-pop b { display: block; color: var(--page-ink); margin-bottom: 4px; }
+      .info-tip:hover .info-pop, .info-tip:focus-within .info-pop { visibility: visible; opacity: 1; }
+
+      .ai-actions { align-items: center; }
+      .ai-actions .action-spacer { flex: 1 1 auto; }
+      .ai-enable { min-height: 32px; }
+      .ai-enable.on { background: var(--accent-soft); color: var(--ok-fg); border-color: var(--accent); }
+      .privacy-link { border-top: 1px solid var(--line-soft); padding: 11px 0; font-size: 11.5px;
+        color: var(--page-ink-2); }
+      .privacy-link button { all: unset; cursor: pointer; color: var(--accent); font-weight: 650;
+        text-decoration: underline; text-underline-offset: 2px; border-radius: 4px; }
+      .privacy-link button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
       /* AI 판정: 사용량 */
       .usec { border-top: 1px solid var(--line-soft); padding: 10px 0 4px; }
       .uhead { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
@@ -240,13 +278,6 @@
       .utable td:first-child .sub { display: block; font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", sans-serif;
         color: var(--page-ink-3); font-size: 10.5px; }
       .uempty { font-size: 11.5px; color: var(--page-ink-3); padding: 6px 0; }
-
-      details.privacy { border-top: 1px solid var(--line-soft); margin-top: 2px; }
-      details.privacy summary { cursor: pointer; font-size: 12px; font-weight: 650; color: var(--page-ink-2);
-        padding: 10px 0; list-style-position: inside; }
-      details.privacy summary:hover { color: var(--accent); }
-      details.privacy summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-      details.privacy p { margin: 0 0 10px; }
 
       /* page footer — centered, pinned to the bottom of the viewport on short panes */
       .sitefoot { flex: none; border-top: 1px solid var(--line-soft); padding: 22px 24px 26px;
@@ -275,13 +306,18 @@
   <body>
     <div class="frame">
       <div class="head">
+        <!-- Geometry traced off icons/icon-128.png so the mark reads as the same character:
+             a solid semicircular head of radius R peeking over the monitor, eyes r 0.231R at
+             (cx ± 0.365R, cy − 0.317R), hands 0.423R wide at cx ± 0.788R. Here R = 8.66,
+             which is 0.433 × the monitor's width, as in the icon. The eyes take --page rather
+             than a fixed white so they stay cut-outs when --page-ink flips in dark mode. -->
         <svg width="30" height="25" viewBox="0 0 26 22" fill="none" aria-hidden="true">
-          <circle cx="9.5" cy="7" r="1.7" fill="var(--page-ink)" />
-          <circle cx="16.5" cy="7" r="1.7" fill="var(--page-ink)" />
-          <path d="M6 10 C6 5.2 9 3 13 3 C17 3 20 5.2 20 10" stroke="var(--page-ink)" stroke-width="1.8" fill="none" />
+          <path d="M4.34 10 A8.66 8.66 0 0 1 21.66 10 Z" fill="var(--page-ink)" />
+          <circle cx="9.84" cy="7.25" r="2" fill="var(--page)" />
+          <circle cx="16.16" cy="7.25" r="2" fill="var(--page)" />
           <rect x="3" y="10" width="20" height="9" rx="2.4" fill="var(--accent)" />
-          <rect x="7.6" y="9" width="2.6" height="2.4" rx="1.2" fill="var(--page-ink)" />
-          <rect x="15.8" y="9" width="2.6" height="2.4" rx="1.2" fill="var(--page-ink)" />
+          <rect x="4.32" y="8.6" width="3.66" height="3.5" rx="1.75" fill="var(--page-ink)" />
+          <rect x="18.02" y="8.6" width="3.66" height="3.5" rx="1.75" fill="var(--page-ink)" />
         </svg>
         <span class="name">Kibitzer 설정</span>
       </div>
@@ -382,7 +418,8 @@
       <!-- AI 판정 -->
       <section class="pane" id="pane-ai" role="tabpanel" aria-labelledby="tab-ai" data-pane="ai">
         <div class="card">
-          <h3>AI 판정</h3>
+          <h3 class="ai-title">AI 판정<span class="description">AI를 활용해 목표 이탈 여부를 더 정확하게 판정합니다.</span></h3>
+          <div class="ai-alerts" id="ajAlerts" role="status" aria-live="polite"></div>
 
           <div class="psec">
             <span class="seclabel">연결된 AI 서비스</span>
@@ -392,10 +429,9 @@
 
           <div class="msec">
             <span class="seclabel">모델 지정</span>
-            <div id="ajRouteWarn" role="status"></div>
             <div class="mrow">
               <span class="mlab">
-                <span class="mtitle"><b>Tier 1 · 빠른 판정</b><button class="stchip" data-tier="tier1" type="button">– 테스트</button></span>
+                <span class="mtitle"><b>Tier 1 · 빠른 판정</b><span class="info-tip"><button class="info-trigger" type="button" aria-describedby="tier1DataTip" aria-label="Tier 1 전송 데이터 안내">i</button><span class="info-pop" id="tier1DataTip" role="tooltip"><b>어떤 데이터가 전송되나요?</b>빠른 목표 이탈 판정을 위해 목표, 현재 페이지의 제목·호스트, 최근 최대 20개 페이지의 제목·판정이 전송됩니다. 페이지 본문은 전송하지 않습니다.</span></span><button class="stchip" data-tier="tier1" type="button">– 테스트</button></span>
                 <small>한눈판 듯하면 훑어보는 저비용 모델</small>
               </span>
               <span class="mctl" data-tier="tier1">
@@ -407,7 +443,7 @@
             </div>
             <div class="mrow">
               <span class="mlab">
-                <span class="mtitle"><b>Tier 2 · 정밀 판정</b><button class="stchip" data-tier="tier2" type="button">– 테스트</button></span>
+                <span class="mtitle"><b>Tier 2 · 정밀 판정</b><span class="info-tip"><button class="info-trigger" type="button" aria-describedby="tier2DataTip" aria-label="Tier 2 전송 데이터 안내">i</button><span class="info-pop" id="tier2DataTip" role="tooltip"><b>어떤 데이터가 전송되나요?</b>더 정확한 목표 이탈 판정과 훈수 메시지 생성을 위해 목표, 현재 페이지의 제목·호스트·본문 최대 3,000자, 최근 최대 20개 페이지의 제목·판정이 전송됩니다. 세션 요약에는 체류시간 상위 최대 5개 페이지 정보가 사용됩니다.</span></span><button class="stchip" data-tier="tier2" type="button">– 테스트</button></span>
                 <small>내용을 정독하고 훈수를 쓰는 모델</small>
               </span>
               <span class="mctl" data-tier="tier2">
@@ -422,10 +458,17 @@
             </p>
           </div>
 
-          <div class="btnrow" style="padding-top: 0">
+          <div class="btnrow ai-actions" style="padding-top: 0">
             <button class="btn primary" id="ajSave">저장</button>
+            <span class="action-spacer" aria-hidden="true"></span>
+            <button class="btn ai-enable" id="ajEnabled" type="button" aria-pressed="false">AI 판정 꺼짐</button>
           </div>
           <div class="hint" id="ajResult"></div>
+
+          <div class="privacy-link">
+            특정 페이지 정보가 AI 서비스로 전송되는 것이 불안하거나 싫다면
+            <button type="button" id="openSiteSettings">감시 제외 사이트로 설정하세요</button>.
+          </div>
 
           <div class="usec">
             <div class="uhead">
@@ -443,14 +486,6 @@
             <p class="hint" style="margin-bottom: 4px">표시된 사용량은 AI 제공사의 집계 기준이며 실제와 다를 수 있습니다. 사용 내역은 수집되지 않습니다.</p>
           </div>
 
-          <details class="privacy">
-            <summary>어떤 데이터가 전송되나요?</summary>
-            <p class="hint">
-              목표, 현재 제목·호스트, 최대 3,000자의 현재 페이지 요약, 최근 페이지 제목·판정,
-              시간·훈수 횟수 맥락이 연결된 AI 제공자로 전송될 수 있습니다.
-              원본 URL, 저장된 벡터, 전체 이벤트 로그는 전송하지 않습니다.
-            </p>
-          </details>
         </div>
       </section>
 

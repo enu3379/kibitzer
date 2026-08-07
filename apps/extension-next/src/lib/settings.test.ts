@@ -57,6 +57,7 @@ test("sensitivity presets are strictly ordered and the default is standard", () 
   assert.equal(DEFAULT_SETTINGS.tauOk, SENSITIVITY_PRESETS.standard)
   assert.equal(DEFAULT_SETTINGS.observeLocalPdfs, false, "local PDFs must be explicit opt-in")
   assert.equal(DEFAULT_SETTINGS.localPdfPolicyRevision, 0)
+  assert.equal(DEFAULT_SETTINGS.aiJudgmentEnabled, true)
 })
 
 test("sessionAutoContinue defaults ON — including for legacy records that predate the field", async () => {
@@ -72,6 +73,16 @@ test("sessionAutoContinue defaults ON — including for legacy records that pred
   assert.equal((await getSettings()).sessionAutoContinue, false)
   await setSettings({ tauOk: SENSITIVITY_PRESETS.strict })
   assert.equal((await getSettings()).sessionAutoContinue, false)
+  delete store["kibitzer:settings:v1"]
+})
+
+test("AI judgment defaults ON but preserves an explicit opt-out", async () => {
+  store["kibitzer:settings:v1"] = { tauOk: 0.59 }
+  assert.equal((await getSettings()).aiJudgmentEnabled, true)
+  await setSettings({ aiJudgmentEnabled: false })
+  assert.equal((await getSettings()).aiJudgmentEnabled, false)
+  await setSettings({ tauOk: SENSITIVITY_PRESETS.strict })
+  assert.equal((await getSettings()).aiJudgmentEnabled, false)
   delete store["kibitzer:settings:v1"]
 })
 

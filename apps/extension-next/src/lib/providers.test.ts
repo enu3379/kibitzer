@@ -194,6 +194,32 @@ test("add/remove key round-trips; masked view never carries the value", async ()
   assert.equal(settings.accounts.openrouter?.keys.length, 0)
 })
 
+test("concurrent removals cannot empty an actively routed provider key pool", async () => {
+  reset()
+  let settings = await addProviderKey("ollama", "first", "key-a")
+  settings = await addProviderKey("ollama", "second", "key-b")
+  const ids = settings.accounts.ollama?.keys.map((key) => key.id) ?? []
+  assert.equal(ids.length, 2)
+
+  await Promise.all(ids.map((id) => removeProviderKey("ollama", id, true)))
+
+  settings = await getJudgeSettings()
+  assert.equal(settings.accounts.ollama?.keys.length, 1)
+})
+
+test("protected route saves reject a provider without a key", async () => {
+  reset()
+  await addProviderKey("ollama", "", "key-a")
+  await connectProvider("openai")
+
+  const settings = await setRoutes({
+    tier2: { provider: "openai", model: "gpt-5.4-mini" },
+  }, true)
+
+  assert.equal(settings.routes.tier2.provider, "ollama")
+  assert.equal(settings.routesManuallyConfigured, false)
+})
+
 test("a blank key name is saved as the provider/date/sequence default", async () => {
   reset()
   const settings = await addProviderKey("ollama", "   ", "key-a")
@@ -217,6 +243,15 @@ test("disconnect drops the account and reroutes affected tiers to the Ollama def
   settings = await disconnectProvider("claude")
   assert.equal(settings.accounts.claude, undefined)
   assert.deepEqual(settings.routes.tier2, { provider: "ollama", model: "minimax-m3" })
+})
+
+test("a routed provider cannot be disconnected while protection is enabled", async () => {
+  reset()
+  await addProviderKey("claude", "", "sk-ant-xyz")
+  const settings = await disconnectProvider("claude", true)
+  assert.ok(settings.accounts.claude)
+  assert.equal(settings.routes.tier1.provider, "claude")
+  assert.equal(settings.routes.tier2.provider, "claude")
 })
 
 test("ollama cannot be disconnected", async () => {

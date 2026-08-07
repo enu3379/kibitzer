@@ -21,7 +21,7 @@ import { embedText, embedTexts, judgeTier0 } from "./lib/tier0.ts"
 import { addExemplar, admissionEligible, admitAnchor, loadRefs, setDerived } from "./lib/relevance.ts"
 import { filterDerivedPhrases, MAX_PHRASES } from "./lib/goalEnrichment.ts"
 import { currentState, dispatch, enterNeutral, flushOutbox, PROVIDER_ALERT_ID, resetState, setActivePage, testNag } from "./lib/gaugeRuntime.ts"
-import { enrichGoal, judgeEnabled, testRoute, tier1Rescue } from "./lib/tier12.ts"
+import { enrichGoal, judgeEnabled, testCandidateKey, testRoute, tier1Rescue } from "./lib/tier12.ts"
 import {
   addProviderKey,
   connectProvider,
@@ -313,8 +313,11 @@ async function judgeAndDispatch(pending: PendingDwell): Promise<void> {
   // B2: the dwell + embed + Tier-1 rescue took time; the user may have navigated away or
   // changed the goal. Applying this verdict now would drive the gauge / active page for a
   // page they left. Drop it — the page they're on now gets its own dwell + judge.
-  if (!(await currentJudgingTab(pageKey, kind, localPdfPolicyRevision, epoch))) {
-    klog(`judge dropped (page/goal moved on) ${pageKey}`)
+  if (
+    (enabled && !(await judgeEnabled())) ||
+    !(await currentJudgingTab(pageKey, kind, localPdfPolicyRevision, epoch))
+  ) {
+    klog(`judge dropped (page/goal/AI policy moved on) ${pageKey}`)
     // This page was never actually judged (lastObservedKey was set optimistically at entry).
     // Clear the debounce marker so returning to it later re-judges, instead of observe()
     // silently debouncing it as "already judged" — which would leave it never re-judged.
@@ -355,7 +358,7 @@ async function enrichGoalDerived(goal: SessionGoal): Promise<void> {
     if (phrases.length === 0) return
     const derived = await filterDerivedPhrases(phrases, goal.text, MAX_PHRASES, embedTexts)
     const current = await getGoal()
-    if (!current || current.epoch !== goal.epoch) return // goal changed meanwhile
+    if (!current || current.epoch !== goal.epoch || !(await judgeEnabled())) return
     await setDerived(derived.map((d) => d.vector))
     klog(`goal enriched: ${derived.length} phrases [${derived.map((d) => d.phrase).join(" · ")}]`)
     logEvent("enrich", { count: derived.length, phrases: derived.map((d) => d.phrase) })
@@ -678,6 +681,7 @@ interface PopupMessage {
   value?: string
   keyId?: string
   routes?: Partial<Record<TierName, Partial<TierRoute>>>
+  models?: Partial<Record<TierName, string>>
   days?: number
   // user domain lists (options 사이트 pane)
   lists?: { block?: string[]; allow?: string[] }
@@ -689,11 +693,17 @@ async function applySettingsPatch(
 ): Promise<Settings> {
   const before = await getSettings()
   const next = await setSettings(patch)
+  const aiModeChanged = before.aiJudgmentEnabled !== next.aiJudgmentEnabled
+  const localPdfChanged = before.localPdfPolicyRevision !== next.localPdfPolicyRevision
+  if (aiModeChanged) {
+    // The mode edge invalidates old provider failures.
+    await clearProviderHealth(["tier1", "tier2"])
+  }
   // Compare the revision, not the boolean: it is minted inside setSettings' write queue and
   // bumped once per edge, so an OFF→ON pair that lands between these two reads still counts.
-  if (before.localPdfPolicyRevision !== next.localPdfPolicyRevision) {
-    // A setting change supersedes both a checkpointed and an already-running PDF judge.
-    // Re-observe the current tab so OFF holds it neutral and ON begins a fresh full dwell.
+  if (aiModeChanged || localPdfChanged) {
+    // Either policy edge supersedes the pending page judge. A fresh observation adopts
+    // local-only/AI mode and, for PDFs, OFF holds neutral while ON begins a full dwell.
     await dwell.cancel()
     lastObservedKey = null
     if (reobserveActiveTab && await getGoal()) void observeActiveTab()
@@ -933,7 +943,24 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
   }
   if (message?.type === "disconnect-provider" && message.provider) {
     const provider = message.provider
-    return toPublicSettings(await mutateProviderSettings(provider, () => disconnectProvider(provider)))
+    const protectRoutedProvider = (await getSettings()).aiJudgmentEnabled
+    return toPublicSettings(await mutateProviderSettings(
+      provider,
+      () => disconnectProvider(provider, protectRoutedProvider),
+    ))
+  }
+  if (message?.type === "test-and-add-provider-key" && message.provider) {
+    const provider = message.provider
+    const tested = await testCandidateKey(provider, message.value ?? "", {
+      tier1: message.models?.tier1 ?? "",
+      tier2: message.models?.tier2 ?? "",
+    })
+    if (!tested.ok) return { ...tested, view: null }
+    const view = await mutateProviderSettings(
+      provider,
+      () => addProviderKey(provider, message.name ?? "", message.value ?? ""),
+    )
+    return { ...tested, view: toPublicSettings(view) }
   }
   if (message?.type === "add-provider-key" && message.provider) {
     const provider = message.provider
@@ -944,11 +971,16 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
   if (message?.type === "remove-provider-key" && message.provider && message.keyId) {
     const provider = message.provider
     const keyId = message.keyId
-    return toPublicSettings(await mutateProviderSettings(provider, () => removeProviderKey(provider, keyId)))
+    const protectRoutedLastKey = (await getSettings()).aiJudgmentEnabled
+    return toPublicSettings(await mutateProviderSettings(
+      provider,
+      () => removeProviderKey(provider, keyId, protectRoutedLastKey),
+    ))
   }
   if (message?.type === "set-routes") {
     const routes = message.routes ?? {}
-    return toPublicSettings(await mutateProviderSettings(null, () => setRoutes(routes)))
+    const requireComplete = (await getSettings()).aiJudgmentEnabled
+    return toPublicSettings(await mutateProviderSettings(null, () => setRoutes(routes, requireComplete)))
   }
   if (message?.type === "test-route" && message.tier && message.provider) {
     return await testRoute(message.tier, message.provider, message.model ?? "")

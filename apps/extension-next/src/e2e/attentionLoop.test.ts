@@ -622,16 +622,27 @@ test("E2E: an unreachable judge still nudges — a configured-but-dead Tier 2 mu
     if (keyId) await send({ type: "remove-provider-key", provider: "ollama", keyId })
     assert.equal(
       (await send({ type: "get-state" })).judgeEnabled,
+      true,
+      "an enabled AI route must reject removal of its only API key",
+    )
+    // Product policy forbids removing the only key used by an enabled AI route. Cleanup follows
+    // the same supported path as a user: switch to local-only mode, remove the key, then restore
+    // the preference so the next scenario starts from the normal default.
+    await send({ type: "set-settings", settings: { aiJudgmentEnabled: false } })
+    if (keyId) await send({ type: "remove-provider-key", provider: "ollama", keyId })
+    await send({ type: "set-settings", settings: { aiJudgmentEnabled: true } })
+    assert.equal(
+      (await send({ type: "get-state" })).judgeEnabled,
       false,
       "the route must be gone again, or every later scenario silently runs non-degraded",
     )
   }
 })
 
-test("E2E: Tier 1 keyed, Tier 2 routed to a keyless provider — issue #207's silent-mute config still nudges", async () => {
+test("E2E: a half-configured AI setup is disabled and falls back to local judging", async () => {
   // The exact configuration issue #207 (확인 1) reported as silently muting Kibitzer forever:
-  // routes are saved per tier and setRoutes never validates key presence, so tier1 can point at
-  // a provider WITH keys while tier2 points at one WITHOUT. judgeEnabled() is then true (tier1
+  // old/migrated routes can leave tier1 pointing at a provider WITH keys while tier2 points at
+  // one WITHOUT. Earlier judgeEnabled() then returned true (because tier1
   // is live), so the gauge is NOT degraded and asks Tier 2 to confirm at S=0 — but that route
   // resolves to no provider at all. Before #204/#208 the resulting silence came back as a bare
   // "ok" verdict: the gauge refunded S and no nudge ever fired, with no error surfaced anywhere.
@@ -644,13 +655,16 @@ test("E2E: Tier 1 keyed, Tier 2 routed to a keyless provider — issue #207's si
   notifications.length = 0
   activeTab = { id: 41, url: "https://video.test/watch?v=panda", title: "귀여운 판다 영상 몰아보기", active: true, windowId: 1 }
   await send({ type: "clear-log" }) // shared klog: an earlier scenario's final=DRIFT would satisfy the probe below
-  // Keys for ollama only; tier2 deliberately routed to a provider that has NO keys. This is a
-  // savable configuration — the settings API accepts it exactly as the options UI would.
+  // Recreate a stale/migrated half configuration while AI is OFF; the options UI and the
+  // background save boundary both reject creating it while AI is ON.
+  await send({ type: "set-settings", settings: { aiJudgmentEnabled: false } })
+  // Keys for ollama only; tier2 deliberately routed to a provider that has NO keys.
   const keyed = await send({ type: "add-provider-key", provider: "ollama", name: "local", value: "test-key" })
   // Every ollama key present now, not just the one just added: `makeTier` returns a live provider
   // whenever the ROUTED provider has any key at all, so one stray key keeps the judge enabled.
   const ollamaKeyIds = ((keyed.accounts as Record<string, Array<{ id: string }>>)?.ollama ?? []).map((a) => a.id)
   await send({ type: "set-routes", routes: { tier1: { provider: "ollama", model: "llama3" }, tier2: { provider: "openai", model: "gpt-5.6-luna" } } })
+  await send({ type: "set-settings", settings: { aiJudgmentEnabled: true } })
   // Tier 1 IS reachable in this configuration, but a live rescue could answer OK and stop the
   // drain. Failing the call keeps the DRIFT verdict (fail-closed) — all this test needs from
   // Tier 1. Tier 2 is unaffected: its route resolves to no provider before any call is made.
@@ -660,13 +674,12 @@ test("E2E: Tier 1 keyed, Tier 2 routed to a keyless provider — issue #207's si
   // actually surface here.
   store.delete("kibitzer:provider-alert-ts")
   try {
-    // Without this the scenario is vacuous: were the keyless tier2 route to disable the judge
-    // outright, degraded mode's S=0 gate would nudge directly, for reasons that have nothing to
-    // do with what is tested. The mute only ever existed because judgeEnabled stays true.
+    // A missing tier disables the whole AI mode. This is now the product policy: half-configured
+    // routes are not a supported runtime mode and must never enter a Tier-2 confirmation path.
     assert.equal(
       (await send({ type: "get-state" })).judgeEnabled,
-      true,
-      "tier1 alone keeps the judge enabled — the gauge must take the confirm-first path, not degraded mode",
+      false,
+      "both tiers are required before AI judging becomes active",
     )
     await send({ type: "set-goal", goal: "선형대수 고유값 문제 풀이", minutes: null })
     let judged = false
@@ -699,11 +712,7 @@ test("E2E: Tier 1 keyed, Tier 2 routed to a keyless provider — issue #207's si
         `the nudge still arrives when Tier 2 is routed to a keyless provider (S=${(await send({ type: "get-state" })).s})`,
       )
       const log = (await send({ type: "get-log" })).text as string
-      assert.match(
-        log,
-        /tier2 unavailable/,
-        `no judgment was obtained — must not read as an "ok" verdict. log tail:\n${log.slice(-1800)}`,
-      )
+      assert.match(log, /mode=degraded/, "the half configuration uses the local fallback path")
       // What distinguishes this from the dead-judge scenario: nothing was ever ASKED, so this
       // is deliberate Tier-0 mode, not an error — providerError stays unset and the
       // provider-problem OS alert must not fire.
@@ -721,12 +730,14 @@ test("E2E: Tier 1 keyed, Tier 2 routed to a keyless provider — issue #207's si
     // Health clearing is tier-scoped now: disconnecting openai touches only tier2's route,
     // so the tier1 error record (the failed rescue above) must survive that change (#205).
     const afterDisconnect = (await send({ type: "get-state" })).health as Record<string, { ok: boolean } | null>
-    assert.equal(afterDisconnect.tier1?.ok, false, "a tier2-only settings change leaves tier1's record intact")
+    assert.equal(afterDisconnect.tier1, null, "the disabled half setup never called Tier 1")
     // That default is ollama again, so tier1 AND tier2 both route there and any surviving ollama
     // key leaves the judge enabled for every later scenario. `disconnect-provider` cannot retract
     // it — ollama is the default provider and disconnecting it is a deliberate no-op
     // (providers.ts) — so the keys have to go by id.
+    await send({ type: "set-settings", settings: { aiJudgmentEnabled: false } })
     for (const keyId of ollamaKeyIds) await send({ type: "remove-provider-key", provider: "ollama", keyId })
+    await send({ type: "set-settings", settings: { aiJudgmentEnabled: true } })
     assert.equal(
       (await send({ type: "get-state" })).judgeEnabled,
       false,

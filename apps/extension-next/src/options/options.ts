@@ -11,6 +11,16 @@ import {
 } from "../lib/providers.ts"
 
 import {
+  DISABLED_COPY,
+  INCOMPLETE_COPY,
+  canToggleAiPreference,
+  effectiveAiEnabled,
+  incompleteTiers,
+  isAiConfigComplete,
+  providerIsRouted,
+} from "./aiTabState.ts"
+
+import {
   SENSITIVITY_PRESETS,
   sensitivityLevelFor,
   type SensitivityLevel,
@@ -20,6 +30,15 @@ import {
 interface StateResponse {
   persona?: string
   personas?: Array<{ key: string; name: string; tier?: "default" | "lab" }>
+  health?: ProviderHealthSnapshot
+}
+interface TierHealth {
+  ok: boolean
+  message: string
+}
+interface ProviderHealthSnapshot {
+  tier1: TierHealth | null
+  tier2: TierHealth | null
 }
 interface PublicKeyInfo {
   id: string
@@ -38,6 +57,11 @@ interface JudgeView {
 interface RouteTestResult {
   ok: boolean
   detail: string
+}
+interface CandidateKeyTestResult {
+  ok: boolean
+  tiers: Record<TierName, RouteTestResult>
+  view: JudgeView | null
 }
 interface UsageRow {
   provider: ProviderId
@@ -72,9 +96,10 @@ const pquoteTag = $<HTMLElement>("pquoteTag")
 const pquoteTxt = $<HTMLElement>("pquoteTxt")
 const ajProviders = $<HTMLElement>("ajProviders")
 const ajConnect = $<HTMLElement>("ajConnect")
-const ajRouteWarn = $<HTMLElement>("ajRouteWarn")
+const ajAlerts = $<HTMLElement>("ajAlerts")
 const ajUsage = $<HTMLElement>("ajUsage")
 const ajSave = $<HTMLButtonElement>("ajSave")
+const ajEnabled = $<HTMLButtonElement>("ajEnabled")
 const ajResult = $<HTMLElement>("ajResult")
 const exportLog = $<HTMLButtonElement>("exportLog")
 const exportEvents = $<HTMLButtonElement>("exportEvents")
@@ -105,6 +130,7 @@ function renderSensitivity(level: SensitivityLevel): void {
 
 async function init(): Promise<void> {
   const settings = (await send({ type: "get-settings" })) as Settings
+  aiPreference = settings.aiJudgmentEnabled
   renderSensitivity(sensitivityLevelFor(settings.tauOk))
   setChecked(quietSw, settings.quietHours.enabled)
   quietStart.value = settings.quietHours.start
@@ -115,10 +141,12 @@ async function init(): Promise<void> {
   renderDomainLists((await send({ type: "get-domain-lists" })) as DomainLists)
 
   const state = (await send({ type: "get-state" })) as StateResponse
+  runtimeHealth = state.health ?? { tier1: null, tier2: null }
   if (state?.personas) {
     renderPersonas(state.personas, state.persona)
   }
-  applyJudge((await send({ type: "get-judge-settings" })) as JudgeView)
+  const judgeView = (await send({ type: "get-judge-settings" })) as JudgeView
+  applyJudge(judgeView)
   await loadUsage()
 }
 
@@ -322,12 +350,22 @@ const draft: Record<TierName, RouteDraft> = {
   tier2: { provider: "ollama", model: "", custom: false },
 }
 const chips: Record<TierName, ChipState> = { tier1: staleChip(), tier2: staleChip() }
+const routeTestTokens: Record<TierName, number> = { tier1: 0, tier2: 0 }
+let aiPreference = true
+let runtimeHealth: ProviderHealthSnapshot = { tier1: null, tier2: null }
 let addOpenFor: ProviderId | null = null
 let connectOpen = false
 let usageDays = 1
+let configActionError: string | null = null
 
 function staleChip(): ChipState {
   return { kind: "unknown", chip: "– 테스트", text: "이 라우팅으로 실제 호출을 확인합니다" }
+}
+
+function routeTestFingerprint(tier: TierName): string {
+  const route = draft[tier]
+  const keyIds = (judge?.accounts[route.provider] ?? []).map((key) => key.id)
+  return JSON.stringify([route.provider, route.model, keyIds])
 }
 
 function profileOf(id: ProviderId): (typeof PROVIDER_PROFILES)[number] {
@@ -371,6 +409,7 @@ function fmtDate(ts: number): string {
 /** Saved routes arrived (init/save/disconnect) — rebuild the drafts from them. */
 function applyJudge(view: JudgeView): void {
   judge = view
+  configActionError = null
   for (const tier of TIERS) {
     const route = view.routes[tier]
     draft[tier] = {
@@ -403,6 +442,7 @@ function applyAccounts(view: JudgeView): void {
     }
   }
   judge = view
+  configActionError = null
   for (const tier of TIERS) chips[tier] = staleChip()
   renderJudge()
 }
@@ -415,6 +455,7 @@ function renderJudge(): void {
 
 function renderProviderBlocks(): void {
   if (!judge) return
+  const savedRoutes = judge.routes
   ajProviders.textContent = ""
   for (const profile of PROVIDER_PROFILES) {
     const keyList = judge.accounts[profile.id]
@@ -428,9 +469,16 @@ function renderProviderBlocks(): void {
     if (profile.id !== "ollama") {
       head.appendChild(
         button("punlink", "연결 해제", () => {
+          const usedByDraftOrSaved =
+            providerIsRouted(profile.id, draft) || providerIsRouted(profile.id, savedRoutes)
+          if (aiPreference && usedByDraftOrSaved) {
+            configActionError = `${profile.label} 연결은 현재 AI 판정에 사용 중이에요. 먼저 AI 판정을 비활성화해 주세요.`
+            renderAiControls()
+            return
+          }
           if (!confirm(`${profile.label} 연결을 해제할까요? 등록된 키도 함께 삭제됩니다.`)) return
-          void send({ type: "disconnect-provider", provider: profile.id }).then((view) =>
-            applyJudge(view as JudgeView),
+          void send({ type: "disconnect-provider", provider: profile.id }).then((raw) =>
+            applyJudge(raw as JudgeView),
           )
         }),
       )
@@ -449,6 +497,15 @@ function renderProviderBlocks(): void {
       row.appendChild(meta)
       row.appendChild(el("span", "kdate", fmtDate(key.addedAt)))
       const del = button("kdel", "✕", () => {
+        const usedByDraftOrSaved =
+          providerIsRouted(profile.id, draft) || providerIsRouted(profile.id, savedRoutes)
+        const isLastRoutedKey = keyList.length === 1 && usedByDraftOrSaved
+        if (aiPreference && isLastRoutedKey) {
+          configActionError = `${profile.label}의 마지막 API 키는 AI 판정이 켜진 동안 삭제할 수 없어요. 먼저 AI 판정을 비활성화해 주세요.`
+          renderAiControls()
+          return
+        }
+        if (!confirm(`${key.name || `키 ${index + 1}`}을 삭제할까요?`)) return
         void send({ type: "remove-provider-key", provider: profile.id, keyId: key.id }).then(
           (view) => applyAccounts(view as JudgeView),
         )
@@ -491,30 +548,77 @@ function buildKeyForm(provider: ProviderId, keyHint: string, existingKeyCount: n
   key.className = "f-key"
   key.placeholder = keyHint
   key.autocomplete = "off"
-  const commit = (): void => {
+  const status = el("p", "ktest")
+  const add = button("btn primary", "추가", () => void commit())
+  const cancel = button("btn", "취소", () => {
+    addOpenFor = null
+    renderJudge()
+  })
+  let testing = false
+  const modelsForCandidate = (): Record<TierName, string> => ({
+    tier1: draft.tier1.provider === provider
+      ? draft.tier1.model
+      : presetsFor(provider, "tier1")[0],
+    tier2: draft.tier2.provider === provider
+      ? draft.tier2.model
+      : presetsFor(provider, "tier2")[0],
+  })
+  const commit = async (): Promise<void> => {
+    if (testing) return
     if (!key.value.trim()) {
       key.focus()
       return
     }
-    void send({ type: "add-provider-key", provider, name: name.value, value: key.value }).then(
-      (view) => {
-        addOpenFor = null
-        applyAccounts(view as JudgeView)
-      },
-    )
+    testing = true
+    add.disabled = cancel.disabled = name.disabled = key.disabled = true
+    add.textContent = "Tier 1·2 확인 중…"
+    status.className = "ktest"
+    status.textContent = "새 키만 사용해 두 모델을 확인하고 있어요. 첫 호출은 느릴 수 있습니다."
+    const models = modelsForCandidate()
+    try {
+      const tested = (await send({
+        type: "test-and-add-provider-key",
+        provider,
+        name: name.value,
+        value: key.value,
+        models,
+      })) as CandidateKeyTestResult
+      if (!tested.ok) {
+        const failures = TIERS
+          .filter((tier) => !tested.tiers[tier].ok)
+          .map((tier) => `${TIER_LABEL[tier]} — ${tested.tiers[tier].detail}`)
+        status.className = "ktest err"
+        status.textContent = `${failures.join(" / ")} · 키와 모델을 다시 확인해 주세요.`
+        return
+      }
+      const view = tested.view
+      if (!view) throw new Error("validated key was not saved")
+      addOpenFor = null
+      applyAccounts(view)
+      for (const tier of TIERS) {
+        if (draft[tier].provider !== provider || draft[tier].model !== models[tier]) continue
+        chips[tier] = {
+          kind: "ok",
+          chip: "✓ 방금 전",
+          text: `정상 — ${tested.tiers[tier].detail}`,
+        }
+        renderChip(tier)
+      }
+      renderAiControls()
+    } catch {
+      status.className = "ktest err"
+      status.textContent = "테스트 요청에 실패했습니다. 잠시 후 다시 시도해 주세요."
+    } finally {
+      testing = false
+      add.disabled = cancel.disabled = name.disabled = key.disabled = false
+      add.textContent = "추가"
+      if (addOpenFor === provider) key.focus()
+    }
   }
   key.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") commit()
+    if (e.key === "Enter") void commit()
   })
-  form.append(
-    name,
-    key,
-    button("btn primary", "추가", commit),
-    button("btn", "취소", () => {
-      addOpenFor = null
-      renderJudge()
-    }),
-  )
+  form.append(name, key, add, cancel, status)
   queueMicrotask(() => name.focus())
   return form
 }
@@ -582,6 +686,7 @@ function renderRoutes(): void {
     }
     prov.value = d.provider
     prov.onchange = () => {
+      configActionError = null
       d.provider = prov.value as ProviderId
       d.custom = false
       d.model = presetsFor(d.provider, tier)[0]
@@ -609,25 +714,31 @@ function renderRoutes(): void {
     else model.value = presets.includes(d.model) ? d.model : presets[0]
 
     model.onchange = () => {
+      configActionError = null
       if (model.value === "__custom") {
         d.custom = true
         d.model = ""
+        chips[tier] = staleChip()
         renderRoutes()
         input.focus()
       } else {
         d.model = model.value
         chips[tier] = staleChip()
         renderChip(tier)
+        renderAiControls()
       }
     }
     input.oninput = () => {
+      configActionError = null
       d.model = input.value.trim()
       if (chips[tier].kind !== "unknown") {
         chips[tier] = staleChip()
         renderChip(tier)
       }
+      renderAiControls()
     }
     back.onclick = () => {
+      configActionError = null
       d.custom = false
       d.model = presetsFor(d.provider, tier)[0]
       chips[tier] = staleChip()
@@ -636,34 +747,58 @@ function renderRoutes(): void {
 
     renderChip(tier)
   }
-  renderRouteWarnings()
+  renderAiControls()
 }
 
-const TIER_KEYLESS_IMPACT: Record<TierName, string> = {
-  tier1: "멀쩡한 페이지도 가끔 딴길로 볼 수 있어요.",
-  tier2: "내용을 읽지 않고 준비된 문구로 훈수해요.",
+function appendAiAlert(text: string, error: boolean): void {
+  ajAlerts.appendChild(el("div", `ai-alert${error ? " err" : ""}`, text))
 }
 
-/** 라우트가 키 없는 제공자를 가리키면 모델 지정 섹션 상단에 안내 배너를 띄운다.
- *  저장된 키 목록과 화면의 드래프트 제공자만 보고 판정 — 런타임 상태·헬스와 무관.
- *  오류가 아니라 설정이 반쪽이라는 안내: 이 상태로도 훈수는 정상 동작한다. */
-function renderRouteWarnings(): void {
+function renderAiControls(): void {
   if (!judge) return
-  ajRouteWarn.textContent = ""
-  const banner = el("div", "route-banner")
-  for (const tier of TIERS) {
-    const provider = draft[tier].provider
-    if ((judge.accounts[provider] ?? []).length > 0) continue
-    const line = el("span", "ln")
-    line.appendChild(el("b", undefined, TIER_LABEL[tier]))
-    line.appendChild(
-      document.createTextNode(
-        ` — ${profileOf(provider).label}에 등록된 키가 없어 이 단계를 건너뜁니다. ${TIER_KEYLESS_IMPACT[tier]}`,
-      ),
-    )
-    banner.appendChild(line)
+  const complete = isAiConfigComplete(draft, judge.accounts)
+  const active = effectiveAiEnabled(aiPreference, draft, judge.accounts)
+  const routeTestFailed = TIERS.some((tier) => chips[tier].kind === "err")
+  const ready = complete && !routeTestFailed
+  ajSave.disabled = !ready
+  ajSave.title = !complete
+    ? "Tier 1과 Tier 2의 모델·키를 모두 설정해야 저장할 수 있어요."
+    : routeTestFailed
+      ? "오류가 난 Tier를 수정하거나 다시 테스트해 정상 응답을 확인해 주세요."
+      : ""
+  // An incomplete setup cannot be activated, but a still-ON preference must always
+  // retain an escape hatch to explicit local-only mode.
+  ajEnabled.disabled = !canToggleAiPreference(aiPreference, complete, routeTestFailed)
+  ajEnabled.setAttribute("aria-pressed", String(active))
+  ajEnabled.classList.toggle("on", active)
+  ajEnabled.textContent = active
+    ? "AI 판정 켜짐"
+    : aiPreference
+      ? "AI 판정 비활성화"
+      : "AI 판정 꺼짐"
+
+  ajAlerts.textContent = ""
+  if (!complete) {
+    appendAiAlert(INCOMPLETE_COPY, true)
+    const missing = incompleteTiers(draft, judge.accounts).map((tier) => TIER_LABEL[tier]).join(" · ")
+    appendAiAlert(`${missing}의 모델과 API 키를 확인해 주세요.`, true)
   }
-  if (banner.childElementCount > 0) ajRouteWarn.appendChild(banner)
+  if (!aiPreference) {
+    appendAiAlert(DISABLED_COPY, false)
+  }
+
+  if (configActionError) appendAiAlert(configActionError, true)
+
+  for (const tier of TIERS) {
+    if (chips[tier].kind === "err") {
+      appendAiAlert(`${TIER_LABEL[tier]} 테스트 오류 — ${chips[tier].text}`, true)
+      continue
+    }
+    const health = runtimeHealth[tier]
+    if (aiPreference && health && !health.ok) {
+      appendAiAlert(`${TIER_LABEL[tier]} 실행 오류 — ${health.message}`, true)
+    }
+  }
 }
 
 function renderChip(tier: TierName): void {
@@ -679,16 +814,25 @@ function renderChip(tier: TierName): void {
 async function runRouteTest(tier: TierName): Promise<void> {
   if (chips[tier].kind === "testing") return
   const d = draft[tier]
+  const token = ++routeTestTokens[tier]
+  const fingerprint = routeTestFingerprint(tier)
   chips[tier] = { kind: "testing", chip: "… 확인 중", text: "확인 중 — 첫 호출은 느릴 수 있어요" }
   renderChip(tier)
-  const result = (await send({
-    type: "test-route",
-    tier,
-    provider: d.provider,
-    model: d.model,
-  })) as RouteTestResult | undefined
+  let result: RouteTestResult | undefined
+  try {
+    result = (await send({
+      type: "test-route",
+      tier,
+      provider: d.provider,
+      model: d.model,
+    })) as RouteTestResult | undefined
+  } catch {
+    result = { ok: false, detail: "테스트 요청에 실패했습니다. 잠시 후 다시 시도해 주세요." }
+  }
+  if (token !== routeTestTokens[tier] || fingerprint !== routeTestFingerprint(tier)) return
   if (result?.ok) {
     chips[tier] = { kind: "ok", chip: "✓ 방금 전", text: `정상 — ${result.detail}` }
+    runtimeHealth[tier] = null
     if (ajResult.classList.contains("err")) {
       ajResult.className = "hint"
       ajResult.textContent = ""
@@ -701,6 +845,7 @@ async function runRouteTest(tier: TierName): Promise<void> {
     ajResult.textContent = `${TIER_LABEL[tier]} · ${profileOf(d.provider).label} — ${detail}`
   }
   renderChip(tier)
+  renderAiControls()
 }
 
 for (const chipEl of document.querySelectorAll<HTMLButtonElement>(".stchip")) {
@@ -708,6 +853,11 @@ for (const chipEl of document.querySelectorAll<HTMLButtonElement>(".stchip")) {
 }
 
 ajSave.addEventListener("click", async () => {
+  if (
+    !judge ||
+    !isAiConfigComplete(draft, judge.accounts) ||
+    TIERS.some((tier) => chips[tier].kind === "err")
+  ) return
   const view = (await send({
     type: "set-routes",
     routes: {
@@ -719,6 +869,50 @@ ajSave.addEventListener("click", async () => {
   const r = view.routes
   ajResult.className = "hint ok"
   ajResult.textContent = `저장됨 ✓ — Tier 1: ${profileOf(r.tier1.provider).label} · ${r.tier1.model} / Tier 2: ${profileOf(r.tier2.provider).label} · ${r.tier2.model}`
+})
+
+ajEnabled.addEventListener("click", async () => {
+  if (!judge) return
+  const complete = isAiConfigComplete(draft, judge.accounts)
+  const routeTestFailed = TIERS.some((tier) => chips[tier].kind === "err")
+  if (!aiPreference && (!complete || routeTestFailed)) return
+  if (
+    aiPreference &&
+    !confirm("AI 판정을 끌까요?\n판정 품질이 낮아지고 훈수 메시지가 단순해져요.")
+  ) return
+  const nextPreference = !aiPreference
+  ajEnabled.disabled = true
+  configActionError = null
+  try {
+    let savedView: JudgeView | null = null
+    if (nextPreference) {
+      savedView = (await send({
+        type: "set-routes",
+        routes: {
+          tier1: { provider: draft.tier1.provider, model: draft.tier1.model },
+          tier2: { provider: draft.tier2.provider, model: draft.tier2.model },
+        },
+      })) as JudgeView
+      const accepted = TIERS.every((tier) =>
+        savedView?.routes[tier].provider === draft[tier].provider &&
+        savedView?.routes[tier].model === draft[tier].model
+      )
+      if (!accepted) throw new Error("route save rejected")
+    }
+    await saveSettings({ aiJudgmentEnabled: nextPreference })
+    aiPreference = nextPreference
+    if (!aiPreference) runtimeHealth = { tier1: null, tier2: null }
+    if (savedView) applyJudge(savedView)
+    else renderAiControls()
+  } catch {
+    configActionError = "AI 판정 설정을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요."
+    renderAiControls()
+  }
+})
+
+$<HTMLButtonElement>("openSiteSettings").addEventListener("click", () => {
+  selectTab("sites", true)
+  blockList.focus()
 })
 
 async function loadUsage(): Promise<void> {

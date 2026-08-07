@@ -135,7 +135,10 @@
       .rank.bad .bar i { background: #c94f4f; }
       .rank .vv { color: #888; font-variant-numeric: tabular-nums; white-space: nowrap; }
       .hl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-      .hlc { padding: 9px 10px; border-radius: 9px; border: 1px solid #8883; }
+      /* min-width:0 — without it the grid track takes its size from .hn's nowrap
+         min-content width, so a long MVP page title pushes the 빌런 card out of
+         the card's right edge instead of ellipsizing. */
+      .hlc { min-width: 0; padding: 9px 10px; border-radius: 9px; border: 1px solid #8883; }
       .hlc.mvp { border-color: color-mix(in srgb, #2b9e57 35%, transparent); background: color-mix(in srgb, #2b9e57 7%, transparent); }
       .hlc.vil { border-color: color-mix(in srgb, #c94f4f 32%, transparent); background: color-mix(in srgb, #c94f4f 7%, transparent); }
       .hlc .hk { font-size: 10.5px; font-weight: 700; margin-bottom: 3px; }

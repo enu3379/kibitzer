@@ -51,6 +51,8 @@ export interface OllamaChatJudgeOptions {
   timeoutMs?: number
   maxOutputTokens?: number
   writerMaxOutputTokens?: number
+  /** Connection probes disable model reasoning so setup does not wait on a full thought trace. */
+  judgeThink?: boolean
   fetch?: typeof fetch
   onUsage?: (tokensIn: number, tokensOut: number) => void
 }
@@ -64,6 +66,7 @@ export class OllamaChatJudgeProvider implements JudgeProvider {
   private readonly timeoutMs: number
   private readonly maxOutputTokens: number
   private readonly writerMaxOutputTokens: number
+  private readonly judgeThink?: boolean
   private readonly fetchFn: typeof fetch
   private readonly onUsage?: (tokensIn: number, tokensOut: number) => void
   private rotation = 0
@@ -79,6 +82,7 @@ export class OllamaChatJudgeProvider implements JudgeProvider {
     this.timeoutMs = options.timeoutMs ?? 120_000
     this.maxOutputTokens = options.maxOutputTokens ?? 512
     this.writerMaxOutputTokens = options.writerMaxOutputTokens ?? 1024
+    this.judgeThink = options.judgeThink
     // Bind to the global scope: this.fetchFn(...) would otherwise call fetch with
     // `this` = the provider, which throws "Illegal invocation" in a service worker.
     this.fetchFn = options.fetch ?? globalThis.fetch.bind(globalThis)
@@ -86,10 +90,13 @@ export class OllamaChatJudgeProvider implements JudgeProvider {
   }
 
   async classifyTier1(payload: Record<string, unknown>): Promise<Tier1Result> {
-    const response = await this.postChat([
-      { role: "system", content: TIER1_OLLAMA_SYSTEM_PROMPT },
-      { role: "user", content: JSON.stringify(payload) },
-    ])
+    const response = await this.postChat(
+      [
+        { role: "system", content: TIER1_OLLAMA_SYSTEM_PROMPT },
+        { role: "user", content: JSON.stringify(payload) },
+      ],
+      { think: this.judgeThink },
+    )
     return withResponseDebug(response, "ollama tier1 judge", () => (
       parseJudgeResponse(response, this.maxOutputTokens, parseTier1Json)
     ))
@@ -118,10 +125,13 @@ export class OllamaChatJudgeProvider implements JudgeProvider {
     payload: Record<string, unknown>,
     systemPrompt = TIER2_LEGACY_SYSTEM_PROMPT,
   ): Promise<Tier2Result> {
-    const response = await this.postChat([
-      { role: "system", content: systemPrompt },
-      { role: "user", content: JSON.stringify(payload) },
-    ])
+    const response = await this.postChat(
+      [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: JSON.stringify(payload) },
+      ],
+      { think: this.judgeThink },
+    )
     return withResponseDebug(response, "ollama tier2 judge", () => (
       parseJudgeResponse(response, this.maxOutputTokens, parseTier2Json)
     ))
@@ -139,6 +149,7 @@ export class OllamaChatJudgeProvider implements JudgeProvider {
       {
         numPredict: this.maxOutputTokens,
         jsonMode: true,
+        think: this.judgeThink,
       },
     )
     return withResponseDebug(response, "ollama tier2 judge", () => (

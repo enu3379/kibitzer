@@ -17,6 +17,9 @@ export interface Settings {
   // Browser fully quit + relaunched within RESTORE_GAP_MS → the in-flight session continues
   // seamlessly (경우 ①). OFF: any restart parks the session as resumable (경우 ②).
   sessionAutoContinue: boolean
+  // AI is the recommended/default judging path, but users can explicitly opt out.
+  // Runtime activation still requires BOTH tier routes to resolve to keyed providers.
+  aiJudgmentEnabled: boolean
 }
 
 export type SensitivityLevel = "lenient" | "standard" | "strict"
@@ -57,6 +60,7 @@ export const DEFAULT_SETTINGS: Settings = {
   observeLocalPdfs: false,
   localPdfPolicyRevision: 0,
   sessionAutoContinue: true,
+  aiJudgmentEnabled: true,
 }
 
 function coerce(value: Partial<Settings> | undefined): Settings {
@@ -80,6 +84,12 @@ function coerce(value: Partial<Settings> | undefined): Settings {
       typeof value?.sessionAutoContinue === "boolean"
         ? value.sessionAutoContinue
         : DEFAULT_SETTINGS.sessionAutoContinue,
+    // Default-on for existing installs. A missing/half provider configuration still
+    // makes the effective runtime state OFF; this is only the user's preference.
+    aiJudgmentEnabled:
+      typeof value?.aiJudgmentEnabled === "boolean"
+        ? value.aiJudgmentEnabled
+        : DEFAULT_SETTINGS.aiJudgmentEnabled,
   }
 }
 

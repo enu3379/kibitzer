@@ -746,6 +746,23 @@ creation AND only on the page that caused it" (user-decided — supersedes the 5
 drain TTL for nags, which that work should absorb), and whether celebrate gets an
 age cap at all.
 
+### D19 — AI judgment is a complete two-tier mode with explicit opt-out → DECIDED (2026-08-07)
+
+AI-assisted judging is the recommended/default product mode, but it is activated only
+when **both** Tier 1 and Tier 2 resolve to a model plus a keyed provider. A half-configured
+route is not a supported runtime mode: the options page blocks route saving and activation
+until both tiers are complete, and the runtime falls back to local Tier-0 judging if a key
+is later removed. This replaces the earlier direction of accepting half configurations and
+softening their consequences (#207/#219).
+
+Users may explicitly turn AI judgment off without deleting their keys or routes. OFF gates
+all runtime LLM work — goal enrichment, Tier-1 rescue, Tier-2 confirmation/message writing,
+and session recap — and the UI warns that judgment quality drops and prepared nudge copy replaces
+generated messages. A user-initiated candidate-key connection test is the sole setup-time
+exception and contacts both selected tier models before saving the key. Provider/test failures remain errors while AI is enabled. The store
+listing leads with AI usage while disclosing the opt-out and its quality tradeoff; no numeric
+quality-loss claim is made until the full Tier-0-only vs two-tier pipeline is benchmarked.
+
 ### D14 — Serverless cutover scope and preservation → RESOLVED (2026-07-24)
 
 The active product becomes the single TypeScript MV3 runtime in

@@ -39,6 +39,7 @@ import {
 import { detectSpecial, type SessionStats } from "./sessionStats.ts"
 import type { SummaryDice } from "./summaryDice.ts"
 import { classifyProviderError, recordProviderError, recordProviderOk } from "./providerHealth.ts"
+import { getSettings } from "./settings.ts"
 
 /** History-derived context for the Tier-2 writer (built by gaugeRuntime from the nag /
  *  visit logs). `nagCount` is the 1-based ordinal of the nag about to be produced.
@@ -59,28 +60,49 @@ export interface Tier2Context {
 // These Cloud models reason before answering; a small budget exhausts before the
 // JSON verdict (output_exhausted). Match the server's Judge budget.
 const JUDGE_BUDGETS = { timeoutMs: 60_000, maxOutputTokens: 4096, writerMaxOutputTokens: 2048 } as const
+const CONNECTION_PROBE_TIMEOUT_MS = 30_000
+const OLLAMA_CONNECTION_PROBE_BUDGETS = {
+  timeoutMs: CONNECTION_PROBE_TIMEOUT_MS,
+  maxOutputTokens: 256,
+  writerMaxOutputTokens: 256,
+} as const
 
 function buildJudgeProvider(
   provider: ProviderId,
   model: string,
   keys: readonly string[],
+  probe = false,
 ): JudgeProvider {
   const profile = profileFor(provider)
+  // Ollama's native API can explicitly disable reasoning, so its setup probe can use a
+  // genuinely small output budget. Other providers keep the normal judge budget: for some
+  // reasoning models the compatibility API counts hidden thought tokens against the output
+  // cap, and 256 would reject a valid model before it emits the JSON verdict.
+  const budgets = probe
+    ? profile.format === "ollama"
+      ? OLLAMA_CONNECTION_PROBE_BUDGETS
+      : { ...JUDGE_BUDGETS, timeoutMs: CONNECTION_PROBE_TIMEOUT_MS }
+    : JUDGE_BUDGETS
   const onUsage = (tokensIn: number, tokensOut: number): void => {
     void recordUsage(provider, model, tokensIn, tokensOut)
   }
   if (profile.format === "ollama") {
     return new OllamaChatJudgeProvider({
-      apiUrl: profile.chatUrl, model, apiKeys: keys, ...JUDGE_BUDGETS, onUsage,
+      apiUrl: profile.chatUrl,
+      model,
+      apiKeys: keys,
+      ...budgets,
+      ...(probe ? { judgeThink: false } : {}),
+      onUsage,
     })
   }
   if (profile.format === "claude") {
     return new ClaudeChatJudgeProvider({
-      chatUrl: profile.chatUrl, model, apiKeys: keys, ...JUDGE_BUDGETS, onUsage,
+      chatUrl: profile.chatUrl, model, apiKeys: keys, ...budgets, onUsage,
     })
   }
   return new OpenAIChatJudgeProvider({
-    chatUrl: profile.chatUrl, model, apiKeys: keys, ...JUDGE_BUDGETS, ...(profile.wire ?? {}), onUsage,
+    chatUrl: profile.chatUrl, model, apiKeys: keys, ...budgets, ...(profile.wire ?? {}), onUsage,
   })
 }
 
@@ -102,20 +124,24 @@ function makeTier(settings: JudgeSettings, tier: TierName): JudgeProvider | null
 /** Per-tier judge providers for the saved routes. Settings changes are picked up on the
  *  next call via the fingerprint — no explicit cache invalidation needed. */
 async function providers(): Promise<TierProviders> {
-  const settings = await getJudgeSettings()
-  const fp = JSON.stringify(settings)
+  const [settings, appSettings] = await Promise.all([getJudgeSettings(), getSettings()])
+  const fp = JSON.stringify([settings, appSettings.aiJudgmentEnabled])
   if (fingerprint !== fp) {
-    cache = { tier1: makeTier(settings, "tier1"), tier2: makeTier(settings, "tier2") }
+    const tier1 = makeTier(settings, "tier1")
+    const tier2 = makeTier(settings, "tier2")
+    // AI judging is one complete product mode: explicit OFF, or either missing tier,
+    // disables every LLM call (rescue, confirm, message writing, enrichment, recap).
+    // Route tests bypass this helper so users can repair an incomplete setup.
+    cache = appSettings.aiJudgmentEnabled && tier1 && tier2 ? { tier1, tier2 } : { tier1: null, tier2: null }
     fingerprint = fp
   }
   return cache
 }
 
-/** True when at least one tier can reach an LLM (drives the popup's on/off line and
- *  the pipeline's degraded-mode logging). */
+/** True only for an explicitly enabled, complete two-tier AI setup. */
 export async function judgeEnabled(): Promise<boolean> {
   const p = await providers()
-  return p.tier1 !== null || p.tier2 !== null
+  return p.tier1 !== null && p.tier2 !== null
 }
 
 export interface Tier1RescueResult {
@@ -170,6 +196,11 @@ export interface RouteTestResult {
   detail: string
 }
 
+export interface CandidateKeyTestResult {
+  ok: boolean
+  tiers: Record<TierName, RouteTestResult>
+}
+
 /** Treat a failed policy/state read as cancellation at provider boundaries. */
 export async function safeShouldContinue(
   shouldContinue: () => Promise<boolean>,
@@ -195,29 +226,25 @@ function elapsed(startedAt: number): string {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
 }
 
-/** One real round-trip for one tier's route, using the provider's SAVED key pool and the
- *  given (possibly not-yet-saved) model. Reports success or a readable error, without
- *  saving — drives the options page's per-tier status chips. */
-export async function testRoute(
+async function testRouteWithKeys(
   tier: TierName,
   provider: ProviderId,
   model: string,
+  keys: readonly string[],
 ): Promise<RouteTestResult> {
-  const settings = await getJudgeSettings()
-  const keys = (settings.accounts[provider]?.keys ?? []).map((k) => k.value)
   if (keys.length === 0) return { ok: false, detail: "키 없음 — 먼저 키를 추가하세요" }
   const trimmed = model.trim()
   if (!trimmed) return { ok: false, detail: "모델명이 비어 있어요" }
-  const judge = buildJudgeProvider(provider, trimmed, keys)
   const startedAt = Date.now()
   try {
+    const judge = buildJudgeProvider(provider, trimmed, keys, true)
     if (tier === "tier1") {
       const r1 = await judge.classifyTier1(
         buildTier1Payload({ rawText: "테스트" }, { title: "예시 페이지", urlHost: "example.com" }, []),
       )
       return { ok: true, detail: `${trimmed} ✓ (${r1.verdict}) · ${elapsed(startedAt)}` }
     }
-    await judge.confirmTier2(
+    await judge.decideTier2(
       buildTier2ReviewPayload(
         { rawText: "테스트" },
         { title: "예시 페이지", urlHost: "example.com", verdict: "DRIFT", tierReached: 0, tier0Score: 0.3 },
@@ -231,6 +258,40 @@ export async function testRoute(
   } catch (error) {
     return { ok: false, detail: errorText(error) }
   }
+}
+
+/** One real round-trip for one tier's route, using the provider's SAVED key pool and the
+ *  given (possibly not-yet-saved) model. Reports success or a readable error, without
+ *  saving — drives the options page's per-tier status chips. */
+export async function testRoute(
+  tier: TierName,
+  provider: ProviderId,
+  model: string,
+): Promise<RouteTestResult> {
+  const settings = await getJudgeSettings()
+  const keys = (settings.accounts[provider]?.keys ?? []).map((k) => k.value)
+  return await testRouteWithKeys(tier, provider, model, keys)
+}
+
+/** Validate an unsaved candidate key against both tier models. The key is deliberately
+ *  passed as a one-item pool, so an existing saved key can never rotate in and create a
+ *  false success. Setup failures are returned inline only: no provider-health record is
+ *  written and the candidate key never touches storage here. */
+export async function testCandidateKey(
+  provider: ProviderId,
+  value: string,
+  models: Record<TierName, string>,
+): Promise<CandidateKeyTestResult> {
+  const key = value.trim()
+  if (!key) {
+    const missing = { ok: false, detail: "API 키를 입력해 주세요" }
+    return { ok: false, tiers: { tier1: missing, tier2: missing } }
+  }
+  const [tier1, tier2] = await Promise.all([
+    testRouteWithKeys("tier1", provider, models.tier1, [key]),
+    testRouteWithKeys("tier2", provider, models.tier2, [key]),
+  ])
+  return { ok: tier1.ok && tier2.ok, tiers: { tier1, tier2 } }
 }
 
 /** Expand the goal into cross-lingual search phrases via Tier 1 (retries the parse once,
@@ -385,6 +446,7 @@ export async function writeSessionSummary(
     const message = await p.tier2.writeTier2Message(payload, composeSummaryPrompt(persona), {
       temperature: SUMMARY_TEMPERATURE,
     })
+    if (!(await judgeEnabled())) return null
     void recordProviderOk("tier2")
     return clampSentences(message, dice.bonus ? SUMMARY_MAX_SENTENCES + 1 : SUMMARY_MAX_SENTENCES)
   } catch (error) {
