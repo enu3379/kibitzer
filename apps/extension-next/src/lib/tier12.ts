@@ -39,6 +39,7 @@ import {
 import { detectSpecial, type SessionStats } from "./sessionStats.ts"
 import type { SummaryDice } from "./summaryDice.ts"
 import { classifyProviderError, recordProviderError, recordProviderOk } from "./providerHealth.ts"
+import { getSettings } from "./settings.ts"
 
 /** History-derived context for the Tier-2 writer (built by gaugeRuntime from the nag /
  *  visit logs). `nagCount` is the 1-based ordinal of the nag about to be produced.
@@ -102,20 +103,24 @@ function makeTier(settings: JudgeSettings, tier: TierName): JudgeProvider | null
 /** Per-tier judge providers for the saved routes. Settings changes are picked up on the
  *  next call via the fingerprint — no explicit cache invalidation needed. */
 async function providers(): Promise<TierProviders> {
-  const settings = await getJudgeSettings()
-  const fp = JSON.stringify(settings)
+  const [settings, appSettings] = await Promise.all([getJudgeSettings(), getSettings()])
+  const fp = JSON.stringify([settings, appSettings.aiJudgmentEnabled])
   if (fingerprint !== fp) {
-    cache = { tier1: makeTier(settings, "tier1"), tier2: makeTier(settings, "tier2") }
+    const tier1 = makeTier(settings, "tier1")
+    const tier2 = makeTier(settings, "tier2")
+    // AI judging is one complete product mode: explicit OFF, or either missing tier,
+    // disables every LLM call (rescue, confirm, message writing, enrichment, recap).
+    // Route tests bypass this helper so users can repair an incomplete setup.
+    cache = appSettings.aiJudgmentEnabled && tier1 && tier2 ? { tier1, tier2 } : { tier1: null, tier2: null }
     fingerprint = fp
   }
   return cache
 }
 
-/** True when at least one tier can reach an LLM (drives the popup's on/off line and
- *  the pipeline's degraded-mode logging). */
+/** True only for an explicitly enabled, complete two-tier AI setup. */
 export async function judgeEnabled(): Promise<boolean> {
   const p = await providers()
-  return p.tier1 !== null || p.tier2 !== null
+  return p.tier1 !== null && p.tier2 !== null
 }
 
 export interface Tier1RescueResult {

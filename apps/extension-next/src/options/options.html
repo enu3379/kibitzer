@@ -140,12 +140,22 @@
       button.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
       button.btn.danger { color: var(--err); border-color: var(--err); }
       button.btn.danger:hover { background: var(--err-soft); }
+      button.btn:disabled { cursor: not-allowed; opacity: .45; }
+      button.btn:disabled:hover { border-color: var(--line); }
       button.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
       button.btn#ajSave { padding: 6.5px 12px; }
       .btnrow { display: flex; gap: 8px; padding: 12px 0; flex-wrap: wrap; }
       .hint { font-size: 11.5px; color: var(--page-ink-3); margin: 4px 0 12px; word-break: break-word; }
       .hint.ok { color: var(--ok-fg); } .hint.err { color: var(--err-fg); }
+      .hint.warn { color: var(--warn-fg); }
       .hidden { display: none !important; }
+
+      /* AI 판정: 설정 카드 상단에 붙어 있는 상태 안내 */
+      .ai-alerts { position: sticky; top: 0; z-index: 3; margin: 2px -4px 8px; }
+      .ai-alert { border-left: 3px solid var(--warn-line); border-radius: 0 9px 9px 0;
+        padding: 9px 12px; font-size: 11.5px; background: var(--warn-soft); color: var(--warn-fg); }
+      .ai-alert.err { border-left-color: var(--err); background: var(--err-soft); color: var(--err-fg); }
+      .ai-alert + .ai-alert { margin-top: 5px; }
 
       /* AI 판정: 연결된 제공자 블록 */
       .psec { padding: 10px 0 12px; }
@@ -221,6 +231,29 @@
       .mctl select.model { flex: 1; min-width: 0; font-size: 12.5px; }
       .mctl input { flex: 1; min-width: 0; font-size: 12.5px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
       .mctl .backbtn { flex: none; padding: 6px 10px; font-size: 12px; }
+
+      /* Tier별 전송 데이터 도움말 — hover뿐 아니라 키보드 focus에서도 열린다. */
+      .info-tip { position: relative; display: inline-flex; flex: none; }
+      .info-trigger { all: unset; box-sizing: border-box; cursor: help; width: 17px; height: 17px;
+        border: 1px solid var(--line); border-radius: 50%; color: var(--page-ink-3); font-size: 11px;
+        font-weight: 750; line-height: 15px; text-align: center; }
+      .info-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .info-pop { position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%);
+        width: 290px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px;
+        background: var(--surface); color: var(--page-ink-2); box-shadow: 0 8px 24px rgba(0,0,0,.16);
+        font-size: 11.5px; line-height: 1.5; visibility: hidden; opacity: 0; pointer-events: none;
+        transition: opacity .14s ease; z-index: 6; }
+      .info-pop b { display: block; color: var(--page-ink); margin-bottom: 4px; }
+      .info-tip:hover .info-pop, .info-tip:focus-within .info-pop { visibility: visible; opacity: 1; }
+
+      .ai-actions { align-items: center; }
+      .ai-enable { margin-left: auto; min-height: 32px; }
+      .ai-enable.on { background: var(--accent-soft); color: var(--ok-fg); border-color: var(--accent); }
+      .privacy-link { border-top: 1px solid var(--line-soft); padding: 11px 0; font-size: 11.5px;
+        color: var(--page-ink-2); }
+      .privacy-link button { all: unset; cursor: pointer; color: var(--accent); font-weight: 650;
+        text-decoration: underline; text-underline-offset: 2px; border-radius: 4px; }
+      .privacy-link button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
       /* AI 판정: 사용량 */
       .usec { border-top: 1px solid var(--line-soft); padding: 10px 0 4px; }
@@ -383,6 +416,7 @@
       <section class="pane" id="pane-ai" role="tabpanel" aria-labelledby="tab-ai" data-pane="ai">
         <div class="card">
           <h3>AI 판정</h3>
+          <div class="ai-alerts" id="ajAlerts" role="status" aria-live="polite"></div>
 
           <div class="psec">
             <span class="seclabel">연결된 AI 서비스</span>
@@ -392,10 +426,9 @@
 
           <div class="msec">
             <span class="seclabel">모델 지정</span>
-            <div id="ajRouteWarn" role="status"></div>
             <div class="mrow">
               <span class="mlab">
-                <span class="mtitle"><b>Tier 1 · 빠른 판정</b><button class="stchip" data-tier="tier1" type="button">– 테스트</button></span>
+                <span class="mtitle"><b>Tier 1 · 빠른 판정</b><span class="info-tip"><button class="info-trigger" type="button" aria-describedby="tier1DataTip" aria-label="Tier 1 전송 데이터 안내">i</button><span class="info-pop" id="tier1DataTip" role="tooltip"><b>어떤 데이터가 전송되나요?</b>빠른 목표 이탈 판정을 위해 목표, 현재 페이지의 제목·호스트, 최근 최대 20개 페이지의 제목·판정이 전송됩니다. 페이지 본문은 전송하지 않습니다.</span></span><button class="stchip" data-tier="tier1" type="button">– 테스트</button></span>
                 <small>한눈판 듯하면 훑어보는 저비용 모델</small>
               </span>
               <span class="mctl" data-tier="tier1">
@@ -407,7 +440,7 @@
             </div>
             <div class="mrow">
               <span class="mlab">
-                <span class="mtitle"><b>Tier 2 · 정밀 판정</b><button class="stchip" data-tier="tier2" type="button">– 테스트</button></span>
+                <span class="mtitle"><b>Tier 2 · 정밀 판정</b><span class="info-tip"><button class="info-trigger" type="button" aria-describedby="tier2DataTip" aria-label="Tier 2 전송 데이터 안내">i</button><span class="info-pop" id="tier2DataTip" role="tooltip"><b>어떤 데이터가 전송되나요?</b>더 정확한 목표 이탈 판정과 훈수 메시지 생성을 위해 목표, 현재 페이지의 제목·호스트·본문 최대 3,000자, 최근 최대 20개 페이지의 제목·판정이 전송됩니다.</span></span><button class="stchip" data-tier="tier2" type="button">– 테스트</button></span>
                 <small>내용을 정독하고 훈수를 쓰는 모델</small>
               </span>
               <span class="mctl" data-tier="tier2">
@@ -422,10 +455,16 @@
             </p>
           </div>
 
-          <div class="btnrow" style="padding-top: 0">
+          <div class="btnrow ai-actions" style="padding-top: 0">
             <button class="btn primary" id="ajSave">저장</button>
+            <button class="btn ai-enable" id="ajEnabled" type="button" aria-pressed="false">AI 판정 꺼짐</button>
           </div>
           <div class="hint" id="ajResult"></div>
+
+          <div class="privacy-link">
+            특정 페이지 정보가 AI 서비스로 전송되는 것이 불안하거나 싫다면
+            <button type="button" id="openSiteSettings">감시 제외 사이트로 설정하세요</button>.
+          </div>
 
           <div class="usec">
             <div class="uhead">

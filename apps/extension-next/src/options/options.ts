@@ -11,6 +11,14 @@ import {
 } from "../lib/providers.ts"
 
 import {
+  DISABLED_COPY,
+  INCOMPLETE_COPY,
+  effectiveAiEnabled,
+  incompleteTiers,
+  isAiConfigComplete,
+} from "./aiTabState.ts"
+
+import {
   SENSITIVITY_PRESETS,
   sensitivityLevelFor,
   type SensitivityLevel,
@@ -20,6 +28,15 @@ import {
 interface StateResponse {
   persona?: string
   personas?: Array<{ key: string; name: string; tier?: "default" | "lab" }>
+  health?: ProviderHealthSnapshot
+}
+interface TierHealth {
+  ok: boolean
+  message: string
+}
+interface ProviderHealthSnapshot {
+  tier1: TierHealth | null
+  tier2: TierHealth | null
 }
 interface PublicKeyInfo {
   id: string
@@ -72,9 +89,10 @@ const pquoteTag = $<HTMLElement>("pquoteTag")
 const pquoteTxt = $<HTMLElement>("pquoteTxt")
 const ajProviders = $<HTMLElement>("ajProviders")
 const ajConnect = $<HTMLElement>("ajConnect")
-const ajRouteWarn = $<HTMLElement>("ajRouteWarn")
+const ajAlerts = $<HTMLElement>("ajAlerts")
 const ajUsage = $<HTMLElement>("ajUsage")
 const ajSave = $<HTMLButtonElement>("ajSave")
+const ajEnabled = $<HTMLButtonElement>("ajEnabled")
 const ajResult = $<HTMLElement>("ajResult")
 const exportLog = $<HTMLButtonElement>("exportLog")
 const exportEvents = $<HTMLButtonElement>("exportEvents")
@@ -105,6 +123,7 @@ function renderSensitivity(level: SensitivityLevel): void {
 
 async function init(): Promise<void> {
   const settings = (await send({ type: "get-settings" })) as Settings
+  aiPreference = settings.aiJudgmentEnabled
   renderSensitivity(sensitivityLevelFor(settings.tauOk))
   setChecked(quietSw, settings.quietHours.enabled)
   quietStart.value = settings.quietHours.start
@@ -115,10 +134,12 @@ async function init(): Promise<void> {
   renderDomainLists((await send({ type: "get-domain-lists" })) as DomainLists)
 
   const state = (await send({ type: "get-state" })) as StateResponse
+  runtimeHealth = state.health ?? { tier1: null, tier2: null }
   if (state?.personas) {
     renderPersonas(state.personas, state.persona)
   }
-  applyJudge((await send({ type: "get-judge-settings" })) as JudgeView)
+  const judgeView = (await send({ type: "get-judge-settings" })) as JudgeView
+  applyJudge(judgeView)
   await loadUsage()
 }
 
@@ -322,6 +343,8 @@ const draft: Record<TierName, RouteDraft> = {
   tier2: { provider: "ollama", model: "", custom: false },
 }
 const chips: Record<TierName, ChipState> = { tier1: staleChip(), tier2: staleChip() }
+let aiPreference = true
+let runtimeHealth: ProviderHealthSnapshot = { tier1: null, tier2: null }
 let addOpenFor: ProviderId | null = null
 let connectOpen = false
 let usageDays = 1
@@ -429,8 +452,8 @@ function renderProviderBlocks(): void {
       head.appendChild(
         button("punlink", "연결 해제", () => {
           if (!confirm(`${profile.label} 연결을 해제할까요? 등록된 키도 함께 삭제됩니다.`)) return
-          void send({ type: "disconnect-provider", provider: profile.id }).then((view) =>
-            applyJudge(view as JudgeView),
+          void send({ type: "disconnect-provider", provider: profile.id }).then((raw) =>
+            applyJudge(raw as JudgeView),
           )
         }),
       )
@@ -618,6 +641,7 @@ function renderRoutes(): void {
         d.model = model.value
         chips[tier] = staleChip()
         renderChip(tier)
+        renderAiControls()
       }
     }
     input.oninput = () => {
@@ -626,6 +650,7 @@ function renderRoutes(): void {
         chips[tier] = staleChip()
         renderChip(tier)
       }
+      renderAiControls()
     }
     back.onclick = () => {
       d.custom = false
@@ -636,34 +661,43 @@ function renderRoutes(): void {
 
     renderChip(tier)
   }
-  renderRouteWarnings()
+  renderAiControls()
 }
 
-const TIER_KEYLESS_IMPACT: Record<TierName, string> = {
-  tier1: "멀쩡한 페이지도 가끔 딴길로 볼 수 있어요.",
-  tier2: "내용을 읽지 않고 준비된 문구로 훈수해요.",
+function appendAiAlert(text: string, error: boolean): void {
+  ajAlerts.appendChild(el("div", `ai-alert${error ? " err" : ""}`, text))
 }
 
-/** 라우트가 키 없는 제공자를 가리키면 모델 지정 섹션 상단에 안내 배너를 띄운다.
- *  저장된 키 목록과 화면의 드래프트 제공자만 보고 판정 — 런타임 상태·헬스와 무관.
- *  오류가 아니라 설정이 반쪽이라는 안내: 이 상태로도 훈수는 정상 동작한다. */
-function renderRouteWarnings(): void {
+function renderAiControls(): void {
   if (!judge) return
-  ajRouteWarn.textContent = ""
-  const banner = el("div", "route-banner")
-  for (const tier of TIERS) {
-    const provider = draft[tier].provider
-    if ((judge.accounts[provider] ?? []).length > 0) continue
-    const line = el("span", "ln")
-    line.appendChild(el("b", undefined, TIER_LABEL[tier]))
-    line.appendChild(
-      document.createTextNode(
-        ` — ${profileOf(provider).label}에 등록된 키가 없어 이 단계를 건너뜁니다. ${TIER_KEYLESS_IMPACT[tier]}`,
-      ),
-    )
-    banner.appendChild(line)
+  const complete = isAiConfigComplete(draft, judge.accounts)
+  const active = effectiveAiEnabled(aiPreference, draft, judge.accounts)
+  ajSave.disabled = !complete
+  ajSave.title = complete ? "" : "Tier 1과 Tier 2의 모델·키를 모두 설정해야 저장할 수 있어요."
+  ajEnabled.disabled = !complete
+  ajEnabled.setAttribute("aria-pressed", String(active))
+  ajEnabled.classList.toggle("on", active)
+  ajEnabled.textContent = active ? "AI 판정 켜짐" : "AI 판정 꺼짐"
+
+  ajAlerts.textContent = ""
+  if (!complete) {
+    appendAiAlert(INCOMPLETE_COPY, true)
+    const missing = incompleteTiers(draft, judge.accounts).map((tier) => TIER_LABEL[tier]).join(" · ")
+    appendAiAlert(`${missing}의 모델과 API 키를 확인해 주세요.`, true)
+  } else if (!aiPreference) {
+    appendAiAlert(DISABLED_COPY, false)
   }
-  if (banner.childElementCount > 0) ajRouteWarn.appendChild(banner)
+
+  for (const tier of TIERS) {
+    if (chips[tier].kind === "err") {
+      appendAiAlert(`${TIER_LABEL[tier]} 테스트 오류 — ${chips[tier].text}`, true)
+      continue
+    }
+    const health = runtimeHealth[tier]
+    if (aiPreference && health && !health.ok) {
+      appendAiAlert(`${TIER_LABEL[tier]} 실행 오류 — ${health.message}`, true)
+    }
+  }
 }
 
 function renderChip(tier: TierName): void {
@@ -689,6 +723,7 @@ async function runRouteTest(tier: TierName): Promise<void> {
   })) as RouteTestResult | undefined
   if (result?.ok) {
     chips[tier] = { kind: "ok", chip: "✓ 방금 전", text: `정상 — ${result.detail}` }
+    runtimeHealth[tier] = null
     if (ajResult.classList.contains("err")) {
       ajResult.className = "hint"
       ajResult.textContent = ""
@@ -701,6 +736,7 @@ async function runRouteTest(tier: TierName): Promise<void> {
     ajResult.textContent = `${TIER_LABEL[tier]} · ${profileOf(d.provider).label} — ${detail}`
   }
   renderChip(tier)
+  renderAiControls()
 }
 
 for (const chipEl of document.querySelectorAll<HTMLButtonElement>(".stchip")) {
@@ -708,6 +744,7 @@ for (const chipEl of document.querySelectorAll<HTMLButtonElement>(".stchip")) {
 }
 
 ajSave.addEventListener("click", async () => {
+  if (!judge || !isAiConfigComplete(draft, judge.accounts)) return
   const view = (await send({
     type: "set-routes",
     routes: {
@@ -719,6 +756,18 @@ ajSave.addEventListener("click", async () => {
   const r = view.routes
   ajResult.className = "hint ok"
   ajResult.textContent = `저장됨 ✓ — Tier 1: ${profileOf(r.tier1.provider).label} · ${r.tier1.model} / Tier 2: ${profileOf(r.tier2.provider).label} · ${r.tier2.model}`
+})
+
+ajEnabled.addEventListener("click", async () => {
+  if (!judge || !isAiConfigComplete(draft, judge.accounts)) return
+  aiPreference = !aiPreference
+  await saveSettings({ aiJudgmentEnabled: aiPreference })
+  renderAiControls()
+})
+
+$<HTMLButtonElement>("openSiteSettings").addEventListener("click", () => {
+  selectTab("sites", true)
+  blockList.focus()
 })
 
 async function loadUsage(): Promise<void> {

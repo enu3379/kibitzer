@@ -628,7 +628,7 @@ test("E2E: an unreachable judge still nudges — a configured-but-dead Tier 2 mu
   }
 })
 
-test("E2E: Tier 1 keyed, Tier 2 routed to a keyless provider — issue #207's silent-mute config still nudges", async () => {
+test("E2E: a half-configured AI setup is disabled and falls back to local judging", async () => {
   // The exact configuration issue #207 (확인 1) reported as silently muting Kibitzer forever:
   // routes are saved per tier and setRoutes never validates key presence, so tier1 can point at
   // a provider WITH keys while tier2 points at one WITHOUT. judgeEnabled() is then true (tier1
@@ -660,13 +660,12 @@ test("E2E: Tier 1 keyed, Tier 2 routed to a keyless provider — issue #207's si
   // actually surface here.
   store.delete("kibitzer:provider-alert-ts")
   try {
-    // Without this the scenario is vacuous: were the keyless tier2 route to disable the judge
-    // outright, degraded mode's S=0 gate would nudge directly, for reasons that have nothing to
-    // do with what is tested. The mute only ever existed because judgeEnabled stays true.
+    // A missing tier disables the whole AI mode. This is now the product policy: half-configured
+    // routes are not a supported runtime mode and must never enter a Tier-2 confirmation path.
     assert.equal(
       (await send({ type: "get-state" })).judgeEnabled,
-      true,
-      "tier1 alone keeps the judge enabled — the gauge must take the confirm-first path, not degraded mode",
+      false,
+      "both tiers are required before AI judging becomes active",
     )
     await send({ type: "set-goal", goal: "선형대수 고유값 문제 풀이", minutes: null })
     let judged = false
@@ -699,11 +698,7 @@ test("E2E: Tier 1 keyed, Tier 2 routed to a keyless provider — issue #207's si
         `the nudge still arrives when Tier 2 is routed to a keyless provider (S=${(await send({ type: "get-state" })).s})`,
       )
       const log = (await send({ type: "get-log" })).text as string
-      assert.match(
-        log,
-        /tier2 unavailable/,
-        `no judgment was obtained — must not read as an "ok" verdict. log tail:\n${log.slice(-1800)}`,
-      )
+      assert.match(log, /mode=degraded/, "the half configuration uses the local fallback path")
       // What distinguishes this from the dead-judge scenario: nothing was ever ASKED, so this
       // is deliberate Tier-0 mode, not an error — providerError stays unset and the
       // provider-problem OS alert must not fire.
@@ -721,7 +716,7 @@ test("E2E: Tier 1 keyed, Tier 2 routed to a keyless provider — issue #207's si
     // Health clearing is tier-scoped now: disconnecting openai touches only tier2's route,
     // so the tier1 error record (the failed rescue above) must survive that change (#205).
     const afterDisconnect = (await send({ type: "get-state" })).health as Record<string, { ok: boolean } | null>
-    assert.equal(afterDisconnect.tier1?.ok, false, "a tier2-only settings change leaves tier1's record intact")
+    assert.equal(afterDisconnect.tier1, null, "the disabled half setup never called Tier 1")
     // That default is ollama again, so tier1 AND tier2 both route there and any surviving ollama
     // key leaves the judge enabled for every later scenario. `disconnect-provider` cannot retract
     // it — ollama is the default provider and disconnecting it is a deliberate no-op

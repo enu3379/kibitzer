@@ -204,6 +204,10 @@
         padding-bottom: calc(var(--num-nudge) * 2); transform: translateY(3px);
       }
       .legend b { color: var(--page-ink); }
+      .legend-detail { display: grid; grid-template-columns: max-content 1fr; align-items: baseline; }
+      .legend-label { grid-column: 1; white-space: nowrap; }
+      .legend-copy { grid-column: 2; }
+      .legend-states { grid-column: 2; margin-top: 4px; margin-left: -1.5px;}
       .ldot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 1px 0 3px; transform: translateY(0.5px); }
 
       /* step 4 — toolbar pin. The two-click demo is drawn with tokens (not screenshots)
@@ -499,7 +503,7 @@
             </div>
 
             <ul class="legend">
-              <li><span class="n">1</span><span><b>툴바 아이콘의 색 점</b> — 지금 상태를 조용히 표시합니다. <span class="ldot" style="background:#1f9d6b"></span>몰입 <span class="ldot" style="background:#e0a100"></span>주의 <span class="ldot" style="background:#d1495b"></span>이탈 <span class="ldot" style="background:#8a8a90"></span>조용히 중. 좌상단 <b>!</b> 표시는 AI 판정 오류이고, 색 점의 몰입 상태 표시는 계속 유지됩니다.</span></li>
+              <li><span class="n">1</span><span class="legend-detail"><span class="legend-label"><b>툴바 아이콘의 색 점</b> —</span><span class="legend-copy">지금 상태를 조용히 표시합니다.</span><span class="legend-states"><span class="ldot" style="background:#1f9d6b"></span>몰입 <span class="ldot" style="background:#e0a100"></span>주의 <span class="ldot" style="background:#d1495b"></span>이탈 <span class="ldot" style="background:#8a8a90"></span>조용히 중. 좌상단 <b>!</b> 표시는 AI 판정 오류이고, 색 점의 몰입 상태 표시는 계속 유지됩니다.</span></span></li>
               <li><span class="n">2</span><span><b>팝업</b> — 아이콘을 누르면 열립니다. 목표, 해시계(남은 시간), 몰입 게이지, 일시정지가 여기에.</span></li>
               <li><span class="n">3</span><span><b>훈수</b> — 딴길이 쌓이면 보고 있던 페이지의 오른쪽 아래에 나타납니다. 답하거나 닫으면 그만.</span></li>
             </ul>
