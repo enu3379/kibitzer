@@ -24,7 +24,7 @@ Tier 1 프롬프트 엄격화. 감사 밴드(A1), title quality 게이트(A2), �
 ## 2. 검증 방법
 
 세 단계로 검증했다. 상세 데이터는
-[benchmarks/tier1-prompt-validation/](benchmarks/tier1-prompt-validation/README.md).
+[benchmarks/tier1-prompt-validation/](../../benchmarks/tier1-prompt-validation/README.md).
 
 1. **티어 귀속 분석** (v2 벤치마크 200쌍, tau=0.6 재현): false-OK는 구조적으로
    100% Tier 0 종결분에서 확정되고(재심 경로 부재, 원 문서 FO-1), false-drift의

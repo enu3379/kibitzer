@@ -1,7 +1,7 @@
 # Planning Notes — Claude ↔ User
 
 Living working doc. Unlike `progress.md` (a log of completed work) and
-`roadmap-fun-layer.md` (the master product plan), this file is where Claude and
+`legacy/plans/roadmap-fun-layer.md` (the master product plan), this file is where Claude and
 the user think out loud and record decisions as they are made. Edit freely from
 both sides; keep the "Open decisions" statuses current.
 
@@ -151,7 +151,7 @@ private labeled corpus shows the dominant Tier-0 failure is false-DRIFT
 unreachable sub-topic words; threshold tuning cannot fix a 0.00-mass. The
 corpus stays local (browsing history); set `KIBITZER_AUDIT_CORPUS` to rerun
 its regression test. Shape (details in
-[handoff-goal-enrichment.md](handoff-goal-enrichment.md)): one async call at
+[handoff-goal-enrichment.md](legacy/handoffs/handoff-goal-enrichment.md)): one async call at
 goal declaration (Tier-1 cloud stack, goal text only), K≤8 phrases via a
 strict prompt (~half English when the topic lives in English), stored in a
 separate `goal_derived_exemplars` table, matched at a separate higher
@@ -406,7 +406,7 @@ adversarial verification + 2 maintainability agents; 31 agents, ~21 min). 20
 candidate findings → **17 confirmed** (2 high, 6 medium, 9 low), 3 refuted, all
 confirmed at verifier confidence high. Known CWD-relative-path issue was
 excluded (already D9 phase-0). **Work order:
-[handoff-refactor-predist.md](handoff-refactor-predist.md)** — findings
+[handoff-refactor-predist.md](legacy/handoffs/handoff-refactor-predist.md)** — findings
 reorganized into ordered, file-anchored tasks (owner + effort + deps + tests),
 with the verbatim report embedded as Appendix A.
 
@@ -484,7 +484,7 @@ Errata: the report has **13** numbered maintainability recommendations (not
 15), M13 means expanding the existing extension test harness, and M7 wrongly
 called `embedding.model`/`batch_size` unread (both feed the ONNX provider).
 The corrected source of execution is
-[handoff-refactor-predist.md](handoff-refactor-predist.md) (Appendix A keeps
+[handoff-refactor-predist.md](legacy/handoffs/handoff-refactor-predist.md) (Appendix A keeps
 the old report verbatim behind errata). Release gates: R1 strict
 malformed-config degradation and the **full** R2 — persistent alarm-backed
 MV3 dwell state plus idempotent server retries; a ≤25 s clamp is dogfooding
@@ -616,7 +616,7 @@ input caps also remain. F3/F4 stay informational.
 
 ### D9 — Gauge controller: v0 semantics locked, TypeScript-first rollout → RESOLVED (design, 2026-07-21)
 
-The gauge design (`docs/analysis-plan-a-gauge-design.md`, PR #121) is the v0
+The gauge design (`docs/research/gauge/analysis-plan-a-gauge-design.md`, PR #121) is the v0
 behavior contract, superseding plan A (`AlignmentController`) and — on the
 shipping path — plan B (`StreakController`). §1–§6 (state model, dynamics, Tier 2
 dual gate, nag/renag/celebration semantics) are frozen as the contract; every
@@ -666,7 +666,7 @@ frozen reference deleted with the server. Canonical roadmap: `docs/ts-migration-
 
 ### D9 — Gauge controller: v0 semantics locked, TypeScript-first rollout → RESOLVED (design, 2026-07-21)
 
-The gauge design (`docs/analysis-plan-a-gauge-design.md`, PR #121) is the v0
+The gauge design (`docs/research/gauge/analysis-plan-a-gauge-design.md`, PR #121) is the v0
 behavior contract, superseding plan A (`AlignmentController`) and — on the
 shipping path — plan B (`StreakController`). §1–§6 (state model, dynamics, Tier 2
 dual gate, nag/renag/celebration semantics) are frozen as the contract; every
@@ -1104,7 +1104,7 @@ the extension badge.
 - 2026-07-08 (P1 plumbing): Codex implemented P1 mechanics: return celebration
   `kind:"celebration"`, `break` feedback, custom persona merge + `/personas`,
   current/daily report APIs, and persisted/exposed `tier1_reason`. Added
-  `handoff-p1-claude-design.md` for Claude-owned toast copy/style, popup report,
+  `legacy/handoffs/handoff-p1-claude-design.md` for Claude-owned toast copy/style, popup report,
   persona selector, and "왜?" UX. Verification: 90 server tests green; extension
   build green.
 - 2026-07-15: Packaging & distribution direction decided (now D9 after
@@ -1156,7 +1156,7 @@ the extension badge.
   toggle, and the 리포트 view (hourly focus strip / longest stretch / feedback
   counts / top drift hosts / recent judgment reasons). Verified in browser
   preview light+dark; 90 tests green; build green. Decisions logged in
-  handoff-p1-claude-design.md. P1 attachment loop is now feature-complete.
+  legacy/handoffs/handoff-p1-claude-design.md. P1 attachment loop is now feature-complete.
 - 2026-07-14: D7 time-budget drift rule fully designed via two Q&A rounds
   (clocks, thresholds, per-page + total/2 rules, pending state, heartbeat,
   dual Tier-2 judgment, next-multiple recheck). Same-day correction: 누적/연속

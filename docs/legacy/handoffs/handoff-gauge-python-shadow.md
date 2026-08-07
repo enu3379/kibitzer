@@ -5,9 +5,9 @@ you (Python) are the early real-data probe on the current server. Read these fir
 
 1. `docs/gauge/contract.md` — the **binding** language-neutral contract (events, state,
    effects, dynamics, Tier 2 gates, renag, celebration). This is the spec you implement.
-2. `docs/gauge-dual-track.md` — how the two tracks stay in lockstep. Note: **A owns the
+2. `docs/legacy/workflows/gauge-dual-track.md` — how the two tracks stay in lockstep. Note: **A owns the
    fixtures; you consume them.** Never change gauge behavior without a fixture that pins it.
-3. `docs/analysis-plan-a-gauge-design.md` §1–§6 — the design rationale behind the contract.
+3. `docs/research/gauge/analysis-plan-a-gauge-design.md` §1–§6 — the design rationale behind the contract.
    §9 (the old Python stage roadmap) is **superseded**; follow this handoff instead.
 4. `docs/planning-notes.md` D9 — locked decisions: S recovers to 100; degraded mode weights
    both directions by f(margin); plan B (`streak`) is not a design constraint; `J_page = 0`.
@@ -61,7 +61,7 @@ Interim **shadow** wiring on the Python server — records S/m/accelTier, still 
 Wire the gauge as the actual trigger under an opt-in flag, run real sessions, and report
 findings. Each finding you want to change becomes a **new failing fixture** proposed back to
 the A/contract owner (do not edit existing fixtures or the contract yourself) — see the sync
-protocol in `docs/gauge-dual-track.md`.
+protocol in `docs/legacy/workflows/gauge-dual-track.md`.
 
 ## Rules
 

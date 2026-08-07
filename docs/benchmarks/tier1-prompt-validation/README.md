@@ -39,7 +39,7 @@
   집중. goal enrichment 파생 문구가 페이로드에 실리는 실환경에서는 추가 해소
   여지 있음 (본 벤치마크는 파생 문구 부재 조건).
 - 후속 운영 개선 후보: tier1 `max_output_tokens` 320→512 (빈 응답 회수),
-  타임아웃 1회 재시도 (analysis-tier01-false-signals.md A3), reasoning 비활성화
+  타임아웃 1회 재시도 (../../legacy/analysis/analysis-tier01-false-signals.md A3), reasoning 비활성화
   실험.
 
 `real_result_{OLD,CMP}[_v1|_v3].json`: 관측 id → verdict (null = 프로바이더 오류).

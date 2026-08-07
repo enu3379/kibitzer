@@ -28,6 +28,12 @@ not a second or experimental runtime.
 - [Security review](security-review-2026-07-15.md)
 - [Tier-2 prompt-injection red team](security-redteam-prompt-extraction.md)
 
+## Research and supporting material
+
+- [Gauge design rationale](research/gauge/analysis-plan-a-gauge-design.md)
+- [Anchor experiments](research/anchor/)
+- [Persona research](research/personas/)
+
 ## Follow-up product work
 
 The cutover does not claim complete UX/analysis parity:
@@ -44,9 +50,10 @@ The disposition and remaining B7/B8 tails are recorded in
 ## Historical plans and handoffs
 
 Implementation plans, platform-daemon plans, pre-cutover analysis, and
-`handoff-*.md` files are historical evidence unless a current issue explicitly
-reactivates them. Their paths may refer to the retired Python server and relay
-extension.
+[archived handoff documents](legacy/handoffs/), [analyses](legacy/analysis/),
+[plans](legacy/plans/), and [workflows](legacy/workflows/) are historical
+evidence unless a current issue explicitly reactivates them. Their paths may
+refer to the retired Python server and relay extension.
 
 The complete legacy runtime is preserved on `dev-legacy` and
 `pre-serverless-cutover-2026-07-24`; the full pre-squash migration history is

@@ -1,6 +1,6 @@
 # Results — OK-anchor 오염 루프 검증과 존폐 결정 (2026-07-21)
 
-원인 문서: [handoff-2026-07-21-anchor-pollution.md](handoff-2026-07-21-anchor-pollution.md).
+원인 문서: [handoff-2026-07-21-anchor-pollution.md](../../legacy/handoffs/handoff-2026-07-21-anchor-pollution.md).
 산출: 실험 결과(본 문서) + **PR #118**(오염 차단 가드) + **PR #120**(anchor
 기본 비활성화, 본 문서를 포함한 PR).
 

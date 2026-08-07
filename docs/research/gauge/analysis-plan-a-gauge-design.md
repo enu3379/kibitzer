@@ -11,7 +11,7 @@
 
 - **이 문서는 단일 몰입 게이지 컨트롤러의 설계 근거다.** 게이지는
   A안(`AlignmentController`, EWMA + 히스테리시스)을 완전히 대체한다.
-  `docs/analysis-plan-a-redesign.md` §3(재설계안)~§5(미해결 질문)를 supersede하며,
+  `docs/legacy/analysis/analysis-plan-a-redesign.md` §3(재설계안)~§5(미해결 질문)를 supersede하며,
   같은 문서의 §1~§2(현황 분석·문제점 P1~P10)는 이 설계의 근거 기록으로 유효하다.
 - **출하·마이그레이션 순서는 `docs/ts-migration-plan.md`가 정의한다.** 현행
   `StreakController`는 TypeScript 전환까지의 임시 기본값일 뿐 설계 제약이 아니다.

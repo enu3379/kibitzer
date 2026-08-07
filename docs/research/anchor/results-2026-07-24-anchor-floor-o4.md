@@ -73,6 +73,6 @@ same_frame_trap, …)을 섞어 만든 것이라 페이지 간 자기유사성�
   세션 로그 리플레이로 rescue/차단 트레이드오프를 다시 측정해야 한다**
   (그 시점의 재보정 절차도 `tools/anchorFloorStudy.ts` 재실행으로 시작).
 
-같은 시기 문서: [handoff-2026-07-21-anchor-pollution.md](handoff-2026-07-21-anchor-pollution.md)
+같은 시기 문서: [handoff-2026-07-21-anchor-pollution.md](../../legacy/handoffs/handoff-2026-07-21-anchor-pollution.md)
 (서버 시절 실험의 출발 질문), [results-2026-07-21-anchor-pollution.md](results-2026-07-21-anchor-pollution.md)
 (서버 시절 결과 — 방법론의 원본).

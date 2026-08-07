@@ -2,7 +2,7 @@
 
 Date: 2026-07-06
 Scope owner: delegated agent (Codex)
-Parent plan: [roadmap-fun-layer.md](roadmap-fun-layer.md)
+Parent plan: [roadmap-fun-layer.md](../plans/roadmap-fun-layer.md)
 
 ## Goal
 

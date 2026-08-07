@@ -6,7 +6,7 @@ handoff for future work, not a new design source of truth.
 ## Source Of Truth
 
 - The original implementation guideline is now preserved at
-  [kibitzer-implementation-guideline.md](kibitzer-implementation-guideline.md).
+  [kibitzer-implementation-guideline.md](../../kibitzer-implementation-guideline.md).
 - When controller behavior is ambiguous, prefer that guideline over later
   partial implementation notes.
 - Important correction: A안 is **not** a recent-window DRIFT count. The original

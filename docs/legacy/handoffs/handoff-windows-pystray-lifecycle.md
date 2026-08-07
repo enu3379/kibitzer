@@ -14,7 +14,7 @@ back into the foundation PR.
 
 The modern toast transport, Priority-only fallback, and Windows QA completed on
 2026-07-18 are recorded separately in
-`docs/handoff-2026-07-18-windows-launch-notifications.md`.
+`docs/legacy/handoffs/handoff-2026-07-18-windows-launch-notifications.md`.
 
 ## Ownership contract
 

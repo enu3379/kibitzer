@@ -67,7 +67,7 @@ runner, `--experimental-strip-types`). B: `pytest apps/server/tests/test_gauge_f
 - **This session (Claude)** drives **A**: contract, fixtures, TS reducer, shadow wiring,
   popup debug S.
 - **Opus subagent** drives **B**: Python reducer passing the shared fixtures, then interim
-  trigger wiring + real-data run. Work order: `docs/handoff-gauge-python-shadow.md`.
+  trigger wiring + real-data run. Work order: `docs/legacy/handoffs/handoff-gauge-python-shadow.md`.
 - On a real-data finding, both are updated in the same sync cycle (above).
 
 ## Shadow-first for both

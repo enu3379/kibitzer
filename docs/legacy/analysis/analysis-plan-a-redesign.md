@@ -26,13 +26,13 @@
 1. 원 지침서 §4.4는 A안을 수식 3줄(`A_t = α·A_{t-1} + (1-α)·r_t`, `A_t < θ_low` 개입,
    `A_t > θ_high` 회복)과 "불만족스러우면 Page-Hinkley/CUSUM/ADWIN으로 교체"라는
    스케치로만 정의했다. 로드맵상 A안은 Stage 3("리플레이 A/B 실험") 항목이었다.
-2. 2026-07-07 세션에서 A안이 구현되어 merge됨 (`docs/handoff-2026-07-07-alignment-dwell.md`).
+2. 2026-07-07 세션에서 A안이 구현되어 merge됨 (`docs/legacy/handoffs/handoff-2026-07-07-alignment-dwell.md`).
    첫 구현은 윈도 카운트였다가 EWMA로 교체(커밋 `5a44aa0`). **이 시점에도 θ 값
    캘리브레이션 없이 placeholder로 투입**되었고, 전제 조건이던 리플레이 하니스
    (지침서 §8 "튜닝을 라이브로 하지 않는다") 없이 진행되었다.
 3. 2026-07-14 D7 설계에서 "누적/연속은 두 기존 드리프트 규칙의 시간 측정 변형"으로
    재해석되어 A안에 `cumulative_drift_seconds` 클록이 결합됨 (`docs/planning-notes.md` D7).
-4. D7 구현 리뷰(`docs/handoff-d7-review-findings.md` finding 1)에서 **D7 원설계의
+4. D7 구현 리뷰(`docs/legacy/handoffs/handoff-d7-review-findings.md` finding 1)에서 **D7 원설계의
    "drift-rule condition holds AND …" 조건이 트리거에서 제거**됨(아래 1.4 참조).
    이것이 "B안 설계하면서 자동적으로 작업된" 지점의 핵심이다.
 
@@ -97,7 +97,7 @@ A_0가 곧바로 θ_low 아래에서 시작한다.
 
 정리: **D7 원설계는 "drift-rule condition holds AND current_page ≥ per_page AND
 (mode_clock ≥ total OR current_page ≥ total/2)"였으나**(`docs/planning-notes.md` D7
-Trigger 절), 구현 리뷰 finding 1(`docs/handoff-d7-review-findings.md`)이 "presence
+Trigger 절), 구현 리뷰 finding 1(`docs/legacy/handoffs/handoff-d7-review-findings.md`)이 "presence
 경로에서는 컨트롤러 상태가 전진하지 않아 단일 페이지 장기 체류 시나리오가 영원히
 발동 불가"라는 이유로 drift-rule 조건을 DESIGN CALL로 제거했다. 그 결과 현재
 기본 구성에서 A안을 선택하면:
@@ -143,7 +143,7 @@ Trigger 절), 구현 리뷰 finding 1(`docs/handoff-d7-review-findings.md`)이 "
 ### P1. EWMA가 트리거에서 무단 이탈 — A안의 판정 규칙이 사실상 삭제됨 (구조적 핵심)
 
 근거: 1.4 (b) 전체, 특히 `controller_flow.py:63-85`, `observations.py:499-506`,
-`docs/handoff-d7-review-findings.md` finding 1.
+`docs/legacy/handoffs/handoff-d7-review-findings.md` finding 1.
 
 D7 원설계의 AND 조건("드리프트 규칙 성립")이 구현 수리 과정에서 제거되면서,
 A안 선택 시에도 나깅 여부는 "관측 단위 DRIFT + 시간 임계값"만으로 결정된다.
@@ -178,7 +178,7 @@ A_t를 10배 더 끌어내린다. D7이 도입한 시간 세계관(체류 시간
 
 ### P4. θ_low / θ_high / α의 출처 불명 — 캘리브레이션 없는 상수
 
-근거: `docs/handoff-2026-07-07-alignment-dwell.md`(값 첫 등장, 근거 기록 없음),
+근거: `docs/legacy/handoffs/handoff-2026-07-07-alignment-dwell.md`(값 첫 등장, 근거 기록 없음),
 지침서 §4.5(θ 값 자체는 목록에도 없음), `docs/planning-notes.md` D4(리플레이 CLI
 스코프 OPEN — 검증 수단 부재). α=0.85는 시간상수 약 6.2 관측 — 이 선택의 근거도
 기록에 없다. 지침서 §8("튜닝을 라이브로 하지 않는다")과 모순된 상태.

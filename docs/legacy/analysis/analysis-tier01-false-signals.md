@@ -4,7 +4,7 @@
 로컬 판정 로그 표본 분석은 시도했으나 `data/kibitzer.sqlite3`의
 `observations`/`event_log` 등 전 테이블이 0건(빈 DB)이어서 불가 — 실측 수치는
 `docs/planning-notes.md`, `docs/judgment-audit-plan.md`,
-`docs/handoff-goal-enrichment.md`에 기록된 과거 세션 감사 결과를 인용한다.
+`docs/legacy/handoffs/handoff-goal-enrichment.md`에 기록된 과거 세션 감사 결과를 인용한다.
 
 용어: **false-ok** = 실제 드리프트를 OK로 오판, **false-drift** = 실제 목표
 부합을 DRIFT로 오판. 판정 주체는 TIER 0(로컬 임베딩 코사인)과 TIER 1(경량
@@ -113,7 +113,7 @@ OK (judgment-audit-plan.md "Log Findings"; 당시 tau 0.15 하시대의 수치�
 goal enrichment는 recall을 23.8%→86.2%로 올리는 대신 FPR을 11.7%→17.5%로
 올렸고, 신규 false-OK는 전부 aspect 확장에서 나왔다 — 예: 목표 "영어 공부",
 문구 "토익 토플 시험 준비"가 드리프트 제목 "토익 시험 접수"를 0.82로 끌어올림
-(`docs/handoff-goal-enrichment.md` 2026-07-13 addendum). 이 0.60–0.82 대역은
+(`docs/legacy/handoffs/handoff-goal-enrichment.md` 2026-07-13 addendum). 이 0.60–0.82 대역은
 어떤 그럴듯한 감사 밴드보다도 높아서 FO-1의 감사 밴드로도 못 잡는다고
 문서에 명시돼 있다. 코드상 파생 매치는 `max()` 안에서 exemplar와 동급으로
 verdict를 결정한다 (`relevance.py:66-75`; `derived_tau=0.25`는 τ=0.6 아래라
@@ -200,7 +200,7 @@ dwell 5초 시점의 `tab.title`을 쓰므로 (`background.ts:517-518`) 느린 S
 Step-0 라벨링(실관측 231건): Tier 0 지배적 실패는 false-DRIFT로, **관련
 페이지 142건 중 80건이 τ 미달**, 주로 한국어 목표 vs 영어 제목 (r0=0.000
 사례: "마인크래프트 크리에이트모드" vs "How To Make a Train In Minecraft…")
-(`handoff-goal-enrichment.md:13-20`). ONNX 전환 후에도 tiny 모델의 ko↔en
+(`legacy/handoffs/handoff-goal-enrichment.md:13-20`). ONNX 전환 후에도 tiny 모델의 ko↔en
 정렬은 약해서 교차 언어 관련 쌍이 0.26–0.59로 τ=0.6 아래에 깔린다 (addendum
 :184-191; ONNX 단독 recall 23.8%, 파생 문구 결합 시 86.2%). 즉 **파생 문구가
 유일한 완화책**인데—

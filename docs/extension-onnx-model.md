@@ -54,7 +54,7 @@ These tests validate engine parity, not product calibration. The shipped O4
 operating point is `tauOk=0.59`; the trajectory anchor is disabled by default
 (`ANCHOR_WINDOW=0`). Calibration evidence is under
 `docs/benchmarks/tier0-embedding-o4/` and
-`docs/results-2026-07-24-anchor-floor-o4.md`.
+`docs/research/anchor/results-2026-07-24-anchor-floor-o4.md`.
 
 ## Provenance and recovery
 

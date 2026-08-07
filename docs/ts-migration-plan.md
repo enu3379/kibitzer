@@ -61,7 +61,7 @@ forward-merge `dev-legacy`.
 - The trajectory anchor is disabled by default (`ANCHOR_WINDOW=0`).
 - Dormant anchor reactivation guards use the O4-recalibrated `0.50` floor.
 - Evidence is preserved under `docs/benchmarks/tier0-embedding-o4/` and
-  `docs/results-2026-07-24-anchor-floor-o4.md`.
+  `docs/research/anchor/results-2026-07-24-anchor-floor-o4.md`.
 
 ## 5. Accepted follow-ups
 

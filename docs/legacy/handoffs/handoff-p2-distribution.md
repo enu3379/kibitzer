@@ -4,7 +4,7 @@ Date: 2026-07-06
 Scope owner: delegated agent (Codex), **do not start until P1 merges**. This is a
 placeholder plan; write the full handoff (verified file states, schemas, acceptance
 checks) when P1 lands.
-Parent plan: [roadmap-fun-layer.md](roadmap-fun-layer.md)
+Parent plan: [roadmap-fun-layer.md](../plans/roadmap-fun-layer.md)
 
 ## Planned features
 
