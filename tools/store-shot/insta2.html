@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="insta.css" />
+    <style>
+      /* scene2와 같은 와이어프레임 브라우저 창. 말풍선만 진짜(toast.js)다.
+         창 전체를 통째로 확대하므로 말풍선도 같이 커진다 — 최종 배율은 insta-fit.js가
+         남은 캔버스 공간을 보고 정한다. 창 그림자가 살아야 하니 이 장면의 clip은 넘침을
+         자르지 않는다.
+
+         이 창 크기·말풍선 크기를 직접 조정하려면 —
+
+         1) 창(웹페이지 창) 너비: 아래 .win 의 width 값과, body 하단 <div class="clip"
+            data-fit="742x566" …> 의 "742" 두 곳을 반드시 같은 값으로 맞춘다. 높이를 함께
+            바꾸고 싶으면 .win 의 height 와 data-fit 의 "x566" 부분도 같이 맞춘다.
+            (data-fit은 insta-fit.js가 축척을 계산하는 유일한 기준이라 .win의 CSS 크기만
+            바꾸면 무시된다 — 반드시 둘 다 고친다.)
+
+         2) 말풍선(toast) 크기: 아래 #kibitzer-toast-host 의 transform: scale(...) 값 하나만
+            바꾸면 가로·세로가 함께 그 배율로 커진다/작아진다. 이 값은 창 전체 배율 위에
+            추가로 곱해진다 — 예를 들어 창이 이미 커져서 말풍선도 같이 커진 상태에서, 여기
+            scale(1.15)를 주면 그 시점 크기 기준으로 다시 15%가 더 커진다. */
+      .clip { overflow: visible; }
+      .win {
+        position: relative;
+        width: 779px; /* 742 × 1.05 (창 너비 5% 확대) */
+        height: 566px;
+        background: #fff;
+        border-radius: 14px;
+        overflow: hidden;
+        box-shadow: 0 22px 56px rgba(86, 76, 55, .16), 0 2px 6px rgba(86, 76, 55, .07);
+      }
+      .win .bar {
+        height: 36px;
+        background: #f1efe9;
+        border-bottom: 1px solid #e3e0d7;
+        display: flex;
+        align-items: center;
+        padding: 0 13px;
+        gap: 6px;
+      }
+      .win .bar i { width: 9px; height: 9px; border-radius: 50%; background: #d7d3c8; }
+      .win .bar .addr {
+        flex: 1;
+        margin-left: 12px;
+        height: 20px;
+        border-radius: 10px;
+        background: #fff;
+        border: 1px solid #e3e0d7;
+        display: flex;
+        align-items: center;
+        padding: 0 9px;
+      }
+      .win .bar .addr::before {
+        content: "";
+        width: 132px;
+        height: 7px;
+        border-radius: 3px;
+        background: #e6e3dc;
+      }
+      .win .page { padding: 20px 22px; }
+      .win .player {
+        height: 224px;
+        border-radius: 8px;
+        background: linear-gradient(160deg, #4a4a4f, #313136);
+        position: relative;
+      }
+      .win .player::after {
+        content: "";
+        position: absolute;
+        left: 50%; top: 50%;
+        width: 0; height: 0;
+        transform: translate(-38%, -50%);
+        border-left: 24px solid rgba(255, 255, 255, .5);
+        border-top: 15px solid transparent;
+        border-bottom: 15px solid transparent;
+      }
+      .win .ln { height: 10px; border-radius: 4px; background: #e6e3dc; margin-top: 15px; }
+      .win .ln.w1 { width: 58%; height: 14px; }
+      .win .ln.w2 { width: 30%; height: 9px; background: #edebe4; }
+      .win .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 13px; margin-top: 24px; }
+      .win .th { height: 74px; border-radius: 6px; background: #eceae3; }
+      .win .cap { height: 8px; border-radius: 3px; background: #edebe4; margin-top: 8px; width: 78%; }
+      #kibitzer-toast-host {
+        position: absolute !important;
+        right: 18px;
+        bottom: 16px;
+        transform: scale(1.15); /* 말풍선 가로·세로 15% 확대 */
+        transform-origin: bottom right; /* 우하단 고정 위치는 그대로, 왼쪽·위로 커진다 */
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <h1>막지 않습니다. <span class="mark">구석에서 한마디</span> 할 뿐</h1>
+      <p class="sub">차단도, 전체 화면 경고도 없습니다. 딴짓이 충분히 쌓였을 때만<br />페이지 구석에 작은 말풍선이 뜹니다.</p>
+      <div class="chips">
+        <span class="chip">비차단 훈수</span>
+        <span class="chip">5분만 · 30분 조용히</span>
+      </div>
+      <div class="stage">
+        <div class="clip" data-fit="779x566" data-fit-max="1.25">
+          <div class="win fit-target" id="win">
+            <div class="bar"><i></i><i></i><i></i><span class="addr"></span></div>
+            <div class="page">
+              <div class="player"></div>
+              <div class="ln w1"></div>
+              <div class="ln w2"></div>
+              <div class="grid">
+                <div><div class="th"></div><div class="cap"></div></div>
+                <div><div class="th"></div><div class="cap"></div></div>
+                <div><div class="th"></div><div class="cap"></div></div>
+                <div><div class="th"></div><div class="cap"></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      // 헤드리스 Chrome은 다크 스킴을 보고한다. 말풍선이 matchMedia로 팔레트를 고르므로
+      // 합성 기준인 라이트로 고정한다.
+      var realMatchMedia = window.matchMedia.bind(window)
+      window.matchMedia = function (q) {
+        if (String(q).indexOf("prefers-color-scheme: dark") !== -1) {
+          return { matches: false, media: q, addListener: function () {}, removeListener: function () {} }
+        }
+        return realMatchMedia(q)
+      }
+    </script>
+    <script src="toast.js"></script>
+    <script>
+      showKibitzerToast({
+        notificationId: "kbz-7",
+        displayToken: 7,
+        message: "대단히 유익해 보이는 영상이군요. 졸업논문\n항목엔 없겠습니다만.",
+        contextLabel: "youtube.com#-1683729401",
+        autoDismissMs: 600000,
+        kind: "intervention",
+        demo: true,
+      })
+      var host = document.getElementById("kibitzer-toast-host")
+      document.getElementById("win").appendChild(host)
+      var s = document.createElement("style")
+      s.textContent = "*,*::before,*::after{animation:none!important;transition:none!important}" +
+      ".peek{transform:scale(1.25);transform-origin:bottom left}" +
+      ".hands{transform:scale(1.25);transform-origin:top left}" +
+      // toast.js는 .msg에 textContent로 문자열을 그대로 꽂는다. 기본 white-space:normal
+      // 아래선 문자열 속 \n이 그냥 공백으로 뭉개지므로, pre-line으로 바꿔야 실제 줄바꿈이 된다.
+      ".msg{white-space:pre-line}"
+      host.shadowRoot.appendChild(s)
+    </script>
+    <script src="insta-fit.js"></script>
+  </body>
+</html>

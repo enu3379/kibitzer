@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="insta.css" />
+    <style>
+      /* 캐러셀 3장. 세로로 긴 요약 팝업 하나를 통째로 세우는 대신 두 덩어리로 쪼갠다 —
+         왼쪽은 지표와 페르소나 한 줄 평까지, 오른쪽은 리포트 카드(하이라이트·지난번보다·
+         집중·몰입 곡선). 정사각 캔버스에서 가로를 다 쓰게 되므로 팝업이 커지고, '확인'
+         버튼도 잘라낼 필요가 없어진다. 이전에는 단일 팝업 이미지 하나를 그대로 세운
+         구성이었다 — 그 버전은 insta3-legacy.html로 남아 있다.
+
+         쪼개기(?part=head|cards)와 이 슬라이스만의 스타일 다듬기(구분선 제거·상하 여백
+         대칭·집중 카드 3열·곡선 카드 압축)는 전부 stub.js의 part=cards 분기에 있다 — 이
+         파일이 아니라 거기서 고친다.
+         data-fit의 높이(381 / 413)만 실측값으로, 슬라이스별 body.scrollHeight다. */
+      .frame { padding-left: 64px; padding-right: 64px; }
+      .cols { margin-top: 36px; }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <h1>끝내고 나면<br /><span class="mark">시간이 어디로 샜는지</span> 보입니다</h1>
+      <div class="chips">
+        <span class="chip">지난 세션과 비교</span>
+        <span class="chip">MVP · 빌런</span>
+      </div>
+      <div class="cols">
+        <div class="stage">
+          <div class="panel">
+            <div class="clip" data-fit="296x381" data-fit-max="1.8">
+              <iframe class="fit-target" src="popup/popup.html?scene=summary&amp;part=head"></iframe>
+            </div>
+          </div>
+        </div>
+        <div class="stage">
+          <div class="panel">
+            <div class="clip" data-fit="296x413" data-fit-max="1.8">
+              <iframe
+                class="fit-target"
+                src="popup/popup.html?scene=summary&amp;part=cards&amp;cards=highlight,compare-last,focus,scurve"
+              ></iframe>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="insta-fit.js"></script>
+  </body>
+</html>

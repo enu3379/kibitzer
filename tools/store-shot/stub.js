@@ -2,8 +2,39 @@
 // Returns fixed, self-consistent state so the shipped UI code renders a realistic scene
 // with no service worker behind it. Scene is chosen with ?scene= on the iframe URL.
 (function () {
-  var scene = new URLSearchParams(location.search).get("scene") || "";
+  var params = new URLSearchParams(location.search);
+  var scene = params.get("scene") || "";
   var MIN = 60000;
+
+  // Demo goal defaults to startedAt: 0 (epoch) — hugely overrun, so the sundial shows the
+  // moon/overtime state. Scenes that want the daytime sun instead pass ?elapsedMin=<n> to
+  // pick a point on the dome (see sundial.ts: frac = elapsedMin / availableMinutes).
+  var elapsedMinParam = Number(params.get("elapsedMin"));
+  var goalStartedAt = Number.isFinite(elapsedMinParam) && params.has("elapsedMin") ? Date.now() - elapsedMinParam * MIN : 0;
+
+  // ?cards=highlight,compare-last,focus — which report cards the summary shows. The shipped
+  // code picks 5 of 11 at weighted random per session (lib/reportCards.ts); pinning them keeps
+  // a capture reproducible. Omit to keep the fixture's own list.
+  var cardsParam = params.get("cards");
+
+  // ?part=head|cards — render only one slice of the summary, so a scene can lay the summary
+  // out as two side-by-side columns instead of one tall card. "head" is everything down to the
+  // persona one-liner; "cards" is only the report cards. Omit for the whole thing.
+  var part = params.get("part") || "";
+
+  // ?persona=<key> — which persona is selected/highlighted (options page persona tab, and the
+  // "말투" line in the popup's goal card). Defaults to dry_kibitzer, matching every capture
+  // taken before this param existed.
+  var personaParam = params.get("persona") || "dry_kibitzer";
+
+  // ?lede=<text> — override the options page's intro line (.lede) with different copy, for a
+  // capture that wants shorter/different wording without touching the shipped page text.
+  var ledeParam = params.get("lede");
+
+  // ?fontBump=persona — bump every font-size inside the persona tab's #pane-persona by 1px,
+  // for a capture where the tab is shown larger than its real popup/options size and the
+  // shipped sizes read a touch small blown up. Scoped to that one pane; nothing else shifts.
+  var fontBumpPersona = params.get("fontBump") === "persona";
 
   var PERSONAS = [
     { key: "navigation", name: "내비게이션", tier: "default" },
@@ -75,7 +106,7 @@
       lastSCurve: [70, 71, 68, 62, 55, 49, 44, 40, 38, 42, 51, 57, 60, 62, 64],
       avgSCurve: null,
     },
-    cards: ["highlight"],
+    cards: cardsParam ? cardsParam.split(",") : ["highlight"],
     comment: {
       status: "ready",
       text: "78분 중 61분을 논문에 쓰셨습니다. 나머지 17분의 행방은 굳이 여쭙지 않겠습니다.",
@@ -86,12 +117,12 @@
 
   // The popup's active view needs a live goal; the summary view needs none.
   var STATE_ACTIVE = {
-    goal: { text: "졸업논문 관련연구 정리", availableMinutes: 90, startedAt: 0 },
+    goal: { text: "졸업논문 관련연구 정리", availableMinutes: 90, startedAt: goalStartedAt },
     s: 82,
     accelTier: 0,
     snoozedUntil: null,
     judgeEnabled: true,
-    persona: "dry_kibitzer",
+    persona: personaParam,
     personas: PERSONAS,
     health: null,
   };
@@ -184,7 +215,62 @@
       "--accent:#1e7a4c;--accent-ink:#ffffff;--accent-soft:#e2f1e8;" +
       "--ok-fg:#175f3b;--err:#bf4540;--err-soft:#f7e2e0;--err-fg:#8f322c;" +
       "--sd-ink:#6e6960;--sd-ink3:#9b968c;--sd-line:#e6e3dc;--sd-leaf:#5aa63c;--sd-bg:#ffffff}";
+
+    // ?part= slices the summary so a scene can run it as two columns. Hiding is done here,
+    // inside the popup document, rather than by cropping from the scene — that way each slice
+    // sizes itself and there are no pixel offsets to re-measure when the fixture changes.
+    // The '세션 더보기' toggle and '확인' button go in both slices: they are real UI, but a
+    // still image has nothing to toggle or confirm.
+    if (part === "head") {
+      s.textContent += "#sumMore,#sumReport,#sumDone{display:none!important}";
+    } else if (part === "cards") {
+      s.textContent +=
+        // h1 goes too — the left slice already carries the KIBITZER wordmark, and repeating it
+        // at the top of the second column would read as two separate popups.
+        // .divider is the <hr> that normally sits between the stat rows and the '세션
+        // 더보기' button — with the stats and button both hidden, it was left floating right
+        // above the first card as a stray horizontal rule.
+        "h1,.sumlabel,.sumgoal,.stat,#sumTopWrap,#sumMore,#sumDone,.comment-head,.comment-text,.comment-note,.divider" +
+        "{display:none!important}" +
+        // #sumReport's first card carries a 10px top margin meant to separate it from the
+        // one-liner above; with nothing above it that reads as a stray gap. Trim the body's own
+        // padding too (14px shipped default on all four sides, meant to frame the stat rows we
+        // no longer show here) — top AND bottom the same, so the white space above the first
+        // card matches the white space below the last one.
+        "#sumReport>.card:first-child{margin-top:0}" +
+        "body{padding-top:6px;padding-bottom:6px}" +
+        // 🎯 집중 is the only card in this slice's rotation that uses .metrics, so widening it
+        // to 3 columns here only affects that card. The shipped 12px column-gap reads uneven
+        // across 3 columns because it's small enough that each gap's apparent width is mostly
+        // set by how much of its column the label text fills (최장 집중 연속 vs 첫 딴짓까지 are
+        // different lengths) — widening the gap swamps that difference so the three read as
+        // evenly spaced.
+        ".metrics{grid-template-columns:repeat(3,1fr);gap:8px 22px}" +
+        // 📉 몰입 곡선: pull the legend right up under the chart (no gap at all) and shave the
+        // chart's own height too — together that's what shortens the card.
+        ".scurve{height:44px}.scurve-legend{margin-top:0}";
+    }
+
+    // ?fontBump=persona: +1px on every font-size declared inside #pane-persona (탭 제목,
+    // "Kibitzer 설정", .lede are all outside that section, so they're untouched). Each
+    // selector below is scoped with #pane-persona so it doesn't also bump the same classes
+    // (.hint, .card > h3) used in other tabs.
+    if (fontBumpPersona) {
+      s.textContent +=
+        "#pane-persona .card>h3{font-size:14px!important}" +
+        "#pane-persona .pcard .pn{font-size:16px!important}" +
+        "#pane-persona .hint{font-size:13px!important}" +
+        "#pane-persona .pqtag{font-size:14px!important}" +
+        "#pane-persona .pqtxt{font-size:16px!important}";
+    }
     document.head.appendChild(s);
+
+    // ?lede=<text>: swap the options page's intro paragraph for different copy, without
+    // touching the shipped page. .lede is static markup, already in the DOM at this point.
+    if (ledeParam) {
+      var lede = document.querySelector(".lede");
+      if (lede) lede.textContent = ledeParam;
+    }
   });
 
   // Scene-specific post-render nudges (the shipped UI keeps these behind a click).

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="insta.css" />
+    <style>
+      /* 캐러셀 표지. 유일하게 브랜드 머리말(로고 + 워드마크)을 달고, 카피가 폭을 다 쓰도록
+         위아래로 쌓는다 — 헤드라인 두 줄이 캔버스 폭에 꽉 차는 크기가 여기 기준이다. */
+      .frame { padding-left: 64px; padding-right: 64px; }
+      .logo { width: 78px; height: 78px; }
+      .brand { gap: 20px; font-size: 34px; }
+      .brand .dot { width: 20px; height: 20px; }
+      h1 { font-size: 76px; line-height: 1.3; margin-top: 34px; }
+      .sub { font-size: 30px; line-height: 1.75; margin-top: 30px; }
+      .stage { margin-top: 40px; }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <div class="brand">
+        <img class="logo" src="icons/icon-128.png" alt="" />
+        <span>Kibitzer</span><span class="dot"></span><b>몰입 훈수꾼</b>
+      </div>
+      <h1>목표를 선언하면<br />딴짓이 쌓일 때만 <span class="mark">슬쩍 훈수</span></h1>
+      <!-- 어차피 두 줄로 넘어가는 문장이라, 자연 줄바꿈이 만드는 "건넬 뿐." 외톨이 줄 대신
+           쉼표에서 끊어 두 줄 길이를 맞춘다. -->
+      <p class="sub">차단하지 않습니다. 몰입 게이지가 닳는 걸 지켜보다가,<br />화면 구석에서 한마디 건넬 뿐.</p>
+      <div class="stage">
+        <!-- 카피가 폭을 다 쓰는 대신 팝업에 남는 높이가 줄었다. 맨 아래 '설정' 버튼(자연
+             높이 306px 아래쪽)을 잘라내 카드를 그만큼 더 크게 쓴다. 306px은 버튼 두 줄
+             사이의 빈 틈이라 잘린 티가 나지 않는다 — 이미지용 크롭일 뿐 UI는 그대로다. -->
+        <div class="panel">
+          <div class="clip" data-fit="296x356" data-fit-max="1.8" data-fit-show="306">
+            <!-- elapsedMin=30 of a 90분 budget → frac 1/3 → sundial.ts puts the sun at the
+                 dome's 120° point, i.e. 11시 방향. Default (no param) would be startedAt:0,
+                 hugely overrun, showing the night moon instead — see stub.js. -->
+            <iframe class="fit-target" src="popup/popup.html?elapsedMin=30"></iframe>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="insta-fit.js"></script>
+  </body>
+</html>

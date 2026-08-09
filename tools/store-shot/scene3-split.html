@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="scenes.css" />
+    <style>
+      /* store-3의 대안. scene3.html(현재 스토어 3번, 세로로 긴 팝업 하나)은 그대로 두고,
+         같은 1280×800 화면비·같은 .split 레이아웃(카피 왼쪽) 위에 insta3.html의 좌우
+         두 패널 구성(지표+한줄평 / 리포트 카드)만 옮겨 얹은 버전이다.
+
+         .split .copy는 scenes.css 그대로 쓴다. 오른쪽 절반은 원래 패널 하나가 들어가던
+         .split .stage 자리 대신 .half를 두 칸으로 나눈 twocol을 놓는다 — insta-fit.js는
+         가장 가까운 .stage 조상의 크기로 배율을 재므로, 칸마다 독립된 .stage가 있어야
+         한다(아래 twocol 안쪽 두 div). 그 두 div는 여전히 클래스가 "stage"라서
+         scenes.css의 .split .stage 규칙(flex:1로 나란히, 안에서 가운데 정렬)을 그대로
+         받는다 — 편하게 재사용한 것.
+
+         바깥 래퍼(.half)는 일부러 "stage" 클래스를 안 쓴다. .split은
+         align-items:center라서, 명시적 height 없이 그 규칙만 받으면 내용 높이만큼
+         쪼그라들어(버그였다 — 처음엔 이래서 패널이 훨씬 작게 나왔다) 안쪽 100% 높이가
+         전부 무너진다. .half에 height:100%를 직접 줘서 그 사슬을 끊는다.
+
+         data-fit의 높이(381 / 413)는 insta3.html과 같다 — 같은 popup.html?part=… 조각을
+         쓰므로 실측값도 그대로 재사용한다.
+
+         .half에 좌우 padding을 준 건 여백 때문 — 처음엔 안 줬더니 카피 텍스트와 첫 패널
+         사이, 그리고 둘째 패널과 캔버스 오른쪽 끝 사이에 여백이 0이라 답답했다. */
+      .half { flex: 1; height: 100%; padding: 0 48px 0 32px; }
+      .twocol { display: flex; gap: 20px; height: 100%; }
+      /* scenes.css엔 .clip이 없다(insta.css에만 있다) — insta-fit.js가 여기에 크기를
+         inline으로 박아 넣으므로, 넘치는 부분을 잘라내려면 직접 선언해야 한다. */
+      .clip { overflow: hidden; }
+
+      /* 두 패널의 세로 위치 -----------------------------------------------------
+         왼쪽(.stage-head)은 scenes.css의 .split .stage{align-items:center} 그대로 —
+         381 높이 카드라서 세로 가운데 정렬하면 top≈181px이 나온다. 오른쪽 카드
+         묶음(.stage-cards)은 자연 높이가 더 커서(413) 똑같이 가운데 정렬하면 top이
+         더 위(≈163px)로 올라가 둘의 윗선이 안 맞았다.
+
+         그래서 오른쪽만 정렬 기준을 바꿨다: align-items:flex-start로 스택 위쪽에
+         붙이고, .panel에 margin-top을 줘서 왼쪽 카드의 top(181px, 실측값)만큼
+         내렸다 — 결과적으로 두 패널의 윗선이 같아진다.
+
+         ↓ 두 패널의 시작 y좌표를 직접 조정하려면 —
+         · 오른쪽(.stage-cards)은 아래 .stage-cards .panel의 margin-top 숫자를 바로
+           바꾸면 된다. 키우면 더 아래로, 줄이면 더 위로 움직인다.
+         · 왼쪽(.stage-head)도 같은 방식으로 옮기려면, 아래 .stage-head 규칙의
+           align-items를 flex-start로 바꾸고 `.stage-head .panel { margin-top: …px }`
+           를 추가하면 된다(지금은 center라서 margin-top이 안 먹는다 — flex-start일
+           때만 margin-top이 위치를 결정한다).
+
+         ↓ 오른쪽 "패널 안쪽"(흰 박스 안, 하이라이트 카드 위 / 몰입 곡선 카드 아래의
+           빈 흰색 공간)의 위·아래 여백을 늘리려면 —
+         위 margin-top은 패널 박스를 통째로 아래로 미는 값이라 이 얘기가 아니다(그건
+         "패널의 시작 위치"를 옮길 뿐, 박스 안쪽 공간이 아니다). 안쪽 여백을 늘리려면
+         바로 아래 .stage-cards .panel의 padding-top/padding-bottom을 쓴다 — 지금
+         28px씩 균등하게 줘서, 카드들의 실제 크기는 그대로 두고 패널 박스만 그만큼
+         커졌다. 이 숫자를 키우면 위아래 흰 여백이 똑같이 늘어난다(줄이려면 두 값을
+         같이 줄인다 — 다르게 주면 위/아래 여백이 비대칭이 된다).
+
+         이 padding은 .panel(clip과 stage 사이에 낀 요소)에 있어서 insta-fit.js의
+         availH 계산에서 자동으로 빠진다(파일 위쪽 .clip 관련 주석 참고) — 그래서
+         카드가 넘칠 걱정 없이 안전하게 키울 수 있고, 지금 정도(28px×2=56px)로는
+         남는 여유(availH가 필요한 높이보다 한참 크다)가 넉넉해서 카드 확대 배율도
+         전혀 안 바뀐다. 아주 크게(수백 px) 늘리면 그때는 배율이 폭 대신 높이에
+         걸리기 시작할 수 있다. */
+      /* .twocol .stage-cards로 쓴 이유: scenes.css의 .split .stage{align-items:center}가
+         클래스 2개(.split .stage)라 .stage-cards 하나짜리보다 우선순위가 높다 — 그냥
+         .stage-cards만 쓰면 조용히 안 먹힌다(처음에 이걸로 한 번 걸렸다: align-items는
+         그대로 center인 채 margin-top만 더해져서 가운데 정렬 기준점 자체가 아래로
+         밀려버렸다). 클래스를 하나 더 얹어 우선순위를 맞춘다. */
+      .twocol .stage-cards { align-items: flex-start; }
+      .stage-cards .panel { margin-top: 181px; padding: 9px 0; }
+    </style>
+  </head>
+  <body>
+    <div class="split">
+      <div class="copy">
+        <div class="brand"><span>Kibitzer</span><span class="dot"></span><b>몰입 훈수꾼</b></div>
+        <h1>세션을 끝내면<br /><span class="mark">시간이 어디로 샜는지</span><br />숫자로 남습니다</h1>
+        <p class="sub">
+          유효 페이지 비율, 실제로 목표에 쓴 시간, 받은 훈수 횟수.<br />
+          고른 말투가 마지막에 한 줄 평을 남깁니다.
+        </p>
+        <div class="chips">
+          <span class="chip">지난 세션과 비교</span>
+          <span class="chip">MVP · 빌런</span>
+        </div>
+      </div>
+      <div class="half">
+        <div class="twocol">
+          <div class="stage stage-head">
+            <div class="panel">
+              <div class="clip" data-fit="296x381" data-fit-max="1.8">
+                <iframe class="fit-target" src="popup/popup.html?scene=summary&amp;part=head"></iframe>
+              </div>
+            </div>
+          </div>
+          <div class="stage stage-cards">
+            <div class="panel">
+              <div class="clip" data-fit="296x413" data-fit-max="1.8">
+                <iframe
+                  class="fit-target"
+                  src="popup/popup.html?scene=summary&amp;part=cards&amp;cards=highlight,compare-last,focus,scurve"
+                ></iframe>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="insta-fit.js"></script>
+  </body>
+</html>

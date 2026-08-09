@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="insta.css" />
+    <style>
+      /* legacy — 캐러셀 3장의 이전 구성. 단일 팝업 이미지 하나를 세로로 세운다. 현재 채택된
+         버전(두 덩어리로 쪼개 나란히 놓는 구성)은 insta3.html. shoot-insta.sh는 그쪽만 찍고
+         이 파일은 참고용으로만 남겨 둔다.
+
+         종료 요약 팝업은 296×605로 캔버스보다 세로가 길다. 축소해서 다 넣는 대신 맨 아래
+         '확인' 버튼(자연 높이 536px 아래쪽)을 잘라내고 카드를 캔버스 하단까지 흘려보낸다 —
+         숫자·한 줄 평·MVP는 전부 화면 안에 남고, 카드가 아래로 이어지는 인상만 남는다. */
+      .frame { padding-bottom: 0; }
+      .stage { margin-top: 30px; }
+      .panel { border-radius: 22px 22px 0 0; padding: 20px 20px 0; }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <h1>끝내고 나면<br /><span class="mark">시간이 어디로 샜는지</span> 보입니다</h1>
+      <div class="chips">
+        <span class="chip">지난 세션과 비교</span>
+        <span class="chip">MVP · 빌런</span>
+      </div>
+      <div class="stage">
+        <div class="panel">
+          <div class="clip" data-fit="296x605" data-fit-max="1.6" data-fit-show="536">
+            <iframe class="fit-target" src="popup/popup.html?scene=summary"></iframe>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="insta-fit.js"></script>
+  </body>
+</html>
