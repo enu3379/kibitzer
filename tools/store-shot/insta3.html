@@ -11,11 +11,23 @@
          구성이었다 — 그 버전은 insta3-legacy.html로 남아 있다.
 
          쪼개기(?part=head|cards)와 이 슬라이스만의 스타일 다듬기(구분선 제거·상하 여백
-         대칭·집중 카드 3열·곡선 카드 압축)는 전부 stub.js의 part=cards 분기에 있다 — 이
-         파일이 아니라 거기서 고친다.
-         data-fit의 높이(381 / 413)만 실측값으로, 슬라이스별 body.scrollHeight다. */
-      .frame { padding-left: 64px; padding-right: 64px; }
+         대칭·집중 카드 3열·곡선 카드 압축·안쪽 텍스트 +1px)는 전부 stub.js의 part=head/
+         part=cards 분기에 있다 — 팝업 안쪽 글자 크기를 바꾸고 싶으면 이 파일이 아니라
+         거기 있는 font-size 숫자를 고친다(카피 쪽 h1/.chip은 아래 이 파일에서).
+         data-fit의 높이(398 / 428)만 실측값으로, 슬라이스별 body.scrollHeight다. */
+      .frame { padding-left: 64px; padding-right: 64px; margin-top:-15px;}
       .cols { margin-top: 36px; }
+      /* h1 제외 카피 텍스트 전부 +2px(insta.css 기본값 19에서). 이 font-size 값만 바꾸면
+         조정된다. (팝업 안쪽 글자는 위 주석 참고 — stub.js 쪽) */
+      .chip { font-size: 21px; }
+
+      /* 오른쪽 패널 안쪽(흰 박스 안, 하이라이트 카드 위 / 몰입 곡선 카드 아래)의 빈 여백.
+         ↓ 이 숫자 하나만 바꾸면 위·아래가 항상 같은 값으로 함께 늘고 준다.
+         (`padding: N px 0`은 위=아래=N, 좌우=0이라 폭에는 영향이 없다.)
+         이 padding은 .panel — clip과 stage 사이 — 에 있어서 insta-fit.js가 배율을 잴 때
+         자동으로 빠진다. 지금은 폭이 배율을 정하고 있어서 여백을 늘려도 카드 크기는
+         그대로다. */
+      .stage-cards .panel { padding: 12px 0; }
     </style>
   </head>
   <body>
@@ -28,14 +40,14 @@
       <div class="cols">
         <div class="stage">
           <div class="panel">
-            <div class="clip" data-fit="296x381" data-fit-max="1.8">
+            <div class="clip" data-fit="296x398" data-fit-max="1.8">
               <iframe class="fit-target" src="popup/popup.html?scene=summary&amp;part=head"></iframe>
             </div>
           </div>
         </div>
-        <div class="stage">
+        <div class="stage stage-cards">
           <div class="panel">
-            <div class="clip" data-fit="296x413" data-fit-max="1.8">
+            <div class="clip" data-fit="296x428" data-fit-max="1.8">
               <iframe
                 class="fit-target"
                 src="popup/popup.html?scene=summary&amp;part=cards&amp;cards=highlight,compare-last,focus,scurve"

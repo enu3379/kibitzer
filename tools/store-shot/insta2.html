@@ -86,9 +86,13 @@
         position: absolute !important;
         right: 18px;
         bottom: 16px;
-        transform: scale(1.15); /* 말풍선 가로·세로 15% 확대 */
+        transform: scale(1.15); /* 말풍선 가로·세로 확대 */
         transform-origin: bottom right; /* 우하단 고정 위치는 그대로, 왼쪽·위로 커진다 */
       }
+      /* h1 제외 텍스트 전부 +2px(insta.css 기본값 24/19에서). 이 두 font-size 값만
+         바꾸면 각각 조정된다. */
+      .sub { font-size: 26px; }
+      .chip { font-size: 21px; }
     </style>
   </head>
   <body>
@@ -134,7 +138,7 @@
       showKibitzerToast({
         notificationId: "kbz-7",
         displayToken: 7,
-        message: "대단히 유익해 보이는 영상이군요. 졸업논문\n항목엔 없겠습니다만.",
+        message: "대단히 유익해 보이는 영상이군요. 졸업\n논문 항목엔 없겠습니다만.",
         contextLabel: "youtube.com#-1683729401",
         autoDismissMs: 600000,
         kind: "intervention",
@@ -148,7 +152,15 @@
       ".hands{transform:scale(1.25);transform-origin:top left}" +
       // toast.js는 .msg에 textContent로 문자열을 그대로 꽂는다. 기본 white-space:normal
       // 아래선 문자열 속 \n이 그냥 공백으로 뭉개지므로, pre-line으로 바꿔야 실제 줄바꿈이 된다.
-      ".msg{white-space:pre-line}"
+      ".msg{white-space:pre-line}" +
+      // 말풍선 안 텍스트 크기. 지금은 toast.js 기본값 그대로라 렌더가 안 바뀐다 — 숫자
+      // 하나씩 직접 바꿔서 조정한다. 이 값들은 #kibitzer-toast-host의 scale(1.15) 위에
+      // 얹히므로, 배율은 그대로 두고 특정 텍스트만 키우거나 줄일 때 쓴다.
+      ".brand{font-size:11px}" +  /* "Kibitzer" 라벨 */
+      ".close{font-size:12px}" +    /* ✕ 닫기 버튼 */
+      ".msg{font-size:15px}" +      /* 본문 메시지 */
+      ".ctx{font-size:10.5px}" +    /* youtube.com#-... 컨텍스트 줄 */
+      ".btn{font-size:12.2px}"      /* 목표와 관련 있어요 / 5분만 / 30분 조용히 */
       host.shadowRoot.appendChild(s)
     </script>
     <script src="insta-fit.js"></script>

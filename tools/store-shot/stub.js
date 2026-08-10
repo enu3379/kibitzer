@@ -36,6 +36,11 @@
   // shipped sizes read a touch small blown up. Scoped to that one pane; nothing else shifts.
   var fontBumpPersona = params.get("fontBump") === "persona";
 
+  // ?fontBump=active — same idea for the popup's active (goal) card: 현재 목표, 게이지
+  // state/score, 말투 line, and the four buttons. Scoped to #active so scene1.html/
+  // store-1-popup.png (plain popup.html, no fontBump) stays untouched.
+  var fontBumpActive = params.get("fontBump") === "active";
+
   var PERSONAS = [
     { key: "navigation", name: "내비게이션", tier: "default" },
     { key: "tsundere", name: "츤데레", tier: "default" },
@@ -109,7 +114,9 @@
     cards: cardsParam ? cardsParam.split(",") : ["highlight"],
     comment: {
       status: "ready",
-      text: "78분 중 61분을 논문에 쓰셨습니다. 나머지 17분의 행방은 굳이 여쭙지 않겠습니다.",
+      // \n은 실제 UI에선(white-space:normal) 그냥 공백으로 뭉개져 무시된다 — "나머지" 뒤에서
+      // 줄바꿈되는 건 part=head 슬라이스에서만(.comment-text{white-space:pre-line} 참고).
+      text: "78분 중 61분을 논문에 쓰셨습니다. 나머지\n17분의 행방은 굳이 여쭙지 않겠습니다.",
     },
     seen: false,
     createdAt: 0,
@@ -222,7 +229,19 @@
     // The '세션 더보기' toggle and '확인' button go in both slices: they are real UI, but a
     // still image has nothing to toggle or confirm.
     if (part === "head") {
-      s.textContent += "#sumMore,#sumReport,#sumDone{display:none!important}";
+      s.textContent +=
+        "#sumMore,#sumReport,#sumDone{display:none!important}" +
+        // 이 슬라이스에서 보이는 텍스트 전부 +1px. 숫자 하나씩 직접 바꿔서 조정한다.
+        "h1{font-size:13px!important}" +           /* KIBITZER 워드마크 */
+        ".sumlabel{font-size:12px!important}" +    /* 세션 요약 */
+        ".sumgoal{font-size:18px!important}" +     /* 목표 문구 */
+        ".stat-name{font-size:13px!important}" +   /* 유효 페이지 비율 등 항목 이름 */
+        ".stat-val{font-size:16px!important}" +    /* 32/41, 1시간 1분, 3회 */
+        ".stat-val small{font-size:13px!important}" + /* · 78%, / 1시간 18분 */
+        ".top-title{font-size:14px!important}" +   /* 가장 오래 머문 페이지 제목 */
+        ".top-meta{font-size:12px!important}" +    /* 유효 · arxiv.org · 23분 */
+        ".comment-head{font-size:12px!important}" + /* 영국 집사의 한 줄 평 */
+        ".comment-text{font-size:14px!important;white-space:pre-line}"; /* 한 줄 평 본문 */
     } else if (part === "cards") {
       s.textContent +=
         // h1 goes too — the left slice already carries the KIBITZER wordmark, and repeating it
@@ -245,10 +264,22 @@
         // set by how much of its column the label text fills (최장 집중 연속 vs 첫 딴짓까지 are
         // different lengths) — widening the gap swamps that difference so the three read as
         // evenly spaced.
-        ".metrics{grid-template-columns:repeat(3,1fr);gap:8px 22px}" +
+        ".metrics{grid-template-columns:repeat(3,1fr);gap:8px 8px}" +
         // 📉 몰입 곡선: pull the legend right up under the chart (no gap at all) and shave the
         // chart's own height too — together that's what shortens the card.
-        ".scurve{height:44px}.scurve-legend{margin-top:0}";
+        ".scurve{height:44px}.scurve-legend{margin-top:0}" +
+        // 이 슬라이스에서 실제로 쓰는 카드(하이라이트·지난번보다·집중·몰입 곡선)의 텍스트만
+        // +1px. cards= 목록에 딴짓 리포트(.mischief/.rank)나 사이트별 시간을 추가하면 그
+        // 카드들 글자는 아직 이 목록에 없어서 안 커진다 — 필요해지면 여기 더 추가한다.
+        ".card>.ch{font-size:11.5px!important}" + /* 카드 제목(하이라이트/지난번보다/집중/곡선) */
+        ".dchip{font-size:12px!important}" +      /* 유효율 ▲11%p 같은 알약 */
+        ".hlc .hk{font-size:11.5px!important}" +  /* MVP / 빌런 */
+        ".hlc .hn{font-size:13px!important}" +    /* 그 아래 페이지·사이트 이름 */
+        ".hlc .hs{font-size:12px!important}" +    /* 23분 집중 / 9분 헌납 */
+        ".mc .mk{font-size:11.5px!important}" +   /* 최장 집중 연속 등 항목 이름 */
+        ".mc .mv{font-size:15px!important}" +     /* 23분 / 26분 / 9곳 */
+        ".mc .mv small{font-size:12px!important}" +
+        ".scurve-legend{font-size:11.5px!important}"; /* 이번 / 지난 범례 */
     }
 
     // ?fontBump=persona: +1px on every font-size declared inside #pane-persona (탭 제목,
@@ -257,11 +288,33 @@
     // (.hint, .card > h3) used in other tabs.
     if (fontBumpPersona) {
       s.textContent +=
-        "#pane-persona .card>h3{font-size:14px!important}" +
-        "#pane-persona .pcard .pn{font-size:16px!important}" +
-        "#pane-persona .hint{font-size:13px!important}" +
-        "#pane-persona .pqtag{font-size:14px!important}" +
-        "#pane-persona .pqtxt{font-size:16px!important}";
+        // 말투 탭 안쪽. 숫자 하나씩 직접 바꿔서 조정한다.
+        "#pane-persona .card>h3{font-size:16px!important}" +   /* 훈수 말투 / 실험실 (베타) */
+        "#pane-persona .pcard .pn{font-size:18px!important}" + /* 말투 버튼 라벨 */
+        "#pane-persona .hint{font-size:14px!important}" +      /* 실험실 안내문 */
+        "#pane-persona .pqtag{font-size:16px!important}" +     /* 선택됨 · 츤데레 */
+        "#pane-persona .pqtxt{font-size:20px!important}" +     /* 말투 인용문 */
+        // 탭 바깥 공통 부분. 지금은 실제 옵션 페이지와 같은 기본값이라 렌더가 안 바뀐다 —
+        // 키우고 싶을 때 이 숫자만 올리면 된다.
+        ".head .name{font-size:22px!important}" +              /* Kibitzer 설정 */
+        ".lede{font-size:13.5px!important}" +                  /* 그 아래 리드 문장 */
+        ".tabs button{font-size:13px!important}";              /* 일반/사이트/말투/AI 판정/데이터 */
+    }
+
+    // ?fontBump=active: +1px on the active card's text (현재 목표, 게이지 state/score, 말투
+    // line, buttons). #active scopes it to that card only.
+    if (fontBumpActive) {
+      s.textContent +=
+        // 숫자 하나씩 직접 바꿔서 조정한다.
+        "h1{font-size:13px!important}" +                  /* KIBITZER 워드마크 */
+        "#active .goal-label{font-size:12px!important}" + /* 현재 목표 */
+        "#active .goal{font-size:18px!important}" +       /* 목표 문구 */
+        "#active .state{font-size:13px!important}" +      /* 집중/흔들림/이탈 */
+        "#active .state .dot{font-size:11px!important}" +
+        "#active .score{font-size:13px!important}" +      /* / 100 */
+        "#active .score b{font-size:16px!important}" +    /* 82 */
+        "#active .mode{font-size:12px!important}" +       /* AI 판정 활성화 · 말투 줄 */
+        "#active button{font-size:15px!important}";       /* 목표 변경 / 일시정지 / 종료하기 */
     }
     document.head.appendChild(s);
 

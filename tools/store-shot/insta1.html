@@ -8,11 +8,21 @@
          위아래로 쌓는다 — 헤드라인 두 줄이 캔버스 폭에 꽉 차는 크기가 여기 기준이다. */
       .frame { padding-left: 64px; padding-right: 64px; }
       .logo { width: 78px; height: 78px; }
-      .brand { gap: 20px; font-size: 34px; }
+      /* h1 제외 텍스트 전부 +2px. 이 두 font-size 값만 바꾸면 각각 조정된다. */
+      .brand { gap: 20px; font-size: 36px; }
       .brand .dot { width: 20px; height: 20px; }
       h1 { font-size: 76px; line-height: 1.3; margin-top: 34px; }
-      .sub { font-size: 30px; line-height: 1.75; margin-top: 30px; }
+      .sub { font-size: 32px; line-height: 1.75; margin-top: 30px; }
       .stage { margin-top: 40px; }
+
+      /* '종료하기' 줄 아래 빈 흰색 여백. ↓ 이 숫자 하나만 바꾸면 늘고 준다.
+         data-fit-show(아래 .clip)가 실제 UI를 딱 그 지점에서 잘라내므로, UI 안에는 더
+         키울 여백이 없다 — 그래서 자른 뒤 .panel에 빈 공간을 덧붙이는 방식이다. 패널의
+         시작 y좌표(위)는 그대로고, 이 padding-bottom만큼 패널 전체 높이가 늘어난다.
+         .panel은 clip과 stage 사이에 있어서 insta-fit.js가 배율을 잴 때 이 padding을
+         자동으로 빼고 계산한다 — 너무 크게 늘리면 그만큼 배율이 줄어들 수 있다(지금
+         20px 정도는 폭이 배율을 정하고 있어서 영향 없다). */
+      .panel { padding-bottom: 15px; }
     </style>
   </head>
   <body>
@@ -27,14 +37,17 @@
       <p class="sub">차단하지 않습니다. 몰입 게이지가 닳는 걸 지켜보다가,<br />화면 구석에서 한마디 건넬 뿐.</p>
       <div class="stage">
         <!-- 카피가 폭을 다 쓰는 대신 팝업에 남는 높이가 줄었다. 맨 아래 '설정' 버튼(자연
-             높이 306px 아래쪽)을 잘라내 카드를 그만큼 더 크게 쓴다. 306px은 버튼 두 줄
-             사이의 빈 틈이라 잘린 티가 나지 않는다 — 이미지용 크롭일 뿐 UI는 그대로다. -->
+             높이 313px 아래쪽)을 잘라내 카드를 그만큼 더 크게 쓴다. 313px은 버튼 두 줄
+             사이의 빈 틈이라 잘린 티가 나지 않는다 — 이미지용 크롭일 뿐 UI는 그대로다.
+             368/313 둘 다 실측값이라, stub.js에서 글자 크기를 바꾸면 여기도 다시 재야 한다. -->
         <div class="panel">
-          <div class="clip" data-fit="296x356" data-fit-max="1.8" data-fit-show="306">
+          <div class="clip" data-fit="296x368" data-fit-max="1.8" data-fit-show="313">
             <!-- elapsedMin=30 of a 90분 budget → frac 1/3 → sundial.ts puts the sun at the
                  dome's 120° point, i.e. 11시 방향. Default (no param) would be startedAt:0,
-                 hugely overrun, showing the night moon instead — see stub.js. -->
-            <iframe class="fit-target" src="popup/popup.html?elapsedMin=30"></iframe>
+                 hugely overrun, showing the night moon instead — see stub.js.
+                 fontBump=active: 카드 안 텍스트 +1px. 숫자 조정은 stub.js의 fontBumpActive
+                 블록에서 한다 — 이 파일이 아니라 거기가 진짜 소스다. -->
+            <iframe class="fit-target" src="popup/popup.html?elapsedMin=30&amp;fontBump=active"></iframe>
           </div>
         </div>
       </div>
