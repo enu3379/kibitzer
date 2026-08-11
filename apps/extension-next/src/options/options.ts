@@ -23,7 +23,7 @@ import {
   type ProviderLockKind,
 } from "./aiTabState.ts"
 
-import { buildProviderWarn, providerAlertLevel } from "../lib/providerHealthView.ts"
+import { buildProviderWarn } from "../lib/providerHealthView.ts"
 import type { ProviderHealthSnapshot } from "../lib/providerHealth.ts"
 
 import {
@@ -363,6 +363,16 @@ let usageDays = 1
 let providerLock: { provider: ProviderId; kind: ProviderLockKind } | null = null
 /** The only genuine failure the tab can produce on its own: the preference write failed. */
 let preferenceSaveError: string | null = null
+
+/** Dismiss both transient notices. The provider lock lives inside the provider block, so
+ *  clearing it has to repaint that block — every caller here renders some other region,
+ *  and without this the refusal outlived the state that justified it. */
+function dismissAiNotices(): void {
+  const hadLock = providerLock !== null
+  providerLock = null
+  preferenceSaveError = null
+  if (hadLock) renderProviderBlocks()
+}
 
 function staleChip(): ChipState {
   return { kind: "unknown", chip: "– 테스트", text: "이 라우팅으로 실제 호출을 확인합니다" }
@@ -710,8 +720,7 @@ function renderRoutes(): void {
     }
     prov.value = d.provider
     prov.onchange = () => {
-      providerLock = null
-      preferenceSaveError = null
+      dismissAiNotices()
       d.provider = prov.value as ProviderId
       d.custom = false
       d.model = presetsFor(d.provider, tier)[0]
@@ -739,8 +748,7 @@ function renderRoutes(): void {
     else model.value = presets.includes(d.model) ? d.model : presets[0]
 
     model.onchange = () => {
-      providerLock = null
-      preferenceSaveError = null
+      dismissAiNotices()
       if (model.value === "__custom") {
         d.custom = true
         d.model = ""
@@ -755,16 +763,14 @@ function renderRoutes(): void {
       }
     }
     input.oninput = () => {
-      providerLock = null
-      preferenceSaveError = null
+      dismissAiNotices()
       d.model = input.value.trim()
       chips[tier] = staleChip()
       renderTierState(tier)
       renderAiControls()
     }
     back.onclick = () => {
-      providerLock = null
-      preferenceSaveError = null
+      dismissAiNotices()
       d.custom = false
       d.model = presetsFor(d.provider, tier)[0]
       chips[tier] = staleChip()
@@ -780,19 +786,34 @@ function renderRoutes(): void {
  *  renderTierState instead, next to the control that fixes it. */
 function renderAiControls(): void {
   if (!judge) return
-  const complete = isAiConfigComplete(draft, judge.accounts)
+  // The save button is about the edit in progress, so it reads the draft.
+  const draftComplete = isAiConfigComplete(draft, judge.accounts)
   const routeTestFailed = TIERS.some((tier) => chips[tier].kind === "err")
-  ajSave.disabled = !complete || routeTestFailed
-  ajSave.title = !complete
+  ajSave.disabled = !draftComplete || routeTestFailed
+  ajSave.title = !draftComplete
     ? "Tier 1과 Tier 2의 모델·키를 모두 설정해야 저장할 수 있어요."
     : routeTestFailed
       ? "오류가 난 Tier를 수정하거나 다시 테스트해 정상 응답을 확인해 주세요."
       : ""
 
-  // The status line says which of the three states we are in; the tone says how loud.
-  // Runtime failures never reword it — they only colour it and fill the alert stack.
-  const status = aiStatus(aiPreference, draft, judge.accounts)
-  const level = aiPreference ? providerAlertLevel(runtimeHealth) : null
+  // The status line reports what the worker is running, so it reads the SAVED routes —
+  // tier12 gates on those. Reading the draft would flip the line to "켜짐" the moment a
+  // model name is typed, before 저장 has told the worker anything.
+  const status = aiStatus(aiPreference, judge.routes, judge.accounts)
+  // Runtime health only — a manual test result belongs to its tier row. Reuses the
+  // popup's model so both surfaces name the same failure the same way and agree on
+  // what it costs the user.
+  const warn = aiPreference
+    ? buildProviderWarn(runtimeHealth, routeKeyless(), Date.now())
+    : { facts: [], consequence: null }
+  // Derived from the drawn lines, not the raw records: an expired record produces no
+  // fact, and must not colour the line red over an empty stack.
+  const level = warn.facts.some((fact) => fact.tone === "red")
+    ? "red"
+    : warn.facts.length > 0
+      ? "amber"
+      : null
+
   const copy = STATUS_COPY[status]
   ajState.className = `aistate ${aiStatusTone(status, level)}`
   ajStateText.textContent = copy.text
@@ -808,32 +829,33 @@ function renderAiControls(): void {
   if (preferenceSaveError) {
     ajAlerts.appendChild(el("div", "ai-alert err", preferenceSaveError))
   }
-  // Runtime health only — a manual test result belongs to its tier row. Reuses the
-  // popup's model so both surfaces name the same failure the same way and agree on
-  // what it costs the user.
-  if (aiPreference) {
-    const warn = buildProviderWarn(
-      runtimeHealth,
-      {
-        tier1: tierGap("tier1", draft, judge.accounts) === "key",
-        tier2: tierGap("tier2", draft, judge.accounts) === "key",
-      },
-      Date.now(),
-    )
-    warn.facts.forEach((fact, index) => {
-      const alert = el("div", `ai-alert${fact.tone === "red" ? " err" : ""}`)
-      const msg = el("div", "msg")
-      msg.appendChild(el("span", undefined, fact.text))
-      // One consequence per snapshot: it describes the combined state, so it hangs off
-      // the most severe (last) fact rather than repeating on every line.
-      if (index === warn.facts.length - 1 && warn.consequence) {
-        msg.appendChild(el("span", "conseq", warn.consequence))
-      }
-      alert.appendChild(msg)
-      alert.appendChild(button("btn", "다시 테스트", () => void runRouteTest(fact.tier)))
-      ajAlerts.appendChild(alert)
-    })
+  warn.facts.forEach((fact, index) => {
+    const alert = el("div", `ai-alert${fact.tone === "red" ? " err" : ""}`)
+    const msg = el("div", "msg")
+    msg.appendChild(el("span", undefined, fact.text))
+    // One consequence per snapshot: it describes the combined state, so it hangs off
+    // the most severe (last) fact rather than repeating on every line.
+    if (index === warn.facts.length - 1 && warn.consequence) {
+      msg.appendChild(el("span", "conseq", warn.consequence))
+    }
+    alert.appendChild(msg)
+    const retest = el("button", "btn", "다시 테스트") as HTMLButtonElement
+    retest.type = "button"
+    retest.addEventListener("click", () => void retestSavedRoute(fact.tier, retest))
+    alert.appendChild(retest)
+    ajAlerts.appendChild(alert)
+  })
+}
+
+/** Which tiers the health model should treat as keyless — the saved route's provider has
+ *  no key. "both" is keyless too (no model AND no key), so this cannot test for "key". */
+function routeKeyless(): { tier1: boolean; tier2: boolean } {
+  const of = (tier: TierName): boolean => {
+    if (!judge) return false
+    const gap = tierGap(tier, judge.routes, judge.accounts)
+    return gap === "key" || gap === "both"
   }
+  return { tier1: of("tier1"), tier2: of("tier2") }
 }
 
 /** Everything that belongs to one tier's row: the test chip and the inline line under it
@@ -846,14 +868,16 @@ function renderTierState(tier: TierName): void {
   const gap = tierGap(tier, draft, judge.accounts)
   gapEl.textContent = ""
 
-  if (chip.kind === "err") {
+  // A missing model or key outranks a failed test: the test cannot pass until the gap is
+  // filled (a keyless route fails with "키 없음"), and only the gap line offers the fix.
+  if (gap === null) {
+    if (chip.kind !== "err") {
+      gapEl.className = "mgap hidden"
+      return
+    }
     gapEl.className = "mgap err"
     gapEl.appendChild(el("span", undefined, `테스트 실패 — ${chip.text}`))
     gapEl.appendChild(button("mgap-act", "다시 테스트", () => void runRouteTest(tier)))
-    return
-  }
-  if (gap === null) {
-    gapEl.className = "mgap hidden"
     return
   }
   gapEl.className = "mgap"
@@ -902,9 +926,10 @@ async function runRouteTest(tier: TierName): Promise<void> {
   if (token !== routeTestTokens[tier] || fingerprint !== routeTestFingerprint(tier)) return
   if (result?.ok) {
     chips[tier] = { kind: "ok", chip: "✓ 방금 전", text: `정상 — ${result.detail}` }
-    // A route that just answered is not a route with a live failure: drop the runtime
-    // record so a green chip and a red alert can never sit on screen together.
-    runtimeHealth[tier] = null
+    // The worker drops the stored failure itself when the tested route is the saved one
+    // (an unsaved draft proves nothing about the route that failed). Re-read rather than
+    // clearing locally, or the alert would come back on the next refresh.
+    void refreshProviderHealth()
   } else {
     // The failure text goes on the tier's own row (renderTierState) — it used to be
     // repeated in the chip tooltip, the alert stack and this hint at the same time.
@@ -912,6 +937,23 @@ async function runRouteTest(tier: TierName): Promise<void> {
   }
   renderTierState(tier)
   renderAiControls()
+}
+
+/** The alert stack describes a failure of the SAVED route, so its retest must call that
+ *  route and not the draft — otherwise a passing draft would clear an alert for a route
+ *  that is still broken. Leaves the tier's chip alone: the chip reports the draft. */
+async function retestSavedRoute(tier: TierName, trigger: HTMLButtonElement): Promise<void> {
+  if (!judge || trigger.disabled) return
+  const route = judge.routes[tier]
+  trigger.disabled = true
+  trigger.textContent = "확인 중…"
+  try {
+    await send({ type: "test-route", tier, provider: route.provider, model: route.model })
+  } catch {
+    // A failed round trip leaves the stored record untouched; the refresh below repaints
+    // the same alert, which is the honest outcome.
+  }
+  await refreshProviderHealth()
 }
 
 for (const chipEl of document.querySelectorAll<HTMLButtonElement>(".stchip")) {
@@ -951,8 +993,7 @@ ajEnabled.addEventListener("click", async () => {
   // an incomplete route here would be rejected by setRoutes and strand the toggle.
   const commitRoutes = nextPreference && isAiConfigComplete(draft, judge.accounts)
   ajEnabled.disabled = true
-  providerLock = null
-  preferenceSaveError = null
+  dismissAiNotices()
   try {
     let savedView: JudgeView | null = null
     if (commitRoutes) {
@@ -988,7 +1029,12 @@ ajEnabled.addEventListener("click", async () => {
  *  so a snapshot taken at load goes stale. Re-read it whenever the user comes back to the
  *  page or to this tab — the two moments where the stack is about to be looked at. */
 async function refreshProviderHealth(): Promise<void> {
-  const snapshot = (await send({ type: "get-provider-health" })) as ProviderHealthSnapshot | undefined
+  let snapshot: ProviderHealthSnapshot | undefined
+  try {
+    snapshot = (await send({ type: "get-provider-health" })) as ProviderHealthSnapshot | undefined
+  } catch {
+    return // worker asleep or restarting — keep showing the last snapshot
+  }
   if (!snapshot) return
   runtimeHealth = snapshot
   renderAiControls()

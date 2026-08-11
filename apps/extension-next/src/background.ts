@@ -994,7 +994,20 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     return toPublicSettings(await mutateProviderSettings(null, () => setRoutes(routes, requireComplete)))
   }
   if (message?.type === "test-route" && message.tier && message.provider) {
-    return await testRoute(message.tier, message.provider, message.model ?? "")
+    const tier = message.tier
+    const model = message.model ?? ""
+    const result = await testRoute(tier, message.provider, model)
+    // A successful call on the tier's *saved* route disproves its stored failure — the
+    // toolbar mark and the options alert must not keep accusing a route that just
+    // answered. A draft route proves nothing about the one that failed, so it is
+    // deliberately not enough.
+    if (result.ok) {
+      const saved = (await getJudgeSettings()).routes[tier]
+      if (saved.provider === message.provider && saved.model === model) {
+        await clearProviderHealth([tier])
+      }
+    }
+    return result
   }
   if (message?.type === "get-usage") {
     return { rows: await getUsage(message.days ?? 1) }

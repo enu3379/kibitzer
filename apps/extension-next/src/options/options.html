@@ -286,7 +286,7 @@
       .info-pop b { display: block; color: var(--page-ink); margin-bottom: 4px; }
       .info-tip:hover .info-pop, .info-tip:focus-within .info-pop { visibility: visible; opacity: 1; }
 
-      .ai-actions { align-items: center; }
+
       .privacy-link { border-top: 1px solid var(--line-soft); padding: 11px 0; font-size: 11.5px;
         color: var(--page-ink-2); }
       .privacy-link button { all: unset; cursor: pointer; color: var(--accent); font-weight: 650;
@@ -452,7 +452,9 @@
       <section class="pane" id="pane-ai" role="tabpanel" aria-labelledby="tab-ai" data-pane="ai">
         <div class="card">
           <h3 class="ai-title">AI 판정<span class="description">AI를 활용해 목표 이탈 여부를 더 정확하게 판정합니다.</span></h3>
-          <div class="aistate" id="ajState">
+          <!-- role=status: activating the switch can land on 준비 중 rather than 켜짐, and the
+               line is the only thing that says so — a bare aria-checked would announce "on". -->
+          <div class="aistate" id="ajState" role="status" aria-live="polite">
             <div class="line1">
               <span class="dot" aria-hidden="true"></span>
               <span class="txt" id="ajStateText"></span>

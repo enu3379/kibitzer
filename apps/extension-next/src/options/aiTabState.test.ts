@@ -79,7 +79,7 @@ test("runtime failures colour the status line without rewording it", () => {
 test("status copy states the mode without asking for an action the toggle cannot take", () => {
   assert.equal(STATUS_COPY.active.text, "AI 판정 켜짐")
   assert.equal(STATUS_COPY.pending.text, "AI 판정 준비 중")
-  assert.equal(STATUS_COPY.pending.sub, "아래 설정을 마치면 자동으로 켜져요")
+  assert.equal(STATUS_COPY.pending.sub, "아래 Tier 1·2 설정을 마치면 켜져요")
   assert.equal(STATUS_COPY.off.text, "AI 판정 꺼짐")
   assert.equal(
     STATUS_COPY.off.sub,

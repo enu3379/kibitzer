@@ -69,7 +69,11 @@ export function aiStatus(
 }
 
 /** How loudly to paint the status line. `off` is amber, not neutral: running without AI
- *  is supported but degraded, and the line is the only place that still says so. */
+ *  is supported but degraded, and the line is the only place that still says so.
+ *
+ *  `alertLevel` must be derived from the very lines the alert stack is about to draw, not
+ *  from the raw records: an expired record still counts for providerAlertLevel but no
+ *  longer produces a fact, which would paint the line red over an empty stack. */
 export type AiStatusTone = "ok" | "warn" | "err"
 
 export function aiStatusTone(
@@ -91,7 +95,9 @@ export const STATUS_COPY: Record<AiStatus, StatusCopy> = {
   // costs are the alert stack's job, and repeating them in the headline was the old
   // duplication. The tone carries the severity.
   active: { text: "AI 판정 켜짐", sub: null },
-  pending: { text: "AI 판정 준비 중", sub: "아래 설정을 마치면 자동으로 켜져요" },
+  // No "자동으로": filling a key gap re-routes through the worker on its own, but filling
+  // a model gap still needs 저장, and the line must not promise the wrong one.
+  pending: { text: "AI 판정 준비 중", sub: "아래 Tier 1·2 설정을 마치면 켜져요" },
   off: {
     text: "AI 판정 꺼짐",
     sub: "로컬 판정으로 동작 중입니다. AI 판정을 비활성화하면 판정 품질이 낮아지고 훈수 메시지가 단순해져요.",
