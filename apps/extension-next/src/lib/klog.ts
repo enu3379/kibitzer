@@ -2,7 +2,7 @@
 // console AND a ring buffer in chrome.storage.local, so it can be shown in the popup or
 // exported to a file (~/Downloads/kibitzer-debug.log) that can be read directly off disk.
 
-import { expectDownload } from "./downloadName.ts"
+import { expectDownload, EXPORT_MIME } from "./downloadName.ts"
 
 const LOG_KEY = "kibitzer:logs:v1"
 const CAP = 400
@@ -67,8 +67,8 @@ export async function logText(): Promise<string> {
 export async function exportLog(): Promise<{ ok: boolean; error?: string }> {
   try {
     const text = (await logText()) || "(empty)"
-    const url = `data:text/plain;charset=utf-8,${encodeURIComponent(text)}`
-    // A Save-As dialog would otherwise rename this to 다운로드.txt — see downloadName.ts.
+    const url = `data:${EXPORT_MIME};charset=utf-8,${encodeURIComponent(text)}`
+    // Chrome renames this to 다운로드.txt without both halves of the fix — see downloadName.ts.
     expectDownload(url, DEBUG_LOG_FILENAME)
     await chrome.downloads.download({
       url,
