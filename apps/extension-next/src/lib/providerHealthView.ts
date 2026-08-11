@@ -9,6 +9,7 @@
 // A keyless route is deliberate config, not an error: it never produces a fact line and
 // never shows the block on its own, but it DOES participate in the consequence line.
 
+import type { TierName } from "./providers.ts"
 import { HEALTH_TTL_MS, type ProviderHealthSnapshot, type TierHealth } from "./providerHealth.ts"
 
 export interface TierKeyless {
@@ -19,6 +20,9 @@ export interface TierKeyless {
 export interface ProviderWarnFact {
   text: string
   tone: "amber" | "red"
+  /** Which tier the line is about — lets a surface attach a per-tier control (the options
+   *  tab puts a "다시 테스트" button on each line). At most one fact per tier. */
+  tier: TierName
 }
 
 export interface ProviderWarnModel {
@@ -44,9 +48,15 @@ function liveError(record: TierHealth | null | undefined, now: number): TierHeal
   return now - record.ts >= HEALTH_TTL_MS ? null : record
 }
 
-function fact(label: string, record: TierHealth, tone: "amber" | "red", now: number): ProviderWarnFact | null {
+function fact(
+  label: string,
+  record: TierHealth,
+  tone: "amber" | "red",
+  tier: TierName,
+  now: number,
+): ProviderWarnFact | null {
   const ago = formatAgo(record.ts, now)
-  return ago == null ? null : { text: `⚠ ${label}(${ago}): ${record.message}`, tone }
+  return ago == null ? null : { text: `⚠ ${label}(${ago}): ${record.message}`, tone, tier }
 }
 
 export function buildProviderWarn(
@@ -63,11 +73,11 @@ export function buildProviderWarn(
 
   const facts: ProviderWarnFact[] = []
   if (t1) {
-    const line = fact("빠른 판정 오류", t1, "amber", now)
+    const line = fact("빠른 판정 오류", t1, "amber", "tier1", now)
     if (line) facts.push(line)
   }
   if (t2) {
-    const line = fact(t2writer ? "훈수 문구 생성 오류" : "정밀 판정 오류", t2, "red", now)
+    const line = fact(t2writer ? "훈수 문구 생성 오류" : "정밀 판정 오류", t2, "red", "tier2", now)
     if (line) facts.push(line)
   }
   if (facts.length === 0) return { facts, consequence: null }

@@ -944,6 +944,11 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
   if (message?.type === "get-judge-settings") {
     return toPublicSettings(await getJudgeSettings())
   }
+  // Health alone, without get-state's gauge advance — the options page re-reads it every
+  // time the user returns to the AI tab, and that must stay a pure read.
+  if (message?.type === "get-provider-health") {
+    return await getProviderHealth()
+  }
   if (message?.type === "connect-provider" && message.provider) {
     return toPublicSettings(await connectProvider(message.provider))
   }

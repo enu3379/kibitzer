@@ -11,14 +11,20 @@ import {
 } from "../lib/providers.ts"
 
 import {
-  DISABLED_COPY,
-  INCOMPLETE_COPY,
-  canToggleAiPreference,
-  effectiveAiEnabled,
-  incompleteTiers,
+  STATUS_COPY,
+  aiStatus,
+  aiStatusTone,
   isAiConfigComplete,
   providerIsRouted,
+  providerLockCopy,
+  routedTiers,
+  tierGap,
+  tierGapCopy,
+  type ProviderLockKind,
 } from "./aiTabState.ts"
+
+import { buildProviderWarn, providerAlertLevel } from "../lib/providerHealthView.ts"
+import type { ProviderHealthSnapshot } from "../lib/providerHealth.ts"
 
 import {
   SENSITIVITY_PRESETS,
@@ -31,14 +37,6 @@ interface StateResponse {
   persona?: string
   personas?: Array<{ key: string; name: string; tier?: "default" | "lab" }>
   health?: ProviderHealthSnapshot
-}
-interface TierHealth {
-  ok: boolean
-  message: string
-}
-interface ProviderHealthSnapshot {
-  tier1: TierHealth | null
-  tier2: TierHealth | null
 }
 interface PublicKeyInfo {
   id: string
@@ -97,6 +95,9 @@ const pquoteTxt = $<HTMLElement>("pquoteTxt")
 const ajProviders = $<HTMLElement>("ajProviders")
 const ajConnect = $<HTMLElement>("ajConnect")
 const ajAlerts = $<HTMLElement>("ajAlerts")
+const ajState = $<HTMLElement>("ajState")
+const ajStateText = $<HTMLElement>("ajStateText")
+const ajStateSub = $<HTMLElement>("ajStateSub")
 const ajUsage = $<HTMLElement>("ajUsage")
 const ajSave = $<HTMLButtonElement>("ajSave")
 const ajEnabled = $<HTMLButtonElement>("ajEnabled")
@@ -245,6 +246,7 @@ function selectTab(key: string, focus = false): void {
   }
   for (const p of panes) p.classList.toggle("on", p.dataset.pane === key)
   history.replaceState(null, "", `#${key}`)
+  if (key === "ai") void refreshProviderHealth()
 }
 
 tabButtons.forEach((b, i) => {
@@ -356,7 +358,11 @@ let runtimeHealth: ProviderHealthSnapshot = { tier1: null, tier2: null }
 let addOpenFor: ProviderId | null = null
 let connectOpen = false
 let usageDays = 1
-let configActionError: string | null = null
+/** A provider control refused because AI judging is using it. Rendered under the control
+ *  that refused, not in the runtime alert stack — it is a precondition, not a failure. */
+let providerLock: { provider: ProviderId; kind: ProviderLockKind } | null = null
+/** The only genuine failure the tab can produce on its own: the preference write failed. */
+let preferenceSaveError: string | null = null
 
 function staleChip(): ChipState {
   return { kind: "unknown", chip: "– 테스트", text: "이 라우팅으로 실제 호출을 확인합니다" }
@@ -409,7 +415,8 @@ function fmtDate(ts: number): string {
 /** Saved routes arrived (init/save/disconnect) — rebuild the drafts from them. */
 function applyJudge(view: JudgeView): void {
   judge = view
-  configActionError = null
+  providerLock = null
+  preferenceSaveError = null
   for (const tier of TIERS) {
     const route = view.routes[tier]
     draft[tier] = {
@@ -442,7 +449,8 @@ function applyAccounts(view: JudgeView): void {
     }
   }
   judge = view
-  configActionError = null
+  providerLock = null
+  preferenceSaveError = null
   for (const tier of TIERS) chips[tier] = staleChip()
   renderJudge()
 }
@@ -451,6 +459,17 @@ function renderJudge(): void {
   renderProviderBlocks()
   renderConnect()
   renderRoutes()
+}
+
+/** The tiers a refusal is protecting. The guards accept either the draft or the saved
+ *  route as "in use" (an unsaved reroute must not open a hole), so the sentence names the
+ *  union of both — anything narrower could list no tier at all. */
+function lockedTierLabels(provider: ProviderId): string[] {
+  const tiers = new Set([
+    ...routedTiers(provider, draft),
+    ...(judge ? routedTiers(provider, judge.routes) : []),
+  ])
+  return TIERS.filter((tier) => tiers.has(tier)).map((tier) => TIER_LABEL[tier])
 }
 
 function renderProviderBlocks(): void {
@@ -472,8 +491,8 @@ function renderProviderBlocks(): void {
           const usedByDraftOrSaved =
             providerIsRouted(profile.id, draft) || providerIsRouted(profile.id, savedRoutes)
           if (aiPreference && usedByDraftOrSaved) {
-            configActionError = `${profile.label} 연결은 현재 AI 판정에 사용 중이에요. 먼저 AI 판정을 비활성화해 주세요.`
-            renderAiControls()
+            providerLock = { provider: profile.id, kind: "disconnect" }
+            renderProviderBlocks()
             return
           }
           if (!confirm(`${profile.label} 연결을 해제할까요? 등록된 키도 함께 삭제됩니다.`)) return
@@ -501,8 +520,8 @@ function renderProviderBlocks(): void {
           providerIsRouted(profile.id, draft) || providerIsRouted(profile.id, savedRoutes)
         const isLastRoutedKey = keyList.length === 1 && usedByDraftOrSaved
         if (aiPreference && isLastRoutedKey) {
-          configActionError = `${profile.label}의 마지막 API 키는 AI 판정이 켜진 동안 삭제할 수 없어요. 먼저 AI 판정을 비활성화해 주세요.`
-          renderAiControls()
+          providerLock = { provider: profile.id, kind: "last-key" }
+          renderProviderBlocks()
           return
         }
         if (!confirm(`${key.name || `키 ${index + 1}`}을 삭제할까요?`)) return
@@ -529,6 +548,11 @@ function renderProviderBlocks(): void {
     if (keyList.length >= 2) {
       block.appendChild(
         el("p", "krot", `키 ${keyList.length}개 — 한도 초과(429) 시 자동으로 다음 키로 로테이션합니다.`),
+      )
+    }
+    if (providerLock?.provider === profile.id) {
+      block.appendChild(
+        el("div", "route-banner", providerLockCopy(providerLock.kind, lockedTierLabels(profile.id))),
       )
     }
     ajProviders.appendChild(block)
@@ -686,7 +710,8 @@ function renderRoutes(): void {
     }
     prov.value = d.provider
     prov.onchange = () => {
-      configActionError = null
+      providerLock = null
+      preferenceSaveError = null
       d.provider = prov.value as ProviderId
       d.custom = false
       d.model = presetsFor(d.provider, tier)[0]
@@ -714,7 +739,8 @@ function renderRoutes(): void {
     else model.value = presets.includes(d.model) ? d.model : presets[0]
 
     model.onchange = () => {
-      configActionError = null
+      providerLock = null
+      preferenceSaveError = null
       if (model.value === "__custom") {
         d.custom = true
         d.model = ""
@@ -724,80 +750,124 @@ function renderRoutes(): void {
       } else {
         d.model = model.value
         chips[tier] = staleChip()
-        renderChip(tier)
+        renderTierState(tier)
         renderAiControls()
       }
     }
     input.oninput = () => {
-      configActionError = null
+      providerLock = null
+      preferenceSaveError = null
       d.model = input.value.trim()
-      if (chips[tier].kind !== "unknown") {
-        chips[tier] = staleChip()
-        renderChip(tier)
-      }
+      chips[tier] = staleChip()
+      renderTierState(tier)
       renderAiControls()
     }
     back.onclick = () => {
-      configActionError = null
+      providerLock = null
+      preferenceSaveError = null
       d.custom = false
       d.model = presetsFor(d.provider, tier)[0]
       chips[tier] = staleChip()
       renderRoutes()
     }
 
-    renderChip(tier)
+    renderTierState(tier)
   }
   renderAiControls()
 }
 
-function appendAiAlert(text: string, error: boolean): void {
-  ajAlerts.appendChild(el("div", `ai-alert${error ? " err" : ""}`, text))
-}
-
+/** Status line + runtime alert stack + save button. Everything tier-local lives in
+ *  renderTierState instead, next to the control that fixes it. */
 function renderAiControls(): void {
   if (!judge) return
   const complete = isAiConfigComplete(draft, judge.accounts)
-  const active = effectiveAiEnabled(aiPreference, draft, judge.accounts)
   const routeTestFailed = TIERS.some((tier) => chips[tier].kind === "err")
-  const ready = complete && !routeTestFailed
-  ajSave.disabled = !ready
+  ajSave.disabled = !complete || routeTestFailed
   ajSave.title = !complete
     ? "Tier 1과 Tier 2의 모델·키를 모두 설정해야 저장할 수 있어요."
     : routeTestFailed
       ? "오류가 난 Tier를 수정하거나 다시 테스트해 정상 응답을 확인해 주세요."
       : ""
-  // An incomplete setup cannot be activated, but a still-ON preference must always
-  // retain an escape hatch to explicit local-only mode.
-  ajEnabled.disabled = !canToggleAiPreference(aiPreference, complete, routeTestFailed)
-  ajEnabled.setAttribute("aria-pressed", String(active))
-  ajEnabled.classList.toggle("on", active)
-  ajEnabled.textContent = active
-    ? "AI 판정 켜짐"
-    : aiPreference
-      ? "AI 판정 비활성화"
-      : "AI 판정 꺼짐"
+
+  // The status line says which of the three states we are in; the tone says how loud.
+  // Runtime failures never reword it — they only colour it and fill the alert stack.
+  const status = aiStatus(aiPreference, draft, judge.accounts)
+  const level = aiPreference ? providerAlertLevel(runtimeHealth) : null
+  const copy = STATUS_COPY[status]
+  ajState.className = `aistate ${aiStatusTone(status, level)}`
+  ajStateText.textContent = copy.text
+  ajStateSub.textContent = copy.sub ?? ""
+  ajStateSub.classList.toggle("hidden", copy.sub == null)
+
+  // The toggle carries the preference alone, so it is never disabled: preferring AI
+  // with an unfinished setup is a legal state (`pending`), and an ON preference must
+  // always be switchable back OFF.
+  ajEnabled.setAttribute("aria-checked", String(aiPreference))
 
   ajAlerts.textContent = ""
-  if (!complete) {
-    appendAiAlert(INCOMPLETE_COPY, true)
-    const missing = incompleteTiers(draft, judge.accounts).map((tier) => TIER_LABEL[tier]).join(" · ")
-    appendAiAlert(`${missing}의 모델과 API 키를 확인해 주세요.`, true)
+  if (preferenceSaveError) {
+    ajAlerts.appendChild(el("div", "ai-alert err", preferenceSaveError))
   }
-  if (!aiPreference) {
-    appendAiAlert(DISABLED_COPY, false)
+  // Runtime health only — a manual test result belongs to its tier row. Reuses the
+  // popup's model so both surfaces name the same failure the same way and agree on
+  // what it costs the user.
+  if (aiPreference) {
+    const warn = buildProviderWarn(
+      runtimeHealth,
+      {
+        tier1: tierGap("tier1", draft, judge.accounts) === "key",
+        tier2: tierGap("tier2", draft, judge.accounts) === "key",
+      },
+      Date.now(),
+    )
+    warn.facts.forEach((fact, index) => {
+      const alert = el("div", `ai-alert${fact.tone === "red" ? " err" : ""}`)
+      const msg = el("div", "msg")
+      msg.appendChild(el("span", undefined, fact.text))
+      // One consequence per snapshot: it describes the combined state, so it hangs off
+      // the most severe (last) fact rather than repeating on every line.
+      if (index === warn.facts.length - 1 && warn.consequence) {
+        msg.appendChild(el("span", "conseq", warn.consequence))
+      }
+      alert.appendChild(msg)
+      alert.appendChild(button("btn", "다시 테스트", () => void runRouteTest(fact.tier)))
+      ajAlerts.appendChild(alert)
+    })
   }
+}
 
-  if (configActionError) appendAiAlert(configActionError, true)
+/** Everything that belongs to one tier's row: the test chip and the inline line under it
+ *  (what the tier is still missing, or why its last manual test failed). */
+function renderTierState(tier: TierName): void {
+  renderChip(tier)
+  const gapEl = document.querySelector<HTMLElement>(`.mgap[data-tier="${tier}"]`)
+  if (!gapEl || !judge) return
+  const chip = chips[tier]
+  const gap = tierGap(tier, draft, judge.accounts)
+  gapEl.textContent = ""
 
-  for (const tier of TIERS) {
-    if (chips[tier].kind === "err") {
-      appendAiAlert(`${TIER_LABEL[tier]} 테스트 오류 — ${chips[tier].text}`, true)
-      continue
-    }
-    const health = runtimeHealth[tier]
-    if (aiPreference && health && !health.ok) {
-      appendAiAlert(`${TIER_LABEL[tier]} 실행 오류 — ${health.message}`, true)
-    }
+  if (chip.kind === "err") {
+    gapEl.className = "mgap err"
+    gapEl.appendChild(el("span", undefined, `테스트 실패 — ${chip.text}`))
+    gapEl.appendChild(button("mgap-act", "다시 테스트", () => void runRouteTest(tier)))
+    return
+  }
+  if (gap === null) {
+    gapEl.className = "mgap hidden"
+    return
+  }
+  gapEl.className = "mgap"
+  gapEl.appendChild(el("span", undefined, tierGapCopy(gap, profileOf(draft[tier].provider).label)))
+  if (gap !== "model") {
+    // Nothing to connect from here when the provider is already connected but keyless —
+    // "＋ 키 추가" lives in that provider's block, so send the user there.
+    gapEl.appendChild(button("mgap-act", "키 연결", () => {
+      const provider = draft[tier].provider
+      if (judge?.accounts[provider]) addOpenFor = provider
+      else connectOpen = true
+      renderJudge()
+      ajProviders.scrollIntoView({ block: "nearest" })
+    }))
   }
 }
 
@@ -817,7 +887,7 @@ async function runRouteTest(tier: TierName): Promise<void> {
   const token = ++routeTestTokens[tier]
   const fingerprint = routeTestFingerprint(tier)
   chips[tier] = { kind: "testing", chip: "… 확인 중", text: "확인 중 — 첫 호출은 느릴 수 있어요" }
-  renderChip(tier)
+  renderTierState(tier)
   let result: RouteTestResult | undefined
   try {
     result = (await send({
@@ -832,19 +902,15 @@ async function runRouteTest(tier: TierName): Promise<void> {
   if (token !== routeTestTokens[tier] || fingerprint !== routeTestFingerprint(tier)) return
   if (result?.ok) {
     chips[tier] = { kind: "ok", chip: "✓ 방금 전", text: `정상 — ${result.detail}` }
+    // A route that just answered is not a route with a live failure: drop the runtime
+    // record so a green chip and a red alert can never sit on screen together.
     runtimeHealth[tier] = null
-    if (ajResult.classList.contains("err")) {
-      ajResult.className = "hint"
-      ajResult.textContent = ""
-    }
   } else {
-    const detail = result?.detail ?? "응답 없음"
-    chips[tier] = { kind: "err", chip: "✕ 오류", text: detail }
-    // ✕ 원인은 툴팁만으론 발견성이 낮아 카드 하단 힌트에도 표시
-    ajResult.className = "hint err"
-    ajResult.textContent = `${TIER_LABEL[tier]} · ${profileOf(d.provider).label} — ${detail}`
+    // The failure text goes on the tier's own row (renderTierState) — it used to be
+    // repeated in the chip tooltip, the alert stack and this hint at the same time.
+    chips[tier] = { kind: "err", chip: "✕ 오류", text: result?.detail ?? "응답 없음" }
   }
-  renderChip(tier)
+  renderTierState(tier)
   renderAiControls()
 }
 
@@ -873,19 +939,23 @@ ajSave.addEventListener("click", async () => {
 
 ajEnabled.addEventListener("click", async () => {
   if (!judge) return
-  const complete = isAiConfigComplete(draft, judge.accounts)
-  const routeTestFailed = TIERS.some((tier) => chips[tier].kind === "err")
-  if (!aiPreference && (!complete || routeTestFailed)) return
   if (
     aiPreference &&
     !confirm("AI 판정을 끌까요?\n판정 품질이 낮아지고 훈수 메시지가 단순해져요.")
   ) return
   const nextPreference = !aiPreference
+  // Turning ON commits the drafted routes so the preference and the routes it was made
+  // against are stored together — but only when they are complete. An incomplete setup
+  // enters `pending`: the preference is stored, the runtime stays local-only (tier12
+  // resolves no provider), and it starts by itself once the last gap is filled. Saving
+  // an incomplete route here would be rejected by setRoutes and strand the toggle.
+  const commitRoutes = nextPreference && isAiConfigComplete(draft, judge.accounts)
   ajEnabled.disabled = true
-  configActionError = null
+  providerLock = null
+  preferenceSaveError = null
   try {
     let savedView: JudgeView | null = null
-    if (nextPreference) {
+    if (commitRoutes) {
       savedView = (await send({
         type: "set-routes",
         routes: {
@@ -901,13 +971,31 @@ ajEnabled.addEventListener("click", async () => {
     }
     await saveSettings({ aiJudgmentEnabled: nextPreference })
     aiPreference = nextPreference
-    if (!aiPreference) runtimeHealth = { tier1: null, tier2: null }
+    // The mode edge invalidates the old failures (background clears the stored records
+    // on the same edge) — keep this page's copy from outliving them.
+    runtimeHealth = { tier1: null, tier2: null }
     if (savedView) applyJudge(savedView)
     else renderAiControls()
   } catch {
-    configActionError = "AI 판정 설정을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요."
+    preferenceSaveError = "AI 판정 설정을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요."
     renderAiControls()
+  } finally {
+    ajEnabled.disabled = false
   }
+})
+
+/** The alert stack mirrors records the service worker writes while this page sits open,
+ *  so a snapshot taken at load goes stale. Re-read it whenever the user comes back to the
+ *  page or to this tab — the two moments where the stack is about to be looked at. */
+async function refreshProviderHealth(): Promise<void> {
+  const snapshot = (await send({ type: "get-provider-health" })) as ProviderHealthSnapshot | undefined
+  if (!snapshot) return
+  runtimeHealth = snapshot
+  renderAiControls()
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") void refreshProviderHealth()
 })
 
 $<HTMLButtonElement>("openSiteSettings").addEventListener("click", () => {

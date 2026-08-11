@@ -42,14 +42,14 @@ test("fact lines: one per erring tier, tier1 first, exact copy and tones", () =>
     NOW,
   )
   assert.equal(model.facts.length, 2)
-  assert.deepEqual(model.facts[0], { text: "⚠ 빠른 판정 오류(5분전): 요청 한도 초과 (429)", tone: "amber" })
-  assert.deepEqual(model.facts[1], { text: "⚠ 정밀 판정 오류(2시간 전): API 키 인증 실패 (키 확인 필요)", tone: "red" })
+  assert.deepEqual(model.facts[0], { text: "⚠ 빠른 판정 오류(5분전): 요청 한도 초과 (429)", tone: "amber", tier: "tier1" })
+  assert.deepEqual(model.facts[1], { text: "⚠ 정밀 판정 오류(2시간 전): API 키 인증 실패 (키 확인 필요)", tone: "red", tier: "tier2" })
 })
 
 test("a tier2 writer error gets its own fact-line label", () => {
   const model = buildProviderWarn({ tier1: null, tier2: err({ stage: "writer" }) }, KEYED, NOW)
   assert.deepEqual(model.facts, [
-    { text: "⚠ 훈수 문구 생성 오류(조금전): API 키 인증 실패 (키 확인 필요)", tone: "red" },
+    { text: "⚠ 훈수 문구 생성 오류(조금전): API 키 인증 실패 (키 확인 필요)", tone: "red", tier: "tier2" },
   ])
 })
 
