@@ -9,7 +9,8 @@
     "assets:check": "node scripts/checkProviderAssets.mjs",
     "test": "node --experimental-strip-types --test && npm run typecheck && npm run typecheck:test",
     "build": "npm run assets:check && npm run test && node build.mjs",
-    "watch": "node build.mjs --watch"
+    "build:dev": "npm run assets:check && npm run test && node build.mjs --dev",
+    "watch": "node build.mjs --watch --dev"
   },
   "dependencies": {
     "@huggingface/tokenizers": "0.1.3",

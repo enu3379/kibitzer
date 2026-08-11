@@ -962,7 +962,8 @@ const exportClick = (btn: HTMLButtonElement, type: string, label: string) =>
 exportClick(exportLog, "export-log", "디버그 로그 파일")
 exportClick(exportEvents, "export-events", "이벤트 JSON")
 
-$<HTMLButtonElement>("openReplay").addEventListener("click", () => {
+// 개발 빌드에만 존재하는 버튼 (일반 빌드에서는 build.mjs가 마크업을 잘라낸다).
+document.getElementById("openReplay")?.addEventListener("click", () => {
   void chrome.tabs.create({ url: chrome.runtime.getURL("replay/replay.html") })
 })
 
