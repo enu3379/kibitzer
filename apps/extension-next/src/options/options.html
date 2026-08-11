@@ -422,7 +422,7 @@
           <div class="ai-alerts" id="ajAlerts" role="status" aria-live="polite"></div>
 
           <div class="psec">
-            <span class="seclabel">연결된 AI 서비스</span>
+            <span class="seclabel">연결된 AI 서비스 <span class="info-tip"><button class="info-trigger" type="button" aria-describedby="AIServiceTip" aria-label="AI API 연결 안내">i</button><span class="info-pop" id="AIServiceTip" role="tooltip">한 제공자에 등록된 키가 여러 개면 자동 로테이션을 사용합니다. 여러 계정의 무료 API 키를 등록해 무료 한도를 넓게 사용할 수도 있습니다.</span></span></span>
             <div id="ajProviders"></div>
             <div id="ajConnect"></div>
           </div>
@@ -453,9 +453,7 @@
                 <button class="btn backbtn hidden" type="button" title="추천 목록으로">목록</button>
               </span>
             </div>
-            <p class="hint" style="margin-top: 6px; margin-bottom: 0">
-              두 Tier 모두 Ollama Cloud 무료 계정으로 충분합니다.
-            </p>
+
           </div>
 
           <div class="btnrow ai-actions" style="padding-top: 0">
@@ -467,7 +465,7 @@
 
           <div class="privacy-link">
             특정 페이지 정보가 AI 서비스로 전송되는 것이 불안하거나 싫다면
-            <button type="button" id="openSiteSettings">감시 제외 사이트로 설정하세요</button>.
+            <button type="button" id="openSiteSettings">감시 제외 사이트에서 설정하세요</button>.
           </div>
 
           <div class="usec">

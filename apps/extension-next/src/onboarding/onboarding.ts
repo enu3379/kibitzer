@@ -8,7 +8,7 @@ import { sundialSVG } from "../lib/sundial.ts"
 import { bandOf } from "../lib/sessionStats.ts"
 import { PERSONAS, PERSONA_DEFAULT } from "../lib/personas.data.ts"
 import { DEFAULT_PERSONA_KEYS, fillTemplate } from "../lib/personas.ts"
-import { defaultRoute } from "../lib/providers.ts"
+import { defaultRoute, PROVIDER_PROFILES, profileFor, type ProviderId } from "../lib/providers.ts"
 
 interface WizardState {
   persona?: string
@@ -31,6 +31,8 @@ interface CandidateKeyCommitResult {
   ok: boolean
   tiers: { tier1: RouteTestResult; tier2: RouteTestResult }
   view: JudgeView | null
+  /** Set instead of `tiers` when the service worker itself failed to run the test. */
+  error?: string
 }
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
@@ -292,8 +294,68 @@ type AiTestState = "idle" | "testing" | "success" | "failure"
 let aiTestState: AiTestState = "idle"
 let judgeConfigured = false
 
+// Ollama is the recommended default (free, one-minute key); the rest of the roster
+// is offered here too so switching never has to leave onboarding for the options page.
+const keyIssueLink = $<HTMLAnchorElement>("keyIssueLink")
+const keyIssueHint = $("keyIssueHint")
+const keyIssueHintBreak = $<HTMLBRElement>("keyIssueHintBreak")
+const switchProvider = $("switchProvider")
+const providerChips = $("providerChips")
+let selectedProvider: ProviderId = "ollama"
+
+function renderProviderChoice(): void {
+  const profile = profileFor(selectedProvider)
+  const host = new URL(profile.keysUrl).host
+  keyIssueLink.href = profile.keysUrl
+  keyIssueLink.textContent =
+    selectedProvider === "ollama" ? `${host}에서 무료 API 키 발급` : `${host}에서 API 키 발급`
+  // The "free, one minute" line is an Ollama fact — it (and its line break) just
+  // disappears for the others, so the switch-link sits right under the issue link.
+  keyIssueHint.hidden = selectedProvider !== "ollama"
+  keyIssueHintBreak.hidden = selectedProvider !== "ollama"
+  keyInput.placeholder = profile.keyHint
+  for (const chip of Array.from(providerChips.children)) {
+    chip.setAttribute("aria-pressed", String(chip.getAttribute("data-provider") === selectedProvider))
+  }
+}
+
+function setChipsOpen(open: boolean): void {
+  providerChips.hidden = !open
+  switchProvider.setAttribute("aria-expanded", String(open))
+}
+
+for (const { id, label } of PROVIDER_PROFILES) {
+  const chip = document.createElement("button")
+  chip.type = "button"
+  chip.dataset.provider = id
+  chip.textContent = label
+  chip.addEventListener("click", () => {
+    selectedProvider = id
+    // A failure belonged to the previous provider — don't carry it over.
+    if (aiTestState === "failure") {
+      aiTestState = "idle"
+      showKeyTestResult("")
+    }
+    renderProviderChoice()
+    renderAiStatus()
+    setChipsOpen(false)
+    keyInput.focus()
+  })
+  providerChips.append(chip)
+}
+switchProvider.addEventListener("click", () => setChipsOpen(providerChips.hidden))
+switchProvider.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault()
+    setChipsOpen(providerChips.hidden)
+  }
+})
+renderProviderChoice()
+
 function renderAiStatus(): void {
   const highlighted = judgeConfigured || aiTestState === "testing" || aiTestState === "success"
+  // Nothing to report yet — no box at all until a test runs (or a key is already on file).
+  aiStatus.hidden = aiTestState === "idle" && !judgeConfigured && !keysResult.textContent
   aiStatus.classList.toggle("on", highlighted)
   aiStatus.classList.toggle("failed", aiTestState === "failure")
   if (aiTestState === "testing") {
@@ -303,7 +365,7 @@ function renderAiStatus(): void {
   } else if (aiTestState === "success" || judgeConfigured) {
     aiStatusText.textContent = "AI 연결됨 ✓  페이지 내용까지 읽고 판정합니다"
   } else {
-    aiStatusText.textContent = "지금은 페이지 제목만 분석 중"
+    aiStatusText.textContent = ""
   }
 }
 
@@ -318,6 +380,11 @@ function withoutTestVerdict(detail: string): string {
   return detail.replace(/\s+\((?:OK|DRIFT)\)(?=\s*(?:·|$))/u, "")
 }
 
+// Onboarding has no model picker — the tier defaults are chosen silently — so the tier
+// numbers get their job spelled out, and a failure has to name the model it tried.
+// (A success `detail` already starts with the model name, so it isn't repeated there.)
+const TIER_LABEL = { tier1: "Tier 1 (빠른 판정)", tier2: "Tier 2 (정밀 판정)" } as const
+
 async function refreshAiStatus(): Promise<void> {
   const st = await send<WizardState>({ type: "get-state" })
   if (!st) return
@@ -329,6 +396,7 @@ testKeys.addEventListener("click", async () => {
   if (testKeys.disabled) return
   if (!keyInput.value.trim()) {
     showKeyTestResult("API 키가 비어 있어요. 위 링크에서 발급한 키를 붙여넣어 주세요.", "err")
+    renderAiStatus()
     return
   }
   aiTestState = "testing"
@@ -336,28 +404,37 @@ testKeys.addEventListener("click", async () => {
   renderAiStatus()
   aiStatus.setAttribute("aria-busy", "true")
   testKeys.disabled = true
+  const models = {
+    tier1: defaultRoute("tier1", selectedProvider).model,
+    tier2: defaultRoute("tier2", selectedProvider).model,
+  }
   try {
     const result = await send<CandidateKeyCommitResult>({
       type: "test-and-add-provider-key",
-      provider: "ollama",
+      provider: selectedProvider,
       name: "",
       value: keyInput.value,
-      models: {
-        tier1: defaultRoute("tier1", "ollama").model,
-        tier2: defaultRoute("tier2", "ollama").model,
-      },
+      models,
     })
     const r1 = result?.tiers.tier1
     const r2 = result?.tiers.tier2
+    // Always report both tiers. Listing only the failures made a Tier-2-only problem read
+    // as a total failure, hiding that the key and the fast route are in fact working.
+    // A passing `detail` already opens with the model name, so it isn't repeated there.
+    const line = (tier: "tier1" | "tier2", r?: RouteTestResult): string => (
+      r?.ok
+        ? `${TIER_LABEL[tier]} · ${withoutTestVerdict(r.detail)}`
+        : `${TIER_LABEL[tier]} · ${models[tier]} — ${r?.detail ?? "응답 없음"}`
+    )
+    const report = `${line("tier1", r1)}\n${line("tier2", r2)}`
     if (result?.ok && result.view && r1?.ok && r2?.ok) {
       aiTestState = "success"
-      showKeyTestResult(`Tier 1 · ${withoutTestVerdict(r1.detail)}\nTier 2 · ${r2.detail}`, "ok")
+      showKeyTestResult(report, "ok")
       keyInput.value = ""
       await refreshAiStatus()
     } else {
       aiTestState = "failure"
-      const failures = [r1?.ok ? null : `Tier 1: ${r1?.detail ?? "응답 없음"}`, r2?.ok ? null : `Tier 2: ${r2?.detail ?? "응답 없음"}`]
-      showKeyTestResult(`실패 — ${failures.filter(Boolean).join(" · ")}`, "err")
+      showKeyTestResult(result?.error ?? report, "err")
     }
     renderAiStatus()
   } catch {
@@ -368,10 +445,6 @@ testKeys.addEventListener("click", async () => {
     testKeys.disabled = false
     aiStatus.removeAttribute("aria-busy")
   }
-})
-
-$("openSettingsAi").addEventListener("click", () => {
-  if (extension) void chrome.tabs.create({ url: chrome.runtime.getURL("options/options.html#ai") })
 })
 
 const skip = $("skip")
