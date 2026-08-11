@@ -153,11 +153,36 @@
       /* AI 판정: 설정 카드 상단에 붙어 있는 상태 안내 */
       .ai-title { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
       .ai-title .description { color: var(--page-ink-3); font-size: 11.5px; font-weight: 400; }
+
+      /* 상태 줄 — 항상 한 줄. 색이 심각도를, 문구가 상태를 나른다. ok 외의 모든 상태가
+         앰버 이상인 것은 의도적: AI 미사용은 지원하지만 권장하지 않는 모드다. */
+      .aistate { padding: 10px 12px; margin: 6px 0 4px; border-radius: 10px;
+        background: var(--surface-2); border: 1px solid var(--line-soft); }
+      .aistate .line1 { display: flex; align-items: center; gap: 9px; }
+      .aistate .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--page-ink-3); }
+      .aistate .txt { font-size: 12.5px; font-weight: 650; min-width: 0; }
+      .aistate .sub { display: block; font-size: 11.5px; margin: 3px 0 0 17px; color: var(--page-ink-3); }
+      .aistate.ok { background: var(--accent-soft); border-color: transparent; }
+      .aistate.ok .dot { background: var(--accent); }
+      .aistate.ok .txt { color: var(--ok-fg); }
+      .aistate.warn { background: var(--warn-soft); border-color: transparent; }
+      .aistate.warn .dot { background: var(--warn-fg); }
+      .aistate.warn .txt, .aistate.warn .sub { color: var(--warn-fg); }
+      .aistate.err { background: var(--err-soft); border-color: transparent; }
+      .aistate.err .dot { background: var(--err); }
+      .aistate.err .txt, .aistate.err .sub { color: var(--err-fg); }
+
+      /* 알림 스택 — 런타임 호출 실패 전용. 설정 미완료는 여기 오지 않는다. */
       .ai-alerts { position: sticky; top: 0; z-index: 3; margin: 2px -4px 8px; }
       .ai-alert { border-left: 3px solid var(--warn-line); border-radius: 0 9px 9px 0;
-        padding: 9px 12px; font-size: 11.5px; background: var(--warn-soft); color: var(--warn-fg); }
+        padding: 9px 12px; font-size: 11.5px; background: var(--warn-soft); color: var(--warn-fg);
+        display: flex; align-items: flex-start; gap: 10px; }
       .ai-alert.err { border-left-color: var(--err); background: var(--err-soft); color: var(--err-fg); }
       .ai-alert + .ai-alert { margin-top: 5px; }
+      .ai-alert .msg { flex: 1 1 auto; min-width: 0; }
+      /* 결과 문장은 사실 줄과 같은 박스 안에서 줄바꿈 — 상태 줄로 올리면 중복이 된다 */
+      .ai-alert .conseq { display: block; margin-top: 3px; opacity: .82; }
+      .ai-alert .btn { flex: none; padding: 4px 10px; font-size: 11.5px; }
 
       /* AI 판정: 연결된 제공자 블록 */
       .psec { padding: 10px 0 12px; }
@@ -223,13 +248,24 @@
       .stchip.err { background: var(--err-soft); color: var(--err-fg); border-color: transparent; }
       .stchip:hover { border-color: var(--accent); }
       .stchip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-      /* 키 없는 라우트 안내 배너 — 오류가 아닌 설정 안내라 앰버 톤 (빨간 오류·stchip 런타임 확인과 구분) */
+      /* 제공자 제어가 거절된 이유 — 오류가 아닌 전제조건 안내라 앰버 톤 (빨간 런타임 오류와 구분).
+         거절한 컨트롤 바로 아래에 붙는다. */
       .route-banner { background: var(--warn-soft); border-left: 3px solid var(--warn-line);
-        border-radius: 0 9px 9px 0; padding: 9px 12px; margin: 2px 0 10px;
+        border-radius: 0 9px 9px 0; padding: 9px 12px; margin: 6px 0 2px;
         font-size: 11.5px; color: var(--warn-fg); }
-      .route-banner b { font-weight: 700; }
-      .route-banner .ln { display: block; }
-      .route-banner .ln + .ln { margin-top: 3px; }
+
+      /* Tier 행 인라인 안내 — 그 tier에 무엇이 빠졌는지, 또는 수동 테스트 결과.
+         고칠 컨트롤 바로 옆에 있어야 하므로 상단 알림 스택으로 올리지 않는다. */
+      .mgap { flex: 1 1 100%; display: flex; align-items: center; gap: 8px; margin-top: 1px;
+        font-size: 11.5px; color: var(--warn-fg); }
+      .mgap::before { content: "!"; flex: none; width: 14px; height: 14px; border-radius: 50%;
+        background: var(--warn-line); color: var(--warn-fg); font-size: 10px; font-weight: 800;
+        line-height: 14px; text-align: center; }
+      .mgap.err { color: var(--err-fg); }
+      .mgap.err::before { content: "\00d7"; background: var(--err); color: #fff; }
+      .mgap .mgap-act { all: unset; cursor: pointer; font-weight: 700; text-decoration: underline;
+        text-underline-offset: 2px; }
+      .mgap .mgap-act:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
       .mctl { flex: 2 1 300px; display: flex; gap: 6px; min-width: 0; }
       .mctl select.prov { flex: 0 1 128px; min-width: 0; font-size: 12.5px; }
       .mctl select.model { flex: 1; min-width: 0; font-size: 12.5px; }
@@ -250,10 +286,7 @@
       .info-pop b { display: block; color: var(--page-ink); margin-bottom: 4px; }
       .info-tip:hover .info-pop, .info-tip:focus-within .info-pop { visibility: visible; opacity: 1; }
 
-      .ai-actions { align-items: center; }
-      .ai-actions .action-spacer { flex: 1 1 auto; }
-      .ai-enable { min-height: 32px; }
-      .ai-enable.on { background: var(--accent-soft); color: var(--ok-fg); border-color: var(--accent); }
+
       .privacy-link { border-top: 1px solid var(--line-soft); padding: 11px 0; font-size: 11.5px;
         color: var(--page-ink-2); }
       .privacy-link button { all: unset; cursor: pointer; color: var(--accent); font-weight: 650;
@@ -418,7 +451,17 @@
       <!-- AI 판정 -->
       <section class="pane" id="pane-ai" role="tabpanel" aria-labelledby="tab-ai" data-pane="ai">
         <div class="card">
-          <h3 class="ai-title">AI 판정<span class="description">AI를 활용해 목표 이탈 여부를 더 정확하게 판정합니다.</span></h3>
+          <h3 class="ai-title">AI 판정</h3>
+          <!-- role=status: activating the switch can land on 준비 중 rather than 켜짐, and the
+               line is the only thing that says so — a bare aria-checked would announce "on". -->
+          <div class="aistate" id="ajState" role="status" aria-live="polite">
+            <div class="line1">
+              <span class="dot" aria-hidden="true"></span>
+              <span class="txt" id="ajStateText"></span>
+              <button class="switch" id="ajEnabled" type="button" role="switch" aria-checked="false" aria-label="AI 판정 사용"></button>
+            </div>
+            <span class="sub" id="ajStateSub"></span>
+          </div>
           <div class="ai-alerts" id="ajAlerts" role="status" aria-live="polite"></div>
 
           <div class="psec">
@@ -440,6 +483,7 @@
                 <input type="text" class="modelinput hidden" aria-label="Tier 1 모델 직접 입력" placeholder="정확한 API 모델명" />
                 <button class="btn backbtn hidden" type="button" title="추천 목록으로">목록</button>
               </span>
+              <div class="mgap hidden" data-tier="tier1"></div>
             </div>
             <div class="mrow">
               <span class="mlab">
@@ -452,14 +496,15 @@
                 <input type="text" class="modelinput hidden" aria-label="Tier 2 모델 직접 입력" placeholder="정확한 API 모델명" />
                 <button class="btn backbtn hidden" type="button" title="추천 목록으로">목록</button>
               </span>
+              <div class="mgap hidden" data-tier="tier2"></div>
             </div>
 
           </div>
 
+          <!-- .ai-actions carries no styles now, but tools/store-shot/stub.js selects it to inject
+               the store-screenshot note — do not drop the class. -->
           <div class="btnrow ai-actions" style="padding-top: 0">
             <button class="btn primary" id="ajSave">저장</button>
-            <span class="action-spacer" aria-hidden="true"></span>
-            <button class="btn ai-enable" id="ajEnabled" type="button" aria-pressed="false">AI 판정 꺼짐</button>
           </div>
           <div class="hint" id="ajResult"></div>
 

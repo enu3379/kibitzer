@@ -944,6 +944,11 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
   if (message?.type === "get-judge-settings") {
     return toPublicSettings(await getJudgeSettings())
   }
+  // Health alone, without get-state's gauge advance — the options page re-reads it every
+  // time the user returns to the AI tab, and that must stay a pure read.
+  if (message?.type === "get-provider-health") {
+    return await getProviderHealth()
+  }
   if (message?.type === "connect-provider" && message.provider) {
     return toPublicSettings(await connectProvider(message.provider))
   }
@@ -989,7 +994,24 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     return toPublicSettings(await mutateProviderSettings(null, () => setRoutes(routes, requireComplete)))
   }
   if (message?.type === "test-route" && message.tier && message.provider) {
-    return await testRoute(message.tier, message.provider, message.model ?? "")
+    const tier = message.tier
+    const model = message.model ?? ""
+    const result = await testRoute(tier, message.provider, model)
+    // A successful call on the tier's *saved* route disproves its stored failure — the
+    // toolbar mark and the options alert must not keep accusing a route that just
+    // answered. A draft route proves nothing about the one that failed, so it is
+    // deliberately not enough. Neither is a passing judge probe against a *writer*
+    // record: testRoute only exercises decideTier2, and the writer is a different call
+    // with a different prompt and output budget.
+    if (result.ok) {
+      const saved = (await getJudgeSettings()).routes[tier]
+      const record = (await getProviderHealth())[tier]
+      const untestedWriterFailure = record != null && !record.ok && record.stage === "writer"
+      if (saved.provider === message.provider && saved.model === model && !untestedWriterFailure) {
+        await clearProviderHealth([tier])
+      }
+    }
+    return result
   }
   if (message?.type === "get-usage") {
     return { rows: await getUsage(message.days ?? 1) }
