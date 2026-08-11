@@ -50,7 +50,7 @@ function copyStatic() {
     join(distDir, "assets/ort/ort-wasm-simd-threaded.wasm"),
   )
   // Licensing files shipped with the packaged extension.
-  cpSync(join(repoRoot, "docs/THIRD_PARTY_NOTICES.txt"), join(distDir, "THIRD_PARTY_NOTICES.txt"))
+  cpSync(join(repoRoot, "docs/THIRD_PARTY_NOTICES.md"), join(distDir, "THIRD_PARTY_NOTICES.md"))
   cpSync(join(repoRoot, "LICENSES/Apache-2.0.txt"), join(distDir, "LICENSES/Apache-2.0.txt"))
 }
 
