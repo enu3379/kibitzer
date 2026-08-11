@@ -61,11 +61,6 @@ export interface Tier2Context {
 // JSON verdict (output_exhausted). Match the server's Judge budget.
 const JUDGE_BUDGETS = { timeoutMs: 60_000, maxOutputTokens: 4096, writerMaxOutputTokens: 2048 } as const
 const CONNECTION_PROBE_TIMEOUT_MS = 30_000
-const OLLAMA_CONNECTION_PROBE_BUDGETS = {
-  timeoutMs: CONNECTION_PROBE_TIMEOUT_MS,
-  maxOutputTokens: 256,
-  writerMaxOutputTokens: 256,
-} as const
 
 function buildJudgeProvider(
   provider: ProviderId,
@@ -74,15 +69,13 @@ function buildJudgeProvider(
   probe = false,
 ): JudgeProvider {
   const profile = profileFor(provider)
-  // Ollama's native API can explicitly disable reasoning, so its setup probe can use a
-  // genuinely small output budget. Other providers keep the normal judge budget: for some
-  // reasoning models the compatibility API counts hidden thought tokens against the output
-  // cap, and 256 would reject a valid model before it emits the JSON verdict.
-  const budgets = probe
-    ? profile.format === "ollama"
-      ? OLLAMA_CONNECTION_PROBE_BUDGETS
-      : { ...JUDGE_BUDGETS, timeoutMs: CONNECTION_PROBE_TIMEOUT_MS }
-    : JUDGE_BUDGETS
+  // The probe used to give Ollama a much smaller output budget than the real judge call
+  // (its native API can explicitly disable reasoning, so 256 tokens looked safe) — but a
+  // model that ignores judgeThink, or whose JSON verdict simply runs long, would exhaust
+  // that budget and fail the connection test while the real 4096-token judge call would
+  // have succeeded. Every provider's probe now matches its real judge budget exactly, so
+  // passing the test is a genuine guarantee, just with a shorter timeout.
+  const budgets = probe ? { ...JUDGE_BUDGETS, timeoutMs: CONNECTION_PROBE_TIMEOUT_MS } : JUDGE_BUDGETS
   const onUsage = (tokensIn: number, tokensOut: number): void => {
     void recordUsage(provider, model, tokensIn, tokensOut)
   }

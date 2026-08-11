@@ -28,6 +28,8 @@ export interface ProviderProfile {
   /** Stable provider name used when automatically naming an API key. */
   keyNamePrefix: string
   chatUrl: string
+  /** Where the user issues a key — linked from the onboarding connect step. */
+  keysUrl: string
   format: WireFormat
   /** Options-UI key placeholder, e.g. "sk-or-v1-…". */
   keyHint: string
@@ -47,9 +49,10 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
     label: "Ollama Cloud",
     keyNamePrefix: "Ollama",
     chatUrl: "https://ollama.com/api/chat",
+    keysUrl: "https://ollama.com/settings/keys",
     format: "ollama",
     keyHint: "ollama.com API 키",
-    note: "무료 계정 키만으로 충분 — 키가 여러 개면 자동 로테이션으로 무료 한도를 넓게 씁니다.",
+    note: "두 Tier 모두 Ollama Cloud 무료 계정으로 충분합니다. ",
     // 2026-07-28 judge study: nano matches nemotron-3-super's 100% accuracy (case F
     // incl.) at ~40% lower latency and a Low GPU-usage tier — super was T1 overkill.
     // T2 stays minimax-m3 (best Korean tone tested); gemma4:31b is the Low-tier
@@ -63,9 +66,10 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
     label: "Gemini",
     keyNamePrefix: "Gemini",
     chatUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    keysUrl: "https://aistudio.google.com/apikey",
     format: "openai",
     keyHint: "AIza…",
-    note: "Google AI Studio 키 · Flash급 무료 쿼터(일 ~1,000회 수준, 변동) · 비한국계 중 한국어 최상급.",
+    note: "Google AI Studio 키 · Flash급 무료 쿼터(일 ~1,000회 수준, 변동) · 비한국계 중 한국어 최상급",
     // gemini-2.5-flash-lite is still listed by /models but 404s on the compat chat
     // endpoint (live-verified 2026-07-28) — 3.1-flash-lite is the servable lite tier.
     tier1Presets: ["gemini-3.1-flash-lite"],
@@ -76,9 +80,10 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
     label: "OpenRouter",
     keyNamePrefix: "OpenRouter",
     chatUrl: "https://openrouter.ai/api/v1/chat/completions",
+    keysUrl: "https://openrouter.ai/settings/keys",
     format: "openai",
     keyHint: "sk-or-v1-…",
-    note: "한 키로 300+ 모델 — 업체/모델 형식. :free 모델은 무료(기본 50회/일, $10 충전 시 1,000회/일).",
+    note: "한 키로 300+ 모델 사용 · free 모델은 무료(기본 50회/일, $10 충전 시 1,000회/일)",
     // 2026-07-28 judge study: solar-pro-3 (previous T2 default) confirmed drift on an
     // on-goal lecture (case F) and scored 33% — false-nag risk, dropped along with
     // ling-2.6-flash (same failure). nemotron-3-super-120b passed everything with
@@ -99,9 +104,10 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
     label: "DeepSeek",
     keyNamePrefix: "DeepSeek",
     chatUrl: "https://api.deepseek.com/v1/chat/completions",
+    keysUrl: "https://platform.deepseek.com/api_keys",
     format: "openai",
     keyHint: "sk-…",
-    note: "v4-flash 하나로 두 Tier 커버 · 캐시 히트 시 입력 $0.0028/1M · OpenAI 호환.",
+    note: "v4-flash 하나로 두 Tier 커버 · OpenAI 호환",
     tier1Presets: ["deepseek-v4-flash"],
     tier2Presets: ["deepseek-v4-flash", "deepseek-v4-pro"],
   },
@@ -110,9 +116,10 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
     label: "Claude",
     keyNamePrefix: "Claude",
     chatUrl: "https://api.anthropic.com/v1/messages",
+    keysUrl: "https://console.anthropic.com/settings/keys",
     format: "claude",
     keyHint: "sk-ant-…",
-    note: "Anthropic API 키 필요 (console.anthropic.com) · 사용량 과금.",
+    note: "Anthropic API 키 필요 (console.anthropic.com/settings/keys)",
     tier1Presets: ["claude-haiku-4-5"],
     tier2Presets: ["claude-sonnet-5", "claude-opus-4-8"],
   },
@@ -121,9 +128,10 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
     label: "OpenAI",
     keyNamePrefix: "OpenAI",
     chatUrl: "https://api.openai.com/v1/chat/completions",
+    keysUrl: "https://platform.openai.com/api-keys",
     format: "openai",
     keyHint: "sk-…",
-    note: "OpenAI API 키 필요 (developers.openai.com) · 사용량 과금.",
+    note: "OpenAI API 키 필요 (platform.openai.com/api-keys)",
     tier1Presets: ["gpt-5.4-nano", "gpt-5-nano", "gpt-5.4-mini"],
     tier2Presets: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.4"],
     // gpt-5.x rejects `max_tokens` (wants max_completion_tokens) and non-default temperature.
@@ -134,9 +142,10 @@ export const PROVIDER_PROFILES: readonly ProviderProfile[] = [
     label: "Kimi (Moonshot)",
     keyNamePrefix: "Kimi",
     chatUrl: "https://api.moonshot.ai/v1/chat/completions",
+    keysUrl: "https://platform.moonshot.ai/console/api-keys",
     format: "openai",
     keyHint: "sk-…",
-    note: "무료 티어 없음 · $1 충전 전 분당 3회 제한 · OpenAI 호환 — 현재는 비추천.",
+    note: "무료 티어 없음 · $1 충전 전 분당 3회 제한 · OpenAI 호환 (현재는 비추천)",
     tier1Presets: ["kimi-k2.6"],
     tier2Presets: ["kimi-k2.6", "kimi-k3"],
   },

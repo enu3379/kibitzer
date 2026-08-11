@@ -72,7 +72,11 @@ test("candidate-key validation forces the unsaved key through both tiers without
     assert.deepEqual(authorizations, [`Bearer ${candidate}`, `Bearer ${candidate}`])
     for (const body of requestBodies) {
       assert.equal(body.think, false, "Ollama connection probes must disable reasoning")
-      assert.equal((body.options as Record<string, unknown>).num_predict, 256)
+      assert.equal(
+        (body.options as Record<string, unknown>).num_predict,
+        4096,
+        "the probe budget must match the real judge call, or a passing test can still fail for real",
+      )
     }
     assert.ok(!JSON.stringify(store).includes(candidate), "the candidate must not reach persistent storage")
     assert.deepEqual(await getProviderHealth(), { tier1: null, tier2: null })

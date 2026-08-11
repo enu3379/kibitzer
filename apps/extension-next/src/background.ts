@@ -1146,6 +1146,12 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
 }
 
 chrome.runtime.onMessage.addListener((message: PopupMessage, _sender, sendResponse) => {
-  void handleMessage(message).then(sendResponse)
+  // A rejected handler used to answer nothing at all: the channel stayed open until the
+  // worker went idle, and every caller saw an indistinguishable "no response". Report the
+  // failure in the shape callers already handle, so the real cause reaches the UI.
+  void handleMessage(message).then(sendResponse, (error: unknown) => {
+    klog(`message handler failed (${String(message?.type)}): ${String(error)}`)
+    sendResponse({ error: String(error) })
+  })
   return true
 })
