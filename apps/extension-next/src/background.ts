@@ -40,6 +40,7 @@ import { getUsage } from "./lib/usage.ts"
 import { getPersonaKey, personaChoices, setPersonaKey } from "./lib/personas.ts"
 import { clearProviderHealth, getProviderHealth, tiersAffectedByProviderChange } from "./lib/providerHealth.ts"
 import { clearBadge } from "./lib/badge.ts"
+import { registerDownloadNaming } from "./lib/downloadName.ts"
 import { clearEvents, exportEvents, logEvent } from "./lib/events.ts"
 import { getSettings, inQuietHours, localPdfPolicyMatches, setSettings, type Settings } from "./lib/settings.ts"
 import { clearStore, kvGet, kvSet, OBS_STORE } from "./lib/db.ts"
@@ -440,6 +441,11 @@ chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
     () => undefined,
   )
 })
+
+// --- exports ---------------------------------------------------------------------
+
+// Registered at top level so it is in place whenever the worker wakes to run an export.
+registerDownloadNaming()
 
 // --- heartbeat / presence --------------------------------------------------------
 

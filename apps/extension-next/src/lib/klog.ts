@@ -2,8 +2,12 @@
 // console AND a ring buffer in chrome.storage.local, so it can be shown in the popup or
 // exported to a file (~/Downloads/kibitzer-debug.log) that can be read directly off disk.
 
+import { expectDownload } from "./downloadName.ts"
+
 const LOG_KEY = "kibitzer:logs:v1"
 const CAP = 400
+
+export const DEBUG_LOG_FILENAME = "kibitzer-debug.log"
 
 export interface LogEntry {
   t: number // epoch ms
@@ -64,9 +68,11 @@ export async function exportLog(): Promise<{ ok: boolean; error?: string }> {
   try {
     const text = (await logText()) || "(empty)"
     const url = `data:text/plain;charset=utf-8,${encodeURIComponent(text)}`
+    // A Save-As dialog would otherwise rename this to 다운로드.txt — see downloadName.ts.
+    expectDownload(url, DEBUG_LOG_FILENAME)
     await chrome.downloads.download({
       url,
-      filename: "kibitzer-debug.log",
+      filename: DEBUG_LOG_FILENAME,
       conflictAction: "overwrite",
       saveAs: false,
     })
