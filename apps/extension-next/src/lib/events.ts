@@ -4,8 +4,11 @@
 // IndexedDB SSOT, so they can drive session analytics (P3-3) and offline replay (P3-6).
 
 import { addRecord, clearStore, EVENT_STORE, getAllRecords } from "./db.ts"
+import { expectDownload, EXPORT_MIME } from "./downloadName.ts"
 
 const EVENT_CAP = 2000
+
+export const EVENTS_FILENAME = "kibitzer-events.jsonl"
 
 export interface KibitzerEvent {
   id?: number
@@ -36,10 +39,13 @@ export async function eventsJsonl(): Promise<string> {
 export async function exportEvents(): Promise<{ ok: boolean; error?: string }> {
   try {
     const text = (await eventsJsonl()) || ""
-    const url = `data:application/json;charset=utf-8,${encodeURIComponent(text)}`
+    const url = `data:${EXPORT_MIME};charset=utf-8,${encodeURIComponent(text)}`
+    // Declaring application/json here costs the .jsonl extension: Chrome swaps in whatever
+    // the Windows registry calls that type (.customization) — see downloadName.ts.
+    expectDownload(url, EVENTS_FILENAME)
     await chrome.downloads.download({
       url,
-      filename: "kibitzer-events.jsonl",
+      filename: EVENTS_FILENAME,
       conflictAction: "overwrite",
       saveAs: false,
     })
