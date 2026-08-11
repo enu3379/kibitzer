@@ -1000,10 +1000,14 @@ async function handleMessage(message: PopupMessage): Promise<unknown> {
     // A successful call on the tier's *saved* route disproves its stored failure — the
     // toolbar mark and the options alert must not keep accusing a route that just
     // answered. A draft route proves nothing about the one that failed, so it is
-    // deliberately not enough.
+    // deliberately not enough. Neither is a passing judge probe against a *writer*
+    // record: testRoute only exercises decideTier2, and the writer is a different call
+    // with a different prompt and output budget.
     if (result.ok) {
       const saved = (await getJudgeSettings()).routes[tier]
-      if (saved.provider === message.provider && saved.model === model) {
+      const record = (await getProviderHealth())[tier]
+      const untestedWriterFailure = record != null && !record.ok && record.stage === "writer"
+      if (saved.provider === message.provider && saved.model === model && !untestedWriterFailure) {
         await clearProviderHealth([tier])
       }
     }

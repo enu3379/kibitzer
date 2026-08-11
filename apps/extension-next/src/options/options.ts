@@ -15,6 +15,7 @@ import {
   aiStatus,
   aiStatusTone,
   isAiConfigComplete,
+  pendingSub,
   providerIsRouted,
   providerLockCopy,
   routedTiers,
@@ -363,15 +364,21 @@ let usageDays = 1
 let providerLock: { provider: ProviderId; kind: ProviderLockKind } | null = null
 /** The only genuine failure the tab can produce on its own: the preference write failed. */
 let preferenceSaveError: string | null = null
+/** Tiers with an alert-stack retest in flight, and the outcome of the last one that
+ *  failed — a repeat failure changes nothing in the stored record, so the tab has to
+ *  report it itself. Dropped as soon as that tier stops having a fact line. */
+const retestInFlight = new Set<TierName>()
+let retestFailure: { tier: TierName; detail: string } | null = null
 
-/** Dismiss both transient notices. The provider lock lives inside the provider block, so
- *  clearing it has to repaint that block — every caller here renders some other region,
- *  and without this the refusal outlived the state that justified it. */
+/** Dismiss both transient notices. The provider lock lives inside the provider block,
+ *  which every caller here leaves alone, so the banner has to be taken out by hand —
+ *  otherwise the refusal outlives the state that justified it. Detaching just the banner
+ *  rather than re-rendering the block matters: a rebuild would wipe an open key form and
+ *  steal focus mid-typing. */
 function dismissAiNotices(): void {
-  const hadLock = providerLock !== null
   providerLock = null
   preferenceSaveError = null
-  if (hadLock) renderProviderBlocks()
+  for (const banner of ajProviders.querySelectorAll(".route-banner")) banner.remove()
 }
 
 function staleChip(): ChipState {
@@ -815,10 +822,14 @@ function renderAiControls(): void {
       : null
 
   const copy = STATUS_COPY[status]
+  const sub = status === "pending" ? pendingSub(draftComplete) : copy.sub
   ajState.className = `aistate ${aiStatusTone(status, level)}`
-  ajStateText.textContent = copy.text
-  ajStateSub.textContent = copy.sub ?? ""
-  ajStateSub.classList.toggle("hidden", copy.sub == null)
+  // #ajState is a live region, and renderAiControls runs on every keystroke in the custom
+  // model field — writing an identical string still counts as a mutation and would make a
+  // screen reader re-announce the status on every character.
+  if (ajStateText.textContent !== copy.text) ajStateText.textContent = copy.text
+  if (ajStateSub.textContent !== (sub ?? "")) ajStateSub.textContent = sub ?? ""
+  ajStateSub.classList.toggle("hidden", sub == null)
 
   // The toggle carries the preference alone, so it is never disabled: preferring AI
   // with an unfinished setup is a legal state (`pending`), and an ON preference must
@@ -837,6 +848,9 @@ function renderAiControls(): void {
     // the most severe (last) fact rather than repeating on every line.
     if (index === warn.facts.length - 1 && warn.consequence) {
       msg.appendChild(el("span", "conseq", warn.consequence))
+    }
+    if (retestFailure?.tier === fact.tier) {
+      msg.appendChild(el("span", "conseq", `다시 테스트: 여전히 실패 — ${retestFailure.detail}`))
     }
     alert.appendChild(msg)
     const retest = el("button", "btn", "다시 테스트") as HTMLButtonElement
@@ -941,19 +955,39 @@ async function runRouteTest(tier: TierName): Promise<void> {
 
 /** The alert stack describes a failure of the SAVED route, so its retest must call that
  *  route and not the draft — otherwise a passing draft would clear an alert for a route
- *  that is still broken. Leaves the tier's chip alone: the chip reports the draft. */
+ *  that is still broken. Leaves the tier's chip alone: the chip reports the draft.
+ *
+ *  If the saved route changes while the call is in flight, the worker compares the tested
+ *  route against the new saved one and declines to clear — the alert stays, which is the
+ *  safe direction. */
 async function retestSavedRoute(tier: TierName, trigger: HTMLButtonElement): Promise<void> {
-  if (!judge || trigger.disabled) return
+  // The stack is rebuilt on every render, so a fresh enabled button can appear under a
+  // call that is still running: guard on the tier, not on this element.
+  if (!judge || retestInFlight.has(tier)) return
   const route = judge.routes[tier]
+  retestInFlight.add(tier)
+  retestFailure = null
   trigger.disabled = true
   trigger.textContent = "확인 중…"
+  let result: RouteTestResult | undefined
   try {
-    await send({ type: "test-route", tier, provider: route.provider, model: route.model })
+    result = (await send({
+      type: "test-route", tier, provider: route.provider, model: route.model,
+    })) as RouteTestResult | undefined
   } catch {
-    // A failed round trip leaves the stored record untouched; the refresh below repaints
-    // the same alert, which is the honest outcome.
+    result = { ok: false, detail: "테스트 요청에 실패했습니다. 잠시 후 다시 시도해 주세요." }
+  } finally {
+    retestInFlight.delete(tier)
+    // The render below normally replaces this button, but every early return in
+    // refreshProviderHealth skips it — without this the button stays "확인 중…" forever.
+    trigger.disabled = false
+    trigger.textContent = "다시 테스트"
   }
+  // A retest that fails again leaves the stored record byte-identical, so the repainted
+  // alert would be indistinguishable from the button doing nothing. Say so explicitly.
+  if (result && !result.ok) retestFailure = { tier, detail: result.detail }
   await refreshProviderHealth()
+  renderAiControls()
 }
 
 for (const chipEl of document.querySelectorAll<HTMLButtonElement>(".stchip")) {

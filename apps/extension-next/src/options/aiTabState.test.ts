@@ -7,6 +7,7 @@ import {
   aiStatus,
   aiStatusTone,
   isAiConfigComplete,
+  pendingSub,
   providerIsRouted,
   providerLockCopy,
   routedTiers,
@@ -88,6 +89,14 @@ test("status copy states the mode without asking for an action the toggle cannot
   for (const copy of Object.values(STATUS_COPY)) {
     assert.ok(!copy.text.includes("비활성화"), `${copy.text}: the headline states, it does not command`)
   }
+})
+
+test("pending points at the step that is actually left", () => {
+  // The status line reads the saved routes while the tier rows read the draft, so a user
+  // can finish every gap below and still be pending. Sending them "아래" would be a dead
+  // end: the rows all look complete and only 저장 is left.
+  assert.equal(pendingSub(false), "아래 Tier 1·2 설정을 마치면 켜져요")
+  assert.equal(pendingSub(true), "아래 설정을 저장하면 켜져요")
 })
 
 test("a refused provider control names the routed tiers and both ways out", () => {

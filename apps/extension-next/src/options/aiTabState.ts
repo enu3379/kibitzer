@@ -95,13 +95,20 @@ export const STATUS_COPY: Record<AiStatus, StatusCopy> = {
   // costs are the alert stack's job, and repeating them in the headline was the old
   // duplication. The tone carries the severity.
   active: { text: "AI 판정 켜짐", sub: null },
-  // No "자동으로": filling a key gap re-routes through the worker on its own, but filling
-  // a model gap still needs 저장, and the line must not promise the wrong one.
   pending: { text: "AI 판정 준비 중", sub: "아래 Tier 1·2 설정을 마치면 켜져요" },
   off: {
     text: "AI 판정 꺼짐",
     sub: "로컬 판정으로 동작 중입니다. AI 판정을 비활성화하면 판정 품질이 낮아지고 훈수 메시지가 단순해져요.",
   },
+}
+
+/** `pending` has two shapes and they need different instructions. The status line reads
+ *  the SAVED routes while the tier rows read the draft, so a user can finish every gap
+ *  below and still be pending until 저장 — pointing them "아래" at rows that now look
+ *  complete is a dead end. Filling a key gap re-routes through the worker on its own, so
+ *  that case really does need nothing but the setup. */
+export function pendingSub(draftComplete: boolean): string {
+  return draftComplete ? "아래 설정을 저장하면 켜져요" : STATUS_COPY.pending.sub ?? ""
 }
 
 export function tierGapCopy(gap: TierGap, providerLabel: string): string {
