@@ -40,7 +40,7 @@ export const PERSONA_SAMPLE_LINES: Record<string, PersonaSampleLines> = {
   },
   tsundere: {
     hover: "그거 목표랑 상관없지 않아? 보고 있기 답답해서 하는 말이야.",
-    picked: "뭐, 알겠어. 딱히 챙겨주려는 거 아니고 그냥 맡은 거야.",
+    picked: "뭐, 알겠어. 딱히 챙겨주려는 건 아니고 그냥 맡은 거야.",
   },
   yandere: {
     hover: "지금 화면에 뜬 걔, 유튜브… 누구야? 나는 처음 보는 애인데.",

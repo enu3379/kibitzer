@@ -20,7 +20,7 @@
          쪼그라들어(버그였다 — 처음엔 이래서 패널이 훨씬 작게 나왔다) 안쪽 100% 높이가
          전부 무너진다. .half에 height:100%를 직접 줘서 그 사슬을 끊는다.
 
-         data-fit의 높이(381 / 413)는 insta3.html과 같다 — 같은 popup.html?part=… 조각을
+         data-fit의 높이(398 / 428)는 insta3.html과 같다 — 같은 popup.html?part=… 조각을
          쓰므로 실측값도 그대로 재사용한다.
 
          .half에 좌우 padding을 준 건 여백 때문 — 처음엔 안 줬더니 카피 텍스트와 첫 패널
@@ -33,12 +33,12 @@
 
       /* 두 패널의 세로 위치 -----------------------------------------------------
          왼쪽(.stage-head)은 scenes.css의 .split .stage{align-items:center} 그대로 —
-         381 높이 카드라서 세로 가운데 정렬하면 top≈181px이 나온다. 오른쪽 카드
-         묶음(.stage-cards)은 자연 높이가 더 커서(413) 똑같이 가운데 정렬하면 top이
-         더 위(≈163px)로 올라가 둘의 윗선이 안 맞았다.
+         398 높이 카드라서 세로 가운데 정렬하면 top≈172.6px이 나온다. 오른쪽 카드
+         묶음(.stage-cards)은 자연 높이가 더 커서(428) 똑같이 가운데 정렬하면 top이
+         더 위로 올라가 둘의 윗선이 안 맞았다.
 
          그래서 오른쪽만 정렬 기준을 바꿨다: align-items:flex-start로 스택 위쪽에
-         붙이고, .panel에 margin-top을 줘서 왼쪽 카드의 top(181px, 실측값)만큼
+         붙이고, .panel에 margin-top을 줘서 왼쪽 카드의 top(172.6px, 실측값)만큼
          내렸다 — 결과적으로 두 패널의 윗선이 같아진다.
 
          ↓ 두 패널의 시작 y좌표를 직접 조정하려면 —
@@ -54,13 +54,13 @@
          위 margin-top은 패널 박스를 통째로 아래로 미는 값이라 이 얘기가 아니다(그건
          "패널의 시작 위치"를 옮길 뿐, 박스 안쪽 공간이 아니다). 안쪽 여백을 늘리려면
          바로 아래 .stage-cards .panel의 padding-top/padding-bottom을 쓴다 — 지금
-         28px씩 균등하게 줘서, 카드들의 실제 크기는 그대로 두고 패널 박스만 그만큼
+         9px씩 균등하게 줘서, 카드들의 실제 크기는 그대로 두고 패널 박스만 그만큼
          커졌다. 이 숫자를 키우면 위아래 흰 여백이 똑같이 늘어난다(줄이려면 두 값을
          같이 줄인다 — 다르게 주면 위/아래 여백이 비대칭이 된다).
 
          이 padding은 .panel(clip과 stage 사이에 낀 요소)에 있어서 insta-fit.js의
          availH 계산에서 자동으로 빠진다(파일 위쪽 .clip 관련 주석 참고) — 그래서
-         카드가 넘칠 걱정 없이 안전하게 키울 수 있고, 지금 정도(28px×2=56px)로는
+         카드가 넘칠 걱정 없이 안전하게 키울 수 있고, 지금 정도(9px×2=18px)로는
          남는 여유(availH가 필요한 높이보다 한참 크다)가 넉넉해서 카드 확대 배율도
          전혀 안 바뀐다. 아주 크게(수백 px) 늘리면 그때는 배율이 폭 대신 높이에
          걸리기 시작할 수 있다. */
@@ -70,7 +70,7 @@
          그대로 center인 채 margin-top만 더해져서 가운데 정렬 기준점 자체가 아래로
          밀려버렸다). 클래스를 하나 더 얹어 우선순위를 맞춘다. */
       .twocol .stage-cards { align-items: flex-start; }
-      .stage-cards .panel { margin-top: 181px; padding: 9px 0; }
+      .stage-cards .panel { margin-top: 172.6px; padding: 9px 0; }
     </style>
   </head>
   <body>
@@ -91,14 +91,14 @@
         <div class="twocol">
           <div class="stage stage-head">
             <div class="panel">
-              <div class="clip" data-fit="296x381" data-fit-max="1.8">
+              <div class="clip" data-fit="296x398" data-fit-max="1.8">
                 <iframe class="fit-target" src="popup/popup.html?scene=summary&amp;part=head"></iframe>
               </div>
             </div>
           </div>
           <div class="stage stage-cards">
             <div class="panel">
-              <div class="clip" data-fit="296x413" data-fit-max="1.8">
+              <div class="clip" data-fit="296x428" data-fit-max="1.8">
                 <iframe
                   class="fit-target"
                   src="popup/popup.html?scene=summary&amp;part=cards&amp;cards=highlight,compare-last,focus,scurve"

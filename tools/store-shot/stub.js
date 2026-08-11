@@ -109,7 +109,10 @@
       vsLast: { okRatioDelta: 0.11, validMsDelta: 12 * MIN, driftVisitsDelta: -3 },
       vsAvg: { okRatioDelta: 0.06, validMsDelta: 7 * MIN, driftVisitsDelta: -1 },
       lastSCurve: [70, 71, 68, 62, 55, 49, 44, 40, 38, 42, 51, 57, 60, 62, 64],
-      avgSCurve: null,
+      // 값은 0~100 절대 스케일(popup.ts smoothCurvePath). 다른 두 곡선과 같은 자리에서
+      // 출발해(72/70/71) 오른쪽으로 갈수록 단조 하강 — 몰입 곡선 카드의 점선 '평균'선.
+      // null이면 popup.ts의 cardSCurve가 평균선과 그 범례를 통째로 건너뛴다.
+      avgSCurve: [71, 69, 67, 64, 61, 58, 55, 52, 49, 46, 43, 40, 38, 36, 34],
     },
     cards: cardsParam ? cardsParam.split(",") : ["highlight"],
     comment: {
@@ -332,7 +335,18 @@
       setTimeout(function () {
         var more = document.getElementById("sumMore");
         if (more && more.getAttribute("aria-expanded") !== "true") more.click();
+        // 카드는 그 click 안에서 동기적으로 그려지므로 다음 틱이면 이미 DOM에 있다.
+        if (part === "cards") setTimeout(shortenSCurveTitle, 0);
       }, 120);
     }
   });
+
+  // 몰입 곡선 카드 제목에서 " · 이번 vs 지난"을 떼어 "📉 몰입 곡선"만 남긴다. 곡선이 세 개
+  // (이번/지난/평균)가 되면서 제목이 그중 둘만 짚는 게 어긋나기도 하고, 어차피 바로 아래
+  // 범례가 셋을 다 설명한다. 캡처용 문구 손질이라 popup.ts는 그대로 둔다.
+  function shortenSCurveTitle() {
+    var legend = document.querySelector(".scurve-legend");
+    var ch = legend && legend.closest(".card").querySelector(".ch");
+    if (ch) ch.textContent = "📉 몰입 곡선";
+  }
 })();
