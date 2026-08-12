@@ -45,6 +45,20 @@
   // shipped sizes read a touch small blown up. Scoped to that one pane; nothing else shifts.
   var fontBumpPersona = params.get("fontBump") === "persona";
 
+  // ?fontBump=ai — enlarge text inside the AI judging pane for its Instagram capture.
+  // This is capture-only and leaves the shared options header and left tabs at their real size.
+  var fontBumpAi = params.get("fontBump") === "ai";
+
+  // insta4 AI 캡처의 레이아웃 조절값. 아래 숫자 3개만 바꾸면 된다.
+  // sectionGapPx: '연결된 AI 서비스'와 '모델 지정' 사이 간격
+  // modelDropdownWidthPx: Tier 1/2 모델 드롭다운 너비
+  // cardHeightPx: 흰색 AI 카드 전체 높이 (늘릴수록 카드 아래쪽 흰 여백이 커진다)
+  var aiCaptureLayout = {
+    sectionGapPx: 55,
+    modelDropdownWidthPx: 280,
+    cardHeightPx: 530,
+  };
+
   // ?fontBump=active — same idea for the popup's active (goal) card: 현재 목표, 게이지
   // state/score, 말투 line, and the four buttons. Scoped to #active so scene1.html/
   // store-1-popup.png (plain popup.html, no fontBump) stays untouched.
@@ -343,6 +357,53 @@
         ".tabs button{font-size:13px!important}";              /* 일반/사이트/말투/AI 판정/데이터 */
     }
 
+    // ?fontBump=ai: increase every visible text role in the AI pane by 2px. Keep the
+    // selectors scoped so the options header, navigation tabs, and other panes are unchanged.
+    if (fontBumpAi) {
+      s.textContent +=
+        "#pane-ai .card>h3{font-size:13px!important}" +
+        "#pane-ai .ai-title .description{font-size:13.5px!important}" +
+        "#pane-ai .ai-alert{font-size:13.5px!important}" +
+        "#pane-ai .lab b{font-size:15px!important}" +
+        "#pane-ai .lab small{font-size:13.5px!important}" +
+        "#pane-ai .seclabel{font-size:14px!important}" +
+        "#pane-ai .phead .pname{font-size:15px!important}" +
+        "#pane-ai .phead .pbadge{font-size:12.5px!important}" +
+        "#pane-ai .punlink,#pane-ai .pnote{font-size:13.5px!important}" +
+        "#pane-ai .kmeta .kn{font-size:14.5px!important}" +
+        "#pane-ai .kmeta .kv{font-size:13.5px!important}" +
+        "#pane-ai .kdate{font-size:13px!important}" +
+        "#pane-ai .kdel{font-size:14px!important}" +
+        "#pane-ai .kempty,#pane-ai .kadd{font-size:14px!important}" +
+        "#pane-ai .kform input,#pane-ai .connectrow select{font-size:14.5px!important}" +
+        "#pane-ai .kform .ktest{font-size:13.5px!important}" +
+        "#pane-ai .krot{font-size:13px!important}" +
+        "#pane-ai .connectbtn{font-size:14.5px!important}" +
+        "#pane-ai .mlab b{font-size:15px!important}" +
+        "#pane-ai .mlab small{font-size:13px!important}" +
+        "#pane-ai .stchip{font-size:12.5px!important}" +
+        "#pane-ai .route-banner{font-size:13.5px!important}" +
+        "#pane-ai .mctl select,#pane-ai .mctl input{font-size:14.5px!important}" +
+        "#pane-ai .mctl .backbtn{font-size:14px!important}" +
+        "#pane-ai .info-trigger{font-size:13px!important}" +
+        "#pane-ai .info-pop{font-size:13.5px!important}" +
+        "#pane-ai button.btn{font-size:14.5px!important}" +
+        "#pane-ai .hint,#pane-ai .privacy-link,#pane-ai .store-ai-note{font-size:13.5px!important}" +
+        "#pane-ai .psec{padding:10px 0 12px}" +
+        "#pane-ai .pblock{padding:9px 12px 10px;margin-bottom:8px}" +
+        "#pane-ai .phead{margin-bottom:7px}" +
+        "#pane-ai .pnote{display:none!important}" +
+        "#pane-ai .krow{padding:7px 10px;margin-bottom:6px}" +
+        "#pane-ai .msec{margin-top:" + aiCaptureLayout.sectionGapPx + "px;padding:10px 0 12px}" +
+        "#pane-ai .mrow{padding:5px 0}" +
+        "#pane-ai .mlab{flex-basis:215px}" +
+        "#pane-ai .mctl{flex:0 0 " + aiCaptureLayout.modelDropdownWidthPx + "px}" +
+        "#pane-ai .mctl select.prov{display:none!important}" +
+        "#pane-ai .mctl select.model{flex:1 1 auto;width:100%}" +
+        "#pane-ai .card{height:" + aiCaptureLayout.cardHeightPx + "px}" +
+        "#pane-ai .store-ai-note{padding-top:8px;margin-bottom:6px;line-height:1.45}";
+    }
+
     // ?fontBump=active: +1px on the active card's text (현재 목표, 게이지 state/score, 말투
     // line, buttons). #active scopes it to that card only.
     if (fontBumpActive) {
@@ -397,7 +458,9 @@
           );
           actions.insertAdjacentElement("afterend", note);
         }
-        var info = document.querySelector('[aria-label="Tier 2 전송 데이터 안내"]');
+        // Keep the Tier 1 info tooltip open for the still capture. The shipped CSS shows the
+        // same tooltip for :hover and :focus-within, so focusing its button reproduces hover.
+        var info = document.querySelector('[aria-label="Tier 1 전송 데이터 안내"]');
         if (info) info.focus();
       }, 120);
     }
