@@ -4,22 +4,34 @@
     <meta charset="utf-8" />
     <link rel="stylesheet" href="scenes.css" />
     <style>
-      .panel .clip { width: 940px; height: 610px; overflow: hidden; }
-      .panel iframe { width: 940px; height: 620px; }
+      /* 옵션 페이지 AI 판정 탭 (store-4-ai.png). 캡처 시점에만 stub.js의 ?aiFix=1이 CSS
+         세 가지를 입힌다(scene==="ai" 분기, aiFixParam 참고) — 전부 실제 options.html/
+         options.ts는 그대로 두고 캡처만 다듬는다:
+           1) 초록 '저장' 버튼 삭제 — .ai-actions엔 지금 그 버튼 하나뿐이라 행째 지운다.
+           2) 그걸로 번 여백 덕에 하단 안내 문구('AI에게 보여주고 싶지 않은 사이트는…')가
+              캔버스 밖으로 안 잘리고 다 보인다.
+           3) '연결된 AI 서비스'와 Tier1/2 사이 gap — Tier 2의 '어떤 데이터가 전송되나요'
+              팝업(위로 열림)이 위 Ollama Cloud API Key 패널과 겹치는 걸 완화한다.
+         .panel .clip/iframe 크기(940×622 / 940×640)는 그대로다 — 저장 버튼 삭제로 번
+         공간이 gap(20px)보다 커서, 하단 잘림 없이 그대로 맞는다(실측: .store-ai-note가
+         캔버스 하단에서 20px 남기고 끝난다). */
+      .stack .stage { margin-top: 14px; }
+      .panel .clip { width: 940px; height: 622px; overflow: hidden; }
+      .panel iframe { width: 940px; height: 640px; }
     </style>
   </head>
   <body>
     <div class="stack">
       <div class="copy">
         <div class="brand"><span>Kibitzer</span><span class="dot"></span><b>몰입 훈수꾼</b></div>
-        <h1><span class="mark">잔소리도 취향껏</span> — 말투 열 가지</h1>
+        <h1><span class="mark">AI를 활용해</span> 더 정확하게 판정합니다.</h1>
         <p class="sub">
-          영국 집사부터 츤데레, 내비게이션, 다큐 내레이터까지 — 고르면 그 목소리가 바로 아래에서 들려줍니다.
+          원하면 AI를 끌 수 있지만, 판정 품질이 낮아지고 훈수 문장은 단순해집니다.
         </p>
       </div>
       <div class="stage">
         <div class="panel">
-          <div class="clip"><iframe src="options/options.html?scene=persona#persona"></iframe></div>
+          <div class="clip"><iframe src="options/options.html?scene=ai&amp;aiFix=1#ai"></iframe></div>
         </div>
       </div>
     </div>

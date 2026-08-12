@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Kibitzer",
-  "version": "0.3.0",
-  "description": "AI로 브라우징의 목표 이탈을 판정하고, 딴짓이 쌓일 때만 자연스럽게 훈수하는 몰입 도우미. 원하면 AI 없이도 사용할 수 있어요.",
+  "version": "1.0.0",
+  "description": "목표를 선언하면 브라우징을 조용히 지켜보다 딴짓이 쌓일 때만 자연스럽게 훈수하는 몰입 도우미.",
   "minimum_chrome_version": "123",
   "incognito": "not_allowed",
   "content_security_policy": {

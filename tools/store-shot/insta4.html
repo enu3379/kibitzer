@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="insta.css" />
+    <style>
+      /* 캐러셀 4장 (스토어 4번 = scene4.html과 같은 소재: 옵션 페이지 말투 탭).
+         insta2처럼 브랜드 머리말 없이 헤드라인부터 시작한다.
+
+         옵션 페이지의 본문은 `.frame { max-width: 880px }`로 안에서 가운데 정렬되므로,
+         뷰포트를 그보다 넓게 줘도 내용이 커지지 않고 여백만 늘어난다 — 그래서 자연
+         너비를 880 + 좌우 패딩(24×2) = 928로 잡았다(더 넓혀 봐야 의미 없다). 실제로 이
+         패널의 "폭"을 조정하려면 아래 .stage 의 data-fit 첫 번째 숫자(928)가 아니라
+         .frame 의 padding-left/right(지금 64px, insta1·insta3과 동일)를 줄이거나 늘려서
+         패널에 남는 가로 공간을 조절한다 — insta-fit.js가 그 공간에 맞춰 배율을 정한다.
+         data-fit의 높이(679)는 실측값으로, 928px 너비에서의 body.scrollHeight다. */
+      .frame { padding-left: 64px; padding-right: 64px; }
+      .stage { margin-top: 40px; }
+      /* h1 제외 텍스트 전부 +2px(insta.css 기본값 24에서). 이 font-size 값만 바꾸면
+         조정된다. */
+      .sub { font-size: 26px; }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <h1>잔소리도 취향껏 <span class="mark">말투 열 가지</span></h1>
+      <p class="sub">영국 집사부터 츤데레, 내비게이션, 다큐 내레이터까지<br />— 고르면 그 말투를 바로 아래에서 들려줍니다.</p>
+      <div class="stage">
+        <div class="panel">
+          <div class="clip" data-fit="928x679" data-fit-max="1.4">
+            <!-- 이 캡처만: 리드 문장에서 "과 훈수 응답" 삭제(lede), 선택 말투를 츤데레로
+                 (persona), 이 탭 안 글자 전부 +1px(fontBump) — 전부 stub.js가 scene=persona
+                 URL을 볼 때만 적용하는 오버라이드라 실제 옵션 페이지·다른 장면은 그대로다. -->
+            <iframe
+              class="fit-target"
+              src="options/options.html?scene=persona&amp;persona=tsundere&amp;fontBump=persona&amp;lede=%ED%8C%90%EC%A0%95%20%EA%B0%90%EB%8F%84%C2%B7%EC%95%8C%EB%A6%BC%C2%B7%EB%A7%90%ED%88%AC%C2%B7AI%20%ED%8C%90%EC%A0%95%C2%B7%EB%8D%B0%EC%9D%B4%ED%84%B0%EB%A5%BC%20%EC%97%AC%EA%B8%B0%EC%84%9C%20%EA%B4%80%EB%A6%AC%ED%95%A9%EB%8B%88%EB%8B%A4.%20%EB%AA%A9%ED%91%9C%20%EC%84%A0%EC%96%B8%EC%9D%80%20%ED%88%B4%EB%B0%94%20%ED%8C%9D%EC%97%85%EC%97%90%EC%84%9C#persona"
+            ></iframe>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="insta-fit.js"></script>
+  </body>
+</html>

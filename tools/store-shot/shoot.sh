@@ -1,6 +1,8 @@
 #!/bin/zsh
 # shoot.sh <url> <out.png> <width> <height>
-# Captures at 2x device scale, then downscales to the exact requested pixel size.
+# Captures at 4x device scale, then downscales to the exact requested pixel size — the extra
+# resolution heading into Lanczos downscale reads noticeably crisper than capturing at 2x
+# directly (compared side by side; see docs/screenshots/*@2x.png vs *@4x.png while they last).
 set -e
 D="${0:A:h}"
 URL="$1"; OUT="$2"; W="$3"; H="$4"
@@ -12,7 +14,7 @@ if [[ ! -x "$CHROME_BIN" ]]; then
 fi
 "$CHROME_BIN" \
   --headless=new --disable-gpu --hide-scrollbars \
-  --force-device-scale-factor=2 --window-size="$W,$H" \
+  --force-device-scale-factor=4 --window-size="$W,$H" \
   --virtual-time-budget=4000 --allow-file-access-from-files \
   --screenshot="$TMP" "$URL" >/dev/null 2>&1
 python3 - "$TMP" "$OUT" "$W" "$H" <<'PY'
