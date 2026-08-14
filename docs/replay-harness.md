@@ -15,7 +15,7 @@ Use **설정 → 데이터 → 이벤트 JSON** to export the input log.
 
 ## Offline CLI
 
-From `apps/extension-next`:
+From `apps/extension`:
 
 ```sh
 node --experimental-strip-types tools/replay.ts <events.jsonl> [availableMinutes]
@@ -43,5 +43,5 @@ reconstruct the full exemplar/anchor/goal-enrichment and feedback-learning
 timeline. The degraded-mode gauge result is therefore a counterfactual tuning
 aid, not a byte-for-byte reproduction of every live decision.
 
-The implementation is in `apps/extension-next/src/lib/replay.ts`; its contract
+The implementation is in `apps/extension/src/lib/replay.ts`; its contract
 tests run as part of `npm test` and `npm run build`.

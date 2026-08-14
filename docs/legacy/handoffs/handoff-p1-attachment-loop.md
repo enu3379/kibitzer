@@ -4,7 +4,7 @@ Date: 2026-07-06 (delivery surface updated 2026-07-08)
 Scope owner: delegated agent (Codex), **execute only after P0 merges** — P0 reshapes
 the persona/settings interfaces this stage builds on. Re-verify file states before
 starting; this document is interface-level on purpose.
-Parent plan: [roadmap-fun-layer.md](roadmap-fun-layer.md)
+Parent plan: [roadmap-fun-layer.md](../plans/roadmap-fun-layer.md)
 
 > **2026-07-08 delivery-surface change (already shipped, affects this handoff):**
 > the extension now renders interventions as an **in-page toast** injected into

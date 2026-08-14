@@ -43,7 +43,7 @@ persona system, add escalation awareness, and let the Mac speak the nag.
 - Runtime settings (persona, voice, quiet hours) in SQLite with a settings API;
   YAML remains the defaults layer.
 
-Detailed handoff: [handoff-p0-persona-engine.md](handoff-p0-persona-engine.md)
+Detailed handoff: [handoff-p0-persona-engine.md](../handoffs/handoff-p0-persona-engine.md)
 
 ### P1 — Attachment (the reasons to keep it installed)
 
@@ -56,7 +56,7 @@ Detailed handoff: [handoff-p0-persona-engine.md](handoff-p0-persona-engine.md)
   stretch, delivered as a popup view (data already in SQLite).
 - Judgment transparency: "왜?" affordance showing the stored Tier 1/2 reasons.
 
-Detailed handoff: [handoff-p1-attachment-loop.md](handoff-p1-attachment-loop.md)
+Detailed handoff: [handoff-p1-attachment-loop.md](../handoffs/handoff-p1-attachment-loop.md)
 (execute after P0 merges; interfaces may shift with P0.)
 
 ### P2 — Distribution and persistence
@@ -67,7 +67,7 @@ Detailed handoff: [handoff-p1-attachment-loop.md](handoff-p1-attachment-loop.md)
 - Cross-session learning (Stage 1): persist confirmed exemplars across sessions.
 - Replay CLI (Work Package 10) doubles as the persona/threshold A/B harness.
 
-Detailed handoff: [handoff-p2-distribution.md](handoff-p2-distribution.md)
+Detailed handoff: [handoff-p2-distribution.md](../handoffs/handoff-p2-distribution.md)
 (interface-level only; write the full handoff when P1 lands.)
 
 ## Ownership and boundaries

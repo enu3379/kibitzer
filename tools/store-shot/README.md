@@ -7,7 +7,7 @@
 ## 쓰는 법
 
 ```sh
-cd apps/extension-next && npm run build   # dist/ 가 있어야 한다
+cd apps/extension && npm run build   # dist/ 가 있어야 한다
 cd ../../tools/store-shot
 ./prepare.sh        # dist/ 에서 popup·options·icons·폰트를 끌어오고 stub을 주입
 ./shoot-all.sh      # 스토어 7장 전부 docs/screenshots/ 로

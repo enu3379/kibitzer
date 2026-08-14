@@ -1,11 +1,11 @@
 // Anchor-floor recalibration study on the O4 export + WASM embedder (the exact
-// runtime stack of extension-next). Re-runs the 2026-07-21 server-era pollution /
+// runtime stack of extension). Re-runs the 2026-07-21 server-era pollution /
 // rescue experiments (docs/results-2026-07-21-anchor-pollution.md) against the O4
 // score distribution to derive ANCHOR_TIEBREAK_FLOOR / TIER1_ANCHOR_FLOOR values
 // that are actually calibrated for this stack — the server-era 0.30 was derived on
 // the pre-O4 export (tau_ok 0.6 era).
 //
-// Usage (from apps/extension-next):
+// Usage (from apps/extension):
 //   node --experimental-strip-types tools/anchorFloorStudy.ts <pair_scores.csv>
 //
 // <pair_scores.csv> is docs/benchmarks/tier0-embedding-o4/pair_scores.csv (the

@@ -1,12 +1,12 @@
 # Platform strategy
 
 Kibitzer has one runtime for macOS and Windows: the Chrome MV3 extension under
-`apps/extension-next/`. There is no native server, tray, menu-bar process,
+`apps/extension/`. There is no native server, tray, menu-bar process,
 installer, or OS-specific launch agent in the active tree.
 
 ## Shared code
 
-- `apps/extension-next/` — browser runtime, UI, tests, and build.
+- `apps/extension/` — browser runtime, UI, tests, and build.
 - `configs/` — persona sources and sensitive-domain rules.
 - `fixtures/gauge/` — reducer contract fixtures.
 - `docs/` — architecture, privacy, decisions, migration records, and evidence.
@@ -17,7 +17,7 @@ GitHub Actions runs the same Node 22 contract on `macos-latest` and
 `windows-latest`:
 
 ```sh
-cd apps/extension-next
+cd apps/extension
 npm ci
 npm run build
 ```

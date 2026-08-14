@@ -10,7 +10,7 @@ Last updated: 2026-07-31.
 ## Where the project is (verified 2026-07-31)
 
 The product is a single serverless Chrome MV3 extension
-(`apps/extension-next`) — the Python server / macOS app era ended with the
+(`apps/extension`) — the Python server / macOS app era ended with the
 2026-07-24 cutover (D14). `main` carries v0.2.0 with `release.yml`
 auto-releases (nested zip + CWS store-root zip). Judging is multi-provider
 BYOK (7 providers, #158) on top of local KoEn-E5 WASM Tier-0 embeddings; with
@@ -170,7 +170,7 @@ private labeled corpus shows the dominant Tier-0 failure is false-DRIFT
 unreachable sub-topic words; threshold tuning cannot fix a 0.00-mass. The
 corpus stays local (browsing history); set `KIBITZER_AUDIT_CORPUS` to rerun
 its regression test. Shape (details in
-[handoff-goal-enrichment.md](handoff-goal-enrichment.md)): one async call at
+[handoff-goal-enrichment.md](legacy/handoffs/handoff-goal-enrichment.md)): one async call at
 goal declaration (Tier-1 cloud stack, goal text only), K≤8 phrases via a
 strict prompt (~half English when the topic lives in English), stored in a
 separate `goal_derived_exemplars` table, matched at a separate higher
@@ -441,7 +441,7 @@ adversarial verification + 2 maintainability agents; 31 agents, ~21 min). 20
 candidate findings → **17 confirmed** (2 high, 6 medium, 9 low), 3 refuted, all
 confirmed at verifier confidence high. Known CWD-relative-path issue was
 excluded (already D9 phase-0). **Work order:
-[handoff-refactor-predist.md](handoff-refactor-predist.md)** — findings
+[handoff-refactor-predist.md](legacy/handoffs/handoff-refactor-predist.md)** — findings
 reorganized into ordered, file-anchored tasks (owner + effort + deps + tests),
 with the verbatim report embedded as Appendix A.
 
@@ -519,7 +519,7 @@ Errata: the report has **13** numbered maintainability recommendations (not
 15), M13 means expanding the existing extension test harness, and M7 wrongly
 called `embedding.model`/`batch_size` unread (both feed the ONNX provider).
 The corrected source of execution is
-[handoff-refactor-predist.md](handoff-refactor-predist.md) (Appendix A keeps
+[handoff-refactor-predist.md](legacy/handoffs/handoff-refactor-predist.md) (Appendix A keeps
 the old report verbatim behind errata). Release gates: R1 strict
 malformed-config degradation and the **full** R2 — persistent alarm-backed
 MV3 dwell state plus idempotent server retries; a ≤25 s clamp is dogfooding
@@ -650,7 +650,7 @@ input caps also remain. F3/F4 stay informational.
 
 ### D16 — Gauge controller: v0 semantics locked, TypeScript-first rollout → RESOLVED (design, 2026-07-21; renumbered from a duplicate “D9” 2026-07-31)
 
-The gauge design (`docs/analysis-plan-a-gauge-design.md`, PR #121) is the v0
+The gauge design (`docs/research/gauge/analysis-plan-a-gauge-design.md`, PR #121) is the v0
 behavior contract, superseding plan A (`AlignmentController`) and — on the
 shipping path — plan B (`StreakController`). §1–§6 (state model, dynamics, Tier 2
 dual gate, nag/renag/celebration semantics) are frozen as the contract; every
@@ -766,7 +766,7 @@ quality-loss claim is made until the full Tier-0-only vs two-tier pipeline is be
 ### D14 — Serverless cutover scope and preservation → RESOLVED (2026-07-24)
 
 The active product becomes the single TypeScript MV3 runtime in
-`apps/extension-next`; the Python FastAPI server, relay extension, menubar/tray,
+`apps/extension`; the Python FastAPI server, relay extension, menubar/tray,
 packaging, and platform launch scripts leave the active tree in PR #139.
 
 The deletion gate is **runtime correctness and privacy**, not complete

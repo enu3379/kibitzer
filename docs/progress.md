@@ -25,7 +25,7 @@ Completed:
 Verified:
 
 - CI (macOS + Windows, Node 22) green on every PR at merge time.
-- Post-batch `apps/extension-next` `npm run build` on `dev`: 221/221 tests,
+- Post-batch `apps/extension` `npm run build` on `dev`: 221/221 tests,
   both typechecks, and the bundle pass.
 
 ## 2026-07-24 Serverless cutover
@@ -51,7 +51,7 @@ Completed:
 
 Verified:
 
-- `apps/extension-next` `npm run build`: 109/109 tests, source/test
+- `apps/extension` `npm run build`: 109/109 tests, source/test
   typechecks, model/WASM hash verification, and bundle passed.
 - `git diff --check` passed.
 
@@ -172,7 +172,7 @@ Completed:
   deferred per the 2026-09-01 Gatekeeper policy). Statuses refreshed for the
   #69/#71/#74 closures, `331a0ba`, and draft #106.
 - Landed the previously local-only non-prompt-injection security audit,
-  `docs/handoff-refactor-predist.md` (the corrected 2026-07-15 reconciled
+  `docs/legacy/handoffs/handoff-refactor-predist.md` (the corrected 2026-07-15 reconciled
   work order from `chore/predist-audit-docs`, superseding the unreconciled
   draft), `docs/persona-voice-revamp.md`, and the
   `docs/benchmarks/persona-voice-v4/` evidence (the v5 benchmark already on
@@ -304,7 +304,7 @@ Completed:
   documented that `derived_tau` is verdict-inert under `tau_ok=0.6` (it
   survives as a diagnostics noise floor), and flagged that the hash-era
   audit-band and private-corpus regression thresholds need ONNX-scale
-  recalibration (`docs/handoff-goal-enrichment.md` addendum 2026-07-13).
+  recalibration (`docs/legacy/handoffs/handoff-goal-enrichment.md` addendum 2026-07-13).
 
 ## 2026-07-13 Tier 0 benchmark v2 (real-corpus findings encoded)
 
@@ -450,7 +450,7 @@ Completed:
   - intervention toasts route `related` / `break` / `snooze`;
   - legacy system notification fallback uses `related` / `break` within Chrome's
     2-button limit.
-- Added [P1 Claude Design/Copy Follow-Up](handoff-p1-claude-design.md) for
+- Added [P1 Claude Design/Copy Follow-Up](legacy/handoffs/handoff-p1-claude-design.md) for
   celebration styling, break button copy/layout, persona selector UI, report UI,
   and "왜?" transparency affordances.
 
@@ -492,7 +492,7 @@ Completed:
   - `GET /health` mode reporting;
   - macOS LaunchAgent install/uninstall scripts.
 - Created the now-retired idle-daemon and Windows-tray plans, and
-  [2026-07-07 Alignment/Dwell Handoff](handoff-2026-07-07-alignment-dwell.md).
+  [2026-07-07 Alignment/Dwell Handoff](legacy/handoffs/handoff-2026-07-07-alignment-dwell.md).
 - Opened PR #1 for the macOS idle daemon work, marked it ready, and merged it to
   `main` as merge commit `0317467`.
 
@@ -524,7 +524,7 @@ Current boundary:
 
 Session handoff:
 
-- Added [handoff-2026-07-07-alignment-dwell.md](handoff-2026-07-07-alignment-dwell.md)
+- Added [handoff-2026-07-07-alignment-dwell.md](legacy/handoffs/handoff-2026-07-07-alignment-dwell.md)
   as the durable summary of today's controller, dwell, verification, and runtime
   state.
 - Preserved the original Korean Kibitzer implementation guideline as
@@ -835,17 +835,17 @@ Verified:
 Product planning for the personality layer, split for parallel work (code: Codex,
 design: Claude):
 
-- [roadmap-fun-layer.md](roadmap-fun-layer.md): thesis (persona-driven contextual
+- [roadmap-fun-layer.md](legacy/plans/roadmap-fun-layer.md): thesis (persona-driven contextual
   nagging for geek/ADHD users), stage overview P0/P1/P2, ownership boundaries,
   design principles.
-- [handoff-p0-persona-engine.md](handoff-p0-persona-engine.md): Codex-executable
+- [handoff-p0-persona-engine.md](legacy/handoffs/handoff-p0-persona-engine.md): Codex-executable
   now — persona loading/prompt composition, escalation context from the event log,
   runtime settings API, macOS `say` voice, quiet hours with the silent-delivery
   fallback.
-- [handoff-p1-attachment-loop.md](handoff-p1-attachment-loop.md) (after P0):
+- [handoff-p1-attachment-loop.md](legacy/handoffs/handoff-p1-attachment-loop.md) (after P0):
   return celebration, "5분만" break, custom personas, session report API,
   judgment transparency.
-- [handoff-p2-distribution.md](handoff-p2-distribution.md) (after P1, placeholder):
+- [handoff-p2-distribution.md](legacy/handoffs/handoff-p2-distribution.md) (after P1, placeholder):
   status CLI/tmux, webhooks, cross-session learning decision, Replay CLI (WP10).
 - [configs/personas.yaml](../configs/personas.yaml): v1 persona content authored —
   건조한 훈수꾼 (default), 오지랖 잔소리꾼, 조용한 코치 — style prompts with
@@ -863,7 +863,7 @@ Next:
 ## 2026-07-07 P0 Persona Engine Plumbing
 
 Implemented the P0 persona/delivery plumbing from
-[handoff-p0-persona-engine.md](handoff-p0-persona-engine.md):
+[handoff-p0-persona-engine.md](legacy/handoffs/handoff-p0-persona-engine.md):
 
 - Persona YAML loading with code-owned Tier 2 strict-JSON prompt composition.
 - Runtime `/settings` API for persona, voice enablement, and quiet hours.
@@ -975,7 +975,7 @@ Next:
 ## 2026-07-08 P1 Attachment Loop: Page Labels
 
 - Added the server-side always-on page verdict plumbing from
-  `docs/handoff-p1-attachment-loop.md`: `GET /observations/latest?tab_id=`
+  `docs/legacy/handoffs/handoff-p1-attachment-loop.md`: `GET /observations/latest?tab_id=`
   returns the current session's newest observation for that tab with verdict,
   Tier 0 diagnostics, anchor eligibility, and `tier1_reason`.
 - Added observation-scoped `page_labels` storage plus

@@ -4,7 +4,7 @@
 
 Tier 0 runs entirely in the extension with KoEn-E5 Tiny O4 ONNX through
 `onnxruntime-web` WASM. The model and tokenizer metadata are pinned under
-`apps/extension-next/assets/models/koen-e5-tiny/`; `npm run build` downloads
+`apps/extension/assets/models/koen-e5-tiny/`; `npm run build` downloads
 the uncommitted model binary and verifies its size and SHA-256.
 
 The browser tokenizer and WASM vectors are regression-tested against the
@@ -44,14 +44,14 @@ API-key field.
 
 ## Implementation
 
-- `apps/extension-next/src/providers/ollamaChat.ts` — HTTP client and key
+- `apps/extension/src/providers/ollamaChat.ts` — HTTP client and key
   rotation.
-- `apps/extension-next/src/providers/payloads.ts` — minimized request shapes.
-- `apps/extension-next/src/providers/prompts.ts` — classifier and trust-boundary
+- `apps/extension/src/providers/payloads.ts` — minimized request shapes.
+- `apps/extension/src/providers/prompts.ts` — classifier and trust-boundary
   prompts.
-- `apps/extension-next/src/providers/judgeParsing.ts` — strict response parsing.
-- `apps/extension-next/src/providers/tier0Wasm.ts` — tokenizer/ONNX inference.
-- `apps/extension-next/src/lib/tier12.ts` — live Tier-1/Tier-2 wiring.
+- `apps/extension/src/providers/judgeParsing.ts` — strict response parsing.
+- `apps/extension/src/providers/tier0Wasm.ts` — tokenizer/ONNX inference.
+- `apps/extension/src/lib/tier12.ts` — live Tier-1/Tier-2 wiring.
 
-Run `npm run build` from `apps/extension-next` for provider tests, WASM parity,
+Run `npm run build` from `apps/extension` for provider tests, WASM parity,
 type checks, and bundling.

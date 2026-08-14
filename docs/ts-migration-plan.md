@@ -12,7 +12,7 @@ Chrome events → Tier 0 (KoEn-E5 WASM) → optional Tier 1 (Ollama)
               → immersion gauge → optional Tier 2 (Ollama) → toast
 ```
 
-- `apps/extension-next/` is the only runtime.
+- `apps/extension/` is the only runtime.
 - `chrome.storage.local` owns the goal and settings. IndexedDB owns the gauge
   state, durable dwell checkpoint, effect outbox, recent context, learned
   exemplars, and structured event log.
@@ -47,7 +47,7 @@ forward-merge `dev-legacy`.
    parsers, prompts, and key rotation moved into the extension.
 4. **Authoritative pipeline.** Browser navigation, presence, dwell, Tier 0/1/2,
    gauge transitions, feedback, and delivery were wired in
-   `apps/extension-next`.
+   `apps/extension`.
 5. **Runtime hardening.** The cutover audit closed the durable outbox,
    stale-verdict, persistent-dwell, hashed-page-key, incognito/delete-all, and
    S=0 recovery blockers. Background integration tests cover the
@@ -61,7 +61,7 @@ forward-merge `dev-legacy`.
 - The trajectory anchor is disabled by default (`ANCHOR_WINDOW=0`).
 - Dormant anchor reactivation guards use the O4-recalibrated `0.50` floor.
 - Evidence is preserved under `docs/benchmarks/tier0-embedding-o4/` and
-  `docs/results-2026-07-24-anchor-floor-o4.md`.
+  `docs/research/anchor/results-2026-07-24-anchor-floor-o4.md`.
 
 ## 5. Accepted follow-ups
 
@@ -89,7 +89,7 @@ tracked UX/analysis/context follow-ups under D14.
 
 ## 7. Verification contract
 
-From `apps/extension-next`:
+From `apps/extension`:
 
 ```sh
 npm ci

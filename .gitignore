@@ -21,5 +21,5 @@ build/
 *.db
 
 # Large ML model binaries are fetched at build/test time (download-on-build),
-# not committed. See apps/extension-next/scripts/checkProviderAssets.mjs + model-manifest.json.
+# not committed. See apps/extension/scripts/checkProviderAssets.mjs + model-manifest.json.
 apps/*/assets/models/**/*.onnx

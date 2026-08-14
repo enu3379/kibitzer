@@ -2,7 +2,7 @@
 
 **Audience:** Codex (or any agent) fixing the D7 implementation on `feature/time-budget-drift`.
 **Reviewed commit:** `16e14bd` ("feat: add time-budget drift reviews") vs `origin/dev`.
-**Design authority:** the D7 entry in [docs/planning-notes.md](planning-notes.md). Where a fix below touches design semantics it is flagged `DESIGN CALL` — confirm with the owner before deviating from the recommendation.
+**Design authority:** the D7 entry in [docs/planning-notes.md](../../planning-notes.md). Where a fix below touches design semantics it is flagged `DESIGN CALL` — confirm with the owner before deviating from the recommendation.
 **Review method:** 8-angle parallel review + per-finding verification against the actual code. Every finding below was CONFIRMED by end-to-end tracing; line numbers refer to this branch at `16e14bd`.
 
 ## What is already correct — do NOT "fix" these

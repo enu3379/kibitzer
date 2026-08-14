@@ -1,6 +1,6 @@
-# Migration Gap Analysis — original → `extension-next`
+# Migration Gap Analysis — original → `extension`
 
-_Generated 2026-07-24 from a 6-way subagent sweep of `apps/server/` + `apps/extension/` (ORIGINAL) vs `apps/extension-next/` (NEW serverless target)._
+_Generated 2026-07-24 from a 6-way subagent sweep of `apps/server/` + `apps/extension/` (ORIGINAL) vs `apps/extension/` (NEW serverless target)._
 
 **Framing:** The pure decision core carried over cleanly — the gauge reducer/config (`core/gauge/*`) is **byte-identical**, and the Tier-1/2 prompts, judge→writer split, key-pool rotation, KoEn-E5 ONNX model, and the 10 personas are all faithfully ported. **Every gap below is in the wiring _around_ that core**: the observation surface, the LLM/Tier-0 _inputs_, durable storage, corrective feedback, privacy, and the user-facing surfaces. Nothing here is a reducer bug.
 
@@ -10,7 +10,7 @@ Legend — Effort: S(mall)/M(edium)/L(arge). "Blocked on SSOT" = needs the durab
 
 ## Runtime audit and cutover disposition — 2026-07-24
 
-A behavioural audit of `fix/extension-next-wasm-csp` (independent of the P0–P3 sweep below) found defects that a green build does **not** catch. The B1–B5/B9 correctness and privacy defects blocked deleting `apps/extension` / `apps/server`; the other rows measure remaining feature equivalence. The P0–P3 tables that follow track feature *presence*.
+A behavioural audit of `fix/extension-wasm-csp` (independent of the P0–P3 sweep below) found defects that a green build does **not** catch. The B1–B5/B9 correctness and privacy defects blocked deleting `apps/extension` / `apps/server`; the other rows measure remaining feature equivalence. The P0–P3 tables that follow track feature *presence*.
 
 **Final disposition (D14):** the correctness/privacy deletion gates were
 B1–B5 and B9; all are closed. B6–B8 and B10 are explicit post-cutover

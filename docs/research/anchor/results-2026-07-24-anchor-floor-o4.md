@@ -1,13 +1,13 @@
 # Results — anchor floor O4/WASM 재보정 (2026-07-24)
 
 [results-2026-07-21-anchor-pollution.md](results-2026-07-21-anchor-pollution.md)의
-서버 시절 실험(오염 루프 재현·대책 비교·존폐)을 extension-next의 실제 런타임 스택
+서버 시절 실험(오염 루프 재현·대책 비교·존폐)을 extension의 실제 런타임 스택
 — **O4 ONNX 익스포트 + `WasmEmbeddingProvider`(onnxruntime-web WASM), τ=0.59,
 β=0.85** — 에서 재실행한 결과다. 서버 시절 운영점 `0.30`은 O4 이전 익스포트
 (τ=0.6 시절)의 분포에서 도출된 값이라 그대로 이식할 수 없다는 문제 제기에서
 출발했다.
 
-재현: `apps/extension-next`에서
+재현: `apps/extension`에서
 
 ```sh
 node --experimental-strip-types tools/anchorFloorStudy.ts \
@@ -73,6 +73,6 @@ same_frame_trap, …)을 섞어 만든 것이라 페이지 간 자기유사성�
   세션 로그 리플레이로 rescue/차단 트레이드오프를 다시 측정해야 한다**
   (그 시점의 재보정 절차도 `tools/anchorFloorStudy.ts` 재실행으로 시작).
 
-같은 시기 문서: [handoff-2026-07-21-anchor-pollution.md](handoff-2026-07-21-anchor-pollution.md)
+같은 시기 문서: [handoff-2026-07-21-anchor-pollution.md](../../legacy/handoffs/handoff-2026-07-21-anchor-pollution.md)
 (서버 시절 실험의 출발 질문), [results-2026-07-21-anchor-pollution.md](results-2026-07-21-anchor-pollution.md)
 (서버 시절 결과 — 방법론의 원본).

@@ -2,11 +2,11 @@
 
 이 문서는 anchor 작업의 **원인 문서**다: 어떤 질문에서 출발했고 무엇을
 확인하기로 했는지를 기록한다. 짝을 이루는 결론/작업 문서는
-[results-2026-07-21-anchor-pollution.md](results-2026-07-21-anchor-pollution.md).
+[results-2026-07-21-anchor-pollution.md](../../research/anchor/results-2026-07-21-anchor-pollution.md).
 
 ## 출발점이 된 질문
 
-TIER 0/1 오판정 논의([analysis-tier01-false-signals.md](analysis-tier01-false-signals.md)
+TIER 0/1 오판정 논의([analysis-tier01-false-signals.md](../analysis/analysis-tier01-false-signals.md)
 FO-3 참조) 중 사용자 질문에서 출발했다:
 
 > "사용자가 직접 OK하지 않는 한, 티어 0에서의 판정이 다시 판정 기준이 되는

@@ -7,7 +7,7 @@ agents). The historical report recorded 20 candidates → **17 confirmed**
 (2 high / 6 medium / 9 low), 3 refuted. Reconciliation against
 `origin/dev` @ `6ba1b36` leaves **14 actionable original findings**
 (2 high / 5 medium / 7 low): C1, T4, and C4 were resolved by #36, #34, and #32.
-Decision context: [planning-notes.md](planning-notes.md) D7 (packaging), D8
+Decision context: [planning-notes.md](../../planning-notes.md) D7 (packaging), D8
 (app/extension split + same-repo refactor), D9 (this audit).
 **Numbering note (2026-07-20):** planning-notes has since renumbered these
 decisions — packaging is now **D9**, the app/extension split **D10**, and this

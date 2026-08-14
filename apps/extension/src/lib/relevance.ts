@@ -30,7 +30,7 @@ export const DERIVED_TAU = 0.25
 // Anchor tiebreaker floors (pollution-loop fix): the anchor term may only lift
 // pages with direct goal affinity, and a Tier-1 OK may only join the anchor with
 // that same affinity. 0.50 is the O4/WASM-recalibrated operating point
-// (docs/results-2026-07-24-anchor-floor-o4.md, tools/anchorFloorStudy.ts): the
+// (docs/research/anchor/results-2026-07-24-anchor-floor-o4.md, tools/anchorFloorStudy.ts): the
 // server-era 0.30 leaks under the O4 distribution (binge-affinity tail p99 0.350,
 // max 0.450 — 15 chained false-OKs across 160 binge pairings), 0.45 is the first
 // full block, and 0.50 adds margin at zero measured rescue cost. Only in effect

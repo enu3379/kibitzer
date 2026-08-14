@@ -2,9 +2,9 @@
 
 Date: 2026-07-08
 Scope owner: delegated agent (Codex).
-Parent plans: [judgment-audit-plan.md](judgment-audit-plan.md) (this tool is its
+Parent plans: [judgment-audit-plan.md](../../judgment-audit-plan.md) (this tool is its
 Step 0/Step 7 prerequisite — everything in that plan is gated on this),
-[planning-notes.md](planning-notes.md) D4 (scope decision, resolved 2026-07-08).
+[planning-notes.md](../../planning-notes.md) D4 (scope decision, resolved 2026-07-08).
 
 ## Why this exists
 

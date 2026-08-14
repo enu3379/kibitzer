@@ -3,7 +3,7 @@
 Language-neutral behavior fixtures for the gauge reducer. The authoritative
 TypeScript runtime loads every JSON file here from:
 
-- `apps/extension-next/src/core/gauge/reducer.fixtures.test.ts`
+- `apps/extension/src/core/gauge/reducer.fixtures.test.ts`
 
 Before the serverless cutover, a temporary Python reference reducer also loaded
 these files to validate cross-language parity. That implementation was removed
@@ -54,7 +54,7 @@ defaults in [the gauge contract](../../docs/gauge/contract.md) §2), applies
 When a finding changes the language-neutral gauge contract, add a failing
 fixture first and then update the TypeScript reducer. Runtime-only events and
 durability behavior that are outside the shared contract belong in focused
-tests under `apps/extension-next/src/core/gauge/` or `src/lib/`.
+tests under `apps/extension/src/core/gauge/` or `src/lib/`.
 
-Run the fixture suite from `apps/extension-next` with `npm test` (or as part of
+Run the fixture suite from `apps/extension` with `npm test` (or as part of
 `npm run build`).
