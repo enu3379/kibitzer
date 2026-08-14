@@ -4,6 +4,7 @@
 // personas.data.ts, and the immersion band mapping is the popup's own bandOf().
 
 import { showKibitzerToast } from "../content/toastOverlay.ts"
+import { playChime } from "../lib/chime.ts"
 import { sundialSVG } from "../lib/sundial.ts"
 import { bandOf } from "../lib/sessionStats.ts"
 import { PERSONAS, PERSONA_DEFAULT } from "../lib/personas.data.ts"
@@ -103,6 +104,7 @@ const demoNagMessage = (): string =>
   })
 
 function firePracticeToast(message: string, contextLabel: string): void {
+  void playChime("intervention")
   showKibitzerToast({
     notificationId: "onboarding-demo",
     displayToken: -1,
