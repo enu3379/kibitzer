@@ -18,7 +18,7 @@ import type { PendingDwell } from "../lib/dwell.ts"
 
 // Serve the real embedding assets off disk so the KoEn-E5 WASM session loads (the extension
 // fetches them via chrome.runtime.getURL + globalThis.fetch).
-const extRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url)))) // …/apps/extension-next
+const extRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url)))) // …/apps/extension
 const assetDisk = (path: string): string =>
   path === "assets/ort/ort-wasm-simd-threaded.wasm"
     ? join(extRoot, "node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm")

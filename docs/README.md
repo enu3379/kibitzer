@@ -1,8 +1,10 @@
 # Kibitzer docs
 
-## Current product contracts
+## Read before implementation
 
-Read these first:
+The active product is [`apps/extension/`](../apps/extension/): one Chrome MV3
+extension with no local server or secondary runtime. Start with these current
+product contracts:
 
 1. [Architecture](architecture.md)
 2. [Data model](data-model.md)
@@ -13,37 +15,31 @@ Read these first:
 7. [Tier-0 O4 model and WASM parity](extension-onnx-model.md)
 8. [Replay harness](replay-harness.md)
 
-The active product is `apps/extension-next/`: one Chrome MV3 extension with no
-local server. The directory name is retained for repository continuity; it is
-not a second or experimental runtime.
-
 ## Active product and release work
 
-- [Migration gap audit](migration-gap-analysis.md) — accepted post-cutover
-  feature tails; completed rows are historical.
-- [Chrome Web Store submission kit](store-submission.ko.md) — current beta
-  submission copy and checklist.
-- [Persona Workstream A](analysis-workstream-a-kyoto-baseball.md) and
-  [Workstream B](research-workstream-b-persona-references.md) — active D15
-  follow-up research until its product decisions land.
+- [Migration gap audit](migration-gap-analysis.md) records accepted
+  post-cutover feature tails; completed rows are historical.
+- [Chrome Web Store submission kit](store-submission.ko.md) contains the
+  current beta submission copy and checklist.
+- [Persona research](research/personas/) is active design evidence until its
+  product decisions land.
 
-Current follow-up product work:
+Current follow-up product work and cutover disposition are recorded in the
+[migration gap audit](migration-gap-analysis.md) and D14 in
+[planning notes](planning-notes.md). The completed migration and rollback
+references are in the [TypeScript/serverless migration record](ts-migration-plan.md).
 
-- #135 — judgment-review dashboard and verdict correction.
-- #136 — Tier-0 OK audit routing.
-- #141 — session pause, reports/history, and current-page verdict UI. Session
-  end and its summary have landed.
+## Research and supporting material
 
-The disposition and remaining B7/B8 tails are recorded in
-[the migration gap audit](migration-gap-analysis.md) and D14 in
-[planning notes](planning-notes.md).
+- [Gauge design rationale](research/gauge/analysis-plan-a-gauge-design.md)
+- [Anchor experiments](research/anchor/)
+- [Persona research](research/personas/)
 
 ## Decision records and evidence
 
 These explain why the current product has its present shape; they are not
 runtime or implementation instructions:
 
-- [TypeScript/serverless migration record](ts-migration-plan.md)
 - [Planning notes](planning-notes.md) — D-numbered decision history, including
   superseded server-era decisions.
 - [Progress log](progress.md) — completed-work chronology.
@@ -57,14 +53,10 @@ runtime or implementation instructions:
 
 ## Historical plans and handoffs
 
-Implementation plans, platform-daemon plans, pre-cutover analysis, and
-`handoff-*.md` files describe completed or abandoned work against historical
-snapshots. Do not treat their branches, paths, commands, or acceptance checks as
-current unless a current issue explicitly reactivates and revalidates them.
-
-The complete legacy runtime is preserved on `dev-legacy` and
-`pre-serverless-cutover-2026-07-24`; the full pre-squash migration history is
-preserved by `serverless-migration-head-2026-07-24`.
+Completed handoffs, pre-cutover analyses, retired plans, and workflows are
+preserved in [legacy/](legacy/). They are historical evidence unless a current
+issue explicitly reactivates and revalidates them; their paths, commands, and
+acceptance checks may refer to the retired Python server and relay extension.
 
 ## Decision rule
 

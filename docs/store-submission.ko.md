@@ -60,7 +60,7 @@ CWS 대시보드의 각 폼에 그대로 붙여 넣을 수 있게 정리한 다�
 - 프로모 타일 440×280: `docs/screenshots/promo-tile-440x280.png`
 - 마퀴 타일 1400×560: `docs/screenshots/promo-marquee-1400x560.png`
 
-1–4번은 v0.3.0 빌드, 5번은 새 AI 설정 화면이 포함된 현재 빌드(`apps/extension-next/dist/`)를
+1–4번은 v0.3.0 빌드, 5번은 새 AI 설정 화면이 포함된 현재 빌드(`apps/extension/dist/`)를
 헤드리스 Chrome으로 렌더해 캡처했다.
 캡처 리그는 [`tools/store-shot/`](../tools/store-shot/)에 있다 — `prepare.sh`로 `dist/{popup,options}`를 끌어와
 모듈 스크립트 앞에 chrome API 스텁을 주입하고, `shoot-all.sh`가 7장을 2배로 찍어 규격 픽셀로 줄인다.

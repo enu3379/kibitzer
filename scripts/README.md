@@ -4,7 +4,7 @@ Project maintenance scripts live here.
 
 ## `gen-personas.py`
 
-Regenerates `apps/extension-next/src/lib/personas.data.ts` from the persona
+Regenerates `apps/extension/src/lib/personas.data.ts` from the persona
 sources under `configs/`. It vendors `configs/personas/*.yaml` into the TS
 module verbatim (no hand-copying) using `configs/personas.yaml` for the persona
 order and default.

@@ -1,5 +1,5 @@
 {
-  "name": "kibitzer-extension-next",
+  "name": "kibitzer-extension",
   "private": true,
   "type": "module",
   "description": "The serverless, TypeScript-only Kibitzer Chrome extension.",

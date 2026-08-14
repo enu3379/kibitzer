@@ -2,7 +2,7 @@ name: Release
 
 # Publish the packaged extension as a GitHub release whenever main moves to a
 # manifest version that has no release yet. The tag is derived from
-# apps/extension-next/manifest.json ("extension-next-v<version>"), so a push
+# apps/extension/manifest.json ("extension-v<version>"), so a push
 # that does not bump the version is a cheap no-op (the gate runs before any
 # build). Re-runs are idempotent: an existing tag/release is never overwritten.
 
@@ -34,8 +34,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION="$(node -p "require('./apps/extension-next/manifest.json').version")"
-          TAG="extension-next-v${VERSION}"
+          VERSION="$(node -p "require('./apps/extension/manifest.json').version")"
+          TAG="extension-v${VERSION}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -51,36 +51,36 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: apps/extension-next/package-lock.json
+          cache-dependency-path: apps/extension/package-lock.json
 
-      - name: Install extension-next dependencies
+      - name: Install extension dependencies
         if: steps.gate.outputs.exists == 'false'
-        working-directory: apps/extension-next
+        working-directory: apps/extension
         run: npm ci
 
-      - name: Build extension-next (assets check + tests + typecheck + bundle)
+      - name: Build extension (assets check + tests + typecheck + bundle)
         if: steps.gate.outputs.exists == 'false'
-        working-directory: apps/extension-next
+        working-directory: apps/extension
         run: npm run build
 
       - name: Package the unpacked extension
         if: steps.gate.outputs.exists == 'false'
-        working-directory: apps/extension-next
+        working-directory: apps/extension
         env:
           VERSION: ${{ steps.gate.outputs.version }}
         run: |
           STAGE="$RUNNER_TEMP/pkg"
-          mkdir -p "$STAGE/kibitzer-extension-next"
-          cp -R dist/. "$STAGE/kibitzer-extension-next/"
-          (cd "$STAGE" && zip -rq "kibitzer-extension-next-v${VERSION}.zip" kibitzer-extension-next)
-          shasum -a 256 "$STAGE/kibitzer-extension-next-v${VERSION}.zip" | awk '{print $1}' > "$STAGE/sha256.txt"
-          echo "asset=$STAGE/kibitzer-extension-next-v${VERSION}.zip" >> "$GITHUB_ENV"
+          mkdir -p "$STAGE/kibitzer-extension"
+          cp -R dist/. "$STAGE/kibitzer-extension/"
+          (cd "$STAGE" && zip -rq "kibitzer-extension-v${VERSION}.zip" kibitzer-extension)
+          shasum -a 256 "$STAGE/kibitzer-extension-v${VERSION}.zip" | awk '{print $1}' > "$STAGE/sha256.txt"
+          echo "asset=$STAGE/kibitzer-extension-v${VERSION}.zip" >> "$GITHUB_ENV"
           echo "sha256=$(cat "$STAGE/sha256.txt")" >> "$GITHUB_ENV"
           # Chrome Web Store variant: the dashboard requires manifest.json at the ZIP ROOT
           # (the folder-nested zip above is for manual "Load unpacked" installs only).
-          (cd dist && zip -rq "$STAGE/kibitzer-extension-next-store-v${VERSION}.zip" .)
-          shasum -a 256 "$STAGE/kibitzer-extension-next-store-v${VERSION}.zip" | awk '{print $1}' > "$STAGE/sha256-store.txt"
-          echo "store_asset=$STAGE/kibitzer-extension-next-store-v${VERSION}.zip" >> "$GITHUB_ENV"
+          (cd dist && zip -rq "$STAGE/kibitzer-extension-store-v${VERSION}.zip" .)
+          shasum -a 256 "$STAGE/kibitzer-extension-store-v${VERSION}.zip" | awk '{print $1}' > "$STAGE/sha256-store.txt"
+          echo "store_asset=$STAGE/kibitzer-extension-store-v${VERSION}.zip" >> "$GITHUB_ENV"
           echo "sha256_store=$(cat "$STAGE/sha256-store.txt")" >> "$GITHUB_ENV"
 
       - name: Publish the GitHub release
@@ -92,13 +92,13 @@ jobs:
         run: |
           NOTES="$RUNNER_TEMP/notes.md"
           cat > "$NOTES" <<EOF
-          Prebuilt Chrome extension (\`apps/extension-next\`) — built from \`main\` @ \`${GITHUB_SHA::7}\`. No build tools needed: the KoEn-E5 model, tokenizer, and ONNX runtime are bundled.
+          Prebuilt Chrome extension (\`apps/extension\`) — built from \`main\` @ \`${GITHUB_SHA::7}\`. No build tools needed: the KoEn-E5 model, tokenizer, and ONNX runtime are bundled.
 
           ## Install
 
-          1. Download **kibitzer-extension-next-v${VERSION}.zip** below and unzip it.
+          1. Download **kibitzer-extension-v${VERSION}.zip** below and unzip it.
           2. Open \`chrome://extensions\` and turn on **Developer mode** (top-right).
-          3. Click **Load unpacked** and select the unzipped \`kibitzer-extension-next\` folder.
+          3. Click **Load unpacked** and select the unzipped \`kibitzer-extension\` folder.
           4. Pin the Kibitzer icon, click it, and declare a goal.
 
           Requires Chrome ≥ 123. Works offline in Tier-0 mode; add Ollama Cloud API keys in **설정 → AI 판정** for LLM judging + persona nudges.
@@ -108,11 +108,11 @@ jobs:
           - All data stays in the extension's local IndexedDB; nothing is sent to any server.
           - Built by the Release workflow with \`npm run build\` (tests + typecheck green, model SHA-256 verified).
           - Asset SHA-256: \`${sha256}\`
-          - **kibitzer-extension-next-store-v${VERSION}.zip** is the Chrome Web Store upload variant (manifest.json at the zip root — not for manual installs). SHA-256: \`${sha256_store}\`
+          - **kibitzer-extension-store-v${VERSION}.zip** is the Chrome Web Store upload variant (manifest.json at the zip root — not for manual installs). SHA-256: \`${sha256_store}\`
           EOF
           gh release create "$TAG" "$asset" "$store_asset" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "Kibitzer extension-next v${VERSION}" \
+            --title "Kibitzer extension v${VERSION}" \
             --notes-file "$NOTES" \
             --latest

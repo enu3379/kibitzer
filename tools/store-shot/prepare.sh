@@ -4,10 +4,10 @@
 # is gitignored — rerun it after any `npm run build`.
 set -e
 D="${0:A:h}"
-DIST="$D/../../apps/extension-next/dist"
+DIST="$D/../../apps/extension/dist"
 
 if [ ! -d "$DIST/popup" ]; then
-  echo "no build at $DIST — run 'npm run build' in apps/extension-next first" >&2
+  echo "no build at $DIST — run 'npm run build' in apps/extension first" >&2
   exit 1
 fi
 

@@ -2,8 +2,8 @@
 
 Date: 2026-07-09
 Scope owner: delegated agent (Codex).
-Parent plans: [judgment-audit-plan.md](judgment-audit-plan.md) §"Add Goal
-Enrichment" (Step 1), [planning-notes.md](planning-notes.md) D3 (design
+Parent plans: [judgment-audit-plan.md](../../judgment-audit-plan.md) §"Add Goal
+Enrichment" (Step 1), [planning-notes.md](../../planning-notes.md) D3 (design
 resolved 2026-07-09). The evidence/eval corpus contains real browsing history
 and stays local; set `KIBITZER_AUDIT_CORPUS` to its directory when rerunning
 the optional regression.

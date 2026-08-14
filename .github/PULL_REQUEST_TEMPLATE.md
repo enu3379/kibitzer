@@ -15,5 +15,5 @@ Closes #
 ## Checklist
 (아래 문장들 뒤 괄호는 삭제하고 작성)
 - [ ] PR 제목이 Conventional Commits 형식 (`feat: …`, `fix: …` — squash 커밋 메시지가 됨)
-- [ ] `apps/extension-next`에서 `npm run build` 통과 (테스트 + 타입체크 + 번들)
+- [ ] `apps/extension`에서 `npm run build` 통과 (테스트 + 타입체크 + 번들)
 - [ ] AI-assisted (에이전트가 작성/보조한 PR이면 체크)

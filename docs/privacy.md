@@ -24,7 +24,7 @@ The user-facing policy (store submission) is
 ## Sensitive domains
 
 `configs/sensitive_domains.json` is imported at build time by
-`apps/extension-next/src/lib/domainFilter.ts`. The default rules cover banking,
+`apps/extension/src/lib/domainFilter.ts`. The default rules cover banking,
 payments, webmail, health, authentication, cloud-console secrets, and local
 administration surfaces. The background worker drops a matching page before
 judging and refuses to show a Kibitzer toast there.

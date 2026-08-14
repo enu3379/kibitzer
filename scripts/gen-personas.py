@@ -9,7 +9,7 @@ import yaml
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PERSONA_DIR = os.path.join(ROOT, "configs/personas")
 INDEX = os.path.join(ROOT, "configs/personas.yaml")
-OUT = os.path.join(ROOT, "apps/extension-next/src/lib/personas.data.ts")
+OUT = os.path.join(ROOT, "apps/extension/src/lib/personas.data.ts")
 
 index = yaml.safe_load(open(INDEX, encoding="utf-8")) or {}
 default = index.get("default", "dry_kibitzer")

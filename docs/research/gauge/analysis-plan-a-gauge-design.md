@@ -15,7 +15,7 @@
   해소 방식은 아래 표에 자립적으로 요약돼 있으며, 전체 pre-cutover 분석은
   `pre-serverless-cutover-2026-07-24`에 보존돼 있다.
 - **출하·마이그레이션은 완료됐다.** 현재 실행 계약은
-  `docs/gauge/contract.md`와 `apps/extension-next/src/core/gauge/`가 정의하며,
+  `docs/gauge/contract.md`와 `apps/extension/src/core/gauge/`가 정의하며,
   `docs/ts-migration-plan.md`는 완료된 전환 기록이다.
 - 병행 별도 과제: TIER 0/1 오판정 개선(별도 작업으로 진행 — 게이지는 오판을
   관성으로 완충할 뿐 판정 품질을 대신 고치지 않는다), 누적 드리프트 시간

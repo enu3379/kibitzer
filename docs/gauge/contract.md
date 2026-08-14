@@ -1,11 +1,11 @@
 # Gauge v0 — language-neutral behavior contract
 
 Status: v0 (2026-07-21), authoritative TypeScript runtime after the 2026-07-24
-cutover. Frozen semantics come from `docs/analysis-plan-a-gauge-design.md`
+cutover. Frozen semantics come from `docs/research/gauge/analysis-plan-a-gauge-design.md`
 §1–§6 and planning-notes D9.
 
 The production implementation is the pure reducer under
-`apps/extension-next/src/core/gauge/`. The retired Python reducer was used only
+`apps/extension/src/core/gauge/`. The retired Python reducer was used only
 as an independent validation track; it remains reachable through
 `pre-serverless-cutover-2026-07-24`. Shared fixtures and historical
 cross-language results remain evidence for this contract.

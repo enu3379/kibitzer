@@ -18,28 +18,46 @@ history respectively.
 ## Prerequisites
 
 - **Node.js ≥ 22.6** — the build/test scripts use `node --experimental-strip-types`.
-- **Google Chrome ≥ 120** (MV3 offscreen documents, service-worker modules).
+- **Google Chrome ≥ 123** (MV3 offscreen documents, service-worker modules).
 - Network access **once** at build time to fetch the embedding model (see [Model assets](#model-assets)).
 
 ## Build
 
 ```sh
-cd apps/extension-next
+cd apps/extension
 npm ci          # install dev deps (esbuild, onnxruntime-web, typescript…)
 npm run build   # verify assets → run tests + typecheck → bundle into dist/
 ```
 
 `npm run build` is self-checking: it fetches and hash-verifies the model assets, runs the
 test suite and both typechecks, then bundles everything into `dist/`. A green build leaves
-a complete, loadable extension in `apps/extension-next/dist/`.
+a complete, loadable extension in `apps/extension/dist/`.
 
 For iterative work: `npm run watch` (rebuilds on change; run `npm test` separately).
+
+## Shared configuration and fixtures
+
+Persona source files live under [`../../configs/`](../../configs/). After editing
+`configs/personas.yaml` or a file in `configs/personas/`, regenerate the
+checked-in TypeScript data from the repository root:
+
+```sh
+python scripts/gen-personas.py
+```
+
+This writes `src/lib/personas.data.ts`. Do not edit that generated file by hand.
+
+The language-neutral gauge contract and its shared fixtures live in
+[`../../fixtures/gauge/`](../../fixtures/gauge/) and
+[`../../docs/gauge/contract.md`](../../docs/gauge/contract.md). When a change
+alters gauge behavior, add or update a fixture first, then change the reducer.
+Run `npm test` from this directory to exercise the fixture suite.
 
 ## Load it in Chrome
 
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode** (top-right).
-3. Click **Load unpacked** and select the **`apps/extension-next/dist`** folder.
+3. Click **Load unpacked** and select the **`apps/extension/dist`** folder.
 4. Pin the Kibitzer icon to the toolbar.
 
 To pick up a rebuild, click the extension's **↻ reload** button on `chrome://extensions`.
@@ -126,7 +144,7 @@ and merged: a durable effect outbox and persistent dwell timer for MV3 worker-te
 recovery, verdict-generation guards against stale-page races, a hashed page key, a
 complete delete-all, and an `incognito` guard. The trajectory anchor is disabled by
 default (`ANCHOR_WINDOW=0`) with O4-recalibrated floors
-(`docs/results-2026-07-24-anchor-floor-o4.md`), and an E2E background test now covers the
+(`docs/research/anchor/results-2026-07-24-anchor-floor-o4.md`), and an E2E background test now covers the
 observe→judge→deliver loop.
 
 Remaining follow-ups are tracked as issues rather than blockers:

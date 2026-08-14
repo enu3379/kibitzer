@@ -127,5 +127,5 @@ labels that distinction. Clearing or replacing a goal also resets the
 goal-scoped runtime state.
 
 The record stores are capped and recent context is bounded. Exact caps are
-implementation constants in `apps/extension-next/src/lib/db.ts`,
+implementation constants in `apps/extension/src/lib/db.ts`,
 `events.ts`, `history.ts`, and `klog.ts`.
