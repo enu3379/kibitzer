@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="insta.css" />
+    <style>
+      /* 캐러셀 4장 (스토어 4번 = scene4.html과 같은 소재: 옵션 페이지 AI 판정 탭).
+         insta5처럼 왼쪽 설정 탭을 포함하고, 자연 크기 928×679로 캡처한다.
+         ?aiFix=1은 스토어용 AI 화면 보정을, ?fontBump=ai는 AI 탭 내부 글자 확대를 켠다. */
+      .frame { padding-left: 64px; padding-right: 64px; }
+      .stage { margin-top: 40px; }
+      .sub { font-size: 26px; }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <h1><span class="mark">AI를 활용해</span> 더 정확하게 판정합니다</h1>
+      <p class="sub">Ollama·Gemini·OpenAI·OpenRouter 등 API 지원. 무료 AI 계정으로도 충분해요.</p>
+      <div class="stage">
+        <div class="panel">
+          <div class="clip" data-fit="928x679" data-fit-max="1.4">
+            <iframe
+              class="fit-target"
+              src="options/options.html?scene=ai&amp;aiFix=1&amp;fontBump=ai#ai"
+            ></iframe>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="insta-fit.js"></script>
+  </body>
+</html>

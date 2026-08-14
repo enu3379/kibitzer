@@ -3,10 +3,14 @@
 <head>
 <meta charset="utf-8">
 <style>
-  /* Scene 1 predates scenes.css and still carries its own type scale — the brand row is
-     30px here against 21px in scenes 2–5, which is why its dot renders roughly twice as wide.
-     Kept as-is so this file reproduces the shipped store-1-popup.png; only the brand dot moved
-     from the sundial leaf green it used to hardcode (#5aa63c) to the shared brand green. */
+  /* 팝업 히어로 (store-1-popup.png).
+
+     팝업 안 해시계는 ?elapsedMin=30으로 낮 상태를 만든다 — 90분 예산의 1/3 지점이라
+     sundial.ts가 해를 돔의 120° 지점(11시 방향)에 놓는다. 파라미터를 빼면 기본
+     픽스처가 startedAt:0(예산 초과)이라 밤(달 + 별)으로 그려진다. insta1.html과 같은 값.
+
+     이 장면은 scenes.css를 안 쓰고 자체 타입 스케일을 갖는다 — 브랜드 줄이 30px
+     (2~5번은 21px)이라 점이 두 배 가까이 크게 찍힌다. */
   @font-face {
     font-family: "Gowun Dodum";
     src: url("assets/fonts/GowunDodum-Regular.woff2") format("woff2");
@@ -48,12 +52,14 @@
     <h1>목표를 선언하면<br>조용히 지켜보다,<br>딴짓이 쌓일 때만<br><b>슬쩍 훈수</b></h1>
     <div class="sub">차단하지 않습니다. 몰입 게이지가 닳는 걸<br>지켜보다가, 화면 구석에서 한마디 건넬 뿐.</div>
     <div class="badges">
-      <span class="badge">Kibitzer 서버 없음 · AI는 선택한 제공자만 사용</span>
       <span class="badge">비차단 훈수</span>
+      <span class="badge">브라우징 기록 수집 없음</span>
     </div>
   </div>
   <div class="stage">
-    <div class="frame-card"><iframe src="popup/popup.html"></iframe></div>
+    <!-- elapsedMin=30 / 90분 예산 → frac 1/3 → sundial.ts가 해를 돔의 120° 지점(11시 방향)에
+         놓는다. 파라미터를 빼면 startedAt:0이라 초과 상태의 밤(달)이 뜬다 — stub.js 참고. -->
+    <div class="frame-card"><iframe src="popup/popup.html?elapsedMin=30"></iframe></div>
   </div>
 </body>
 </html>
