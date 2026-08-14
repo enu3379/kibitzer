@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      @font-face {
+        font-family: "Gowun Dodum";
+        font-weight: 400;
+        src: url("assets/fonts/GowunDodum-Regular.woff2") format("woff2");
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; width: 440px; height: 280px; overflow: hidden; }
+    </style>
+  </head>
+  <body>
+    <!-- Forces the bundled face to load before the SVG <text> is painted. -->
+    <span style="position: absolute; opacity: 0; font-family: 'Gowun Dodum'">Kibitzer 몰입 훈수꾼</span>
+    <!-- Brand palette and character geometry are measured off icons/icon-128.png so
+         the tile reads as the same character as the toolbar icon:
+         green #10B981, ink #1F2937, eye #F9FAFB. With head radius R = 70 —
+           eyes  r = 0.255R at (cy − 0.265R, cx ± 0.388R)
+           hands 0.45R × 0.43R pills centred at cx ± 0.85R, top at cy − 0.06R
+           page edge at cy + 0.06R, painted after the head so the head peeks over
+           it from behind instead of floating in front of it. -->
+    <svg width="440" height="280" viewBox="0 0 440 280" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="glow" cx="28%" cy="18%" r="82%">
+          <stop offset="0%" stop-color="#2ed79b" />
+          <stop offset="100%" stop-color="#0e9f70" />
+        </radialGradient>
+      </defs>
+      <rect width="440" height="280" fill="url(#glow)" />
+
+      <!-- head + eyes, painted before the page so the page occludes the chin -->
+      <circle cx="220" cy="136" r="70" fill="#1F2937" />
+      <circle cx="192.8" cy="117.5" r="17.9" fill="#F9FAFB" />
+      <circle cx="247.2" cy="117.5" r="17.9" fill="#F9FAFB" />
+
+      <!-- the page the kibitzer looks over -->
+      <path d="M46 140 h348 a16 16 0 0 1 16 16 V280 H30 V156 a16 16 0 0 1 16 -16 Z" fill="#F9FAFB" />
+
+      <!-- hands gripping the page edge, on top of both -->
+      <rect x="144" y="132" width="32" height="30" rx="15" fill="#1F2937" />
+      <rect x="264" y="132" width="32" height="30" rx="15" fill="#1F2937" />
+
+      <text x="220" y="212" text-anchor="middle" fill="#1F2937"
+        font-family="Gowun Dodum, sans-serif" font-size="42" letter-spacing="0.5">Kibitzer</text>
+      <text x="220" y="246" text-anchor="middle" fill="#57635c"
+        font-family="Gowun Dodum, sans-serif" font-size="18">몰입 훈수꾼</text>
+    </svg>
+  </body>
+</html>

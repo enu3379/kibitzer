@@ -10,7 +10,7 @@ Last updated: 2026-07-31.
 ## Where the project is (verified 2026-07-31)
 
 The product is a single serverless Chrome MV3 extension
-(`apps/extension-next`) — the Python server / macOS app era ended with the
+(`apps/extension`) — the Python server / macOS app era ended with the
 2026-07-24 cutover (D14). `main` carries v0.2.0 with `release.yml`
 auto-releases (nested zip + CWS store-root zip). Judging is multi-provider
 BYOK (7 providers, #158) on top of local KoEn-E5 WASM Tier-0 embeddings; with
@@ -170,7 +170,7 @@ private labeled corpus shows the dominant Tier-0 failure is false-DRIFT
 unreachable sub-topic words; threshold tuning cannot fix a 0.00-mass. The
 corpus stays local (browsing history); set `KIBITZER_AUDIT_CORPUS` to rerun
 its regression test. Shape (details in
-[handoff-goal-enrichment.md](handoff-goal-enrichment.md)): one async call at
+[handoff-goal-enrichment.md](legacy/handoffs/handoff-goal-enrichment.md)): one async call at
 goal declaration (Tier-1 cloud stack, goal text only), K≤8 phrases via a
 strict prompt (~half English when the topic lives in English), stored in a
 separate `goal_derived_exemplars` table, matched at a separate higher
@@ -441,7 +441,7 @@ adversarial verification + 2 maintainability agents; 31 agents, ~21 min). 20
 candidate findings → **17 confirmed** (2 high, 6 medium, 9 low), 3 refuted, all
 confirmed at verifier confidence high. Known CWD-relative-path issue was
 excluded (already D9 phase-0). **Work order:
-[handoff-refactor-predist.md](handoff-refactor-predist.md)** — findings
+[handoff-refactor-predist.md](legacy/handoffs/handoff-refactor-predist.md)** — findings
 reorganized into ordered, file-anchored tasks (owner + effort + deps + tests),
 with the verbatim report embedded as Appendix A.
 
@@ -519,7 +519,7 @@ Errata: the report has **13** numbered maintainability recommendations (not
 15), M13 means expanding the existing extension test harness, and M7 wrongly
 called `embedding.model`/`batch_size` unread (both feed the ONNX provider).
 The corrected source of execution is
-[handoff-refactor-predist.md](handoff-refactor-predist.md) (Appendix A keeps
+[handoff-refactor-predist.md](legacy/handoffs/handoff-refactor-predist.md) (Appendix A keeps
 the old report verbatim behind errata). Release gates: R1 strict
 malformed-config degradation and the **full** R2 — persistent alarm-backed
 MV3 dwell state plus idempotent server retries; a ≤25 s clamp is dogfooding
@@ -617,9 +617,8 @@ request, auto-scores leakage + hijack).
 ### D13 — Security review beyond prompt injection → RECORDED + PARTLY IMPLEMENTED (2026-07-16)
 
 Follow-on review of the non-prompt-injection attack surface (server HTTP, secrets,
-SQLite, TTS, extension). Full write-up:
-[security-review-2026-07-15.md](security-review-2026-07-15.md). One finding worth
-scheduling:
+SQLite, TTS, extension). The full pre-cutover write-up is preserved by
+`pre-serverless-cutover-2026-07-24`. One finding was worth scheduling:
 
 - **F1 [MEDIUM] — local API has no origin authentication.** No CORS/Host
   validation/token; binds `127.0.0.1` (not LAN-exposed) but the JSON-content-type
@@ -651,7 +650,7 @@ input caps also remain. F3/F4 stay informational.
 
 ### D16 — Gauge controller: v0 semantics locked, TypeScript-first rollout → RESOLVED (design, 2026-07-21; renumbered from a duplicate “D9” 2026-07-31)
 
-The gauge design (`docs/analysis-plan-a-gauge-design.md`, PR #121) is the v0
+The gauge design (`docs/research/gauge/analysis-plan-a-gauge-design.md`, PR #121) is the v0
 behavior contract, superseding plan A (`AlignmentController`) and — on the
 shipping path — plan B (`StreakController`). §1–§6 (state model, dynamics, Tier 2
 dual gate, nag/renag/celebration semantics) are frozen as the contract; every
@@ -699,10 +698,75 @@ its sole job was to confirm the design runs correctly (byte-identical to TS over
 benchmark), which is done. Work proceeds **TypeScript-only**; the Python reducer is a
 frozen reference deleted with the server. Canonical roadmap: `docs/ts-migration-plan.md`.
 
+### D17 — Local PDF observation: explicit opt-in, title-only → DECIDED (2026-08-03)
+
+Kibitzer may observe a full-page local PDF opened in Chrome only after the user
+enables **로컬 PDF 제목 관측** in settings. The default is OFF. The observation
+uses Chrome's tab title (document metadata title when Chrome exposes it,
+otherwise the filename), the non-path host label `local-pdf`, and the normal
+Tier-0/1/2 title pipeline. It never parses PDF bytes, reads an excerpt, or stores
+or sends the raw `file:` URL. A connected Tier-1/2 provider may receive the PDF
+title under the same disclosure as web-page titles. Prompt/onboarding behavior
+is deliberately deferred to a separate follow-up decision and PR.
+
+### D18 — Browser-restart session policy: 5-minute continue window + resumable suspension → DECIDED (2026-08-04)
+
+Sessions still never expire on their own; what a full browser quit means is now an
+explicit decision made once per relaunch (`lib/sessionRestore.ts`, on
+`runtime.onStartup` only — never a mere SW wake), measured against a durable
+last-alive marker the 1-min heartbeat writes:
+
+- **≤ 5 min AND 자동 유지 ON (default)** → the session continues. The reducer clock
+  is rebased via an `inactive` event (the old behavior integrated up to `gapCap`
+  90 s of the downtime under the pre-shutdown verdict), and the wall-clock anchors
+  (`goal.startedAt`, `drift-since`) shift past the gap so the sundial/time-budget/
+  drift-minutes never count time the browser was closed. First encounters get an
+  auto-opened popup banner (버튼: 잇지 않음을 기본으로 / 다시 보지 않기).
+- **> 5 min, or 자동 유지 OFF (any gap — OFF means always park)** → the goal record
+  moves to a suspended-session key; `getGoal()` returning null stops every
+  observation path, while gauge state/visits/history stay intact. The popup setup
+  view offers **직전 세션 이어가기** (완전 연속: same epoch, stats and gauge carry
+  on; startedAt shifted past the downtime). Declaring a new goal instead closes the
+  parked session quietly — history entry recorded at its shutdown time, no summary
+  view. A first-encounter callout explains resumability (작은 ✕로 1회 해제).
+
+Hardening that rode along: outbox nag/celebrate records older than 5 min (or with
+no live session) are ACK-dropped at drain, so a pre-shutdown nag can't pop on
+relaunch hours later. Every gauge-advancing startup entry point (module-level
+outbox flush, the heartbeat alarm — whose replayed post-relaunch firing would
+otherwise overwrite the last-alive marker and mask the gap as ≈0 — plus observe
+and the popup's get-state) waits on a `startupSettled` barrier (restore decision
+committed, or a 1.5 s fallback on plain SW wakes; the decision clears the fallback
+at entry so a slow cold start can't reopen the race). New shared fixture
+`05-inactive-rebases-clock-no-integration` pins the §5 `inactive` rebase-only rule.
+
+Deferred to the delivery-gate workstream (the 훈수-misplacement handoff prompt on
+the user's desk): continue-path queued-nag delivery narrows to "≤3 min from
+creation AND only on the page that caused it" (user-decided — supersedes the 5-min
+drain TTL for nags, which that work should absorb), and whether celebrate gets an
+age cap at all.
+
+### D19 — AI judgment is a complete two-tier mode with explicit opt-out → DECIDED (2026-08-07)
+
+AI-assisted judging is the recommended/default product mode, but it is activated only
+when **both** Tier 1 and Tier 2 resolve to a model plus a keyed provider. A half-configured
+route is not a supported runtime mode: the options page blocks route saving and activation
+until both tiers are complete, and the runtime falls back to local Tier-0 judging if a key
+is later removed. This replaces the earlier direction of accepting half configurations and
+softening their consequences (#207/#219).
+
+Users may explicitly turn AI judgment off without deleting their keys or routes. OFF gates
+all runtime LLM work — goal enrichment, Tier-1 rescue, Tier-2 confirmation/message writing,
+and session recap — and the UI warns that judgment quality drops and prepared nudge copy replaces
+generated messages. A user-initiated candidate-key connection test is the sole setup-time
+exception and contacts both selected tier models before saving the key. Provider/test failures remain errors while AI is enabled. The store
+listing leads with AI usage while disclosing the opt-out and its quality tradeoff; no numeric
+quality-loss claim is made until the full Tier-0-only vs two-tier pipeline is benchmarked.
+
 ### D14 — Serverless cutover scope and preservation → RESOLVED (2026-07-24)
 
 The active product becomes the single TypeScript MV3 runtime in
-`apps/extension-next`; the Python FastAPI server, relay extension, menubar/tray,
+`apps/extension`; the Python FastAPI server, relay extension, menubar/tray,
 packaging, and platform launch scripts leave the active tree in PR #139.
 
 The deletion gate is **runtime correctness and privacy**, not complete
@@ -1162,8 +1226,9 @@ the extension badge.
 - 2026-07-15 (security review): non-prompt-injection pass (D13). Main finding F1
   — local API has no origin auth, DNS-rebinding-reachable from any visited site;
   fix = Host allowlist middleware. Also F2 (uncapped goal/title). Confirmed safe:
-  no SQLi, no secret leak, no extension XSS, 127.0.0.1 bind. Findings in
-  security-review-2026-07-15.md; fixes deferred to the localhost-hardening track.
+  no SQLi, no secret leak, no extension XSS, 127.0.0.1 bind. The full review is
+  preserved by the pre-serverless cutover tag; fixes were deferred to the
+  localhost-hardening track.
 - 2026-07-08 (P1 design layer): Claude completed the design handoff — celebration
   toast (happy-arc eyes as the observer's one expression change; buttonless
   markup fix: `[hidden]` was defeated by `.row{display:flex}` and celebrations
@@ -1237,4 +1302,12 @@ the extension badge.
   sample-line copy decision. This cleanup pass: duplicate gauge "D9" block
   deduped and renumbered to D16, D9/D10 marked superseded by D14, status
   header refreshed.
-
+- 2026-08-04: D18 decided and implemented — browser-restart session policy
+  (`lib/sessionRestore.ts`): ≤5-min relaunch continues the session with the
+  reducer clock rebased (no more gapCap-worth of downtime integrated under the
+  pre-shutdown verdict) and wall-clock anchors shifted; longer gaps (or 자동
+  유지 OFF) park the session as resumable from the popup (완전 연속, same
+  epoch). Quiet close when a new goal replaces a parked session. Stale outbox
+  nags (>5 min / no session) dropped at drain. Options toggle, popup banner +
+  이어가기 UI, `05-inactive` shared fixture, sessionRestore/session/settings
+  tests.

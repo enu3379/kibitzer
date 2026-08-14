@@ -1,0 +1,1625 @@
+// End-to-end integration test: drives the REAL service worker (background.ts) through a
+// chrome mock + fake-indexeddb + real KoEn-E5 WASM embeddings, exercising the whole
+// attention-guard loop — declare a goal, drift onto an off-goal page, drain S to 0, and
+// deliver a nag — none of which the pure/unit tests cover. Degraded (no Ollama) so it needs
+// no network: the S=0 gate nags directly.
+
+import "fake-indexeddb/auto"
+import assert from "node:assert/strict"
+import test, { mock } from "node:test"
+import { readFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { fileURLToPath, pathToFileURL } from "node:url"
+import { kvDelete, kvGet } from "../lib/db.ts"
+import { PENDING_DWELL_KEY } from "../lib/dwellScheduler.ts"
+import { LOCAL_PDF_PROMPT_DELAY_MS, LOCAL_PDF_PROMPT_SHOWN_KEY } from "../lib/localPdfPrompt.ts"
+import { getVisits, type SessionVisits } from "../lib/visits.ts"
+import type { PendingDwell } from "../lib/dwell.ts"
+
+// Serve the real embedding assets off disk so the KoEn-E5 WASM session loads (the extension
+// fetches them via chrome.runtime.getURL + globalThis.fetch).
+const extRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url)))) // …/apps/extension
+const assetDisk = (path: string): string =>
+  path === "assets/ort/ort-wasm-simd-threaded.wasm"
+    ? join(extRoot, "node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm")
+    : join(extRoot, path)
+// Scenarios that configure an LLM route flip this to make every provider call fail the way an
+// unreachable endpoint does (Ollama not running, model never pulled). Model assets keep loading.
+let providerCallsFail = false
+const realFetch = globalThis.fetch
+;(globalThis as unknown as { fetch: typeof fetch }).fetch = (async (input: string | URL | Request) => {
+  const url = String(input)
+  if (url.startsWith("file://")) return new Response(readFileSync(fileURLToPath(url)))
+  if (providerCallsFail) throw new Error("ECONNREFUSED")
+  return realFetch(input as string)
+}) as typeof fetch
+
+// --- chrome mock (must be installed BEFORE background.ts is imported) ---------------------
+const listeners: Record<string, Array<(...a: unknown[]) => unknown>> = {}
+const evt = (name: string) => {
+  listeners[name] ??= []
+  return { addListener: (fn: (...a: unknown[]) => unknown) => listeners[name].push(fn), removeListener() {} }
+}
+const store = new Map<string, unknown>() // backs chrome.storage.local
+const createdTabs: string[] = [] // URLs opened via chrome.tabs.create (onboarding assertions)
+type MockTab = { id: number; url: string; title: string; active: boolean; windowId: number }
+let activeTab: MockTab | null = null
+let tabQuerySequence: Array<MockTab | null> = []
+// While set, EVERY tab lookup reports this tab. Unlike tabQuerySequence (a consumed queue, so
+// which lookup gets which entry depends on how much unrelated async happens to be in flight) this
+// holds for as long as a scenario wants — the way to say "the user is somewhere else right now"
+// without racing the pipeline for a queue slot.
+let tabQueryOverride: MockTab | null = null
+const createdWindows: Array<Record<string, unknown>> = []
+const updatedTabs: Array<{ tabId: number; props: Record<string, unknown> }> = []
+let promptWindowOpen = false
+let windowFocusFails = false
+let navigateOnActivateUrl: string | null = null
+const toasts: Array<Record<string, unknown>> = [] // captured injected toast payloads
+const notifications: Array<{ id: string; opts: Record<string, unknown> }> = []
+let executeScriptCalls = 0
+let settingsReadGate: { reached: () => void; release: Promise<void> } | null = null
+// Presence knobs (browserPresent = Chrome focused AND idle-active). Default present, so the
+// existing scenarios are unaffected; the presence-gate scenario flips these and restores them.
+let winFocused = true
+let idleActive = true
+
+const chrome = {
+  tabs: {
+    onUpdated: evt("tabs.onUpdated"),
+    onActivated: evt("tabs.onActivated"),
+    query: async (query: Record<string, unknown> = {}) => {
+      const tab = tabQueryOverride ?? (tabQuerySequence.length > 0 ? tabQuerySequence.shift() : activeTab)
+      if (query.windowId != null && tab?.windowId !== query.windowId) return []
+      return tab ? [tab] : []
+    },
+    get: async (tabId: number) => activeTab?.id === tabId ? activeTab : undefined,
+    update: async (tabId: number, props: Record<string, unknown>) => {
+      updatedTabs.push({ tabId, props })
+      if (navigateOnActivateUrl && activeTab?.id === tabId) {
+        activeTab.url = navigateOnActivateUrl
+        navigateOnActivateUrl = null
+      }
+      return activeTab
+    },
+    create: async (opts: { url?: string } = {}) => {
+      createdTabs.push(opts.url ?? "")
+      return {}
+    },
+  },
+  webNavigation: { onHistoryStateUpdated: evt("wn") },
+  runtime: {
+    onInstalled: evt("runtime.onInstalled"),
+    onStartup: evt("runtime.onStartup"),
+    onMessage: evt("runtime.onMessage"),
+    // Model/tokenizer → file:// (served by the fetch override below). The ORT runtime wasm →
+    // "" so the provider skips `ort.env.wasm.wasmPaths` and ORT uses its node default resolver
+    // (the same path tier0Wasm.test.ts relies on), which finds it in node_modules.
+    getURL: (p: string) => (p === "assets/ort/ort-wasm-simd-threaded.wasm" ? "" : pathToFileURL(assetDisk(p)).href),
+    sendMessage: async () => {},
+  },
+  alarms: { onAlarm: evt("alarms.onAlarm"), create: async () => {}, get: async () => undefined, clear: async () => {} },
+  idle: { onStateChanged: evt("idle"), setDetectionInterval() {}, queryState: async () => (idleActive ? "active" : "idle") },
+  // The focused window is always id 1 in these scenarios; tabs of a second (unfocused) side
+  // window carry windowId 2 and must be ignored by the observation surface (Fix 4).
+  windows: {
+    onFocusChanged: evt("win"),
+    onRemoved: evt("windows.onRemoved"),
+    getLastFocused: async () => ({ focused: winFocused, id: 1 }),
+    get: async () => ({ id: 1, left: 100, top: 40, width: 1400, height: 900 }),
+    getAll: async () => promptWindowOpen
+      ? [{
+          id: 9,
+          type: "popup",
+          // Immediately after windows.create resolves the target can exist only as pendingUrl.
+          tabs: [{ id: 99, pendingUrl: `${pathToFileURL(assetDisk("localPdfPrompt/localPdfPrompt.html")).href}?tabId=12` }],
+        }]
+      : [],
+    create: async (opts: Record<string, unknown>) => {
+      createdWindows.push(opts)
+      promptWindowOpen = true
+      return { id: 9 }
+    },
+    update: async () => {
+      if (windowFocusFails) throw new Error("focus refused")
+      return { id: 1, focused: true }
+    },
+    WINDOW_ID_NONE: -1,
+  },
+  notifications: {
+    onButtonClicked: evt("nb"),
+    onClicked: evt("nc"),
+    create: (id: string, opts: Record<string, unknown>) => notifications.push({ id, opts }),
+    clear: async () => {},
+  },
+  scripting: {
+    executeScript: async ({ args }: { args?: unknown[] }) => {
+      executeScriptCalls += 1
+      const payload = args?.[0]
+      if (payload && typeof payload === "object" && "message" in payload) toasts.push(payload as Record<string, unknown>)
+      return [{ result: undefined }]
+    },
+  },
+  storage: {
+    local: {
+      // chrome.storage.local.get takes a key, a list of keys, or an object of defaults. Handling
+      // only the string form made every multi-key read come back EMPTY — which is how the judge
+      // settings are read (`get([SETTINGS_KEY, LEGACY_OLLAMA_KEY])`). Provider config was
+      // therefore unreadable no matter what a scenario wrote, so every run of this suite was
+      // silently pinned to degraded mode and no LLM-configured path was reachable at all.
+      get: async (keys: string | string[] | Record<string, unknown>) => {
+        const names = typeof keys === "string" ? [keys] : Array.isArray(keys) ? keys : Object.keys(keys)
+        const snapshot: Record<string, unknown> = {}
+        for (const name of names) if (store.has(name)) snapshot[name] = store.get(name)
+        // The object form supplies a default for each key the store doesn't hold.
+        if (typeof keys === "object" && !Array.isArray(keys)) {
+          for (const [name, fallback] of Object.entries(keys)) if (!(name in snapshot)) snapshot[name] = fallback
+        }
+        if (names.includes("kibitzer:settings:v1") && settingsReadGate) {
+          const gate = settingsReadGate
+          settingsReadGate = null
+          gate.reached()
+          await gate.release
+        }
+        return snapshot
+      },
+      set: async (obj: Record<string, unknown>) => void Object.entries(obj).forEach(([k, v]) => store.set(k, v)),
+      remove: async (keys: string | string[]) => {
+        for (const key of Array.isArray(keys) ? keys : [keys]) store.delete(key)
+      },
+    },
+  },
+  offscreen: { createDocument: async () => {}, hasDocument: async () => true, closeDocument: async () => {} },
+  action: { setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {}, setTitle: async () => {} },
+}
+;(globalThis as unknown as { chrome: unknown }).chrome = chrome
+
+// Quiet the SW's [kbz] diagnostic logging so it doesn't flood the test output (errors kept).
+console.log = () => {}
+console.debug = () => {}
+
+// Import the real SW (registers its listeners on the mock above).
+await import("../background.ts")
+// Settle the restart-decision barrier once, exactly as a real launch does (Chrome dispatches
+// runtime.onStartup before any user interaction): observe()/heartbeat/get-state now await
+// startupSettled, and without this the suite's first observations would stall on its 1.5 s
+// fallback timer instead. No goal exists yet, so the handler itself is a no-op.
+for (const fn of listeners["runtime.onStartup"]) await fn()
+const { ACTIVE_PAGE_KEY, extractActiveExcerpt, PROVIDER_ALERT_ID, setActivePage, testNag } = await import("../lib/gaugeRuntime.ts")
+const { getGoal } = await import("../lib/session.ts")
+
+// --- drivers -----------------------------------------------------------------------------
+const send = (msg: unknown): Promise<Record<string, unknown>> =>
+  new Promise((resolve) => {
+    for (const fn of listeners["runtime.onMessage"]) fn(msg, {}, resolve as (r: unknown) => void)
+  })
+const fireStartup = async () => {
+  for (const fn of listeners["runtime.onStartup"]) await fn()
+}
+const fireHeartbeat = async () => {
+  for (const fn of listeners["alarms.onAlarm"]) await fn({ name: "kibitzer-next-heartbeat" })
+}
+const fireWindowRemoved = async (windowId: number) => {
+  for (const fn of listeners["windows.onRemoved"]) await fn(windowId)
+}
+// Total recorded dwell across the session's entries. The tracker's open interval is credited
+// only when it CLOSES, so this is exactly "time already attributed to real pages".
+const attributedMs = (visits: SessionVisits | null): number =>
+  Object.values(visits?.entries ?? {}).reduce((sum, e) => sum + e.ms, 0)
+const settle = (ms = 0) => new Promise((r) => setTimeout(r, ms)) // real timer (only Date is mocked)
+const settleUntil = async (until: () => boolean, steps = 100): Promise<boolean> => {
+  for (let i = 0; i < steps; i += 1) {
+    if (until()) return true
+    await settle(5)
+  }
+  return until()
+}
+// Same, for conditions that must be read back out of the SSOT (visits, dwell checkpoint).
+const settleUntilStored = async (until: () => Promise<boolean>, steps = 100): Promise<boolean> => {
+  for (let i = 0; i < steps; i += 1) {
+    if (await until()) return true
+    await settle(5)
+  }
+  return until()
+}
+
+// A heartbeat's alarm listener is fire-and-forget (`void getGoal().then(async () => … dispatch)`),
+// so `await fireHeartbeat()` returns BEFORE the work it triggers finishes: dispatch → outbox drain
+// → showToast → executeScript all run async afterwards. When a beat is expected to DELIVER something
+// (the S=0 nag), reading `toasts` after a single `settle(0)` races that delivery on a loaded runner —
+// the nag lands one macrotask after the check, so `nagged` reads false (the original flake). Pass
+// `until` there to poll REAL time until the delivery lands (early-out the moment it does).
+//
+// With NO `until`, keep the beat as short as possible: a drain/hold/absence beat has nothing to wait
+// for, and burning real time here would let real timers a test relies on NOT firing elapse — e.g. an
+// unjudged page's 5s dwell would fire mid-hold and recover S, breaking the freeze test. Only Date is
+// mocked, so `settle` is a real timer; a bare `settle(0)` yields one macrotask, matching the old fast
+// beats those loops were proven against.
+const BEAT_SETTLE_STEPS = 60 // ~120ms real-time cap for a delivery wait — ample under CI load
+async function beat(until?: () => boolean): Promise<void> {
+  mock.timers.tick(60_000)
+  await fireHeartbeat()
+  if (!until) return void (await settle(0)) // fast beat: nothing to await, don't elapse real timers
+  for (let i = 0; i < BEAT_SETTLE_STEPS; i += 1) {
+    await settle(2)
+    if (until()) return
+  }
+}
+
+test("E2E: local PDFs are opt-in and their dwell checkpoint never stores the file path", async () => {
+  const rawUrl = "file:///C:/Users/alice/Private/secret-paper.pdf"
+  activeTab = { id: 12, url: rawUrl, title: "secret-paper.pdf", active: true, windowId: 1 }
+  await send({ type: "set-settings", settings: { observeLocalPdfs: false } })
+  await send({ type: "set-goal", goal: "논문 읽기", minutes: null })
+  await settle(Math.floor(LOCAL_PDF_PROMPT_DELAY_MS / 2))
+  assert.equal(createdWindows.length, 0, "the prompt waits for the PDF viewer to appear")
+  assert.ok(
+    await settleUntil(
+      () => createdWindows.length === 1,
+      Math.ceil((LOCAL_PDF_PROMPT_DELAY_MS + 1000) / 5),
+    ),
+    "the first OFF local PDF opens one opt-in popup",
+  )
+
+  assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "OFF local PDF never creates a dwell")
+  assert.equal((await send({ type: "get-state" })).s, 100, "OFF local PDF holds the gauge neutral")
+  assert.equal(createdWindows.length, 1)
+  assert.equal(createdWindows[0]?.type, "popup")
+  assert.equal(createdWindows[0]?.left, 1102)
+  assert.equal(createdWindows[0]?.top, 642)
+  assert.ok(String(createdWindows[0]?.url).includes("localPdfPrompt.html?tabId=12"))
+  assert.ok(
+    !JSON.stringify(createdWindows[0]).includes("alice") && !JSON.stringify(createdWindows[0]).includes("secret-paper"),
+    "prompt URL carries no source local path",
+  )
+
+  for (const fn of listeners["tabs.onUpdated"]) await fn(12, { title: activeTab.title }, activeTab)
+  await settle(30)
+  assert.equal(createdWindows.length, 1, "title storms never duplicate the one-time popup")
+
+  store.delete(LOCAL_PDF_PROMPT_SHOWN_KEY)
+  for (const fn of listeners["tabs.onUpdated"]) await fn(12, { title: activeTab.title }, activeTab)
+  assert.ok(
+    await settleUntil(() => store.has(LOCAL_PDF_PROMPT_SHOWN_KEY)),
+    "restart recovery repairs the missing shown marker",
+  )
+  assert.equal(createdWindows.length, 1, "restart recovery recognizes an already-created prompt")
+  assert.ok(store.has(LOCAL_PDF_PROMPT_SHOWN_KEY))
+
+  assert.deepEqual(
+    await send({ type: "enable-local-pdf-observation", sourceTabId: 12 }),
+    { ok: true, settingEnabled: true },
+  )
+  await settle(30)
+  assert.ok(updatedTabs.some((entry) => entry.tabId === 12 && entry.props.active === true))
+  const initial = await kvGet<PendingDwell>(PENDING_DWELL_KEY)
+  assert.ok(initial)
+
+  await settle(10)
+  assert.deepEqual(
+    await send({ type: "enable-local-pdf-observation", sourceTabId: 12 }),
+    { ok: true, settingEnabled: true },
+    "an already-ON race still focuses and starts a fresh dwell",
+  )
+  const refreshed = await kvGet<PendingDwell>(PENDING_DWELL_KEY)
+  assert.ok(refreshed && refreshed.dueAt > initial.dueAt, "the already-ON retry never inherits the old deadline")
+
+  windowFocusFails = true
+  assert.deepEqual(
+    await send({ type: "enable-local-pdf-observation", sourceTabId: 12 }),
+    { ok: false, settingEnabled: true },
+    "focus refusal is reported as partial failure, not success",
+  )
+  windowFocusFails = false
+
+  navigateOnActivateUrl = "https://example.com/not-the-pdf"
+  assert.deepEqual(
+    await send({ type: "enable-local-pdf-observation", sourceTabId: 12 }),
+    { ok: false, settingEnabled: true },
+    "navigation during activation cannot observe the stale PDF snapshot",
+  )
+  assert.deepEqual(
+    await send({ type: "enable-local-pdf-observation", sourceTabId: 12 }),
+    { ok: false, settingEnabled: true },
+    "an already-navigated source still reports the actual enabled setting",
+  )
+  activeTab.url = rawUrl
+  assert.deepEqual(
+    await send({ type: "enable-local-pdf-observation", sourceTabId: 12 }),
+    { ok: true, settingEnabled: true },
+  )
+  const first = await kvGet<PendingDwell>(PENDING_DWELL_KEY)
+  assert.ok(first)
+  assert.equal(first.kind, "local_pdf")
+  assert.equal(first.urlHost, "local-pdf")
+  assert.equal(first.title, "secret-paper.pdf", "Chrome's filename title is used when PDF metadata has no title")
+  assert.equal((first as PendingDwell & { url?: string }).url, undefined)
+  assert.ok(!JSON.stringify(first).includes("alice") && !JSON.stringify(first).includes("file:///"))
+  const beforeExcerpt = executeScriptCalls
+  assert.equal(await extractActiveExcerpt(first.pageKey), null)
+  assert.equal(executeScriptCalls, beforeExcerpt, "PDF excerpt policy returns before executeScript")
+
+  activeTab.title = "PDF metadata title"
+  for (const fn of listeners["tabs.onUpdated"]) await fn(12, { title: activeTab.title }, activeTab)
+  await settle(30)
+  const updated = await kvGet<PendingDwell>(PENDING_DWELL_KEY)
+  assert.equal(updated?.dueAt, first.dueAt, "same PDF title update keeps the original dwell deadline")
+  assert.equal(updated?.title, "PDF metadata title", "the latest Chrome tab title wins")
+
+  await send({ type: "set-settings", settings: { observeLocalPdfs: false } })
+  await settle(30)
+  assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "OFF cancels a pending PDF dwell")
+
+  // Race: an ON observation snapshots its setting, OFF cancels, then the stale invocation
+  // resumes. It must not recreate a durable checkpoint after the OFF transition.
+  await send({ type: "set-settings", settings: { observeLocalPdfs: true } })
+  await settle(30)
+  let reached!: () => void
+  let release!: () => void
+  const reachedPromise = new Promise<void>((resolve) => (reached = resolve))
+  const releasePromise = new Promise<void>((resolve) => (release = resolve))
+  settingsReadGate = { reached, release: releasePromise }
+  activeTab.title = "stale observation"
+  for (const fn of listeners["tabs.onUpdated"]) fn(12, { title: activeTab.title }, activeTab)
+  await reachedPromise
+  await send({ type: "set-settings", settings: { observeLocalPdfs: false } })
+  release()
+  await settle(50)
+  assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "stale ON observe cannot rewrite after OFF")
+
+  // Chrome's built-in PDF viewer is not a reliable surface for an injected overlay. A local
+  // PDF nudge must use the OS-notification fallback, while persona templates see the allowed
+  // Chrome tab title instead of the opaque `local-pdf` identity.
+  const enabledSettings = await send({ type: "set-settings", settings: { observeLocalPdfs: true } })
+  activeTab.title = "PDF metadata title"
+  await setActivePage({
+    pageKey: first.pageKey,
+    title: activeTab.title,
+    urlHost: "local-pdf",
+    score: 0.2,
+    kind: "local_pdf",
+    localPdfPolicyRevision: enabledSettings.localPdfPolicyRevision as number,
+  })
+  toasts.length = 0
+  notifications.length = 0
+  await send({ type: "set-persona", persona: "yandere" })
+  tabQuerySequence = [
+    { id: 12, url: "https://example.test/before-pdf", title: "Previous web page", active: true, windowId: 1 },
+    { id: 12, url: "https://example.test/during-delivery", title: "Interim web page", active: true, windowId: 1 },
+    activeTab,
+  ]
+  const random = mock.method(Math, "random", () => 0)
+  try {
+    await testNag(await getGoal())
+  } finally {
+    random.mock.restore()
+  }
+  assert.equal(toasts.length, 0, "local PDFs never pretend an injected overlay was visible")
+  assert.equal(notifications.length, 1, "local PDF nags use the OS notification fallback")
+  const notificationMessage = String(notifications[0]?.opts.message ?? "")
+  assert.ok(notificationMessage.includes("PDF metadata title"), "the nudge uses the Chrome tab title")
+  assert.ok(!notificationMessage.includes("local-pdf"), "the opaque identity is never user-facing copy")
+  // The one-time explainer variant only renders inside an injected toast, so a delivery that
+  // routes to the OS notification must leave the lifetime slot unspent — otherwise a user
+  // whose first-ever nag lands on a PDF loses the explainer without ever seeing it.
+  assert.equal(
+    await kvGet("first-nag-count"),
+    undefined,
+    "the OS-notification fallback must not consume the one-time explainer slot",
+  )
+  await kvDelete("first-nag-count") // keep the suite's lifetime-first toast scenario isolated
+  notifications.length = 0
+  toasts.length = 0
+  await send({ type: "set-persona", persona: "dry_kibitzer" })
+
+  await send({ type: "set-goal", goal: "", minutes: null })
+  activeTab = { id: 1, url: "https://example.test/neutral", title: "중립 페이지", active: true, windowId: 1 }
+})
+const nagDelivered = (): boolean => toasts.some((t) => t.kind === "intervention") || notifications.length > 0
+
+test("E2E: goal → drift on an off-goal page → S drains to 0 → nag delivered", async () => {
+  // PHASE 1 — REAL time. Let the real (threaded) WASM pipeline judge the off-goal page DRIFT with
+  // NO mocked timers in play, so no fake clock is advanced while an embed is in flight. The verdict
+  // is deterministic (title vs goal cosine ≈ 0.22, well under τ=0.59), and this keeps the two clocks
+  // from overlapping during judging — separating the concern from the drain phase below.
+  activeTab = { id: 1, url: "https://video.test/watch?v=cat", title: "귀여운 고양이 영상 몰아보기", active: true, windowId: 1 }
+  await send({ type: "clear-log" }) // scope the probes below to this scenario
+  const setRes = await send({ type: "set-goal", goal: "파이썬 알고리즘 문제 풀이", minutes: null })
+  assert.ok((setRes.goal as { text?: string })?.text, "goal was declared")
+
+  // The dwell is a real 5s timer; wait (real time) for it plus the embed to land the DRIFT verdict.
+  // reconcile is single-flight, so polling fireStartup can't double-judge.
+  let judged = false
+  for (let i = 0; i < 200 && !judged; i += 1) {
+    await settle(100)
+    await fireStartup() // reconcile judges once the real dwell deadline has actually passed
+    judged = /final=DRIFT/.test((await send({ type: "get-log" })).text as string)
+  }
+  assert.ok(judged, "the off-goal page was judged DRIFT in real time")
+  await settle(200) // let the nav dispatch + any threaded-WASM callbacks fully settle
+
+  // PHASE 2 — MOCKED time. No real async is pending now, and heartbeats never re-judge, so the
+  // active verdict stays DRIFT and S drains monotonically (proved in core/gauge/sZeroNag.test.ts).
+  // The drain is therefore deterministic: S reaches 0 and the degraded S=0 gate nags exactly once —
+  // a celebration is impossible without a verdict flip, which nothing here produces.
+  mock.timers.enable({ apis: ["Date"], now: Date.now() }) // start the fake clock at "now" (>= updatedAt)
+  try {
+    const mid = await send({ type: "get-state" })
+    assert.equal((mid.goal as { text?: string })?.text, "파이썬 알고리즘 문제 풀이")
+    assert.ok(typeof mid.s === "number" && (mid.s as number) <= 100, `S present: ${mid.s}`)
+
+    // Drive heartbeats (synthetic 1-min steps) until the gauge bottoms out and the nag lands.
+    // beat() waits for the fire-and-forget delivery, so `nagged` can't be read before the toast does.
+    let nagged = false
+    for (let i = 0; i < 200 && !nagged; i += 1) {
+      await beat(nagDelivered)
+      nagged = nagDelivered()
+    }
+
+    const final = await send({ type: "get-state" })
+    assert.ok(nagged, `a nag was delivered once S drained (final S=${final.s}, toasts=${toasts.length})`)
+    assert.equal(final.s, 0, "S bottomed out at 0")
+    // The lifetime-first intervention toast carries the one-time explainer variant.
+    assert.equal(
+      (toasts[0] as { firstRun?: boolean } | undefined)?.firstRun,
+      true,
+      "the first-ever intervention toast is the explainer variant",
+    )
+    // A nudge the user actually saw is spent. Refunding it would reopen the S=0 recovery gate and
+    // nudge them again within the minute — the failure mode opposite to the one the refund fixes.
+    assert.doesNotMatch(
+      (await send({ type: "get-log" })).text as string,
+      /nag refunded/,
+      "a delivered nudge is never given back",
+    )
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: a nag never lands on a page it is not about (the tab moved before delivery)", async () => {
+  toasts.length = 0
+  notifications.length = 0
+  // PHASE 1 — REAL time, as above: judge an off-goal page DRIFT. A distinct goal resets the gauge.
+  activeTab = { id: 21, url: "https://video.test/watch?v=fox", title: "귀여운 여우 영상 몰아보기", active: true, windowId: 1 }
+  // The klog is shared by every scenario in this file, and an earlier one already wrote a
+  // `final=DRIFT` line — without this the probe below matches THAT and returns before this page
+  // has been judged at all, leaving the drain loop with no verdict to drain (passes alone, fails
+  // in a full run). Clear before the goal is declared so the judge's own line is the first.
+  await send({ type: "clear-log" })
+  await send({ type: "set-goal", goal: "러스트 소유권 개념 정리", minutes: null })
+  let judged = false
+  for (let i = 0; i < 200 && !judged; i += 1) {
+    await settle(100)
+    await fireStartup()
+    judged = /final=DRIFT/.test((await send({ type: "get-log" })).text as string)
+  }
+  assert.ok(judged, "the off-goal page was judged DRIFT in real time")
+  await settle(200)
+
+  mock.timers.enable({ apis: ["Date"], now: Date.now() })
+  try {
+    // The gauge still holds the video page's DRIFT verdict and will nag about it. But from here
+    // every tab lookup reports a DIFFERENT page: the user switched windows in the moment between
+    // the gauge deciding and the toast being injected — the residual race the reducer can't see
+    // (and the same shape a torn-down worker's queued nag recovers into minutes later). Deep
+    // enough that nothing can exhaust it and fall back to the matching tab.
+    const elsewhere = {
+      id: 22,
+      url: "https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html",
+      title: "What Is Ownership?",
+      active: true,
+      windowId: 2,
+    }
+    tabQuerySequence = Array.from({ length: 40 }, () => elsewhere)
+
+    // Fast beats: nothing is expected to deliver, so don't burn the delivery-wait budget on each.
+    let drained = false
+    let lastS = -1
+    for (let i = 0; i < 200 && !drained; i += 1) {
+      await beat()
+      lastS = (await send({ type: "get-state" })).s as number
+      drained = lastS === 0
+    }
+    assert.ok(drained, `S still drained to 0 — suppressing the nudge must not forgive the drift (S=${lastS})`)
+    // Give a delivery every chance to land before asserting it didn't (the drain loop's fast beats
+    // return before the fire-and-forget delivery would).
+    await settleUntilStored(async () => nagDelivered(), 60)
+    assert.equal(
+      toasts.length + notifications.length,
+      0,
+      "no nudge on the innocent page the user actually has open — not as a toast, not as an OS notification",
+    )
+    assert.match(
+      (await send({ type: "get-log" })).text as string,
+      /nag suppressed \(page moved on\)/,
+      "and the drop is recorded, so a silent miss is distinguishable from a bug",
+    )
+  } finally {
+    mock.timers.reset()
+    tabQuerySequence = []
+  }
+})
+
+test("E2E: an unreachable judge still nudges — a configured-but-dead Tier 2 must not mute Kibitzer", async () => {
+  // The failure this pins is silence, and silence is indistinguishable from "working, nothing to
+  // say". With a Tier-2 route configured the gauge stops nudging on Tier-0/1 alone and asks the
+  // judge first — but `degraded` only means "no tier has a provider AT ALL", so a route that
+  // exists yet cannot be reached read as "confirmable". The confirmation never arrived, no nudge
+  // was ever sent, and the request was re-asked on the next page, forever.
+  toasts.length = 0
+  notifications.length = 0
+  activeTab = { id: 31, url: "https://video.test/watch?v=owl", title: "귀여운 부엉이 영상 몰아보기", active: true, windowId: 1 }
+  await send({ type: "clear-log" }) // the klog is shared across scenarios — see the note below
+  // A real route, through the real settings API. Every provider call then fails like a dead
+  // endpoint, so Tier 1 cannot rescue and Tier 2 cannot confirm.
+  const added = await send({ type: "add-provider-key", provider: "ollama", name: "local", value: "test-key" })
+  const keyId = ((added.accounts as Record<string, Array<{ id: string }>>)?.ollama ?? []).at(-1)?.id
+  await send({ type: "set-routes", routes: { tier1: { provider: "ollama", model: "llama3" }, tier2: { provider: "ollama", model: "llama3" } } })
+  providerCallsFail = true
+  try {
+    // Without this the scenario is vacuous: an unresolved route means degraded mode, and the
+    // degraded S=0 gate nudges directly for reasons that have nothing to do with what is tested.
+    assert.equal((await send({ type: "get-state" })).judgeEnabled, true, "the route must actually be live")
+    await send({ type: "set-goal", goal: "타입스크립트 제네릭 정리", minutes: null })
+    let judged = false
+    for (let i = 0; i < 200 && !judged; i += 1) {
+      await settle(100)
+      await fireStartup()
+      judged = /final=DRIFT/.test((await send({ type: "get-log" })).text as string)
+    }
+    assert.ok(judged, "the off-goal page was judged DRIFT (Tier 1 could not be reached to rescue it)")
+    await settle(200)
+
+    mock.timers.enable({ apis: ["Date"], now: Date.now() })
+    try {
+      // NOT the shared nagDelivered(): it counts any OS notification, and this scenario
+      // deliberately provokes the provider-problem alert, which would satisfy it without a single
+      // nudge having been shown. Nag notifications carry the `kbz-<token>` id; the alert does not.
+      const nudgeShown = (): boolean =>
+        toasts.some((t) => t.kind === "intervention") || notifications.some((n) => n.id.startsWith("kbz-"))
+      let nagged = false
+      for (let i = 0; i < 200 && !nagged; i += 1) {
+        await beat(nudgeShown)
+        nagged = nudgeShown()
+      }
+      assert.ok(
+        nagged,
+        `the nudge still arrives when the judge cannot be reached (S=${(await send({ type: "get-state" })).s})`,
+      )
+      const log = (await send({ type: "get-log" })).text as string
+      assert.match(log, /tier2 unavailable/, `unconfirmed, not a verdict. log tail:\n${log.slice(-1800)}`)
+      // Both tiers failed their calls here, and each failure sits in ITS OWN health slot —
+      // under the single-slot model the later call simply overwrote the earlier one (#205).
+      const health = (await send({ type: "get-state" })).health as Record<
+        string,
+        { ok: boolean; stage?: string } | null
+      >
+      assert.equal(health.tier1?.ok, false, "the failed Tier-1 rescue is recorded under tier1")
+      assert.equal(health.tier2?.ok, false, "the failed Tier-2 judge is recorded under tier2")
+      assert.equal(health.tier2?.stage, "judge", "and names the call that failed")
+      // The OS alert names the Tier-2 route's provider, and — Tier 1 having a live error at
+      // this moment — uses the both-tiers-down body variant.
+      const alert = notifications.find((n) => n.id === PROVIDER_ALERT_ID)
+      assert.ok(alert, "the Tier-2 judge failure raises the OS alert")
+      assert.match(String(alert?.opts.message), /^정밀 판정\(Ollama Cloud\) 오류: /)
+      assert.match(String(alert?.opts.message), /빠른 판정에도 오류가 있어/)
+    } finally {
+      mock.timers.reset()
+    }
+  } finally {
+    // Every other scenario in this file assumes the degraded (no-provider) profile — a leaked
+    // route silently reroutes their S=0 gates through Tier-2. `disconnect-provider` cannot do
+    // this: Ollama is the default provider and disconnecting it is a deliberate no-op
+    // (providers.ts), so the key has to be removed by id.
+    providerCallsFail = false
+    // That no-op is also the pin for clear scoping: a mutation that changed NOTHING (keys
+    // and routes identical) must not clear the live per-tier error records above.
+    await send({ type: "disconnect-provider", provider: "ollama" })
+    const afterNoop = (await send({ type: "get-state" })).health as Record<string, { ok: boolean } | null>
+    assert.equal(afterNoop.tier2?.ok, false, "a no-op provider mutation must leave the live tier2 error intact")
+    assert.equal(afterNoop.tier1?.ok, false, "and tier1's")
+    if (keyId) await send({ type: "remove-provider-key", provider: "ollama", keyId })
+    assert.equal(
+      (await send({ type: "get-state" })).judgeEnabled,
+      true,
+      "an enabled AI route must reject removal of its only API key",
+    )
+    // Product policy forbids removing the only key used by an enabled AI route. Cleanup follows
+    // the same supported path as a user: switch to local-only mode, remove the key, then restore
+    // the preference so the next scenario starts from the normal default.
+    await send({ type: "set-settings", settings: { aiJudgmentEnabled: false } })
+    if (keyId) await send({ type: "remove-provider-key", provider: "ollama", keyId })
+    await send({ type: "set-settings", settings: { aiJudgmentEnabled: true } })
+    assert.equal(
+      (await send({ type: "get-state" })).judgeEnabled,
+      false,
+      "the route must be gone again, or every later scenario silently runs non-degraded",
+    )
+  }
+})
+
+test("E2E: a half-configured AI setup is disabled and falls back to local judging", async () => {
+  // The exact configuration issue #207 (확인 1) reported as silently muting Kibitzer forever:
+  // old/migrated routes can leave tier1 pointing at a provider WITH keys while tier2 points at
+  // one WITHOUT. Earlier judgeEnabled() then returned true (because tier1
+  // is live), so the gauge is NOT degraded and asks Tier 2 to confirm at S=0 — but that route
+  // resolves to no provider at all. Before #204/#208 the resulting silence came back as a bare
+  // "ok" verdict: the gauge refunded S and no nudge ever fired, with no error surfaced anywhere.
+  //
+  // The dead-judge scenario above cannot catch a regression here: it keys BOTH tiers and fails
+  // the network calls, exercising the "asked but no answer" path (providerError set). This
+  // configuration never asks at all — the route resolves to null and providerError is
+  // deliberately unset (a keyless route is chosen Tier-0 mode, not a malfunction).
+  toasts.length = 0
+  notifications.length = 0
+  activeTab = { id: 41, url: "https://video.test/watch?v=panda", title: "귀여운 판다 영상 몰아보기", active: true, windowId: 1 }
+  await send({ type: "clear-log" }) // shared klog: an earlier scenario's final=DRIFT would satisfy the probe below
+  // Recreate a stale/migrated half configuration while AI is OFF; the options UI and the
+  // background save boundary both reject creating it while AI is ON.
+  await send({ type: "set-settings", settings: { aiJudgmentEnabled: false } })
+  // Keys for ollama only; tier2 deliberately routed to a provider that has NO keys.
+  const keyed = await send({ type: "add-provider-key", provider: "ollama", name: "local", value: "test-key" })
+  // Every ollama key present now, not just the one just added: `makeTier` returns a live provider
+  // whenever the ROUTED provider has any key at all, so one stray key keeps the judge enabled.
+  const ollamaKeyIds = ((keyed.accounts as Record<string, Array<{ id: string }>>)?.ollama ?? []).map((a) => a.id)
+  await send({ type: "set-routes", routes: { tier1: { provider: "ollama", model: "llama3" }, tier2: { provider: "openai", model: "gpt-5.6-luna" } } })
+  await send({ type: "set-settings", settings: { aiJudgmentEnabled: true } })
+  // Tier 1 IS reachable in this configuration, but a live rescue could answer OK and stop the
+  // drain. Failing the call keeps the DRIFT verdict (fail-closed) — all this test needs from
+  // Tier 1. Tier 2 is unaffected: its route resolves to no provider before any call is made.
+  providerCallsFail = true
+  // The no-alert assertion below would pass vacuously otherwise: the dead-judge scenario above
+  // already stamped the provider alert's 6h throttle. Clear it so a wrongly-fired alert would
+  // actually surface here.
+  store.delete("kibitzer:provider-alert-ts")
+  try {
+    // A missing tier disables the whole AI mode. This is now the product policy: half-configured
+    // routes are not a supported runtime mode and must never enter a Tier-2 confirmation path.
+    assert.equal(
+      (await send({ type: "get-state" })).judgeEnabled,
+      false,
+      "both tiers are required before AI judging becomes active",
+    )
+    await send({ type: "set-goal", goal: "선형대수 고유값 문제 풀이", minutes: null })
+    let judged = false
+    for (let i = 0; i < 200 && !judged; i += 1) {
+      await settle(100)
+      await fireStartup()
+      judged = /final=DRIFT/.test((await send({ type: "get-log" })).text as string)
+    }
+    assert.ok(judged, "the off-goal page was judged DRIFT (the failed Tier-1 rescue keeps the verdict)")
+    await settle(200)
+    // The failed rescue means Tier 1 never answered, so the observe-time record — the value the
+    // Tier-2 judge is later shown as tier_reached — must say 0. The unit tests pin tier1Rescue
+    // and tier2Confirm separately; only this scenario drives the wiring between them.
+    const activePage = await kvGet<{ tierReached?: number }>(ACTIVE_PAGE_KEY)
+    assert.equal(activePage?.tierReached, 0, "a failed Tier-1 rescue must not be recorded as tier_reached=1")
+
+    mock.timers.enable({ apis: ["Date"], now: Date.now() })
+    try {
+      // Count only real nudges (intervention toasts / kbz-<token> notification ids), as the
+      // dead-judge scenario does — an OS alert must not be able to satisfy this probe.
+      const nudgeShown = (): boolean =>
+        toasts.some((t) => t.kind === "intervention") || notifications.some((n) => n.id.startsWith("kbz-"))
+      let nagged = false
+      for (let i = 0; i < 200 && !nagged; i += 1) {
+        await beat(nudgeShown)
+        nagged = nudgeShown()
+      }
+      assert.ok(
+        nagged,
+        `the nudge still arrives when Tier 2 is routed to a keyless provider (S=${(await send({ type: "get-state" })).s})`,
+      )
+      const log = (await send({ type: "get-log" })).text as string
+      assert.match(log, /mode=degraded/, "the half configuration uses the local fallback path")
+      // What distinguishes this from the dead-judge scenario: nothing was ever ASKED, so this
+      // is deliberate Tier-0 mode, not an error — providerError stays unset and the
+      // provider-problem OS alert must not fire.
+      assert.ok(
+        !notifications.some((n) => n.id === PROVIDER_ALERT_ID),
+        "a keyless Tier-2 route is a configuration, not a provider failure — no alert",
+      )
+    } finally {
+      mock.timers.reset()
+    }
+  } finally {
+    // Every other scenario in this file assumes the degraded (no-provider) profile.
+    providerCallsFail = false
+    await send({ type: "disconnect-provider", provider: "openai" }) // also resets the tier2 route to its default
+    // Health clearing is tier-scoped now: disconnecting openai touches only tier2's route,
+    // so the tier1 error record (the failed rescue above) must survive that change (#205).
+    const afterDisconnect = (await send({ type: "get-state" })).health as Record<string, { ok: boolean } | null>
+    assert.equal(afterDisconnect.tier1, null, "the disabled half setup never called Tier 1")
+    // That default is ollama again, so tier1 AND tier2 both route there and any surviving ollama
+    // key leaves the judge enabled for every later scenario. `disconnect-provider` cannot retract
+    // it — ollama is the default provider and disconnecting it is a deliberate no-op
+    // (providers.ts) — so the keys have to go by id.
+    await send({ type: "set-settings", settings: { aiJudgmentEnabled: false } })
+    for (const keyId of ollamaKeyIds) await send({ type: "remove-provider-key", provider: "ollama", keyId })
+    await send({ type: "set-settings", settings: { aiJudgmentEnabled: true } })
+    assert.equal(
+      (await send({ type: "get-state" })).judgeEnabled,
+      false,
+      "the route must be gone again, or every later scenario silently runs non-degraded",
+    )
+    // The ollama key change touches every tier routed to ollama — both, after the
+    // disconnect above — so nothing stale survives into the later scenarios.
+    const afterKeys = (await send({ type: "get-state" })).health as Record<string, unknown>
+    assert.equal(afterKeys.tier1, null, "removing the routed provider's key clears that tier's record")
+    // Re-stamp the alert throttle the dead-judge scenario left behind, so scenarios after this
+    // one see exactly the pre-existing-suite state.
+    store.set("kibitzer:provider-alert-ts", Date.now())
+  }
+})
+
+test("E2E: a sensitive page is dropped — never judged, no drain, no nag (P0-1 privacy)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    // Fresh session on a neutral page (a distinct goal → resetState wipes the prior scenario).
+    activeTab = { id: 2, url: "https://example.test/neutral", title: "중립 페이지", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "분기 보고서 작성", minutes: null })
+    await settle(50)
+
+    // Navigate to a SENSITIVE page (a bank). observe() must drop it before any judging.
+    activeTab = { id: 2, url: "https://chase.com/account/summary", title: "Account Summary", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(2, { status: "complete" }, activeTab)
+    await settle(50)
+
+    // Try hard to make it judge — advance past a dwell and reconcile. There is no checkpoint
+    // (the sensitive page scheduled none), so nothing is judged.
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(300)
+    // The sensitive page is dropped before any dwell/judge, so no verdict, drain, or nag is ever
+    // queued — the absence below is structural. Fast beats (no delivery to await) suffice.
+    for (let i = 0; i < 10; i += 1) await beat()
+
+    const st = await send({ type: "get-state" })
+    assert.equal(st.s, 100, "a sensitive page pauses the gauge — S must not drain")
+    assert.equal(toasts.length + notifications.length, 0, "no nag is ever surfaced for a sensitive page")
+    // The exportable debug log must never NAME the sensitive page: neither the drop line nor
+    // the gauge trace (which echoes the neutral hold's activePageKey) may carry its host.
+    const log = (await send({ type: "get-log" })).text as string
+    assert.ok(!log.includes("chase.com"), "the sensitive host never appears in the exportable log")
+    assert.ok(/drop \(sensitive\)/.test(log), "the drop itself is still traced (category only)")
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: '관련 있어요' clicked while a sensitive page is active — no recovery, never named", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    // Fresh session on a neutral page (a distinct goal → resetState wipes the prior scenario).
+    // Distinct URL/title/id from the user-lists scenario below, so the obsKey dedup this test
+    // leaves behind can never swallow that scenario's first observation.
+    activeTab = { id: 8, url: "https://example.test/tax-prep", title: "세금 준비 자료", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "세금 신고 준비", minutes: null })
+    await settle(50)
+
+    // A nag notification can outlive the page it nagged about: the user switches to a BANK tab,
+    // then clicks "목표와 관련 있어요" on the stale nag. The handler re-queries the active tab, so
+    // without a guard the bank would be klogged, dispatched into the gauge, and stored in visits.
+    activeTab = { id: 8, url: "https://chase.com/account/summary", title: "Account Summary", active: true, windowId: 1 }
+    await send({ type: "kibitzer:toast-feedback", kind: "related" })
+    await settle(100)
+
+    const log = (await send({ type: "get-log" })).text as string
+    assert.ok(!log.includes("chase.com"), "the sensitive host never appears in the exportable log")
+    assert.ok(!/related → OK recover/.test(log), "the OK-recovery is skipped entirely on a sensitive page")
+    const events = JSON.stringify(await send({ type: "export-events" }))
+    assert.ok(!events.includes("chase.com"), "the sensitive host never appears in the durable event export")
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: user domain lists — a blocked host drops host-free, an allowlisted host judges OK without Tier-0", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    await send({ type: "clear-log" })
+    // Fresh session on a neutral page; register both user lists via the options message path.
+    activeTab = { id: 4, url: "https://example.test/neutral", title: "중립 페이지", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "논문 초록 정리", minutes: null })
+    const setRes = (await send({
+      type: "set-domain-lists",
+      lists: { block: ["blocked.test"], allow: ["allowed.test"] },
+    })) as { lists?: { block: string[]; allow: string[] }; rejected?: string[] }
+    assert.deepEqual(setRes.lists, { block: ["blocked.test"], allow: ["allowed.test"] })
+    assert.deepEqual(setRes.rejected, [])
+    await settle(50)
+
+    // Navigate to the USER-blocked page: dropped like a sensitive page — no dwell checkpoint,
+    // no judging, gauge held NEUTRAL.
+    activeTab = { id: 4, url: "https://blocked.test/very/private/path", title: "비밀 페이지", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(4, { status: "complete" }, activeTab)
+    await settle(50)
+    mock.timers.tick(6000)
+    await fireStartup() // reconcile: there is no checkpoint to judge
+    await settle(300)
+    for (let i = 0; i < 10; i += 1) await beat()
+    let log = (await send({ type: "get-log" })).text as string
+    assert.ok(log.includes("drop (user-blocked)"), "the drop is logged as a fixed string")
+    assert.ok(!log.includes("blocked.test"), "the blocked host never appears in the log")
+    let st = await send({ type: "get-state" })
+    assert.equal(st.s, 100, "a user-blocked page holds the gauge — S must not drain")
+
+    // Navigate to the ALLOWLISTED page: judged OK without any Tier-0 embed once the dwell
+    // elapses — recorded as a normal observation, no nag, S stays full (OK recovers).
+    activeTab = { id: 4, url: "https://allowed.test/docs/ch1", title: "완전 다른 주제의 문서", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(4, { status: "complete" }, activeTab)
+    await settle(50)
+    mock.timers.tick(6000)
+    await fireStartup() // reconcile fires the dwell's judgement (no WASM needed on this path)
+    await settle(300)
+    log = (await send({ type: "get-log" })).text as string
+    assert.ok(/user-allow final=OK/.test(log), "the allowlisted page short-circuited to OK")
+    assert.ok(!/final=DRIFT/.test(log), "no Tier-0 judgement ran for the allowlisted page")
+    for (let i = 0; i < 10; i += 1) await beat()
+    st = await send({ type: "get-state" })
+    assert.equal(st.s, 100, "an always-OK page keeps S full")
+    assert.equal(toasts.length + notifications.length, 0, "no nag on either list")
+
+    // Clean up the lists so later scenarios observe an unfiltered world.
+    await send({ type: "set-domain-lists", lists: { block: [], allow: [] } })
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: drifting, then navigating to a new page freezes S — no drain on the page just left", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    // Fresh session on a clearly off-goal page (a distinct goal → resetState wipes scenario 2).
+    activeTab = { id: 3, url: "https://video.test/watch?v=cat", title: "귀여운 고양이 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "파이썬 알고리즘 문제 풀이", minutes: null })
+    await settle(50)
+
+    // Judge the off-goal page → DRIFT (advance the clock past the dwell, reconcile does the judge).
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+
+    // Drain a while on the drifting page — stop well before 0 so the freeze below is non-trivial
+    // and can't be confused with S already bottoming out.
+    let drained = 100
+    for (let i = 0; i < 60 && drained > 50; i += 1) {
+      // Fast beats (no delivery to await, and the real dwell below must not elapse). A one-beat lag
+      // in the read just costs an extra iteration — the loop stops the first time S is seen ≤ 50.
+      await beat()
+      drained = (await send({ type: "get-state" })).s as number
+    }
+    assert.ok(drained > 0 && drained < 100, `the drift drained S off full but not to 0 (S=${drained})`)
+
+    // Navigate to a NEW page. observe() enters NEUTRAL immediately; its dwell is a real 5s timer
+    // that is never advanced or reconciled here, so the page stays UNjudged — and the gauge must
+    // HOLD, not keep draining on the off-goal page's now-stale DRIFT (the pre-fix bug).
+    activeTab = { id: 3, url: "https://docs.python.org/3/tutorial/", title: "파이썬 알고리즘 문제 풀이 튜토리얼", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(3, { status: "complete" }, activeTab)
+    await settle(50)
+    const atNav = (await send({ type: "get-state" })).s as number
+
+    // Fifteen minutes of heartbeats while the new page is still in its dwell — S is frozen.
+    for (let i = 0; i < 15; i += 1) await beat()
+    const held = (await send({ type: "get-state" })).s as number
+    assert.equal(held, atNav, "S is held steady while the new page is judged — no drain on the stale verdict")
+    assert.ok(held > 0, "the stale DRIFT did NOT drain S to 0 during the neutral hold")
+    assert.equal(toasts.length + notifications.length, 0, "no nag fires during the neutral hold")
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: opening an internal page (chrome://newtab) holds S — no drain on the page just left (Fix 1)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    // Fresh session on a clearly off-goal page (a distinct goal → resetState wipes the prior scenario).
+    activeTab = { id: 5, url: "https://video.test/watch?v=dog", title: "귀여운 강아지 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "리액트 컴포넌트 리팩터링", minutes: null })
+    await settle(50)
+
+    // Judge the off-goal page → DRIFT (advance past the dwell, reconcile does the judge).
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+
+    // Drain a while, stopping well before 0 so the freeze below is unambiguous.
+    let drained = 100
+    for (let i = 0; i < 60 && drained > 50; i += 1) {
+      mock.timers.tick(60_000)
+      await fireHeartbeat()
+      await settle(0)
+      drained = (await send({ type: "get-state" })).s as number
+    }
+    assert.ok(drained > 0 && drained < 100, `the drift drained S off full but not to 0 (S=${drained})`)
+
+    // Open a new tab: an internal chrome:// page with NO page key. Pre-fix, observe() returned at
+    // `if (!pageKey) return` BEFORE the neutral hold, so heartbeats kept draining the off-goal
+    // page's now-stale DRIFT while the user sat on a blank tab. Post-fix it holds NEUTRAL.
+    activeTab = { id: 5, url: "chrome://newtab/", title: "New Tab", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(5, { status: "complete" }, activeTab)
+    await settle(50)
+    const atNav = (await send({ type: "get-state" })).s as number
+
+    // Fifteen minutes of heartbeats while sitting on the new tab — S must be frozen.
+    for (let i = 0; i < 15; i += 1) {
+      mock.timers.tick(60_000)
+      await fireHeartbeat()
+      await settle(0)
+    }
+    const held = (await send({ type: "get-state" })).s as number
+    assert.equal(held, atNav, "the internal page holds the gauge NEUTRAL — no drain on the stale verdict")
+    assert.ok(held > 0, "the stale DRIFT did NOT drain S to 0 while on the new tab")
+    assert.equal(toasts.length + notifications.length, 0, "no nag fires while holding on the internal page")
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: navigating the SAME tab to an internal page also closes the visit interval — no phantom dwell", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 81, url: "https://video.test/watch?v=lynx", title: "귀여운 스라소니 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "운영체제 스케줄러 공부", minutes: null })
+    await settle(50)
+
+    // Judge the off-goal page → DRIFT, which opens its visit interval.
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+    await beat() // one minute of genuine dwell on the judged page
+    assert.ok((await getVisits())?.open, "the judged page owns the open visit interval")
+
+    // Navigate the SAME tab to chrome://newtab. The internal branch returns before noteObserve,
+    // so pre-fix the tracker still believed the judged page was attended: `open` stayed on it and
+    // every heartbeat closed+reopened the interval, crediting dwell for as long as the user sat
+    // on the internal page (Fix 1 held the GAUGE here — the visit tracker was the missing half).
+    activeTab = { id: 81, url: "chrome://newtab/", title: "New Tab", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(81, { status: "complete" }, activeTab)
+    await settle(50)
+
+    assert.equal((await getVisits())?.open ?? null, null, "the interval closes the moment the internal page is observed")
+    const msAtNav = attributedMs(await getVisits())
+
+    // Ten minutes on the internal page — not one more second lands on the page the user left.
+    for (let i = 0; i < 10; i += 1) await beat()
+    assert.equal(attributedMs(await getVisits()), msAtNav, "no phantom dwell accrues while sitting on the internal page")
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: a nudge that never reached the user does not spend the re-nag backoff", async () => {
+  // The nag count is committed when the reducer EMITS the effect; delivery happens afterwards and
+  // can legitimately fail. Without a refund the first such loss both consumes a rung of the
+  // backoff ladder AND shuts the S=0 recovery gate (it requires nagN === 0), so the user gets
+  // nothing at all until the debt-based re-nag comes due — ~6 beats of further drift here.
+  toasts.length = 0
+  notifications.length = 0
+  activeTab = { id: 41, url: "https://video.test/watch?v=seal", title: "귀여운 물범 영상 몰아보기", active: true, windowId: 1 }
+  await send({ type: "clear-log" }) // the klog is shared across scenarios; scope the DRIFT probe
+  await send({ type: "set-goal", goal: "고 언어 동시성 패턴 정리", minutes: null })
+  // Degraded is what makes the retry timing below exact: both the crossing nudge and the recovery
+  // retry are decided in the reducer with no judge round trip. An earlier scenario leaking a live
+  // route would route the retry through Tier-2 and blur the 1-beat signal into several.
+  assert.equal((await send({ type: "get-state" })).judgeEnabled, false, "this scenario needs degraded mode")
+  let judged = false
+  for (let i = 0; i < 200 && !judged; i += 1) {
+    await settle(100)
+    await fireStartup()
+    judged = /final=DRIFT/.test((await send({ type: "get-log" })).text as string)
+  }
+  assert.ok(judged, "the off-goal page was judged DRIFT in real time")
+  // The judging loop fires startup repeatedly and each listener body runs detached, ending in its
+  // own active-page resync. One landing AFTER the override below would see a foreign survivor and
+  // hold the gauge neutral — S would stop draining and no nudge would ever be decided. Let them
+  // finish, then check the gauge really is still integrating this page's DRIFT.
+  await settle(600)
+  assert.match(
+    (await send({ type: "get-log" })).text as string,
+    /v=DRIFT/,
+    "the gauge holds the off-goal verdict before the tab is taken away",
+  )
+
+  mock.timers.enable({ apis: ["Date"], now: Date.now() })
+  try {
+    // The user is on a page the nudge may not be shown on. Held for the whole of phase 1 rather
+    // than queued: the judging loop above leaves unrelated tab lookups in flight (dwell reconcile,
+    // active-page resync), and any one of them would eat a single queue entry and let the nudge
+    // through — which passes alone and fails in a full run. (`chase.com` is in
+    // configs/sensitive_domains.json; the drop is silent either way, since the page-identity gate
+    // would reject it too. Which gate fires does not matter — the refund keys on the outcome.)
+    tabQueryOverride = { id: 42, url: "https://chase.com/accounts", title: "Accounts", active: true, windowId: 1 }
+
+    // PHASE 1 — drain until the gauge DECIDES to nudge. The klog records that before delivery is
+    // attempted, which is how we can tell "emitted then swallowed" from "never emitted".
+    const nagEmitted = async (): Promise<boolean> =>
+      /nag \((writer|fallback)\):/.test((await send({ type: "get-log" })).text as string)
+    let emitted = false
+    for (let i = 0; i < 200 && !emitted; i += 1) {
+      await beat()
+      emitted = await settleUntilStored(nagEmitted, 3) // the klog write trails the beat
+    }
+    assert.ok(emitted, "S drained to 0 and the gauge decided to nudge")
+    // Wait on the refund rather than on a fixed settle: it is logged only after delivery has
+    // definitively failed, so it is both the "nothing was shown" signal and the phase boundary.
+    const refunded = await settleUntilStored(
+      async () => /nag refunded \(never shown\)/.test((await send({ type: "get-log" })).text as string),
+      60,
+    )
+    assert.ok(refunded, "…nothing surfaced, and the count was handed back")
+    assert.equal(
+      toasts.length + notifications.length,
+      0,
+      "…but nothing surfaced: the tab could not host it",
+    )
+    tabQueryOverride = null // the user is back on the drifting page
+
+    // PHASE 2 — beats measured from the swallowed nudge. With the refund the recovery gate reopens
+    // and fires on the very NEXT beat: exactly 1, deterministically, because the gate is a level
+    // condition on the already-zero gauge. Without it only the debt-based re-nag is left, which
+    // needs rRenag(40) of fresh drift — 6 beats at accel tier 0, but as few as 3 once the tier has
+    // climbed to 2.5×. Hence the bound is 1 and not "fewer than 6": the loose version passes
+    // against the unfixed code whenever the episode has accelerated.
+    let beats = 0
+    let nagged = false
+    for (; beats < 200 && !nagged; beats += 1) {
+      await beat(nagDelivered)
+      nagged = nagDelivered()
+    }
+    assert.ok(nagged, `a nudge does eventually arrive (S=${(await send({ type: "get-state" })).s})`)
+    assert.equal(beats, 1, `the retry is the next beat, not a backoff period away (took ${beats})`)
+  } finally {
+    mock.timers.reset()
+    tabQueryOverride = null
+  }
+})
+
+test("E2E: quiet hours decides nothing, and the window leaves the backoff unspent", async () => {
+  // The window is now a reducer-level silence rather than a delivery-time drop, so there is no
+  // nudge to withhold and none to give back. What this pins is the consequence: the ladder is
+  // untouched inside the window, so the first beat after it nudges immediately instead of
+  // needing a full backoff period of fresh drift.
+  toasts.length = 0
+  notifications.length = 0
+  activeTab = { id: 51, url: "https://video.test/watch?v=crow", title: "귀여운 까마귀 영상 몰아보기", active: true, windowId: 1 }
+  await send({ type: "clear-log" })
+  // Derive the window from the wall clock so it covers the whole run whatever time of day CI
+  // starts. A fixed 00:00-23:59 leaves 23:59 OUTSIDE the window (inQuietHours is `cur < end`), so
+  // a run beginning after ~23:06 crosses the boundary mid-test and the window closes under it.
+  const hhmm = (at: number): string => {
+    const d = new Date(at)
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`
+  }
+  const windowStart = hhmm(Date.now() - 10 * 60_000)
+  const windowEnd = hhmm(Date.now() + 6 * 60 * 60_000) // the mocked clock advances ~1h across the beats
+  await send({ type: "set-settings", settings: { quietHours: { enabled: true, start: windowStart, end: windowEnd } } })
+  try {
+    await send({ type: "set-goal", goal: "쿠버네티스 인그레스 설정", minutes: null })
+    let judged = false
+    for (let i = 0; i < 200 && !judged; i += 1) {
+      await settle(100)
+      await fireStartup()
+      judged = /final=DRIFT/.test((await send({ type: "get-log" })).text as string)
+    }
+    assert.ok(judged, "the off-goal page was judged DRIFT in real time")
+    await settle(200)
+
+    mock.timers.enable({ apis: ["Date"], now: Date.now() })
+    try {
+      // Drain past the floor and keep going, well beyond the first re-nag threshold.
+      let drained = false
+      for (let i = 0; i < 40 && !drained; i += 1) {
+        await beat()
+        drained = ((await send({ type: "get-state" })).s as number) === 0
+      }
+      assert.ok(drained, "the drift is still measured — silence is not forgiveness")
+      for (let i = 0; i < 12; i += 1) await beat() // ~12 more minutes of drift inside the window
+
+      const log = (await send({ type: "get-log" })).text as string
+      // The reducer's own trace line, not a delivery-side one: `!! nag` is written the moment a
+      // nudge is DECIDED, which is what spends the ladder. Asserting only on the delivery lines
+      // would let a future drop reason between decision and delivery slip past.
+      assert.doesNotMatch(log, /!! nag/, "no nudge was ever decided inside the window")
+      assert.doesNotMatch(log, /nag \((writer|fallback)\):/, "so none reached delivery either")
+      assert.doesNotMatch(log, /nag suppressed \(quiet hours\)/, "so there was nothing to suppress at delivery")
+      assert.equal(toasts.length + notifications.length, 0, "and nothing surfaced")
+
+      // Leaving the window: the ladder was never climbed, so the S=0 recovery gate is still open
+      // and fires on the very next beat. Spending it inside the window would have cost 6 minutes
+      // of fresh drift here — 48 after a full night.
+      await send({ type: "set-settings", settings: { quietHours: { enabled: false } } })
+      await beat(nagDelivered)
+      assert.ok(nagDelivered(), "the first beat after the window nudges, with no backoff to serve")
+    } finally {
+      mock.timers.reset()
+    }
+  } finally {
+    await send({ type: "set-settings", settings: { quietHours: { enabled: false } } })
+  }
+})
+
+test("E2E: a nag is never surfaced while Chrome is unfocused, but delivers once focused (Fix 3)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 6, url: "https://example.test/article", title: "예시 문서", active: true, windowId: 1 }
+
+    // Chrome is NOT the focused app. The test-goal "알림보기" fires a nag immediately (testNag),
+    // but the delivery invariant in showToast must drop it — no toast, no OS notification.
+    winFocused = false
+    await send({ type: "set-goal", goal: "알림보기", minutes: null })
+    await settle(50)
+    assert.equal(toasts.length + notifications.length, 0, "no nudge surfaces while Chrome is unfocused")
+
+    // The user is at the keyboard but Chrome is still not focused (idle system-wide is "active"):
+    // presence still requires window focus, so the nudge stays suppressed.
+    idleActive = true
+    await send({ type: "set-goal", goal: "알림보기", minutes: null })
+    await settle(50)
+    assert.equal(toasts.length + notifications.length, 0, "focus, not just idle-active, gates delivery")
+
+    // Chrome regains focus: the OS-fallback/toast is only presence-gated, not disabled, so the
+    // same path now delivers.
+    winFocused = true
+    await send({ type: "set-goal", goal: "알림보기", minutes: null })
+    await settle(50)
+    assert.ok(toasts.length + notifications.length > 0, "the nudge delivers once Chrome is focused again")
+    // The first-run explainer slot was consumed by the suite's first nag (the drain
+    // scenario above) — every later toast must render the normal compact variant.
+    for (const t of toasts) {
+      assert.ok(!(t as { firstRun?: boolean }).firstRun, "later nags render the normal toast")
+    }
+  } finally {
+    winFocused = true
+    idleActive = true
+    mock.timers.reset()
+  }
+})
+
+test("E2E: title churn in an UNFOCUSED window's active tab cannot steal the focused page's dwell (Fix 4)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    // Focused window (id 1): a clearly off-goal page; set-goal schedules its 5s dwell.
+    activeTab = { id: 7, url: "https://video.test/watch?v=fox", title: "귀여운 여우 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "통계학 회귀분석 과제 풀이", minutes: null })
+    await settle(50)
+
+    // A SECOND window's active tab storms title updates during that dwell. Tab.active is
+    // per-window, so it reports active:true even though its window (id 2) is NOT focused.
+    // Pre-fix each update passed the `tab.active` check and REPLACED the single dwell
+    // checkpoint, so the focused page was never judged (and the side page's own judgement was
+    // then dropped by the lastFocusedWindow-scoped stillJudging) — the gauge froze in a
+    // NEUTRAL hold. Post-fix the isFocusedWindow gate ignores it entirely.
+    for (let i = 0; i < 5; i += 1) {
+      const sideTab = { id: 9, url: "https://news.test/live", title: `속보 라이브 #${i}`, active: true, windowId: 2 }
+      for (const fn of listeners["tabs.onUpdated"]) await fn(9, { title: sideTab.title }, sideTab)
+      mock.timers.tick(1000) // churn spread across the focused page's dwell window
+      await settle(0)
+    }
+
+    // Advance past the dwell and reconcile: the checkpoint must still hold the FOCUSED page.
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+
+    // The focused off-goal page got its judgement → DRIFT → heartbeats drain S below 100.
+    for (let i = 0; i < 5; i += 1) {
+      mock.timers.tick(60_000)
+      await fireHeartbeat()
+      await settle(0)
+    }
+    const s = (await send({ type: "get-state" })).s as number
+    assert.ok(s < 100, `the focused page's judgement landed and S drains (S=${s}) — the side window did not steal the dwell`)
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: bouncing back to a judged page within another page's dwell re-enters the pipeline — no indefinite freeze", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    // Fresh session on a clearly off-goal page; set-goal schedules its 5s dwell.
+    const pageX = { id: 13, url: "https://video.test/watch?v=owl", title: "귀여운 올빼미 영상 몰아보기", active: true, windowId: 1 }
+    activeTab = pageX
+    await send({ type: "set-goal", goal: "선형대수 고유값 증명 공부", minutes: null })
+    await settle(50)
+
+    // Judge X → DRIFT (advance past the dwell, reconcile does the judge).
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+
+    // Prove integration is live (S drains under X's DRIFT), then remember where S sits.
+    let sMid = 100
+    for (let i = 0; i < 30 && sMid >= 100; i += 1) {
+      await beat()
+      sMid = (await send({ type: "get-state" })).s as number
+    }
+    assert.ok(sMid < 100, `X was judged DRIFT and S is draining (S=${sMid})`)
+
+    // Tab-switch to an unjudged page Y: NEUTRAL hold, Y's dwell armed.
+    activeTab = { id: 14, url: "https://blog.test/daily-essay", title: "일상 잡담 에세이", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onActivated"]) await fn({ tabId: 14, windowId: 1 })
+    await settle(50)
+
+    // Bounce BACK to X within Y's dwell. lastObservedKey still names X (only judgeAndDispatch
+    // writes it), so pre-fix observe(X) early-returned on the bare key match: nothing was
+    // re-armed, Y's dwell later fired against the wrong active tab and was dropped, and the
+    // gauge froze on Y with a null verdict — no drain, no recovery, no drift detection.
+    activeTab = pageX
+    for (const fn of listeners["tabs.onActivated"]) await fn({ tabId: 13, windowId: 1 })
+    await settle(50)
+    const rearmed = await kvGet<PendingDwell>(PENDING_DWELL_KEY)
+    assert.equal(rearmed?.title, pageX.title, "the bounce-back re-armed the dwell for X, not Y")
+
+    // X re-judges after its dwell → DRIFT again → S RESUMES draining below sMid.
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200)
+    let sResumed = sMid
+    for (let i = 0; i < 30 && sResumed >= sMid; i += 1) {
+      await beat()
+      sResumed = (await send({ type: "get-state" })).s as number
+    }
+    assert.ok(sResumed < sMid, `the gauge resumed integrating after the bounce (S ${sMid} → ${sResumed})`)
+
+    // The storm guard survives the fix: an identical onUpdated for the judged, ACCOUNTED page
+    // is still debounced — no new dwell is armed (the checkpoint was consumed by the judge).
+    for (const fn of listeners["tabs.onUpdated"]) await fn(13, { title: pageX.title }, pageX)
+    await settle(50)
+    assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "identical-page churn on an accounted page schedules nothing")
+
+    // Variant: the return goes THROUGH another app. Switch to unjudged Z, lose focus entirely
+    // (WINDOW_ID_NONE cancels Z's dwell — the judge that would reset lastObservedKey never
+    // runs), then regain focus on X. Pre-fix the stale key froze the gauge with NOTHING
+    // pending to ever recover it.
+    activeTab = { id: 15, url: "https://blog.test/second-essay", title: "두 번째 잡담 에세이", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onActivated"]) await fn({ tabId: 15, windowId: 1 })
+    await settle(50)
+    for (const fn of listeners["win"]) await fn(chrome.windows.WINDOW_ID_NONE)
+    await settle(50)
+    assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "focus loss cancelled Z's dwell")
+    activeTab = pageX
+    for (const fn of listeners["win"]) await fn(1)
+    await settle(50)
+    const reobserved = await kvGet<PendingDwell>(PENDING_DWELL_KEY)
+    assert.equal(reobserved?.title, pageX.title, "focus regain re-armed X's dwell despite the stale debounce key")
+
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200)
+    let sFinal = sResumed
+    for (let i = 0; i < 30 && sFinal >= sResumed; i += 1) {
+      await beat()
+      sFinal = (await send({ type: "get-state" })).s as number
+    }
+    assert.ok(sFinal < sResumed, `the gauge resumed after the through-another-app bounce (S ${sResumed} → ${sFinal})`)
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: a pending dwell never survives returning to a held internal page or disabled PDF", async () => {
+  // The internal-page and disabled-PDF branches debounce on lastObservedKey too. Pre-fix their
+  // early return sat ABOVE dwell.cancel(), so held-page → real page Y → back within Y's dwell
+  // left Y's checkpoint alive; it then fired against the held page, was dropped, and the gauge
+  // froze on Y with nothing armed. The cancel must run even on the debounced path.
+  const newtab = { id: 16, url: "chrome://newtab/", title: "New Tab", active: true, windowId: 1 }
+  try {
+    activeTab = newtab
+    await send({ type: "set-goal", goal: "재무 보고서 검토", minutes: null })
+    await settle(50) // set-goal observes the newtab → internal hold, lastObservedKey = internal key
+
+    // Open a real page in that tab: its dwell is armed.
+    activeTab = { id: 16, url: "https://blog.test/third-essay", title: "세 번째 잡담 에세이", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
+    await settle(50)
+    assert.ok(await kvGet<PendingDwell>(PENDING_DWELL_KEY), "the real page armed a dwell")
+
+    // Back to the identical newtab within the dwell — the debounced internal path must still cancel.
+    activeTab = newtab
+    for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
+    await settle(50)
+    assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "returning to the held internal page cancels the abandoned dwell")
+
+    // Same shape through holdLocalPdfDisabled: all disabled PDFs share one debounce key.
+    await send({ type: "set-settings", settings: { observeLocalPdfs: false } })
+    activeTab = { id: 16, url: "file:///C:/docs/one.pdf", title: "one.pdf", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
+    await settle(50) // → lastObservedKey = "local-pdf#disabled"
+
+    activeTab = { id: 16, url: "https://blog.test/fourth-essay", title: "네 번째 잡담 에세이", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
+    await settle(50)
+    assert.ok(await kvGet<PendingDwell>(PENDING_DWELL_KEY), "the real page armed a dwell (PDF phase)")
+
+    activeTab = { id: 16, url: "file:///C:/docs/two.pdf", title: "two.pdf", active: true, windowId: 1 }
+    for (const fn of listeners["tabs.onUpdated"]) await fn(16, { status: "complete" }, activeTab)
+    await settle(50)
+    assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "a second disabled PDF (same debounce key) still cancels the abandoned dwell")
+  } finally {
+    // Cleanup must run even when an assertion above throws, or the leftover goal / disabled-PDF
+    // setting changes what later tests observe. Clear the goal BEFORE re-enabling PDFs: the ON
+    // edge reobserves the active tab, and with a live goal that would arm a real 5s dwell that
+    // outlives this test (a trap for later tests).
+    await send({ type: "set-goal", goal: "", minutes: null })
+    await send({ type: "set-settings", settings: { observeLocalPdfs: true } })
+  }
+})
+
+// The destroyed window's id is deliberately unused by the handler: no tabId/windowId is stored
+// in the visit or gauge state, so ownership is settled by re-querying which tab is active NOW.
+// The mock's getLastFocused is a constant — it stands for "whichever window has focus", which
+// after the close is the survivor.
+test("E2E: destroying the focused window stops all attribution to its page (Fix 5)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 21, url: "https://video.test/watch?v=owl", title: "귀여운 부엉이 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "쿠버네티스 배포 설정 정리", minutes: null })
+    await settle(50)
+
+    // Judge the off-goal page → DRIFT, which opens its visit interval and drains S.
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+
+    let drained = 100
+    for (let i = 0; i < 60 && drained > 50; i += 1) {
+      await beat()
+      drained = (await send({ type: "get-state" })).s as number
+    }
+    assert.ok(drained > 0 && drained < 100, `the drift drained S off full but not to 0 (S=${drained})`)
+    assert.ok((await getVisits())?.open, "the drifting page owns the open visit interval")
+
+    // Its window is destroyed. Chrome fires NO tab event for that, and the surviving window shows
+    // an internal page — so no observation will EVER arrive to correct the attribution. Pre-fix
+    // the minute heartbeats kept crediting dwell to the vanished page AND kept integrating its
+    // stale DRIFT into S (up to gapCap each beat); only windows.onRemoved can stop it.
+    activeTab = { id: 22, url: "chrome://newtab/", title: "New Tab", active: true, windowId: 1 }
+    await fireWindowRemoved(2)
+    // The listener is fire-and-forget, so poll the SSOT rather than racing it with a bare settle.
+    await settleUntilStored(async () => ((await getVisits())?.open ?? null) === null)
+    await settle(30) // let the trailing hand-over observe() finish too
+
+    const atClose = await getVisits()
+    assert.equal(atClose?.open, null, "the destroyed page's interval is closed on the spot")
+    const msAtClose = attributedMs(atClose)
+    const sAtClose = (await send({ type: "get-state" })).s as number
+
+    for (let i = 0; i < 15; i += 1) await beat()
+    assert.equal(attributedMs(await getVisits()), msAtClose, "no dwell accrues to the destroyed page")
+    assert.equal(
+      (await send({ type: "get-state" })).s as number,
+      sAtClose,
+      "S no longer integrates the destroyed page's verdict",
+    )
+    assert.equal(toasts.length + notifications.length, 0, "and no nag fires off a page that no longer exists")
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: a window close hands the session to the surviving window's page (Fix 5)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 31, url: "https://video.test/watch?v=bee", title: "귀여운 벌 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "테라폼 모듈 리팩터링", minutes: null })
+    await settle(50)
+
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+    await beat() // accrue a minute of dwell on the judged page
+    assert.ok((await getVisits())?.open, "the judged page owns the open visit interval")
+
+    // Same close, but the surviving window shows a REAL page: the session must continue there
+    // rather than sitting wedged in the hold.
+    await kvDelete(PENDING_DWELL_KEY)
+    activeTab = { id: 32, url: "https://registry.terraform.io/modules", title: "테라폼 모듈 레지스트리", active: true, windowId: 1 }
+    await fireWindowRemoved(2)
+    // Poll the checkpoint: the hand-over sits at the very end of the listener's async chain.
+    await settleUntilStored(async () => (await kvGet(PENDING_DWELL_KEY)) !== undefined)
+
+    assert.equal((await getVisits())?.open, null, "the destroyed page's interval is still closed out")
+    const pending = (await kvGet(PENDING_DWELL_KEY)) as PendingDwell | undefined
+    assert.equal(
+      pending?.title,
+      "테라폼 모듈 레지스트리",
+      "the surviving window's page starts its own dwell — the session is handed over, not stalled",
+    )
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: closing a BACKGROUND window changes nothing — the drift keeps being measured (Fix 5)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 41, url: "https://video.test/watch?v=elk", title: "귀여운 사슴 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "그래프 알고리즘 정리", minutes: null })
+    await settle(50)
+
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+    await beat()
+
+    const openBefore = (await getVisits())?.open
+    assert.ok(openBefore, "the judged page owns the open interval")
+    const sBefore = (await send({ type: "get-state" })).s as number
+    assert.ok(sBefore > 5, `S has room left to drain (S=${sBefore})`)
+    await kvDelete(PENDING_DWELL_KEY)
+
+    // A window the user was NOT looking at closes: the active tab is unchanged, so the page being
+    // measured still exists and the handler must not touch a thing. This is the invariant the
+    // whole mismatch test is built around — pausing unconditionally here would rebase the gauge
+    // clock and silently forgive every bit of drift since the last beat.
+    await fireWindowRemoved(2)
+    await settle(50)
+
+    assert.deepEqual((await getVisits())?.open, openBefore, "the open interval is left exactly as it was")
+    assert.equal(await kvGet(PENDING_DWELL_KEY), undefined, "and no redundant re-dwell is scheduled")
+    await beat()
+    assert.ok(
+      ((await send({ type: "get-state" })).s as number) < sBefore,
+      "the verdict is still live, so the drift keeps integrating — it was not dropped into a hold",
+    )
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: a tab belonging to the window being closed is not mistaken for a survivor (Fix 5)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 61, url: "https://video.test/watch?v=crab", title: "귀여운 게 영상 몰아보기", active: true, windowId: 3 }
+    await send({ type: "set-goal", goal: "회계 원리 정리", minutes: null })
+    await settle(50)
+
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+    await beat()
+    assert.ok((await getVisits())?.open, "the judged page owns the open interval")
+
+    // Clicking the X on an UNFOCUSED window focuses it first, so `lastFocusedWindow` can still
+    // resolve to the window being torn down and hand back its own doomed tab. Matching that key
+    // would look like "the page still exists" and turn the whole re-sync into a no-op — the exact
+    // leak this handler exists to close. The tab's windowId is what disqualifies it.
+    await fireWindowRemoved(3)
+    await settleUntilStored(async () => ((await getVisits())?.open ?? null) === null)
+
+    assert.equal(
+      (await getVisits())?.open ?? null,
+      null,
+      "the doomed window's own tab is not treated as the surviving page",
+    )
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: a window closed while Chrome is unfocused does not bill the away time as drift (Fix 5)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 71, url: "https://video.test/watch?v=moth", title: "귀여운 나방 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "선형대수 복습", minutes: null })
+    await settle(50)
+
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+    await beat()
+    assert.ok((await getVisits())?.open, "the judged page owns the open interval")
+    const sBefore = (await send({ type: "get-state" })).s as number // present: rebases the clock
+
+    // The user switches to another app and only THEN closes the Chrome window from the taskbar.
+    // The minute in between is away-time. `neutral` integrates the tail before dropping the
+    // verdict — right for a window closed while watching it, wrong here: it would bill drift the
+    // user never spent. No tab survives, matching a taskbar close of the last window.
+    winFocused = false
+    mock.timers.tick(60_000)
+    activeTab = null
+    await fireWindowRemoved(2)
+    await settleUntilStored(async () => ((await getVisits())?.open ?? null) === null)
+
+    assert.equal(
+      (await send({ type: "get-state" })).s as number,
+      sBefore,
+      "the minute spent in another app is rebased away, not integrated as drift",
+    )
+  } finally {
+    winFocused = true
+    mock.timers.reset()
+  }
+})
+
+test("E2E: a restart closes the previous run's interval without integrating the shutdown gap (Fix 5)", async () => {
+  mock.timers.enable({ apis: ["Date"] })
+  try {
+    toasts.length = 0
+    notifications.length = 0
+    activeTab = { id: 51, url: "https://video.test/watch?v=seal", title: "귀여운 물범 영상 몰아보기", active: true, windowId: 1 }
+    await send({ type: "set-goal", goal: "타입스크립트 제네릭 공부", minutes: null })
+    await settle(50)
+
+    mock.timers.tick(6000)
+    await fireStartup()
+    await settle(1200) // real time for the KoEn-E5 WASM embedding
+    await beat()
+    assert.ok((await getVisits())?.open, "the judged page owns the open interval")
+    const sBeforeQuit = (await send({ type: "get-state" })).s as number
+
+    // Chrome quits with that interval still open — on Windows the last window's close races the
+    // teardown, so windows.onRemoved may never run — and is relaunched ten minutes later on a page
+    // that has nothing to do with the previous run. NO tab event describes that transition, and
+    // session restore has not committed yet, so the startup re-sync is the only thing that can
+    // settle it before the first heartbeat resumes crediting the vanished page.
+    mock.timers.tick(10 * 60_000)
+    activeTab = { id: 52, url: "chrome://newtab/", title: "New Tab", active: true, windowId: 1 }
+    await kvDelete(PENDING_DWELL_KEY)
+    await fireStartup()
+    await settleUntilStored(async () => ((await getVisits())?.open ?? null) === null)
+    await settle(30)
+
+    assert.equal((await getVisits())?.open ?? null, null, "the previous run's interval is closed out")
+    assert.equal(
+      (await send({ type: "get-state" })).s as number,
+      sBeforeQuit,
+      "the ten minutes Chrome spent shut are rebased away, not integrated as drift",
+    )
+    assert.equal(
+      toasts.length + notifications.length,
+      0,
+      "so no nag fires at launch about a page from the last session",
+    )
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("E2E: first install opens the onboarding tab once — updates and re-fires never re-open it", async () => {
+  createdTabs.length = 0
+  const fireInstalled = async (details?: { reason: string }) => {
+    for (const fn of listeners["runtime.onInstalled"]) await fn(details)
+    await settle(20) // the listener's storage check + tabs.create are async
+  }
+  const opened = () => createdTabs.filter((u) => u.includes("onboarding/onboarding.html")).length
+
+  await fireInstalled({ reason: "install" })
+  assert.equal(opened(), 1, "a true first install opens the wizard tab")
+
+  await fireInstalled({ reason: "install" }) // duplicate install event → storage flag blocks it
+  await fireInstalled({ reason: "update" }) // extension update (incl. unpacked reloads)
+  await fireInstalled() // defensive: event fired with no details
+  assert.equal(opened(), 1, "the wizard never opens a second time")
+})

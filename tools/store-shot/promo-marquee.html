@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      @font-face {
+        font-family: "Gowun Dodum";
+        font-weight: 400;
+        src: url("assets/fonts/GowunDodum-Regular.woff2") format("woff2");
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; width: 1400px; height: 560px; overflow: hidden; }
+    </style>
+  </head>
+  <body>
+    <span style="position: absolute; opacity: 0; font-family: 'Gowun Dodum'">Kibitzer 몰입 훈수꾼</span>
+    <!-- Same brand palette and character geometry as the small tile. -->
+    <svg width="1400" height="560" viewBox="0 0 1400 560" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="glow" cx="24%" cy="10%" r="86%">
+          <stop offset="0%" stop-color="#2ed79b" />
+          <stop offset="100%" stop-color="#0d9569" />
+        </radialGradient>
+      </defs>
+      <rect width="1400" height="560" fill="url(#glow)" />
+
+      <!-- the tabs being watched over: shape only, no text -->
+      <g fill="#ffffff" opacity="0.13">
+        <rect x="836" y="72" width="228" height="32" rx="16" />
+        <rect x="1088" y="72" width="228" height="32" rx="16" />
+        <rect x="836" y="128" width="480" height="15" rx="7.5" />
+        <rect x="836" y="163" width="308" height="15" rx="7.5" />
+      </g>
+
+      <!-- the page the kibitzer looks over -->
+      <path d="M100 268 h1200 a24 24 0 0 1 24 24 V560 H76 V292 a24 24 0 0 1 24 -24 Z" fill="#F9FAFB" />
+
+      <!-- head + eyes -->
+      <circle cx="340" cy="222" r="86" fill="#1F2937" />
+      <circle cx="309" cy="188" r="21.8" fill="#F9FAFB" />
+      <circle cx="371" cy="188" r="21.8" fill="#F9FAFB" />
+
+      <!-- hands gripping the page edge -->
+      <rect x="191" y="256" width="63" height="46" rx="22" fill="#1F2937" />
+      <rect x="426" y="256" width="63" height="46" rx="22" fill="#1F2937" />
+
+      <text x="580" y="430" fill="#1F2937"
+        font-family="Gowun Dodum, sans-serif" font-size="84" letter-spacing="0.5">Kibitzer</text>
+      <text x="586" y="484" fill="#57635c"
+        font-family="Gowun Dodum, sans-serif" font-size="30">몰입 훈수꾼</text>
+    </svg>
+  </body>
+</html>

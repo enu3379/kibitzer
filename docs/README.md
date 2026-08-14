@@ -1,56 +1,62 @@
 # Kibitzer docs
 
-## Current runtime
+## Read before implementation
 
-Read these first:
+The active product is [`apps/extension/`](../apps/extension/): one Chrome MV3
+extension with no local server or secondary runtime. Start with these current
+product contracts:
 
 1. [Architecture](architecture.md)
 2. [Data model](data-model.md)
 3. [Privacy](privacy.md)
 4. [ML providers](ml-providers.md)
 5. [Platforms](platforms.md)
-6. [TypeScript/serverless migration record](ts-migration-plan.md)
-7. [Migration gap audit](migration-gap-analysis.md)
-8. [Progress log](progress.md)
-9. [Planning notes](planning-notes.md)
+6. [Gauge contract](gauge/contract.md)
+7. [Tier-0 O4 model and WASM parity](extension-onnx-model.md)
+8. [Replay harness](replay-harness.md)
 
-The active product is `apps/extension-next/`: one Chrome MV3 extension with no
-local server. The directory name is retained for repository continuity; it is
-not a second or experimental runtime.
+## Active product and release work
 
-## Runtime contracts and operations
+- [Migration gap audit](migration-gap-analysis.md) records accepted
+  post-cutover feature tails; completed rows are historical.
+- [Chrome Web Store submission kit](store-submission.ko.md) contains the
+  current beta submission copy and checklist.
+- [Persona research](research/personas/) is active design evidence until its
+  product decisions land.
 
-- [Gauge contract](gauge/contract.md)
-- [Tier-0 O4 model and WASM parity](extension-onnx-model.md)
-- [Replay harness](replay-harness.md)
-- [Judgment audit plan](judgment-audit-plan.md)
-- [Persona voice revamp](persona-voice-revamp.md)
-- [Security review](security-review-2026-07-15.md)
-- [Tier-2 prompt-injection red team](security-redteam-prompt-extraction.md)
+Current follow-up product work and cutover disposition are recorded in the
+[migration gap audit](migration-gap-analysis.md) and D14 in
+[planning notes](planning-notes.md). The completed migration and rollback
+references are in the [TypeScript/serverless migration record](ts-migration-plan.md).
 
-## Follow-up product work
+## Research and supporting material
 
-The cutover does not claim complete UX/analysis parity:
+- [Gauge design rationale](research/gauge/analysis-plan-a-gauge-design.md)
+- [Anchor experiments](research/anchor/)
+- [Persona research](research/personas/)
 
-- #135 — judgment-review dashboard and verdict correction.
-- #136 — Tier-0 OK audit routing.
-- #141 — session pause/end, reports/history, current-page verdict UI, and end
-  summary.
+## Decision records and evidence
 
-The disposition and remaining B7/B8 tails are recorded in
-[the migration gap audit](migration-gap-analysis.md) and D14 in
-[planning notes](planning-notes.md).
+These explain why the current product has its present shape; they are not
+runtime or implementation instructions:
+
+- [Planning notes](planning-notes.md) — D-numbered decision history, including
+  superseded server-era decisions.
+- [Progress log](progress.md) — completed-work chronology.
+- [Judgment audit plan](judgment-audit-plan.md) — pre-cutover problem analysis;
+  use current issues and code for implementation status.
+- [Persona voice revamp](persona-voice-revamp.md) and
+  [persona benchmark evidence](benchmarks/persona-voice-v5/report.md).
+- [Tier-2 prompt-injection red team](security-redteam-prompt-extraction.md) —
+  historical threat-model and results; its documented Python harness is not in
+  the active serverless tree.
 
 ## Historical plans and handoffs
 
-Implementation plans, platform-daemon plans, pre-cutover analysis, and
-`handoff-*.md` files are historical evidence unless a current issue explicitly
-reactivates them. Their paths may refer to the retired Python server and relay
-extension.
-
-The complete legacy runtime is preserved on `dev-legacy` and
-`pre-serverless-cutover-2026-07-24`; the full pre-squash migration history is
-preserved by `serverless-migration-head-2026-07-24`.
+Completed handoffs, pre-cutover analyses, retired plans, and workflows are
+preserved in [legacy/](legacy/). They are historical evidence unless a current
+issue explicitly reactivates and revalidates them; their paths, commands, and
+acceptance checks may refer to the retired Python server and relay extension.
 
 ## Decision rule
 

@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>Kibitzer</title>
+    <style>
+      /* Bundled so the popup reads in Gowun Dodum regardless of what's installed. */
+      @font-face {
+        font-family: "Gowun Dodum";
+        font-weight: 400; /* the bundled file is Regular only; let the browser synthesize bold for 600/700 */
+        font-display: swap;
+        src: url("../assets/fonts/GowunDodum-Regular.woff2") format("woff2");
+      }
+      :root {
+        color-scheme: light dark;
+        /* sundial palette — monochrome ink + a leaf green (only the leaves are coloured) */
+        --sd-ink: #6e6960; --sd-ink3: #9b968c; --sd-line: #e6e3dc; --sd-leaf: #5aa63c; --sd-bg: #ffffff;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root { --sd-ink: #a6a49d; --sd-ink3: #7b7970; --sd-line: #3f403c; --sd-leaf: #6fbf4e; --sd-bg: #292a2d; }
+      }
+      body {
+        font: 14px/1.4 "Gowun Dodum", -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+        margin: 0; padding: 14px; width: 268px;
+      }
+      h1 { font-size: 12px; margin: 0 0 12px; color: #888; font-weight: 600; letter-spacing: .06em; }
+      [hidden] { display: none !important; }
+      /* --- active view: goal-first, sundial time, immersion gauge --- */
+      .goal-label { font-size: 11px; color: #999; margin: 0; }
+      .goal { font-size: 17px; font-weight: 700; line-height: 1.3; margin: 2px 0 0; word-break: keep-all; }
+      .tv { display: flex; justify-content: center; margin: 8px 0 2px; }
+      .tv svg { display: block; overflow: visible; }
+      .agauge { --m: #2b9e57; margin-top: 12px; }
+      .agauge.warn { --m: light-dark(#ad7d15, #d9a441); }
+      .agauge.bad { --m: #c94f4f; }
+      .agauge.paused { --m: #8e8b84; }
+      .agauge .track { position: relative; height: 10px; border-radius: 5px; overflow: hidden;
+        background: color-mix(in srgb, var(--m) 18%, transparent); }
+      .agauge .fill { position: absolute; inset: 0 auto 0 0; min-width: 10px; border-radius: 5px; background: var(--m); }
+      .agauge .tick { position: absolute; top: 0; bottom: 0; width: 1px; background: color-mix(in srgb, currentColor 18%, transparent); }
+      .meterline { display: flex; justify-content: space-between; align-items: baseline; margin-top: 6px; }
+      .state { font-size: 12px; font-weight: 700; }
+      .state .dot { color: var(--m); margin-right: 4px; font-size: 10px; }
+      .score { font-size: 12px; color: #888; font-variant-numeric: tabular-nums; }
+      .score b { font-size: 15px; font-weight: 700; color: inherit; }
+      .mode { font-size: 11px; color: #999; margin: 0 0 4px; }
+      .mode.on { color: #1f9d6b; }
+      .hint { font-size: 11px; color: #999; margin: 6px 0 0; word-break: break-word; }
+      .hint.err { color: #d1495b; }
+      .hint.warn { color: light-dark(#ad7d15, #d9a441); }
+      .hint.gray { color: #999; }
+      /* Provider warn block: per-tier fact lines + one consequence line. */
+      #providerWarn .hint { margin: 3px 0 0; }
+      #providerWarn { margin-top: 3px; }
+      label { display: block; font-size: 12px; color: #888; margin-bottom: 10px; }
+      input { width: 100%; box-sizing: border-box; padding: 8px 9px; margin-top: 4px;
+        border: 1px solid #8884; border-radius: 8px; background: transparent; color: inherit; font: inherit; }
+      .row { display: flex; gap: 8px; }
+      .row label { flex: 1; }
+      .row label.mins { flex: 0 0 82px; }
+      button { width: 100%; padding: 9px; border: 0; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer; }
+      #set { background: #1e7a4c; color: #fff; }
+      .ghost { background: transparent; color: #888; border: 1px solid #8884; padding: 7px; font-weight: 500; margin-top: 8px; }
+      .ghost.danger { color: #d1495b; border-color: #d1495b44; }
+      .row button { flex: 1; }
+      /* First-run goal hint: judging accuracy tracks goal specificity, so until the first
+         goal is ever declared the setup view leads with examples (부록 A). */
+      .fr-hint { display: flex; gap: 7px; align-items: baseline; border-radius: 8px; padding: 8px 10px;
+        font-size: 11px; line-height: 1.5; margin-bottom: 10px;
+        background: color-mix(in srgb, #1e7a4c 9%, transparent); color: light-dark(#175f3b, #8fdcb4); }
+      .fr-hint .hx { width: auto; border: 0; background: none; color: inherit; font: inherit;
+        font-size: 11px; padding: 0 2px; margin-left: auto; font-weight: 400; }
+      .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
+      .chip { width: auto; background: transparent; color: #888; border: 1px solid #8884;
+        font-size: 11px; font-weight: 500; padding: 3px 10px; border-radius: 999px; }
+      .chip:hover { border-color: #1e7a4c; color: light-dark(#1e7a4c, #4cc585); }
+      /* Restart-continue banner (경우 ①) + suspended-session resume block (경우 ②). */
+      .rb-actions { display: flex; gap: 6px; margin-top: 7px; }
+      .rb-actions button { width: auto; background: transparent; border: 1px solid #8885;
+        color: inherit; font-size: 11px; font-weight: 500; padding: 3px 9px; border-radius: 999px; }
+      .rb-actions button:hover { border-color: #1e7a4c; color: light-dark(#1e7a4c, #4cc585); }
+      .resume-btn { display: block; width: 100%; text-align: left; background: transparent; color: inherit;
+        border: 1px solid color-mix(in srgb, #1e7a4c 45%, transparent); border-radius: 10px;
+        padding: 10px 12px; margin-bottom: 12px; }
+      .resume-btn:hover { background: color-mix(in srgb, #1e7a4c 8%, transparent); }
+      .resume-btn .rk { display: block; font-size: 11px; font-weight: 700; color: light-dark(#1e7a4c, #4cc585); }
+      .resume-btn .rg { display: block; font-size: 14px; font-weight: 700; margin-top: 2px; word-break: keep-all;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .resume-btn .rm { display: block; font-size: 11px; color: #999; margin-top: 1px; font-weight: 400; }
+      /* --- session summary view --- */
+      .sumlabel { font-size: 11px; color: #999; }
+      .sumgoal { font-size: 17px; font-weight: 650; line-height: 1.3; margin: 1px 0 14px; letter-spacing: -.01em; }
+      .stat { margin-bottom: 12px; }
+      .stat-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+      .stat-name { font-size: 12px; color: #888; }
+      .stat-val { font-size: 15px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+      .stat-val small { font-size: 12px; font-weight: 500; color: #888; }
+      /* Band-colored meter (구간색): ≥66 집중 / 33–65 흔들림 / <33 이탈; track = fill @18%. */
+      .meter { --m: #2b9e57; position: relative; height: 10px; border-radius: 5px; margin-top: 6px; overflow: hidden;
+        background: color-mix(in srgb, var(--m) 18%, transparent); }
+      .meter.warn { --m: light-dark(#ad7d15, #d9a441); }
+      .meter.bad { --m: #c94f4f; }
+      .meter.empty { background: color-mix(in srgb, #999 22%, transparent); }
+      .meter .fill { position: absolute; inset: 0 auto 0 0; background: var(--m); border-radius: 5px; }
+      .meter .tick { position: absolute; top: 2px; bottom: 2px; width: 1px; background: color-mix(in srgb, currentColor 18%, transparent); }
+      .top-title { font-size: 13px; font-weight: 600; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .top-meta { font-size: 11px; color: #888; margin-top: 1px; font-variant-numeric: tabular-nums; }
+      .vdot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #2b9e57; margin: 0 3px 1px 0; }
+      .vdot.bad { background: #c94f4f; }
+      .divider { border: 0; border-top: 1px solid #8883; margin: 12px 0 0; }
+      .comment-head { font-size: 11px; color: #999; margin: 12px 0 4px; }
+      .comment-text { font-size: 13px; line-height: 1.6; }
+      .comment-text.loading { color: #999; animation: kbz-pulse 1.4s ease-in-out infinite; }
+      @media (prefers-reduced-motion: reduce) { .comment-text.loading { animation: none; } }
+      @keyframes kbz-pulse { 50% { opacity: .45; } }
+      .comment-note { font-size: 11px; color: #999; margin-top: 5px; }
+      #sumDone { background: #1e7a4c; color: #fff; margin-top: 10px; }
+      /* --- extended report cards (세션 더보기) --- */
+      .card { border: 1px solid #8883; border-radius: 10px; padding: 11px 12px; margin-top: 10px; }
+      .card > .ch { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; color: #999; text-transform: uppercase; margin-bottom: 8px; }
+      .none { font-size: 13px; color: #2b9e57; font-weight: 600; }
+      .cmp-chips { display: flex; gap: 5px; flex-wrap: wrap; }
+      .dchip { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 999px; font-variant-numeric: tabular-nums; }
+      .dchip.good { color: #2b9e57; background: color-mix(in srgb, #2b9e57 13%, transparent); }
+      .dchip.bad { color: #c94f4f; background: color-mix(in srgb, #c94f4f 13%, transparent); }
+      .dchip.flat { color: #888; background: color-mix(in srgb, #888 14%, transparent); }
+      .mischief { display: flex; align-items: baseline; gap: 6px; margin-bottom: 8px; }
+      .mischief b { font-size: 21px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+      .mischief .u { font-size: 12px; color: #888; } .mischief .sep { color: #aaa; }
+      .ranks { display: flex; flex-direction: column; gap: 7px; }
+      .rank { display: grid; grid-template-columns: 80px 1fr auto; align-items: center; gap: 8px; font-size: 12px; }
+      .rank .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .rank .bar { height: 7px; border-radius: 4px; background: color-mix(in srgb, #999 16%, transparent); overflow: hidden; }
+      .rank .bar i { display: block; height: 100%; border-radius: 4px; background: #2b9e57; }
+      .rank.bad .bar i { background: #c94f4f; }
+      .rank .vv { color: #888; font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .hl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      /* min-width:0 — without it the grid track takes its size from .hn's nowrap
+         min-content width, so a long MVP page title pushes the 빌런 card out of
+         the card's right edge instead of ellipsizing. */
+      .hlc { min-width: 0; padding: 9px 10px; border-radius: 9px; border: 1px solid #8883; }
+      .hlc.mvp { border-color: color-mix(in srgb, #2b9e57 35%, transparent); background: color-mix(in srgb, #2b9e57 7%, transparent); }
+      .hlc.vil { border-color: color-mix(in srgb, #c94f4f 32%, transparent); background: color-mix(in srgb, #c94f4f 7%, transparent); }
+      .hlc .hk { font-size: 10.5px; font-weight: 700; margin-bottom: 3px; }
+      .hlc.mvp .hk { color: #2b9e57; } .hlc.vil .hk { color: #c94f4f; }
+      .hlc .hn { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .hlc .hs { font-size: 11px; color: #888; margin-top: 1px; }
+      .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+      .mc .mk { font-size: 10.5px; color: #888; margin-bottom: 1px; }
+      .mc .mv { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+      .mc .mv small { font-size: 11px; color: #888; font-weight: 500; }
+      .mc .mv .up { color: #2b9e57; } .mc .mv .dn { color: #c94f4f; }
+      .scurve { width: 100%; height: 62px; display: block; overflow: visible; }
+      .scurve-legend { display: flex; gap: 11px; margin-top: 6px; font-size: 10.5px; color: #888; }
+      .scurve-legend span { display: inline-flex; align-items: center; }
+      .scurve-legend i { display: inline-block; width: 11px; border-top: 2px solid currentColor; margin-right: 4px; }
+      .lg-now { color: #2b9e57; } .lg-last { color: #8a8a90; } .lg-avg { color: #aaa; }
+      .lg-avg i { border-top-style: dashed; }
+    </style>
+  </head>
+  <body>
+    <h1>KIBITZER</h1>
+
+    <div id="active" hidden>
+      <div class="fr-hint" id="restoreBanner" hidden>
+        <span aria-hidden="true">🔄</span>
+        <span>
+          <b>세션을 이어가는 중이에요.</b><br />크롬을 껐다가 5분 이내에 다시 켜면 진행 중이던 세션이 자동으로 이어집니다.
+          <span class="rb-actions">
+            <button id="restoreDefaultOff">잇지 않음을 기본으로</button>
+            <button id="restoreNever">다시 보지 않기</button>
+          </span>
+        </span>
+      </div>
+      <p class="goal-label">현재 목표</p>
+      <p class="goal" id="goalText"></p>
+      <div class="tv" id="timeVis" hidden></div>
+      <div class="agauge" id="activeMeter">
+        <div class="track">
+          <div class="fill" id="meterFill"></div>
+          <div class="tick" style="left:33%"></div>
+          <div class="tick" style="left:66%"></div>
+        </div>
+        <div class="meterline">
+          <span class="state" id="stateWord"></span>
+          <span class="score"><b id="scoreNum">–</b> / 100</span>
+        </div>
+      </div>
+      <div class="mode" id="mode"></div>
+      <div class="mode" id="personaActive"></div>
+      <div id="providerWarn" hidden></div>
+      <div class="row">
+        <button id="edit" class="ghost">목표 변경</button>
+        <button id="pause" class="ghost">일시정지</button>
+        <button id="end" class="ghost danger">종료하기</button>
+      </div>
+      <button id="openSettings" class="ghost">설정</button>
+    </div>
+
+    <div id="summary" hidden>
+      <div class="sumlabel">세션 요약</div>
+      <div class="sumgoal" id="sumGoal"></div>
+
+      <div class="stat">
+        <div class="stat-row"><span class="stat-name">유효 페이지 비율</span><span class="stat-val" id="sumRatio"></span></div>
+        <div class="meter" id="sumRatioMeter"><div class="fill"></div><div class="tick" style="left:33%"></div><div class="tick" style="left:66%"></div></div>
+      </div>
+      <div class="stat">
+        <div class="stat-row"><span class="stat-name">유효 방문 시간</span><span class="stat-val" id="sumTime"></span></div>
+        <div class="meter" id="sumTimeMeter"><div class="fill"></div><div class="tick" style="left:33%"></div><div class="tick" style="left:66%"></div></div>
+      </div>
+      <div class="stat">
+        <div class="stat-row"><span class="stat-name">받은 훈수</span><span class="stat-val" id="sumNags"></span></div>
+      </div>
+      <div class="stat" id="sumTopWrap" hidden>
+        <div class="stat-row"><span class="stat-name">가장 오래 머문 페이지</span></div>
+        <div class="top-title" id="sumTopTitle"></div>
+        <div class="top-meta"><span class="vdot" id="sumTopDot"></span><span id="sumTopMeta"></span></div>
+      </div>
+
+      <hr class="divider" />
+      <button id="sumMore" class="ghost" aria-expanded="false">세션 더보기 ▾</button>
+      <div id="sumComment" hidden>
+        <div class="comment-head" id="sumPersona"></div>
+        <div class="comment-text" id="sumCommentText"></div>
+        <div class="comment-note" id="sumCommentNote" hidden>AI 연결 시 페르소나 한 줄 평이 제공돼요</div>
+        <div id="sumReport"></div>
+      </div>
+      <button id="sumDone">확인</button>
+    </div>
+
+    <div id="setup" hidden>
+      <div id="resumeWrap" hidden>
+        <div class="fr-hint" id="suspendHint" hidden>
+          <span aria-hidden="true">💤</span>
+          <span>세션을 종료하지 않고 크롬을 껐을 땐, 나중에 여기서 이어갈 수 있어요.</span>
+          <button class="hx" id="suspendHintClose" title="닫기">✕</button>
+        </div>
+        <button id="resumeBtn" class="resume-btn">
+          <span class="rk">직전 세션 이어가기</span>
+          <span class="rg" id="resumeGoal"></span>
+          <span class="rm" id="resumeMeta"></span>
+        </button>
+      </div>
+      <div class="fr-hint" id="goalHint" hidden>
+        <span aria-hidden="true">🎯</span>
+        <span><b>구체적일수록 판정이 정확해요.</b><br />"공부"보다는 "선형대수 3장 문제풀이". 예시를 눌러 시작해도 좋아요.</span>
+        <button class="hx" id="goalHintClose" title="다시 보지 않기">✕</button>
+      </div>
+      <div class="chips" id="goalChips" hidden>
+        <button class="chip">졸업논문 관련연구 정리</button>
+        <button class="chip">이력서 포트폴리오 섹션 쓰기</button>
+        <button class="chip">선형대수 3장 문제풀이</button>
+      </div>
+      <div class="row">
+        <label>목표<input id="goal" maxlength="2000" placeholder="예: 논문 정리" /></label>
+        <label class="mins">시간(분)<input id="minutes" type="number" min="1" placeholder="60" /></label>
+      </div>
+      <button id="set">시작</button>
+      <div class="hint">목표를 선언하면 흐름이 어긋날 때만 조용히 알려드려요.</div>
+      <button id="openSettings2" class="ghost">설정</button>
+    </div>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

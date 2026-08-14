@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kibitzer 시작하기</title>
+    <style>
+      /* Design language shared with the options page (options.html tokens). The .kpopup /
+         .agauge blocks are verbatim copies of popup/popup.html styles — they dress the
+         step-3 illustration and the step-2 demo; the live popup itself is embedded as an
+         iframe on the final step, so it can never drift from the real thing. */
+      @font-face {
+        font-family: "Gowun Dodum";
+        font-weight: 400;
+        font-display: swap;
+        src: url("../assets/fonts/GowunDodum-Regular.woff2") format("woff2");
+      }
+      :root {
+        color-scheme: light dark;
+        --page: #f2f5f3; --page-ink: #1c2420; --page-ink-2: #57635c; --page-ink-3: #8a958f;
+        --surface: #ffffff; --surface-2: #eef3f0;
+        --line: #dce4df; --line-soft: #e7ede9;
+        --accent: #1e7a4c; --accent-ink: #ffffff; --accent-soft: #e2f1e8;
+        --ok-fg: #175f3b; --err-soft: #f7e2e0; --err-fg: #8f322c;
+        --shadow: 0 12px 32px rgba(28, 36, 32, .08);
+        --popup-bg: #ffffff;
+        /* Optical centring for the numbered step badges (.callout / .co / .legend .n).
+           Their content is a plain digit, whose ink box the grid centres geometrically —
+           but a cap-height-only glyph reads a touch low there, so nudge it up. Applied as
+           padding-bottom ×2: with border-box + a fixed height, bottom padding shrinks the
+           content box from below and place-items:center re-centres inside it, moving the
+           digit up by half the padding. So this value IS the pixel shift. */
+        --num-nudge: 0.5px;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --page: #161b18; --page-ink: #e9efeb; --page-ink-2: #a8b4ad; --page-ink-3: #79857e;
+          --surface: #232a26; --surface-2: #2e3733;
+          --line: #3c463f; --line-soft: #333d37;
+          --accent: #4cc585; --accent-ink: #0c1f14; --accent-soft: #2a4536;
+          --ok-fg: #8fdcb4; --err-soft: #4a2a27; --err-fg: #f0a8a1;
+          --shadow: 0 12px 32px rgba(0, 0, 0, .35);
+          --popup-bg: #292a2d;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; background: var(--page); color: var(--page-ink);
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Apple SD Gothic Neo", "Pretendard", "Malgun Gothic", system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased; line-height: 1.55;
+      }
+
+      .frame { max-width: 600px; margin: 0 auto; padding: 48px 24px 80px; }
+      .wizard {
+        background: var(--surface); border: 1px solid var(--line-soft); border-radius: 16px;
+        box-shadow: var(--shadow); overflow: hidden;
+      }
+      .wtop {
+        display: flex; align-items: center; gap: 10px; padding: 16px 24px;
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .wtop img { width: 22px; height: 22px; }
+      .wtop .name { font-size: 14px; font-weight: 800; letter-spacing: -.02em; }
+      .wtop .count { margin-left: auto; font-size: 11.5px; color: var(--page-ink-3); font-variant-numeric: tabular-nums; }
+      .dots { display: flex; gap: 6px; }
+      .dots button {
+        all: unset; cursor: pointer; width: 7px; height: 7px; border-radius: 50%;
+        background: var(--line); transition: background .18s, transform .18s;
+      }
+      .dots button[aria-current="step"] { background: var(--accent); transform: scale(1.25); }
+      .dots button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+      .body { padding: 28px 28px 8px; min-height: 440px; }
+      .step { animation: enter .24s ease-out; }
+      .step[hidden] { display: none; }
+      @keyframes enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+      @media (prefers-reduced-motion: reduce) {
+        .step, .visit, .nudge, .d-slot, .btn.pulse { animation: none !important; }
+        .agauge .fill { transition: none !important; }
+        .d-menu { transition: none !important; }
+        .nudge.on { opacity: 0; visibility: hidden; }
+      }
+
+      .eyebrow {
+        font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+        color: var(--accent); margin: 0 0 6px;
+      }
+      h1 {
+        font-size: 23px; font-weight: 800; letter-spacing: -.02em; line-height: 1.3;
+        margin: 0 0 10px; text-wrap: balance;
+      }
+      .lede { font-size: 13.5px; color: var(--page-ink-2); margin: 0 0 20px; }
+      .footnote { font-size: 10.5px; color: var(--page-ink-3); margin-top: 8px; }
+
+      /* step 1 — concept */
+      .mascot { display: grid; place-items: center; padding: 10px 0 22px; }
+      .mascot img { width: 84px; height: 84px; }
+      .facts { display: flex; flex-direction: column; border-top: 1px solid var(--line-soft); }
+      .fact { display: flex; gap: 12px; padding: 13px 2px; border-bottom: 1px solid var(--line-soft); align-items: baseline; }
+      .fact b { font-size: 13px; font-weight: 700; white-space: nowrap; }
+      .fact span { font-size: 12.5px; color: var(--page-ink-2); }
+      .fact .tick { color: var(--accent); font-weight: 800; }
+
+      /* step 2 — gauge demo (real agauge component below) */
+      .demo { background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 12px; padding: 16px; }
+      .goalchip {
+        display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700;
+        background: var(--accent-soft); color: var(--ok-fg); border-radius: 999px; padding: 4px 12px; margin-bottom: 12px;
+      }
+      .visits { display: flex; flex-direction: column; gap: 6px; min-height: 132px; margin-top: 14px; }
+      .visit {
+        display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--page-ink-2);
+        background: var(--surface); border: 1px solid var(--line-soft); border-radius: 8px; padding: 7px 10px;
+        animation: enter .3s ease-out;
+      }
+      .visit .site { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .visit .vtag { margin-left: auto; flex: none; font-size: 10.5px; font-weight: 800; border-radius: 5px; padding: 1px 7px; }
+      .vtag.in { background: var(--accent-soft); color: var(--ok-fg); }
+      .vtag.gray { background: var(--line-soft); color: var(--page-ink-3); }
+      .vtag.out { background: var(--err-soft); color: var(--err-fg); }
+      .playrow { display: flex; gap: 8px; margin-top: 14px; }
+
+      /* --- verbatim popup styles (popup.html): active gauge + illustration shell --- */
+      .agauge { --m: #2b9e57; margin-top: 12px; }
+      .agauge.warn { --m: light-dark(#ad7d15, #d9a441); }
+      .agauge.bad { --m: #c94f4f; }
+      .agauge .track { position: relative; height: 10px; border-radius: 5px; overflow: hidden;
+        background: color-mix(in srgb, var(--m) 18%, transparent); }
+      .agauge .fill { position: absolute; inset: 0 auto 0 0; min-width: 10px; border-radius: 5px; background: var(--m);
+        transition: width .55s ease, background .3s; }
+      .agauge .tick { position: absolute; top: 0; bottom: 0; width: 1px; background: color-mix(in srgb, currentColor 18%, transparent); }
+      .agauge .meterline { display: flex; justify-content: space-between; align-items: baseline; margin-top: 6px; }
+      .agauge .state { font-size: 12px; font-weight: 700; }
+      .agauge .state .dot { color: var(--m); margin-right: 4px; font-size: 10px; }
+      .agauge .score { font-size: 12px; color: #888; font-variant-numeric: tabular-nums; }
+      .agauge .score b { font-size: 15px; font-weight: 700; color: inherit; }
+
+      .kpopup {
+        --sd-ink: #6e6960; --sd-ink3: #9b968c; --sd-line: #e6e3dc; --sd-leaf: #5aa63c; --sd-bg: #ffffff;
+        width: 296px; background: var(--sd-bg); color: light-dark(#111111, #e8eaed);
+        font: 14px/1.4 "Gowun Dodum", -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+        padding: 14px; border-radius: 10px; border: 1px solid var(--line); box-shadow: var(--shadow);
+      }
+      @media (prefers-color-scheme: dark) {
+        .kpopup { --sd-ink: #a6a49d; --sd-ink3: #7b7970; --sd-line: #3f403c; --sd-leaf: #6fbf4e; --sd-bg: #292a2d; }
+      }
+      .kpopup .kh1 { font-size: 12px; margin: 0 0 12px; color: #888; font-weight: 600; letter-spacing: .06em; }
+      .kpopup .goal-label { font-size: 11px; color: #999; margin: 0; }
+      .kpopup .goal { font-size: 17px; font-weight: 700; line-height: 1.3; margin: 2px 0 0; word-break: keep-all; }
+      .kpopup .tv { display: flex; justify-content: center; margin: 8px 0 2px; }
+      .kpopup .tv svg { display: block; overflow: visible; }
+      .kpopup .krow { display: flex; gap: 8px; }
+      .kpopup .kbtn { width: 100%; padding: 9px; border: 0; border-radius: 8px; font: inherit; font-weight: 600; cursor: default; }
+      .kpopup .kghost { background: transparent; color: #888; border: 1px solid #8884; padding: 7px; font-weight: 500; margin-top: 8px; }
+      .kpopup .kghost.danger { color: #d1495b; border-color: #d1495b44; }
+      .kpopup .krow .kbtn { flex: 1; }
+
+      /* step 3 — screen map (browser diagram, scaled-down real components) */
+      .browser { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); margin-bottom: 14px; }
+      .chrome-top { display: flex; align-items: center; gap: 10px; background: var(--surface-2); padding: 8px 12px 0; }
+      .traffic { display: flex; gap: 5px; padding-bottom: 8px; }
+      .traffic i { width: 9px; height: 9px; border-radius: 50%; background: var(--line); }
+      .chrome-tab {
+        font-size: 10.5px; color: var(--page-ink-2); background: var(--surface); border: 1px solid var(--line-soft); border-bottom: none;
+        border-radius: 8px 8px 0 0; padding: 5px 12px; max-width: 230px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+      }
+      .chrome-addr {
+        position: relative; display: flex; align-items: center; gap: 8px;
+        background: var(--surface); border-bottom: 1px solid var(--line-soft); padding: 7px 12px;
+      }
+      .chrome-addr .url {
+        flex: 1; font-size: 10.5px; color: var(--page-ink-3); background: var(--surface-2);
+        border-radius: 999px; padding: 3px 12px; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      }
+      .ticons { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+      .puzzle-svg { width: 1.3em; height: 1.3em; fill: currentColor; flex: none; vertical-align: -0.25em; }
+      /* Real toolbar icon + the status dot exactly where badge.ts draws it:
+         r = size×0.2, centred at (size−r, r) → the top-right corner of the bitmap. */
+      .kicon { position: relative; display: inline-flex; width: 16px; height: 16px; }
+      .kicon img { width: 16px; height: 16px; }
+      .kicon .dot { position: absolute; top: 0; right: 0; width: 6.4px; height: 6.4px; border-radius: 50%; background: #d1495b; }
+      .chrome-page { position: relative; background: var(--surface-2); height: 322px; overflow: hidden; }
+      .skel { position: absolute; left: 16px; border-radius: 5px; background: var(--line-soft); }
+      .callout {
+        position: absolute; z-index: 5; width: 20px; height: 20px; border-radius: 50%;
+        background: var(--accent); color: var(--accent-ink); font-size: 11.5px; font-weight: 800;
+        display: grid; place-items: center; padding-bottom: calc(var(--num-nudge) * 2);
+        box-shadow: 0 2px 8px rgba(0,0,0,.25);
+      }
+      .kholder { position: absolute; top: 10px; right: 10px; width: 164px; height: 206px; z-index: 3; }
+      .kholder .kpopup { position: absolute; top: 0; right: 0; transform: scale(.55); transform-origin: top right; }
+      .mini-toast {
+        position: absolute; right: 10px; bottom: 10px; width: 176px; z-index: 3;
+        background: light-dark(#ffffff, #26272b); border: 1.5px solid #10B981; border-radius: 9px;
+        padding: 7px 9px; box-shadow: 0 4px 14px rgba(0,0,0,.18);
+      }
+      .mini-toast .mb { font-size: 8.5px; color: light-dark(#6b7280, #9a9aa0); margin-bottom: 2px; }
+      .mini-toast .mm { font-size: 10px; color: light-dark(#1F2937, #ececef); line-height: 1.45; }
+      .legend { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+      .legend li { display: flex; gap: 9px; font-size: 12.5px; color: var(--page-ink-2); align-items: baseline; }
+      .legend .n {
+        flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--accent-soft); color: var(--ok-fg);
+        font-size: 10.5px; font-weight: 800; display: grid; place-items: center;
+        padding-bottom: calc(var(--num-nudge) * 2); transform: translateY(3px);
+      }
+      .legend b { color: var(--page-ink); }
+      .legend-detail { display: grid; grid-template-columns: max-content 1fr; align-items: baseline; }
+      .legend-label { grid-column: 1; white-space: nowrap; }
+      .legend-copy { grid-column: 2; }
+      .legend-states { grid-column: 2; margin-top: 4px; margin-left: -1.5px;}
+      .ldot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 1px 0 3px; transform: translateY(0.5px); }
+
+      /* step 4 — toolbar pin. The two-click demo is drawn with tokens (not screenshots)
+         so it matches both themes; the pushpin is Chrome's own glyph shape, grey → accent
+         like the real one turns grey → blue. */
+      .pindemo { background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 12px; padding: 16px 16px 13px; }
+      .d-toolbar {
+        display: flex; align-items: center; gap: 8px; background: var(--surface);
+        border: 1px solid var(--line-soft); border-radius: 9px; padding: 6px 10px; width: 300px; margin: 0 auto;
+      }
+      .d-toolbar .d-url { flex: 1; height: 15px; border-radius: 999px; background: var(--surface-2); }
+      .d-puzzle { position: relative; font-size: 13px; line-height: 1; padding: 3px 4px; border-radius: 6px; }
+      .pindemo.p0 .d-puzzle { background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent); }
+      .d-slot { display: none; padding: 3px 2px; }
+      .pindemo.p3 .d-slot { display: inline-flex; animation: pin-pop .35s cubic-bezier(.2, 1.6, .5, 1); }
+      @keyframes pin-pop { from { transform: scale(.3); opacity: 0; } }
+      .d-menu {
+        width: 232px; margin: 10px auto 0; background: var(--surface); border: 1px solid var(--line);
+        border-radius: 10px; padding: 5px; box-shadow: var(--shadow);
+        opacity: 0; transform: translateY(-4px); transition: opacity .2s, transform .2s;
+      }
+      .pindemo.p1 .d-menu, .pindemo.p2 .d-menu, .pindemo.p3 .d-menu { opacity: 1; transform: none; }
+      .d-row { display: flex; align-items: center; gap: 8px; padding: 7px 6px 7px 9px; border-radius: 7px; }
+      .pindemo.p2 .d-row { background: var(--accent-soft); }
+      .d-row .xn { flex: 1; font-size: 12px; font-weight: 650; }
+      .d-pin { position: relative; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--page-ink-3); }
+      .d-pin svg { width: 15px; height: 15px; }
+      .d-pin .pf, .pindemo.p2 .d-pin .po, .pindemo.p3 .d-pin .po { display: none; }
+      .pindemo.p2 .d-pin, .pindemo.p3 .d-pin { color: var(--accent); }
+      .pindemo.p2 .d-pin .pf, .pindemo.p3 .d-pin .pf { display: block; }
+      .pindemo .co {
+        position: absolute; top: -9px; right: -9px; z-index: 5; width: 18px; height: 18px; border-radius: 50%;
+        background: var(--accent); color: var(--accent-ink); font-size: 10.5px; font-weight: 800;
+        display: grid; place-items: center; padding-bottom: calc(var(--num-nudge) * 2);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
+      }
+      .d-cap { font-size: 11.5px; color: var(--page-ink-3); text-align: center; margin: 12px 0 0; }
+      .d-cap b { color: var(--page-ink-2); }
+      .prebox {
+        display: flex; gap: 12px; align-items: center; background: var(--accent-soft); color: var(--ok-fg);
+        border: 1px solid var(--accent); border-radius: 10px; padding: 13px 16px; font-size: 12.5px; font-weight: 650;
+      }
+      /* Corner nudge pointing at the real puzzle icon just above the viewport's top right.
+         Kept small and step-scoped on purpose — a quiet hint, not a billboard. */
+      .nudge {
+        position: fixed; top: 12px; right: 18px; z-index: 40;
+        display: flex; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 700;
+        background: var(--surface); color: var(--page-ink-2);
+        border: 1.5px dashed var(--accent); border-radius: 999px; padding: 6px 13px;
+        box-shadow: var(--shadow); animation: nudge-bob 2.4s ease-in-out infinite;
+      }
+      .nudge[hidden] { display: none; }
+      /* The glyph's own bearing already leaves space on its left and sits low in the line box. */
+      .nudge .up { color: var(--accent); font-size: 15px; line-height: 1; margin-left: -5px; transform: translateY(0.0px); }
+      @keyframes nudge-bob { 50% { transform: translateY(-4px); } }
+      .nudge.on { border-style: solid; background: var(--accent); color: var(--accent-ink); animation: nudge-fade .5s ease-in 1.4s forwards; }
+      .nudge.on .up { color: var(--accent-ink); }
+      @keyframes nudge-fade { to { opacity: 0; visibility: hidden; } }
+      .btn.pulse { animation: next-pulse .55s ease-out 2; }
+      @keyframes next-pulse { 50% { transform: scale(1.06); } }
+
+      /* step 5 — AI judge (the options page's Ollama pane, inlined so it isn't deferred) */
+      .tiers { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+      .tier { border: 1px solid var(--line-soft); border-radius: 10px; padding: 11px 13px; background: var(--surface-2); }
+      .tier b { display: block; font-size: 12px; font-weight: 800; margin-bottom: 3px; }
+      .tier.on { border-color: var(--accent); background: var(--accent-soft); }
+      .tier.on b { color: var(--ok-fg); }
+      .tier small { font-size: 11px; color: var(--page-ink-2); line-height: 1.45; display: block; }
+      .aistatus {
+        display: grid; grid-template-rows: auto 0fr; align-items: start; gap: 0; overflow: hidden;
+        font-size: 12.5px; font-weight: 700;
+        border: 1px dashed var(--line); border-radius: 10px; padding: 10px 13px; margin-top: 12px;
+        color: var(--page-ink-3); transition: grid-template-rows .22s ease, gap .22s ease;
+      }
+      /* The box only exists once there is something to say — `display: grid` would
+         otherwise win over the `hidden` attribute. */
+      .aistatus[hidden] { display: none; }
+      .aistatus.on { color: var(--ok-fg); border-color: var(--accent); border-style: solid; background: var(--accent-soft); }
+      .aistatus.failed { color: var(--err-fg); border-color: var(--err-fg); border-style: solid; background: var(--err-soft); }
+      .aistatus.has-detail { grid-template-rows: auto 1fr; gap: 5px; }
+      .ai-test-detail {
+        min-height: 0; overflow: hidden; white-space: pre-line; line-height: 1.55;
+        font-size: 12px; font-weight: 650; color: var(--page-ink-2); opacity: 0;
+        transition: opacity .18s ease;
+      }
+      .aistatus.has-detail .ai-test-detail { opacity: 1; }
+      .aistatus.on .ai-test-detail.ok { color: var(--ok-fg); }
+      .ai-test-detail.err { color: var(--err-fg); }
+      .keysteps { margin: 0 0 12px; padding-left: 20px; font-size: 12.5px; color: var(--page-ink-2); display: flex; flex-direction: column; gap: 5px; }
+      .keysteps small { color: var(--page-ink-3); font-size: 11px; }
+      .switch-link { color: var(--page-ink-3); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+      .switch-link:hover { color: var(--page-ink-2); }
+      .provider-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 2px; }
+      .provider-chips[hidden] { display: none; }
+      .provider-chips button {
+        font: inherit; font-size: 11px; font-weight: 700; line-height: 1.3;
+        color: var(--page-ink-2); background: var(--surface-2);
+        border: 1px solid var(--line-soft); border-radius: 999px; padding: 5px 11px; cursor: pointer;
+      }
+      .provider-chips button:hover { border-color: var(--line); }
+      .provider-chips button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--ok-fg); }
+      a.ext { color: var(--accent); font-weight: 650; text-decoration: none; }
+      a.ext:hover { text-decoration: underline; }
+      .field { display: block; margin-bottom: 12px; }
+      .field > span { display: block; font-size: 12px; color: var(--page-ink-2); margin-bottom: 5px; }
+      .field textarea, .field input {
+        font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--line);
+        border-radius: 8px; padding: 8px 10px; width: 100%;
+      }
+      .field textarea { resize: vertical; min-height: 58px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+      .field textarea:focus-visible, .field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      .field .two { display: flex; gap: 8px; }
+      .key-connect-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: stretch; }
+      .key-connect-row .field { margin-bottom: 0; }
+      .key-connect-row .btn { box-sizing: border-box; height: 100%; padding-block: 8px; white-space: nowrap; }
+      .skip { display: inline-block; margin-top: 10px; font-size: 12px; color: var(--page-ink-3); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+      .skip:hover { color: var(--page-ink-2); }
+      .privacy { font-size: 11px; color: var(--page-ink-3); margin: 14px 0 0; line-height: 1.6; border-top: 1px solid var(--line-soft); padding-top: 10px; }
+
+      /* step 6 — persona */
+      .pgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+      .pcard {
+        all: unset; box-sizing: border-box; cursor: pointer; padding: 10px 12px; border-radius: 9px;
+        background: var(--surface-2); border: 1px solid var(--line-soft);
+      }
+      .pcard .pn { font-weight: 700; font-size: 12.5px; }
+      .pcard[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+      .pcard[aria-pressed="true"] .pn { color: var(--accent); }
+      .pcard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .sample {
+        background: var(--surface-2); border-left: 3px solid var(--accent); border-radius: 0 9px 9px 0;
+        font-size: 13px; padding: 10px 14px; margin-bottom: 16px; color: var(--page-ink-2); min-height: 42px;
+      }
+      /* shared by the pin step's live strip and the persona step's reminder */
+      .pinlive {
+        display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--page-ink-2);
+        background: var(--surface-2); border: 1.5px dashed var(--line); border-radius: 10px; padding: 10px 13px;
+        transition: background .3s, border-color .3s;
+      }
+      /* display:flex above outranks the UA [hidden] rule, so the persona-step reminder
+         needs this to actually disappear once the toolbar pin is detected. */
+      .pinlive[hidden] { display: none; }
+      .pinlive .kbd {
+        flex: none; font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px;
+        padding: 1px 7px; background: var(--surface); font-weight: 700;
+      }
+      .pinlive .pl-on, .nudge .pl-on { display: none; }
+      .pinlive.on { border-style: solid; border-color: var(--accent); background: var(--accent-soft); color: var(--ok-fg); }
+      .pinlive.on .pl-off, .nudge.on .pl-off { display: none; }
+      .pinlive.on .pl-on, .nudge.on .pl-on { display: inline; }
+      .pinlive.on b { color: inherit; }
+      .plstate { margin-left: auto; flex: none; font-size: 11px; font-weight: 800; color: var(--page-ink-3); }
+      .pinlive.on .plstate { color: var(--ok-fg); }
+
+      /* done — live popup embed */
+      .done { text-align: center; padding: 10px 0; }
+      .done .ring {
+        width: 52px; height: 52px; margin: 0 auto 12px; border-radius: 50%;
+        background: var(--accent-soft); display: grid; place-items: center;
+        color: var(--accent); font-size: 24px; font-weight: 800;
+      }
+      .done h1 { margin-bottom: 8px; }
+      .done .lede { margin: 0 auto 16px; }
+      .embed { display: flex; flex-direction: column; align-items: center; }
+      .embed-label {
+        font-size: 10.5px; color: var(--page-ink-3); margin-bottom: 8px;
+        display: flex; align-items: center; gap: 8px; width: 298px;
+      }
+      .embed-label::before, .embed-label::after { content: ""; flex: 1; border-top: 1px dashed var(--line); }
+      .popup-frame {
+        /* 298 = the popup body's full 296px (268 + 14px padding ×2) + the 1px borders;
+           border-box, so anything narrower leaves the embed scrolling sideways. */
+        width: 298px; height: 240px; border: 1px solid var(--line); border-radius: 10px;
+        box-shadow: var(--shadow); background: var(--popup-bg);
+      }
+      .donerow { display: flex; gap: 8px; justify-content: center; margin-top: 18px; }
+
+      /* nav */
+      .nav { display: flex; align-items: center; gap: 8px; padding: 16px 28px 22px; }
+      .btn {
+        all: unset; cursor: pointer; font-size: 13px; font-weight: 700; padding: 9px 18px; border-radius: 9px;
+        background: var(--surface-2); color: var(--page-ink); border: 1px solid var(--line); text-align: center;
+      }
+      .btn:hover { border-color: var(--accent); }
+      .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+      .btn.primary:hover { filter: brightness(1.06); }
+      .btn.ghost { border-color: transparent; background: none; color: var(--page-ink-2); }
+      .btn:disabled { opacity: .5; cursor: default; }
+      .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .nav .spacer { flex: 1; }
+    </style>
+  </head>
+  <body>
+    <!-- Chrome's actual toolbar puzzle icon (Material "extension", outlined) — referenced via <use> below. -->
+    <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+      <symbol id="i-puzzle" viewBox="0 0 24 24">
+        <path d="M10.5 4.5c.28 0 .5.22.5.5v2h6v6h2c.28 0 .5.22.5.5s-.22.5-.5.5h-2v6h-2.12c-.68-1.75-2.39-3-4.38-3s-3.7 1.25-4.38 3H4v-2.12c1.75-.68 3-2.39 3-4.38 0-1.99-1.24-3.7-2.99-4.38L4 7h6V5c0-.28.22-.5.5-.5m0-2C9.12 2.5 8 3.62 8 5H4c-1.1 0-2 .9-2 2v3.8h.29c1.49 0 2.71 1.21 2.71 2.7s-1.22 2.7-2.71 2.7H2V20c0 1.1.9 2 2 2h3.8v-.3c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7v.3H17c1.1 0 2-.9 2-2v-4c1.38 0 2.5-1.12 2.5-2.5S20.38 11 19 11V7c0-1.1-.9-2-2-2h-4c0-1.38-1.12-2.5-2.5-2.5z"/>
+      </symbol>
+    </svg>
+    <div class="frame">
+      <div class="wizard">
+        <div class="wtop">
+          <img src="../icons/icon-32.png" alt="" />
+          <span class="name">Kibitzer 시작하기</span>
+          <span class="dots" id="dots" role="tablist" aria-label="단계"></span>
+          <span class="count" id="count">1 / 6</span>
+        </div>
+
+        <div class="body">
+          <!-- ① 개념 -->
+          <section class="step" id="s0">
+            <div class="mascot"><img src="../icons/icon-128.png" alt="Kibitzer 아이콘" /></div>
+            <p class="eyebrow">첫 만남</p>
+            <h1>지켜보다가, 한마디 하는 훈수꾼.</h1>
+            <p class="lede">목표를 하나 선언하면 Kibitzer가 브라우징을 옆에서 조용히 지켜봅니다. 막지도, 잔소리를 퍼붓지도 않습니다 — 딴길이 <b>쌓일 때만</b> 훈수 한마디를 둡니다.</p>
+            <div class="facts">
+              <div class="fact"><span class="tick">✓</span><b>차단하지 않아요</b><span>탭을 닫거나 막는 일은 없습니다. 말만 합니다.</span></div>
+              <div class="fact"><span class="tick">✓</span><b>내 컴퓨터에만 저장</b><span>방문 기록·게이지·이력은 전부 로컬에 남습니다.</span></div>
+              <div class="fact"><span class="tick">✓</span><b>한 번 새는 건 눈감아요</b><span>계속 샐 때만, 그때 한마디 합니다.</span></div>
+            </div>
+          </section>
+
+          <!-- ② 게이지 -->
+          <section class="step" id="s1" hidden>
+            <p class="eyebrow">작동 원리</p>
+            <h1>몰입 게이지가 판정합니다.</h1>
+            <p class="lede">페이지를 옮길 때마다 지금 화면이 목표와 얼마나 관련 있는지 판정합니다. 관련 있으면 게이지가 차고, 딴길이면 깎입니다. 게이지가 바닥을 치면 — 훈수.</p>
+            <div class="demo">
+              <span class="goalchip">🎯 졸업논문 초안 쓰기</span>
+              <div class="agauge" id="demoGauge" style="margin-top:0">
+                <div class="track">
+                  <div class="fill" id="demoFill" style="width:78%"></div>
+                  <div class="tick" style="left:33%"></div>
+                  <div class="tick" style="left:66%"></div>
+                </div>
+                <div class="meterline">
+                  <span class="state" id="demoWord"><span class="dot">●</span>집중</span>
+                  <span class="score"><b id="demoScore">78</b> / 100</span>
+                </div>
+              </div>
+              <div class="visits" id="visits"></div>
+              <div class="playrow"><button class="btn" id="play">▶ 딴길 새는 과정 재생</button></div>
+            </div>
+            <p class="footnote">재생이 끝나면 진짜 훈수가 이 화면 오른쪽 아래에 나타납니다. 실제 상황과 같은 위치, 같은 모양입니다.</p>
+          </section>
+
+          <!-- ③ 화면 안내 -->
+          <section class="step" id="s2" hidden>
+            <p class="eyebrow">화면 안내</p>
+            <h1>어디에, 뭐가 뜨나요?</h1>
+            <p class="lede">Kibitzer가 나타나는 곳은 딱 세 군데입니다. 그 밖의 화면은 건드리지 않습니다.</p>
+
+            <!-- Illustration only (scaled copies) — the live popup is embedded on the final step. -->
+            <div class="browser" aria-label="브라우저 화면 예시">
+              <div class="chrome-top">
+                <span class="traffic"><i></i><i></i><i></i></span>
+                <span class="chrome-tab">곱창 먹방 4시간 풀코스 - YouTube</span>
+              </div>
+              <div class="chrome-addr">
+                <span class="url">youtube.com/watch?v=meokbang</span>
+                <span class="ticons"><svg class="puzzle-svg" aria-hidden="true"><use href="#i-puzzle"/></svg>
+                  <span class="kicon">
+                    <img src="../icons/icon-32.png" alt="Kibitzer 툴바 아이콘" />
+                    <i class="dot"></i>
+                  </span>
+                </span>
+                <span class="callout" style="right: 2px; top: 26px;">1</span>
+              </div>
+              <div class="chrome-page">
+                <span class="skel" style="top: 18px; width: 50%; height: 12px;"></span>
+                <span class="skel" style="top: 42px; width: 32%; height: 9px;"></span>
+                <span class="skel" style="top: 70px; width: 42%; height: 72px;"></span>
+                <span class="skel" style="top: 158px; width: 38%; height: 9px;"></span>
+                <span class="skel" style="top: 178px; width: 28%; height: 9px;"></span>
+                <div class="kholder">
+                  <div class="kpopup">
+                    <p class="kh1">KIBITZER</p>
+                    <p class="goal-label">현재 목표</p>
+                    <p class="goal">졸업논문 초안 쓰기</p>
+                    <div class="tv" id="illustSundial"></div>
+                    <div class="agauge warn">
+                      <div class="track">
+                        <div class="fill" style="width:46%"></div>
+                        <div class="tick" style="left:33%"></div>
+                        <div class="tick" style="left:66%"></div>
+                      </div>
+                      <div class="meterline">
+                        <span class="state"><span class="dot">●</span>흔들림</span>
+                        <span class="score"><b>46</b> / 100</span>
+                      </div>
+                    </div>
+                    <div class="krow" style="margin-top:10px">
+                      <span class="kbtn kghost">목표 변경</span>
+                      <span class="kbtn kghost">일시정지</span>
+                      <span class="kbtn kghost danger">종료하기</span>
+                    </div>
+                    <span class="kbtn kghost" style="display:block; text-align:center">설정</span>
+                  </div>
+                </div>
+                <span class="callout" style="right: 180px; top: 16px;">2</span>
+                <div class="mini-toast">
+                  <p class="mb">Kibitzer</p>
+                  <p class="mm" id="miniToastMsg">대단히 생산적인 방문이군요.</p>
+                </div>
+                <span class="callout" style="right: 196px; bottom: 30px;">3</span>
+              </div>
+            </div>
+
+            <ul class="legend">
+              <li><span class="n">1</span><span class="legend-detail"><span class="legend-label"><b>툴바 아이콘</b> —</span><span class="legend-copy">색 점이 지금 상태를 표시합니다.</span><span class="legend-states"><span class="ldot" style="background:#1f9d6b"></span>몰입 <span class="ldot" style="background:#e0a100"></span>주의 <span class="ldot" style="background:#d1495b"></span>이탈 <span class="ldot" style="background:#8a8a90"></span>조용히 중<br>AI 호출 오류 시에는 아이콘 좌상단 <b>!</b> 표시로 알려줍니다.</span></span></li>
+              <li><span class="n">2</span><span><b>팝업</b> — 아이콘을 누르면 열립니다. 목표, 해시계(남은 시간), 몰입 게이지, 일시정지가 여기에.</span></li>
+              <li><span class="n">3</span><span><b>훈수</b> — 딴길이 쌓이면 보고 있던 페이지의 오른쪽 아래에 나타납니다. 답하거나 닫으면 그만.</span></li>
+            </ul>
+            <button class="btn" id="tryToast">▶ 연습 훈수 받아보기</button>
+            <p class="footnote">연습 훈수의 응답은 기록되지 않습니다.</p>
+          </section>
+
+          <!-- ④ 툴바 고정 -->
+          <section class="step" id="s3" hidden>
+            <div id="pinFresh">
+              <p class="eyebrow">자리 잡기</p>
+              <h1>훈수꾼 자리부터 마련해 주세요.</h1>
+              <p class="lede">목표 선언부터 훈수까지, 모든 일은 툴바의 이 아이콘에서 시작됩니다. 설치 직후엔 퍼즐 메뉴 속에 숨어 있어요 — 딱 <b>두 번의 클릭</b>으로 꺼내 주세요.</p>
+              <div class="pindemo" id="pindemo">
+                <div class="d-toolbar">
+                  <span class="d-url"></span>
+                  <span class="d-slot"><span class="kicon"><img src="../icons/icon-32.png" alt="" /><i class="dot"></i></span></span>
+                  <span class="d-puzzle"><svg class="puzzle-svg" aria-hidden="true"><use href="#i-puzzle"/></svg><span class="co">1</span></span>
+                </div>
+                <div class="d-menu">
+                  <div class="d-row">
+                    <span class="kicon"><img src="../icons/icon-32.png" alt="" /><i class="dot"></i></span>
+                    <span class="xn">Kibitzer</span>
+                    <span class="d-pin">
+                      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path class="po" d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4m3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z"/>
+                        <path class="pf" d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z"/>
+                      </svg>
+                      <span class="co">2</span>
+                    </span>
+                  </div>
+                </div>
+                <p class="d-cap">① <svg class="puzzle-svg" aria-hidden="true"><use href="#i-puzzle"/></svg> <b>확장 프로그램 메뉴</b> → ② 📌 <b>툴바에 고정</b></p>
+              </div>
+              <div class="pinlive" id="pinLive">
+                <span class="kicon"><img src="../icons/icon-32.png" alt="" /><i class="dot"></i></span>
+                <span><span class="pl-off">지금 <b>툴바</b>에서 눌러 보세요. 고정되면 여기 불이 켜집니다.</span><span class="pl-on"><b>고정 감지됨</b> — 색 점이 자리에 앉았습니다. 이제 항상 보여요.</span></span>
+                <span class="plstate"><span class="pl-off">미고정</span><span class="pl-on">고정 감지됨 ✓</span></span>
+              </div>
+              <p class="footnote">고정하지 않아도 다음으로 넘어갈 수 있어요. 다만 사용할 때마다 메뉴를 뒤져야 해요.</p>
+            </div>
+            <div id="pinPre" hidden>
+              <p class="eyebrow">자리 잡기</p>
+              <h1>자리는 이미 마련돼 있네요.</h1>
+              <p class="lede">Kibitzer가 벌써 툴바에 고정돼 있어요. 아이콘의 <b>색 점</b>이 몰입 상태를 계속 알려줄 겁니다 — 바로 다음으로 가죠.</p>
+              <div class="prebox">
+                <span class="kicon"><img src="../icons/icon-32.png" alt="" /><i class="dot"></i></span>
+                <span>고정 확인됨 ✓ — 색 점: <span class="ldot" style="background:#1f9d6b"></span>몰입 <span class="ldot" style="background:#e0a100"></span>주의 <span class="ldot" style="background:#d1495b"></span>이탈 <span class="ldot" style="background:#8a8a90"></span>조용히 중</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- ⑤ AI 판정 -->
+          <section class="step" id="s4" hidden>
+            <p class="eyebrow">AI 판정</p>
+            <h1>판정의 눈을 밝혀 주세요.</h1>
+            <p class="lede">API 키를 연결하면 페이지 <b>제목과 내용</b>을 함께 분석해 더 정확하게 판정하고, AI가 상황에 맞는 위트 있는 훈수를 만들어줍니다. AI 없이도 사용할 수 있지만 페이지 제목만 분석해 판정 품질과 훈수 표현이 단순해집니다.</p>
+            <div class="tiers">
+              <div class="tier">
+                <b>AI API 없이</b>
+                <small>페이지 제목 유사도만으로 판정합니다. 대략적인 흐름은 잡지만 상세한 뉘앙스는 놓칠 수 있습니다.</small>
+              </div>
+              <div class="tier on">
+                <b>AI API 연결</b>
+                <small>페이지 내용을 읽고 정밀 분석합니다. 다양한 컨셉의 AI가 상황에 맞는 말투로 훈수를 던집니다.</small>
+              </div>
+            </div>
+            <ol class="keysteps">
+              <li>
+                <a class="ext" id="keyIssueLink" href="https://ollama.com/settings/keys" target="_blank" rel="noreferrer">ollama.com에서 무료 API 키 발급</a>
+                <br>
+                <small>
+                  <span id="keyIssueHint">Ollama Cloud는 무료이고 가입부터 키 발급까지 1분이면 충분합니다</span>
+                  <br id="keyIssueHintBreak">
+                  <span class="switch-link" id="switchProvider" role="button" tabindex="0" aria-expanded="false">다른 서비스를 사용할래요</span>
+                </small>
+                <div class="provider-chips" id="providerChips" role="group" aria-label="AI 서비스 선택" hidden></div>
+              </li>
+              <li>발급된 키를 아래에 붙여넣고 <b>연결 테스트</b></li>
+            </ol>
+            <div class="key-connect-row">
+              <label class="field">
+                <input type="password" id="key" placeholder="ollama.com API 키" autocomplete="off" aria-label="API 키" />
+              </label>
+              <button class="btn primary" id="testKeys">연결 테스트</button>
+            </div>
+            <div class="aistatus" id="aiStatus" role="status" aria-live="polite" hidden>
+              <span id="aiStatusText"></span>
+              <span class="ai-test-detail" id="keysResult" aria-hidden="true"></span>
+            </div>
+            <p class="footnote" style="font-size: 12px; margin: 10px 0 0;">
+              API, 모델 변경 및 키 로테이션은 툴바 아이콘 → 설정 → AI 판정에서 관리할 수 있어요
+            </p>
+            <span class="skip" id="skip" role="button" tabindex="0" style="margin-top: 4px;">나중에 할게요. 우선 제목 분석만으로 시작</span>
+            <div class="privacy">
+              <p style="margin-bottom: 0;">API 키 연결 시 판정을 위해 아래 정보만 최소한으로 전송됩니다.</p>
+              <ul style="padding-left: 18px; margin: 3px 0 8px 0;">
+                <li><b>전송 항목:</b> 목표, 페이지 제목·호스트, 페이지 요약(최대 3,000자)</li>
+                <li><b>보안 방침:</b> 은행·메일 등 민감 도메인 미탐지, 원본 URL 및 전체 기록 전송 불가</li>
+              </ul>
+              <p>※ 관련 설정은 언제든 변경할 수 있습니다.<br>※ Kibitzer는 API 사용 내역을 포함해 어떠한 사용자 정보도 수집하지 않습니다.</p>
+            </div>
+          </section>
+
+          <!-- ⑥ 말투 -->
+          <section class="step" id="s5" hidden>
+            <p class="eyebrow">마지막 하나</p>
+            <h1>훈수 말투를 고르면, 준비 끝.</h1>
+            <p class="lede">같은 훈수도 누가 하느냐에 따라 다르게 들리죠. 설정에서 언제든 바꿀 수 있습니다.</p>
+            <div class="pgrid" id="pgrid"></div>
+            <div class="sample" id="sample"></div>
+            <div class="pinlive" id="pinReminder">
+              <span class="kbd"><svg class="puzzle-svg" aria-hidden="true"><use href="#i-puzzle"/></svg></span>
+              <span>아직 툴바 고정 전이에요 — 퍼즐 메뉴에서 <b>툴바에 고정</b>을 누르면 색 점이 항상 보입니다.</span>
+            </div>
+          </section>
+
+          <!-- 완료 -->
+          <section class="step done" id="s6" hidden>
+            <div class="ring">✓</div>
+            <h1>훈수꾼이 자리에 앉았습니다.</h1>
+            <p class="lede">마지막으로, <b>첫 목표</b>를 여기서 바로 선언해 보세요.<br />여기서 선언한 목표는 진짜로 시작됩니다.</p>
+            <div class="embed">
+              <div class="embed-label">실제 팝업입니다 — 툴바 아이콘을 눌러도 똑같은 화면이 열려요</div>
+              <iframe class="popup-frame" id="popupFrame" src="../popup/popup.html" title="Kibitzer 팝업"></iframe>
+            </div>
+            <div class="donerow">
+              <button class="btn ghost" id="openSettingsDone">세부 설정 열기</button>
+              <button class="btn primary" id="closeTab">튜토리얼 끝내기</button>
+            </div>
+          </section>
+        </div>
+
+        <div class="nav" id="nav">
+          <button class="btn ghost" id="prev">← 이전</button>
+          <span class="spacer"></span>
+          <button class="btn primary" id="next">다음 →</button>
+        </div>
+      </div>
+    </div>
+    <div class="nudge" id="nudge" hidden>
+      <span class="up">↑</span>
+      <span class="pl-off">진짜 <svg class="puzzle-svg" aria-hidden="true"><use href="#i-puzzle"/></svg>는 바로 위에 있어요</span>
+      <span class="pl-on">고정됐어요!</span>
+    </div>
+    <script type="module" src="onboarding.js"></script>
+  </body>
+</html>

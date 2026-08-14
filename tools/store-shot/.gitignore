@@ -1,0 +1,9 @@
+# Everything prepare.sh copies out of apps/extension/dist/
+popup/
+options/
+icons/
+assets/
+
+# Renders
+*.png
+.raw-*

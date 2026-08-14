@@ -6,10 +6,10 @@ Full collaboration rules: [CONTRIBUTING.md](CONTRIBUTING.md) (Korean). Strategic
 
 ## Commands
 
-Extension (run from `apps/extension-next`):
+Extension (run from `apps/extension`):
 
 ```sh
-cd apps/extension-next
+cd apps/extension
 npm ci
 npm run build      # assets hash-verify → test suite → tsc --noEmit ×2 → esbuild → dist/
 npm test           # tests + typecheck only
@@ -21,23 +21,24 @@ Node ≥ 22.6 required (`--experimental-strip-types`). Replay CLI: `node --exper
 Regenerate personas after editing `configs/personas*.yaml`:
 
 ```sh
-python scripts/gen-personas.py   # → apps/extension-next/src/lib/personas.data.ts
+python scripts/gen-personas.py   # → apps/extension/src/lib/personas.data.ts
 ```
 
 ## Layout
 
-- `apps/extension-next/` — the whole product: Chrome MV3 extension (TypeScript, esbuild). Internals map: `apps/extension-next/src/README.md`
+- `apps/extension/` — the whole product: Chrome MV3 extension (TypeScript, esbuild). Internals map: `apps/extension/src/README.md`
 - `configs/` — personas YAML sources + `sensitive_domains.json` (imported by `src/lib/domainFilter.ts`)
-- `fixtures/gauge/` — shared reducer contract fixtures used by extension-next tests
+- `fixtures/gauge/` — shared reducer contract fixtures used by extension tests
 - `docs/` — design docs, planning notes, handoff docs, progress log
 - `scripts/` — `gen-personas.py` + historical benchmark fixture data
+- `tools/store-shot/` — headless-Chrome rig that re-renders the Chrome Web Store screenshots and promo images into `docs/screenshots/`
 
 ## Workflow rules (operational minimum)
 
 1. Never commit directly to `main` or `dev` — rulesets reject direct pushes.
 2. Branch from `dev`: `feature/<slug>`, `fix/<slug>`, `chore/<slug>`, `codex/<slug>`. Only `hotfix/<slug>` branches from `main` (and must merge into both `main` and `dev`).
 3. Open PRs against `dev`. It is squash-merged: **the PR title becomes the commit message**, so PR titles must follow Conventional Commits (`feat: …`, `fix: …`, `chore: …`).
-4. Run `apps/extension-next`'s `npm run build` before opening a PR. CI (macOS + Windows, Node 22) must pass to merge.
+4. Run `apps/extension`'s `npm run build` before opening a PR. CI (macOS + Windows, Node 22) must pass to merge.
 5. Check the **AI-assisted** box in the PR template.
 6. Never commit secrets. Ollama keys/endpoints live in the extension options UI now (there is no `.env`).
 

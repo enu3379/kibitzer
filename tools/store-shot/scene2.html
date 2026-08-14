@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="scenes.css" />
+    <style>
+      .split .copy { width: 480px; }
+      .split .copy .sub { max-width: 372px; }
+      .split .stage { justify-content: flex-start; }
+      /* A generic browser window — wireframe only, no third-party branding. */
+      .win {
+        position: relative;
+        width: 742px;
+        height: 566px;
+        background: #fff;
+        border-radius: 14px;
+        overflow: hidden;
+        box-shadow: 0 22px 56px rgba(86, 76, 55, .16), 0 2px 6px rgba(86, 76, 55, .07);
+      }
+      .win .bar {
+        height: 36px;
+        background: #f1efe9;
+        border-bottom: 1px solid #e3e0d7;
+        display: flex;
+        align-items: center;
+        padding: 0 13px;
+        gap: 6px;
+      }
+      .win .bar i { width: 9px; height: 9px; border-radius: 50%; background: #d7d3c8; }
+      .win .bar .addr {
+        flex: 1;
+        margin-left: 12px;
+        height: 20px;
+        border-radius: 10px;
+        background: #fff;
+        border: 1px solid #e3e0d7;
+        display: flex;
+        align-items: center;
+        padding: 0 9px;
+      }
+      .win .bar .addr::before {
+        content: "";
+        width: 132px;
+        height: 7px;
+        border-radius: 3px;
+        background: #e6e3dc;
+      }
+      .win .page { padding: 20px 22px; }
+      .win .player {
+        height: 224px;
+        border-radius: 8px;
+        background: linear-gradient(160deg, #4a4a4f, #313136);
+        position: relative;
+      }
+      .win .player::after {
+        content: "";
+        position: absolute;
+        left: 50%; top: 50%;
+        width: 0; height: 0;
+        transform: translate(-38%, -50%);
+        border-left: 24px solid rgba(255, 255, 255, .5);
+        border-top: 15px solid transparent;
+        border-bottom: 15px solid transparent;
+      }
+      .win .ln { height: 10px; border-radius: 4px; background: #e6e3dc; margin-top: 15px; }
+      .win .ln.w1 { width: 58%; height: 14px; }
+      .win .ln.w2 { width: 30%; height: 9px; background: #edebe4; }
+      .win .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 13px; margin-top: 24px; }
+      .win .th { height: 74px; border-radius: 6px; background: #eceae3; }
+      .win .cap { height: 8px; border-radius: 3px; background: #edebe4; margin-top: 8px; width: 78%; }
+      /* The toast host is moved in here after render, so it anchors to the window. */
+      #kibitzer-toast-host { position: absolute !important; right: 18px; bottom: 16px; }
+    </style>
+  </head>
+  <body>
+    <div class="split">
+      <div class="copy">
+        <div class="brand"><span>Kibitzer</span><span class="dot"></span><b>몰입 훈수꾼</b></div>
+        <h1>막지 않습니다.<br /><span class="mark">구석에서 한마디</span> 할 뿐</h1>
+        <p class="sub">
+          차단도, 전체 화면 경고도 없습니다. 딴짓이 충분히 쌓였을 때만 페이지
+          구석에 작은 말풍선이 뜹니다. 답해 주면 다음 판정이 더 정확해집니다.
+        </p>
+        <div class="chips">
+          <span class="chip">비차단 훈수</span>
+          <span class="chip">5분만 · 30분 조용히</span>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="win" id="win">
+          <div class="bar"><i></i><i></i><i></i><span class="addr"></span></div>
+          <div class="page">
+            <div class="player"></div>
+            <div class="ln w1"></div>
+            <div class="ln w2"></div>
+            <div class="grid">
+              <div><div class="th"></div><div class="cap"></div></div>
+              <div><div class="th"></div><div class="cap"></div></div>
+              <div><div class="th"></div><div class="cap"></div></div>
+              <div><div class="th"></div><div class="cap"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      // Headless Chrome reports a dark colour scheme; the toast picks its palette from
+      // matchMedia, so pin it to the light variant the composite is designed around.
+      var realMatchMedia = window.matchMedia.bind(window)
+      window.matchMedia = function (q) {
+        if (String(q).indexOf("prefers-color-scheme: dark") !== -1) {
+          return { matches: false, media: q, addListener: function () {}, removeListener: function () {} }
+        }
+        return realMatchMedia(q)
+      }
+    </script>
+    <script src="toast.js"></script>
+    <script>
+      showKibitzerToast({
+        notificationId: "kbz-7",
+        displayToken: 7,
+        message: "대단히 유익해 보이는 영상이군요. 졸업논문 항목엔 없겠습니다만.",
+        contextLabel: "youtube.com#-1683729401",
+        autoDismissMs: 600000,
+        kind: "intervention",
+        demo: true,
+      })
+      // Re-anchor the fixed-position host inside the mock window and stop its entry
+      // animation so the capture is deterministic.
+      var host = document.getElementById("kibitzer-toast-host")
+      document.getElementById("win").appendChild(host)
+      var s = document.createElement("style")
+      s.textContent = "*,*::before,*::after{animation:none!important;transition:none!important}"
+      host.shadowRoot.appendChild(s)
+    </script>
+  </body>
+</html>

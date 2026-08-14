@@ -1,14 +1,18 @@
 # Gauge shared fixtures
 
-Language-neutral behavior fixtures for the gauge reducer. **Both** implementations load
-these exact files and must pass all of them (see `docs/gauge/contract.md`):
+Language-neutral behavior fixtures for the gauge reducer. The authoritative
+TypeScript runtime loads every JSON file here from:
 
-- **A (TypeScript):** `apps/extension/src/core/gauge/reducer.fixtures.test.ts`
-- **B (Python):** `apps/server/tests/test_gauge_fixtures.py`
+- `apps/extension/src/core/gauge/reducer.fixtures.test.ts`
 
-A test runner replays each fixture: start from `initial_state` (fields not listed take the
-init defaults in contract §2), apply `events` in order through `reduceGauge`, then check
-`expected`.
+Before the serverless cutover, a temporary Python reference reducer also loaded
+these files to validate cross-language parity. That implementation was removed
+with the server and remains available only through
+`pre-serverless-cutover-2026-07-24`.
+
+The test runner starts from `initial_state` (fields not listed take the init
+defaults in [the gauge contract](../../docs/gauge/contract.md) §2), applies
+`events` in order through `reduceGauge`, then checks `expected`.
 
 ## Fixture schema
 
@@ -29,7 +33,7 @@ init defaults in contract §2), apply `events` in order through `reduceGauge`, t
 }
 ```
 
-## Runner semantics (both languages must match)
+## Runner semantics
 
 - **Time unit:** `ts` is epoch **milliseconds**; the reducer converts Δ to seconds (contract §5).
 - **Floats:** compare within `tolerance` (default `1e-6`). `op:"near"` uses tolerance; `==` on a
@@ -47,5 +51,10 @@ init defaults in contract §2), apply `events` in order through `reduceGauge`, t
 - **property** — longer scenarios asserting qualitative invariants (S reaches 0, S nearly
   unchanged, an effect was emitted). Robust to knob tuning.
 
-New real-data findings (from B) enter as a new failing fixture first, then both reducers are
-fixed to pass it — this is the sync protocol in `docs/gauge-dual-track.md`.
+When a finding changes the language-neutral gauge contract, add a failing
+fixture first and then update the TypeScript reducer. Runtime-only events and
+durability behavior that are outside the shared contract belong in focused
+tests under `apps/extension/src/core/gauge/` or `src/lib/`.
+
+Run the fixture suite from `apps/extension` with `npm test` (or as part of
+`npm run build`).

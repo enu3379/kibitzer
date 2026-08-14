@@ -25,7 +25,7 @@ body:
       placeholder: |
         - [ ] ...
         - [ ] ...
-        - [ ] `apps/extension-next` `npm run build` 통과
+        - [ ] `apps/extension` `npm run build` 통과
     validations:
       required: true
   - type: textarea

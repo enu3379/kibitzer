@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kibitzer 설정</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --page: #f2f5f3; --page-ink: #1c2420; --page-ink-2: #57635c; --page-ink-3: #8a958f;
+        --surface: #ffffff; --surface-2: #eef3f0;
+        --line: #dce4df; --line-soft: #e7ede9;
+        --accent: #1e7a4c; --accent-ink: #ffffff; --accent-soft: #e2f1e8;
+        --ok-fg: #175f3b; --err: #bf4540; --err-soft: #f7e2e0; --err-fg: #8f322c;
+        --warn-soft: #f6eed9; --warn-fg: #7d651f; --warn-line: #e3d3a1;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --page: #161b18; --page-ink: #e9efeb; --page-ink-2: #a8b4ad; --page-ink-3: #79857e;
+          --surface: #232a26; --surface-2: #2e3733;
+          --line: #3c463f; --line-soft: #333d37;
+          --accent: #4cc585; --accent-ink: #0c1f14; --accent-soft: #2a4536;
+          --ok-fg: #8fdcb4; --err: #e07a72; --err-soft: #4a2a27; --err-fg: #f0a8a1;
+          --warn-soft: #453d26; --warn-fg: #e5cd85; --warn-line: #5d5233;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; background: var(--page); color: var(--page-ink);
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Apple SD Gothic Neo", "Pretendard", "Malgun Gothic", system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased; line-height: 1.5;
+        min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column;
+      }
+      .frame { max-width: 880px; margin: 0 auto; padding: 40px 24px 48px; width: 100%; flex: 1 0 auto; }
+      .head { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+      .head .name { font-size: 22px; font-weight: 800; letter-spacing: -.02em; }
+      .lede { color: var(--page-ink-2); font-size: 13.5px; margin: 0 0 20px; }
+
+      /* left tab rail */
+      .layout { display: flex; gap: 28px; align-items: flex-start; }
+      .tabs { flex: none; width: 160px; display: flex; flex-direction: column; gap: 2px; position: sticky; top: 28px; }
+      .tabs button { all: unset; box-sizing: border-box; width: 100%; cursor: pointer; font-size: 13px; font-weight: 600;
+        color: var(--page-ink-2); padding: 8px 12px; border-radius: 8px; }
+      .tabs button:hover { background: var(--surface-2); color: var(--page-ink); }
+      .tabs button[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+      .tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      .panes { flex: 1; min-width: 0; }
+      .pane { display: none; }
+      .pane.on { display: block; }
+      @media (max-width: 720px) {
+        .layout { flex-direction: column; }
+        .tabs { position: static; width: 100%; flex-direction: row; flex-wrap: wrap; }
+        .tabs button { width: auto; flex: 1 1 auto; text-align: center; }
+      }
+
+      .card { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 12px; padding: 6px 16px; margin-bottom: 14px; }
+      .card > h3 { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--page-ink-3); text-transform: uppercase; margin: 14px 0 4px; }
+      .row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line-soft); }
+      .row:first-of-type { border-top: none; }
+      .lab { flex: 1; min-width: 0; }
+      .lab b { display: block; font-size: 13px; font-weight: 650; }
+      .lab small { color: var(--page-ink-3); font-size: 11.5px; }
+      .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums; }
+
+      /* toggle switch */
+      .switch { all: unset; cursor: pointer; width: 38px; height: 23px; border-radius: 12px; background: var(--line);
+        position: relative; transition: background .18s; flex: none; }
+      .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 19px; height: 19px; border-radius: 50%;
+        background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform .18s; }
+      .switch[aria-checked="true"] { background: var(--accent); }
+      .switch[aria-checked="true"]::after { transform: translateX(15px); }
+      .switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+      input[type="time"], input[type="text"], input[type="number"], textarea, select {
+        font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--line);
+        border-radius: 7px; padding: 6px 9px; }
+      input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      input:disabled { opacity: .45; }
+      .times { display: flex; gap: 6px; align-items: center; color: var(--page-ink-3); }
+      .times input { width: 96px; font-variant-numeric: tabular-nums; padding-left: 6px; padding-right: 7px; text-align: center; }
+      .times input::-webkit-calendar-picker-indicator { margin: 0; padding: 0;}
+      /* sensitivity presets */
+      .seg-block { display: flex; flex-direction: column; gap: 7px; padding: 12px 0; }
+      .seg-block > b { font-size: 13px; font-weight: 650; }
+      .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+      .segbtn { all: unset; box-sizing: border-box; cursor: pointer; text-align: center; padding: 8px 0;
+        border-radius: 9px; background: var(--surface-2); border: 1px solid var(--line-soft);
+        font-size: 12.5px; font-weight: 700; }
+      .segbtn[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+      .segbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .seg-block small { color: var(--page-ink-3); font-size: 11.5px; }
+
+      /* 사이트 목록 (감시 제외 / 항상 OK) */
+      .listblock { display: flex; flex-direction: column; gap: 7px; padding: 12px 0; }
+      .listblock > b { font-size: 13px; font-weight: 650; }
+      .listblock small { color: var(--page-ink-3); font-size: 11.5px; }
+      .listblock textarea { width: 100%; resize: vertical; min-height: 96px;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; line-height: 1.7; }
+      .listblock .listcount { font-variant-numeric: tabular-nums; }
+
+      /* persona grid */
+      .pgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px 0; }
+      .pcard { all: unset; box-sizing: border-box; cursor: pointer; padding: 9px 11px; border-radius: 9px;
+        background: var(--surface-2); border: 1px solid var(--line-soft); display: block; }
+      .pcard .pn { font-weight: 700; font-size: 12.5px; }
+      .pcard[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+      .pcard[aria-pressed="true"] .pn { color: var(--accent); }
+      .pcard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+      /* persona preview strip: hover/focus previews a voice, selecting one commits it.
+         The text block is pinned to exactly two lines so a one-line and a two-line quote
+         occupy identical space — browsing the grid never shifts the layout underneath.
+         Copy is length-budgeted in personaSampleLines.test.ts; the clamp is the backstop. */
+      .pquote { border-left: 3px solid var(--accent); background: var(--surface-2);
+        border-radius: 0 9px 9px 0; padding: 11px 13px;
+        display: flex; flex-direction: column; justify-content: center; gap: 5px; }
+      .pquote.preview { border-left-color: var(--page-ink-3); border-left-style: dashed; }
+      .pquote .pqtag { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; color: var(--accent); }
+      .pquote.preview .pqtag { color: var(--page-ink-3); }
+      .pquote .pqtxt { font-size: 13px; line-height: 1.5; color: var(--page-ink);
+        height: 39px; /* 2 lines × 13px × 1.5 — constant whether the quote wraps or not */
+        display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+      .pquote .pqtxt.swap { animation: pqfade .18s ease; }
+      @keyframes pqfade { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+      /* Selection flash — box-shadow and border width only, so nothing reflows. */
+      .pquote.fire { animation: pqflash 850ms ease-out 50ms; }
+      @keyframes pqflash {
+        0%   { box-shadow: 0 0 0 0 var(--accent); border-left-width: 3px; }
+        30%  { box-shadow: 0 0 0 3px var(--accent); border-left-width: 7px; }
+        100% { box-shadow: 0 0 0 0 transparent; border-left-width: 3px; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .pquote.fire { animation: none; }
+        .pquote .pqtxt.swap { animation: none; }
+      }
+
+      button.btn { all: unset; cursor: pointer; font-size: 12.5px; font-weight: 650; padding: 7px 14px; border-radius: 8px;
+        background: var(--surface-2); color: var(--page-ink); border: 1px solid var(--line); text-align: center; }
+      button.btn:hover { border-color: var(--accent); }
+      button.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+      button.btn.danger { color: var(--err); border-color: var(--err); }
+      button.btn.danger:hover { background: var(--err-soft); }
+      button.btn:disabled { cursor: not-allowed; opacity: .45; }
+      button.btn:disabled:hover { border-color: var(--line); }
+      button.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      button.btn#ajSave { padding: 6.5px 12px; }
+      .btnrow { display: flex; gap: 8px; padding: 12px 0; flex-wrap: wrap; }
+      .hint { font-size: 11.5px; color: var(--page-ink-3); margin: 4px 0 12px; word-break: break-word; }
+      .hint.ok { color: var(--ok-fg); } .hint.err { color: var(--err-fg); }
+      .hint.warn { color: var(--warn-fg); }
+      .hidden { display: none !important; }
+
+      /* AI 판정: 설정 카드 상단에 붙어 있는 상태 안내 */
+      .ai-title { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+      .ai-title .description { color: var(--page-ink-3); font-size: 11.5px; font-weight: 400; }
+
+      /* 상태 줄 — 항상 한 줄. 색이 심각도를, 문구가 상태를 나른다. ok 외의 모든 상태가
+         앰버 이상인 것은 의도적: AI 미사용은 지원하지만 권장하지 않는 모드다. */
+      .aistate { padding: 10px 12px; margin: 6px 0 4px; border-radius: 10px;
+        background: var(--surface-2); border: 1px solid var(--line-soft); }
+      .aistate .line1 { display: flex; align-items: center; gap: 9px; }
+      .aistate .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--page-ink-3); }
+      .aistate .txt { font-size: 12.5px; font-weight: 650; min-width: 0; }
+      .aistate .sub { display: block; font-size: 11.5px; margin: 3px 0 0 17px; color: var(--page-ink-3); }
+      .aistate.ok { background: var(--accent-soft); border-color: transparent; }
+      .aistate.ok .dot { background: var(--accent); }
+      .aistate.ok .txt { color: var(--ok-fg); }
+      .aistate.warn { background: var(--warn-soft); border-color: transparent; }
+      .aistate.warn .dot { background: var(--warn-fg); }
+      .aistate.warn .txt, .aistate.warn .sub { color: var(--warn-fg); }
+      .aistate.err { background: var(--err-soft); border-color: transparent; }
+      .aistate.err .dot { background: var(--err); }
+      .aistate.err .txt, .aistate.err .sub { color: var(--err-fg); }
+
+      /* 알림 스택 — 런타임 호출 실패 전용. 설정 미완료는 여기 오지 않는다. */
+      .ai-alerts { position: sticky; top: 0; z-index: 3; margin: 2px -4px 8px; }
+      .ai-alert { border-left: 3px solid var(--warn-line); border-radius: 0 9px 9px 0;
+        padding: 9px 12px; font-size: 11.5px; background: var(--warn-soft); color: var(--warn-fg);
+        display: flex; align-items: flex-start; gap: 10px; }
+      .ai-alert.err { border-left-color: var(--err); background: var(--err-soft); color: var(--err-fg); }
+      .ai-alert + .ai-alert { margin-top: 5px; }
+      .ai-alert .msg { flex: 1 1 auto; min-width: 0; }
+      /* 결과 문장은 사실 줄과 같은 박스 안에서 줄바꿈 — 상태 줄로 올리면 중복이 된다 */
+      .ai-alert .conseq { display: block; margin-top: 3px; opacity: .82; }
+      .ai-alert .btn { flex: none; padding: 4px 10px; font-size: 11.5px; }
+
+      /* AI 판정: 연결된 제공자 블록 */
+      .psec { padding: 10px 0 12px; }
+      .seclabel { display: block; font-size: 12px; color: var(--page-ink-2); margin-bottom: 7px; }
+      .pblock { border: 1px solid var(--line-soft); border-radius: 10px; padding: 9px 12px 10px; margin-bottom: 8px; }
+      .phead { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+      .phead .pname { font-size: 13px; font-weight: 700; }
+      .phead .pbadge { font-size: 10.5px; font-weight: 700; color: var(--accent); background: var(--accent-soft);
+        border-radius: 20px; padding: 1px 8px; }
+      .phead .grow { flex: 1; }
+      .punlink { all: unset; cursor: pointer; font-size: 11.5px; color: var(--page-ink-3); padding: 2px 7px; border-radius: 6px; }
+      .punlink:hover { background: var(--err-soft); color: var(--err); }
+      .punlink:focus-visible { outline: 2px solid var(--accent); }
+      .pnote { font-size: 11.5px; color: var(--page-ink-3); margin: 0 0 7px; }
+
+      .krow { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 1px solid var(--line-soft);
+        border-radius: 9px; background: var(--surface-2); margin-bottom: 6px; }
+      .kmeta { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+      .kmeta .kn { font-size: 12.5px; font-weight: 700; }
+      .kmeta .kv { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; color: var(--page-ink-3); }
+      .kdate { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums;
+        font-size: 11px; color: var(--page-ink-3); flex: none; }
+      .kdel { all: unset; cursor: pointer; flex: none; width: 22px; height: 22px; border-radius: 6px; text-align: center;
+        line-height: 22px; font-size: 12px; color: var(--page-ink-3); }
+      .kdel:hover { background: var(--err-soft); color: var(--err); }
+      .kdel:focus-visible { outline: 2px solid var(--accent); }
+      .kempty { border: 1.5px dashed var(--line); border-radius: 9px; padding: 10px; text-align: center;
+        font-size: 12px; color: var(--page-ink-3); margin-bottom: 6px; }
+      .kadd { all: unset; box-sizing: border-box; cursor: pointer; display: block; width: 100%; text-align: center;
+        padding: 6px 0; border: 1.5px dashed var(--line); border-radius: 9px; font-size: 12px; font-weight: 650;
+        color: var(--page-ink-2); }
+      .kadd:hover { border-color: var(--accent); color: var(--accent); }
+      .kadd:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .kform { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+      .kform input { font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--line);
+        border-radius: 7px; padding: 6px 9px; font-size: 12.5px; }
+      .kform input.f-name { flex: 1 1 130px; }
+      .kform input.f-key { flex: 2 1 190px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+      .kform .btn { padding: 6px 12px; }
+      .kform .ktest { flex: 1 0 100%; margin: 1px 0 0; font-size: 11.5px; color: var(--page-ink-3); }
+      .kform .ktest.err { color: var(--err-fg); }
+      .krot { font-size: 11px; color: var(--page-ink-3); margin: 2px 0 0; }
+      .connectbtn { all: unset; box-sizing: border-box; cursor: pointer; display: block; width: 100%; text-align: center;
+        padding: 8px 0; border: 1.5px dashed var(--line); border-radius: 10px; font-size: 12.5px; font-weight: 650;
+        color: var(--page-ink-2); }
+      .connectbtn:hover { border-color: var(--accent); color: var(--accent); }
+      .connectbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .connectrow { display: flex; gap: 6px; flex-wrap: wrap; }
+      .connectrow select { flex: 1 1 180px; font-size: 12.5px; }
+      .connectrow .btn { padding: 6px 12px; }
+
+      /* AI 판정: 모델 지정 (상태 칩 = 테스트 버튼) */
+      .msec { border-top: 1px solid var(--line-soft); padding: 10px 0 12px; }
+      .mrow { display: flex; align-items: center; gap: 10px; padding: 5px 0; flex-wrap: wrap; }
+      .mlab { flex: 1 1 150px; min-width: 0; }
+      .mlab .mtitle { display: flex; align-items: center; gap: 7px; min-width: 0; }
+      .mlab b { font-size: 13px; font-weight: 650; }
+      .mlab small { display: block; color: var(--page-ink-3); font-size: 11px; }
+      .stchip { all: unset; box-sizing: border-box; cursor: pointer; flex: none; font-size: 10.5px; font-weight: 700;
+        padding: 1px 8px; border-radius: 20px; white-space: nowrap;
+        background: var(--surface-2); color: var(--page-ink-3); border: 1px solid var(--line-soft); }
+      .stchip.ok { background: var(--accent-soft); color: var(--ok-fg); border-color: transparent; }
+      .stchip.err { background: var(--err-soft); color: var(--err-fg); border-color: transparent; }
+      .stchip:hover { border-color: var(--accent); }
+      .stchip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      /* 제공자 제어가 거절된 이유 — 오류가 아닌 전제조건 안내라 앰버 톤 (빨간 런타임 오류와 구분).
+         거절한 컨트롤 바로 아래에 붙는다. */
+      .route-banner { background: var(--warn-soft); border-left: 3px solid var(--warn-line);
+        border-radius: 0 9px 9px 0; padding: 9px 12px; margin: 6px 0 2px;
+        font-size: 11.5px; color: var(--warn-fg); }
+
+      /* Tier 행 인라인 안내 — 그 tier에 무엇이 빠졌는지, 또는 수동 테스트 결과.
+         고칠 컨트롤 바로 옆에 있어야 하므로 상단 알림 스택으로 올리지 않는다. */
+      .mgap { flex: 1 1 100%; display: flex; align-items: center; gap: 8px; margin-top: 1px;
+        font-size: 11.5px; color: var(--warn-fg); }
+      .mgap::before { content: "!"; flex: none; width: 14px; height: 14px; border-radius: 50%;
+        background: var(--warn-line); color: var(--warn-fg); font-size: 10px; font-weight: 800;
+        line-height: 14px; text-align: center; }
+      .mgap.err { color: var(--err-fg); }
+      .mgap.err::before { content: "\00d7"; background: var(--err); color: #fff; }
+      .mgap .mgap-act { all: unset; cursor: pointer; font-weight: 700; text-decoration: underline;
+        text-underline-offset: 2px; }
+      .mgap .mgap-act:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .mctl { flex: 2 1 300px; display: flex; gap: 6px; min-width: 0; }
+      .mctl select.prov { flex: 0 1 128px; min-width: 0; font-size: 12.5px; }
+      .mctl select.model { flex: 1; min-width: 0; font-size: 12.5px; }
+      .mctl input { flex: 1; min-width: 0; font-size: 12.5px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+      .mctl .backbtn { flex: none; padding: 6px 10px; font-size: 12px; }
+
+      /* Tier별 전송 데이터 도움말 — hover뿐 아니라 키보드 focus에서도 열린다. */
+      .info-tip { position: relative; display: inline-flex; flex: none; }
+      .info-trigger { all: unset; box-sizing: border-box; cursor: help; width: 17px; height: 17px;
+        border: 1px solid var(--line); border-radius: 50%; color: var(--page-ink-3); font-size: 11px;
+        font-weight: 750; line-height: 15px; text-align: center; }
+      .info-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .info-pop { position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%);
+        width: 290px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px;
+        background: var(--surface); color: var(--page-ink-2); box-shadow: 0 8px 24px rgba(0,0,0,.16);
+        font-size: 11.5px; line-height: 1.5; visibility: hidden; opacity: 0; pointer-events: none;
+        transition: opacity .14s ease; z-index: 6; }
+      .info-pop b { display: block; color: var(--page-ink); margin-bottom: 4px; }
+      .info-tip:hover .info-pop, .info-tip:focus-within .info-pop { visibility: visible; opacity: 1; }
+
+
+      .privacy-link { border-top: 1px solid var(--line-soft); padding: 11px 0; font-size: 11.5px;
+        color: var(--page-ink-2); }
+      .privacy-link button { all: unset; cursor: pointer; color: var(--accent); font-weight: 650;
+        text-decoration: underline; text-underline-offset: 2px; border-radius: 4px; }
+      .privacy-link button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+      /* AI 판정: 사용량 */
+      .usec { border-top: 1px solid var(--line-soft); padding: 10px 0 4px; }
+      .uhead { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+      .uhead .seclabel { margin: 0; flex: 1; }
+      .useg { display: flex; gap: 4px; }
+      .ubtn { all: unset; box-sizing: border-box; cursor: pointer; font-size: 11px; font-weight: 650; padding: 2px 9px;
+        border-radius: 6px; background: var(--surface-2); color: var(--page-ink-2); border: 1px solid var(--line-soft); }
+      .ubtn[aria-checked="true"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+      .ubtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .utable { width: 100%; border-collapse: collapse; font-size: 12px; }
+      .utable th { text-align: right; font-size: 10.5px; font-weight: 700; letter-spacing: .05em; color: var(--page-ink-3);
+        padding: 3px 0 5px; }
+      .utable td { text-align: right; padding: 5px 0; border-top: 1px solid var(--line-soft);
+        font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums; font-size: 11.5px; }
+      .utable th:first-child, .utable td:first-child { text-align: left; }
+      .utable td:first-child .sub { display: block; font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", sans-serif;
+        color: var(--page-ink-3); font-size: 10.5px; }
+      .uempty { font-size: 11.5px; color: var(--page-ink-3); padding: 6px 0; }
+
+      /* page footer — centered, pinned to the bottom of the viewport on short panes */
+      .sitefoot { flex: none; border-top: 1px solid var(--line-soft); padding: 22px 24px 26px;
+        text-align: center; color: var(--page-ink-3); font-size: 12px; line-height: 1.8; }
+      .sitefoot .brand { display: flex; align-items: center; justify-content: center; gap: 10px;
+        color: var(--page-ink-2); font-weight: 650; }
+      .sitefoot .ico { display: inline-flex; color: var(--page-ink-3); border-radius: 6px; padding: 2px; }
+      .sitefoot .ico:hover { color: var(--accent); }
+      .sitefoot .ico:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      .sitefoot .ico svg { display: block; fill: currentColor; }
+      .sitefoot .flink { all: unset; box-sizing: border-box; cursor: pointer; color: var(--page-ink-2);
+        text-decoration: underline; text-underline-offset: 2px; border-radius: 4px; }
+      .sitefoot .flink:hover { color: var(--accent); }
+      .sitefoot .flink:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .sitefoot .fmail { color: var(--page-ink-2); }
+      .sitefoot .sep { padding: 0 6px; color: var(--line); }
+
+      .foottoast { position: fixed; left: 50%; bottom: 26px; transform: translate(-50%, 8px);
+        background: var(--page-ink); color: var(--page); font-size: 12.5px; font-weight: 650;
+        padding: 8px 16px; border-radius: 20px; opacity: 0; pointer-events: none;
+        transition: opacity .18s ease, transform .18s ease; z-index: 10; }
+      .foottoast.on { opacity: 1; transform: translate(-50%, 0); }
+      @media (prefers-reduced-motion: reduce) { .foottoast { transition: none; } }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <div class="head">
+        <!-- Geometry traced off icons/icon-128.png so the mark reads as the same character:
+             a solid semicircular head of radius R peeking over the monitor, eyes r 0.231R at
+             (cx ± 0.365R, cy − 0.317R), hands 0.423R wide at cx ± 0.788R. Here R = 8.66,
+             which is 0.433 × the monitor's width, as in the icon. The eyes take --page rather
+             than a fixed white so they stay cut-outs when --page-ink flips in dark mode. -->
+        <svg width="30" height="25" viewBox="0 0 26 22" fill="none" aria-hidden="true">
+          <path d="M4.34 10 A8.66 8.66 0 0 1 21.66 10 Z" fill="var(--page-ink)" />
+          <circle cx="9.84" cy="7.25" r="2" fill="var(--page)" />
+          <circle cx="16.16" cy="7.25" r="2" fill="var(--page)" />
+          <rect x="3" y="10" width="20" height="9" rx="2.4" fill="var(--accent)" />
+          <rect x="4.32" y="8.6" width="3.66" height="3.5" rx="1.75" fill="var(--page-ink)" />
+          <rect x="18.02" y="8.6" width="3.66" height="3.5" rx="1.75" fill="var(--page-ink)" />
+        </svg>
+        <span class="name">Kibitzer 설정</span>
+      </div>
+      <p class="lede">판정 감도·알림·말투·AI 판정·데이터를 여기서 관리합니다. 목표 선언은 툴바 팝업에서.</p>
+
+      <div class="layout">
+        <nav class="tabs" role="tablist" aria-label="설정 분류" aria-orientation="vertical">
+          <button role="tab" id="tab-general" aria-controls="pane-general" aria-selected="true" data-tab="general">일반</button>
+          <button role="tab" id="tab-sites" aria-controls="pane-sites" aria-selected="false" tabindex="-1" data-tab="sites">사이트</button>
+          <button role="tab" id="tab-persona" aria-controls="pane-persona" aria-selected="false" tabindex="-1" data-tab="persona">말투</button>
+          <button role="tab" id="tab-ai" aria-controls="pane-ai" aria-selected="false" tabindex="-1" data-tab="ai">AI 판정</button>
+          <button role="tab" id="tab-data" aria-controls="pane-data" aria-selected="false" tabindex="-1" data-tab="data">데이터</button>
+        </nav>
+        <div class="panes">
+
+      <!-- 일반: 판정 감도 + 알림 -->
+      <section class="pane on" id="pane-general" role="tabpanel" aria-labelledby="tab-general" data-pane="general">
+        <div class="card">
+          <h3>판정 감도</h3>
+          <div class="seg-block">
+            <b>목표 이탈 민감도</b>
+            <div class="seg" id="sens" role="radiogroup" aria-label="목표 이탈 민감도">
+              <button class="segbtn" data-level="lenient" role="radio" aria-checked="false">관대</button>
+              <button class="segbtn" data-level="standard" role="radio" aria-checked="true">중간</button>
+              <button class="segbtn" data-level="strict" role="radio" aria-checked="false">엄격</button>
+            </div>
+            <small id="sensHint">권장 기본값 — 대부분의 상황에 적합합니다.</small>
+          </div>
+        </div>
+        <div class="card">
+          <h3>알림</h3>
+          <div class="row">
+            <span class="lab"><b>방해 금지 시간</b><small>이 시간대엔 훈수를 조용히</small></span>
+            <span class="times"><input type="time" id="quietStart" value="22:00" /><span>–</span><input type="time" id="quietEnd" value="08:00" /></span>
+            <button class="switch" id="quietSw" role="switch" aria-checked="false" aria-label="방해 금지 시간"></button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>관측 범위</h3>
+          <div class="row">
+            <span class="lab"><b>로컬 PDF 제목 관측</b><small>Chrome에서 연 PDF의 문서 제목(없으면 파일명)을 판정·기록에 사용합니다. 연결한 AI 제공자에게 제목이 전송될 수 있으며, 파일 경로와 PDF 본문은 저장·전송하지 않습니다.</small></span>
+            <button class="switch" id="localPdfSw" role="switch" aria-checked="false" aria-label="로컬 PDF 제목 관측"></button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>세션</h3>
+          <div class="row">
+            <span class="lab"><b>재시작 시 세션 자동 유지</b><small>크롬을 완전히 껐다가 5분 안에 다시 켜면 진행 중이던 세션을 그대로 이어갑니다. 옵션을 꺼두어도 종료하지 않은 세션은 남아 있어, 재시작 후 팝업에서 이어갈지 직접 선택할 수 있어요.</small></span>
+            <button class="switch" id="restoreSw" role="switch" aria-checked="true" aria-label="재시작 시 세션 자동 유지"></button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 사이트: 감시 제외 / 항상 OK 목록 -->
+      <section class="pane" id="pane-sites" role="tabpanel" aria-labelledby="tab-sites" data-pane="sites">
+        <div class="card">
+          <h3>감시 제외 사이트</h3>
+          <div class="listblock">
+            <b>여기서는 아무것도 보지 않기</b>
+            <small>등록된 사이트는 어떤 기록도 남지 않고, 머무는 동안 게이지도 멈춥니다.
+              은행·결제·의료 같은 민감한 사이트는 등록하지 않아도 기본으로 제외됩니다.</small>
+            <textarea id="blockList" rows="6" spellcheck="false" autocomplete="off" autocapitalize="off"
+              aria-label="감시 제외 사이트 목록" placeholder="한 줄에 하나씩 — 예: instagram.com"></textarea>
+            <small class="listcount"><span id="blockCount">0</span>개 등록됨</small>
+          </div>
+        </div>
+        <div class="card">
+          <h3>항상 OK 사이트</h3>
+          <div class="listblock">
+            <b>이 사이트는 항상 목표와 관련 있음</b>
+            <small>등록된 사이트는 AI 판정 없이 항상 목표와 관련 있는 것으로 판정합니다 —
+              훈수가 나가지 않고 게이지가 회복됩니다.</small>
+            <textarea id="allowList" rows="6" spellcheck="false" autocomplete="off" autocapitalize="off"
+              aria-label="항상 OK 사이트 목록" placeholder="한 줄에 하나씩 — 예: docs.python.org"></textarea>
+            <small class="listcount"><span id="allowCount">0</span>개 등록됨</small>
+          </div>
+          <p class="hint">주소 대신 호스트만 적어주세요 (예: instagram.com) — 하위 도메인까지 함께 적용됩니다.
+            두 목록에 모두 있으면 감시 제외가 우선하고, 칸을 벗어나면 자동 저장됩니다.</p>
+          <div class="hint" id="siteResult" role="status"></div>
+        </div>
+      </section>
+
+      <!-- 말투 -->
+      <section class="pane" id="pane-persona" role="tabpanel" aria-labelledby="tab-persona" data-pane="persona">
+        <div class="card">
+          <h3>훈수 말투</h3>
+          <div class="pgrid" id="pgrid"></div>
+          <h3>실험실 (베타)</h3>
+          <p class="hint" style="margin-top: 0">아직 다듬는 중인 말투예요. 가끔 어색한 문장이 나올 수 있어요.</p>
+          <div class="pgrid" id="pgridLab" style="padding-top: 0"></div>
+          <div class="pquote" id="pquote">
+            <span class="pqtag" id="pquoteTag"></span>
+            <span class="pqtxt" id="pquoteTxt"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- AI 판정 -->
+      <section class="pane" id="pane-ai" role="tabpanel" aria-labelledby="tab-ai" data-pane="ai">
+        <div class="card">
+          <h3 class="ai-title">AI 판정</h3>
+          <!-- role=status: activating the switch can land on 준비 중 rather than 켜짐, and the
+               line is the only thing that says so — a bare aria-checked would announce "on". -->
+          <div class="aistate" id="ajState" role="status" aria-live="polite">
+            <div class="line1">
+              <span class="dot" aria-hidden="true"></span>
+              <span class="txt" id="ajStateText"></span>
+              <button class="switch" id="ajEnabled" type="button" role="switch" aria-checked="false" aria-label="AI 판정 사용"></button>
+            </div>
+            <span class="sub" id="ajStateSub"></span>
+          </div>
+          <div class="ai-alerts" id="ajAlerts" role="status" aria-live="polite"></div>
+
+          <div class="psec">
+            <span class="seclabel">연결된 AI 서비스 <span class="info-tip"><button class="info-trigger" type="button" aria-describedby="AIServiceTip" aria-label="AI API 연결 안내">i</button><span class="info-pop" id="AIServiceTip" role="tooltip">한 제공자에 등록된 키가 여러 개면 자동 로테이션을 사용합니다. 여러 계정의 무료 API 키를 등록해 무료 한도를 넓게 사용할 수도 있습니다.</span></span></span>
+            <div id="ajProviders"></div>
+            <div id="ajConnect"></div>
+          </div>
+
+          <div class="msec">
+            <span class="seclabel">모델 지정</span>
+            <div class="mrow">
+              <span class="mlab">
+                <span class="mtitle"><b>Tier 1 · 빠른 판정</b><span class="info-tip"><button class="info-trigger" type="button" aria-describedby="tier1DataTip" aria-label="Tier 1 전송 데이터 안내">i</button><span class="info-pop" id="tier1DataTip" role="tooltip"><b>어떤 데이터가 전송되나요?</b>빠른 목표 이탈 판정을 위해 목표, 현재 페이지의 제목·호스트, 최근 최대 20개 페이지의 제목·판정이 전송됩니다. 페이지 본문은 전송하지 않습니다.</span></span><button class="stchip" data-tier="tier1" type="button">– 테스트</button></span>
+                <small>한눈판 듯하면 훑어보는 저비용 모델</small>
+              </span>
+              <span class="mctl" data-tier="tier1">
+                <select class="prov" aria-label="Tier 1 제공자"></select>
+                <select class="model" aria-label="Tier 1 모델"></select>
+                <input type="text" class="modelinput hidden" aria-label="Tier 1 모델 직접 입력" placeholder="정확한 API 모델명" />
+                <button class="btn backbtn hidden" type="button" title="추천 목록으로">목록</button>
+              </span>
+              <div class="mgap hidden" data-tier="tier1"></div>
+            </div>
+            <div class="mrow">
+              <span class="mlab">
+                <span class="mtitle"><b>Tier 2 · 정밀 판정</b><span class="info-tip"><button class="info-trigger" type="button" aria-describedby="tier2DataTip" aria-label="Tier 2 전송 데이터 안내">i</button><span class="info-pop" id="tier2DataTip" role="tooltip"><b>어떤 데이터가 전송되나요?</b>더 정확한 목표 이탈 판정과 훈수 메시지 생성을 위해 목표, 현재 페이지의 제목·호스트·본문 최대 3,000자, 최근 최대 20개 페이지의 제목·판정이 전송됩니다. 세션 요약에는 체류시간 상위 최대 5개 페이지 정보가 사용됩니다.</span></span><button class="stchip" data-tier="tier2" type="button">– 테스트</button></span>
+                <small>내용을 정독하고 훈수를 쓰는 모델</small>
+              </span>
+              <span class="mctl" data-tier="tier2">
+                <select class="prov" aria-label="Tier 2 제공자"></select>
+                <select class="model" aria-label="Tier 2 모델"></select>
+                <input type="text" class="modelinput hidden" aria-label="Tier 2 모델 직접 입력" placeholder="정확한 API 모델명" />
+                <button class="btn backbtn hidden" type="button" title="추천 목록으로">목록</button>
+              </span>
+              <div class="mgap hidden" data-tier="tier2"></div>
+            </div>
+
+          </div>
+
+          <!-- .ai-actions carries no styles now, but tools/store-shot/stub.js selects it to inject
+               the store-screenshot note — do not drop the class. -->
+          <div class="btnrow ai-actions" style="padding-top: 0">
+            <button class="btn primary" id="ajSave">저장</button>
+          </div>
+          <div class="hint" id="ajResult"></div>
+
+          <div class="privacy-link">
+            특정 페이지 정보가 AI 서비스로 전송되는 것이 불안하거나 싫다면
+            <button type="button" id="openSiteSettings">감시 제외 사이트에서 설정하세요</button>.
+          </div>
+
+          <div class="usec">
+            <div class="uhead">
+              <span class="seclabel">사용량</span>
+              <span class="useg" role="radiogroup" aria-label="사용량 기간">
+                <button class="ubtn" data-days="1" role="radio" aria-checked="true" type="button">오늘</button>
+                <button class="ubtn" data-days="7" role="radio" aria-checked="false" type="button">7일</button>
+                <button class="ubtn" data-days="30" role="radio" aria-checked="false" type="button">30일</button>
+              </span>
+            </div>
+            <table class="utable">
+              <thead><tr><th>모델</th><th>호출</th><th>입력 토큰</th><th>출력 토큰</th></tr></thead>
+              <tbody id="ajUsage"></tbody>
+            </table>
+            <p class="hint" style="margin-bottom: 4px">표시된 사용량은 AI 제공사의 집계 기준이며 실제와 다를 수 있습니다. 사용 내역은 수집되지 않습니다.</p>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- 데이터 -->
+      <section class="pane" id="pane-data" role="tabpanel" aria-labelledby="tab-data" data-pane="data">
+        <div class="card">
+          <h3>데이터 · 기기에만 저장됨</h3>
+          <div class="btnrow">
+            <button class="btn" id="exportLog">디버그 로그 파일</button>
+            <button class="btn" id="exportEvents">이벤트 JSON</button>
+            <!-- dev-only:start -->
+            <button class="btn" id="openReplay">리플레이 열기</button>
+            <!-- dev-only:end -->
+          </div>
+          <div class="row">
+            <span class="lab"><b>모든 활동 데이터 삭제</b><small>몰입 게이지·사용 이력·이벤트·훈수 기록을 전부 지웁니다 (목표·API 키·말투 등 설정은 유지)</small></span>
+            <button class="btn danger" id="wipe">삭제</button>
+          </div>
+        </div>
+      </section>
+        </div>
+      </div>
+    </div>
+
+    <footer class="sitefoot">
+      <div class="brand">
+        <span>© 2026 Kibitzer</span>
+        <a class="ico" href="https://github.com/enu3379/kibitzer/tree/main" target="_blank" rel="noopener noreferrer"
+          aria-label="Kibitzer GitHub 저장소">
+          <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58l-.01-2.05c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.34-5.47-5.96 0-1.32.47-2.39 1.24-3.23-.12-.31-.54-1.53.12-3.18 0 0 1.01-.32 3.3 1.23a11.4 11.4 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.65.24 2.87.12 3.18.77.84 1.24 1.91 1.24 3.23 0 4.63-2.81 5.65-5.49 5.95.43.37.82 1.1.82 2.22l-.01 3.29c0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg>
+        </a>
+        <a class="ico" href="https://www.instagram.com/kibitzer_app/" target="_blank" rel="noopener noreferrer"
+          aria-label="Kibitzer 인스타그램">
+          <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.16c3.2 0 3.58.01 4.85.07 1.17.05 1.8.25 2.23.41.56.22.96.48 1.38.9.42.42.68.82.9 1.38.16.42.36 1.06.41 2.23.06 1.27.07 1.65.07 4.85s-.01 3.58-.07 4.85c-.05 1.17-.25 1.8-.41 2.23-.22.56-.48.96-.9 1.38-.42.42-.82.68-1.38.9-.42.16-1.06.36-2.23.41-1.27.06-1.65.07-4.85.07s-3.58-.01-4.85-.07c-1.17-.05-1.8-.25-2.23-.41-.56-.22-.96-.48-1.38-.9-.42-.42-.68-.82-.9-1.38-.16-.42-.36-1.06-.41-2.23-.06-1.27-.07-1.65-.07-4.85s.01-3.58.07-4.85c.05-1.17.25-1.8.41-2.23.22-.56.48-.96.9-1.38.42-.42.82-.68 1.38-.9.42-.16 1.06-.36 2.23-.41C8.42 2.17 8.8 2.16 12 2.16ZM12 0C8.74 0 8.33.01 7.05.07 5.78.13 4.9.33 4.14.63a5.9 5.9 0 0 0-2.13 1.38A5.9 5.9 0 0 0 .63 4.14C.33 4.9.13 5.78.07 7.05.01 8.33 0 8.74 0 12s.01 3.67.07 4.95c.06 1.27.26 2.15.56 2.91.31.79.72 1.46 1.38 2.13a5.9 5.9 0 0 0 2.13 1.38c.76.3 1.64.5 2.91.56C8.33 23.99 8.74 24 12 24s3.67-.01 4.95-.07c1.27-.06 2.15-.26 2.91-.56a5.9 5.9 0 0 0 2.13-1.38 5.9 5.9 0 0 0 1.38-2.13c.3-.76.5-1.64.56-2.91.06-1.28.07-1.69.07-4.95s-.01-3.67-.07-4.95c-.06-1.27-.26-2.15-.56-2.91a5.9 5.9 0 0 0-1.38-2.13A5.9 5.9 0 0 0 19.86.63c-.76-.3-1.64-.5-2.91-.56C15.67.01 15.26 0 12 0Zm0 5.84a6.16 6.16 0 1 0 0 12.32 6.16 6.16 0 0 0 0-12.32Zm0 10.16a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm7.85-10.4a1.44 1.44 0 1 1-2.88 0 1.44 1.44 0 0 1 2.88 0Z"/></svg>
+        </a>
+      </div>
+      <div>All Rights Reserved</div>
+      <div>This product includes a third-party component. See
+        <a class="flink" href="../THIRD_PARTY_NOTICES.md" target="_blank"
+          rel="noopener noreferrer">THIRD_PARTY_NOTICES</a> for details.</div>
+      <div>
+        Developed by
+        <span class="fmail">kimdenya1@gmail.com</span>,
+        <span class="fmail">enu3379@gmail.com</span>
+      </div>
+      <div>
+        <a class="flink" href="https://github.com/enu3379/kibitzer/blob/main/docs/privacy-policy.ko.md"
+          target="_blank" rel="noopener noreferrer">개인정보 처리방침</a>
+        <span class="sep">|</span>
+        <button type="button" class="flink" id="contactUs">Contact Us</button>
+      </div>
+    </footer>
+    <div class="foottoast" id="contactToast" role="status" aria-live="polite"></div>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

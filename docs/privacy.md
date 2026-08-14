@@ -14,13 +14,17 @@ The user-facing policy (store submission) is
   characters in the provider payload.
 - Persist page identity as visible host plus a hash of path and query; never
   persist a raw path, query, or fragment.
+- Observe local PDFs only after explicit opt-in. Use Chrome's tab title (the
+  document title when available, otherwise the filename), label the source as
+  `local-pdf`, never persist or transmit the local path, and never read the PDF
+  body.
 - Keep every cloud provider disabled until the user supplies a key (no-key =
   deliberate Tier-0-only mode).
 
 ## Sensitive domains
 
 `configs/sensitive_domains.json` is imported at build time by
-`apps/extension-next/src/lib/domainFilter.ts`. The default rules cover banking,
+`apps/extension/src/lib/domainFilter.ts`. The default rules cover banking,
 payments, webmail, health, authentication, cloud-console secrets, and local
 administration surfaces. The background worker drops a matching page before
 judging and refuses to show a Kibitzer toast there.
@@ -46,6 +50,12 @@ They do not contain:
 - the full IndexedDB event log;
 - an unbounded browsing-history export;
 - content from a sensitive-domain page.
+- a local PDF path or local PDF body.
+
+When local-PDF observation is enabled, its title is treated like any other page
+title and may be included in Tier-1/2 requests and session-summary requests. Its
+host field is the non-path label `local-pdf`; the raw `file:` URL never enters a
+provider payload or durable dwell checkpoint.
 
 The Tier-2 message writer receives the accepted judgment and compact nag/time
 context, not the current excerpt. The options page repeats the network

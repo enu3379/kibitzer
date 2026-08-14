@@ -39,12 +39,12 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-          cache-dependency-path: apps/extension-next/package-lock.json
+          cache-dependency-path: apps/extension/package-lock.json
 
-      - name: Install extension-next dependencies
-        working-directory: apps/extension-next
+      - name: Install extension dependencies
+        working-directory: apps/extension
         run: npm ci
 
-      - name: Build extension-next
-        working-directory: apps/extension-next
+      - name: Build extension
+        working-directory: apps/extension
         run: npm run build

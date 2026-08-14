@@ -29,7 +29,7 @@ The 74.9 MB model is intentionally git-ignored. Its pinned URL, size, digest,
 license, tokenizer digests, and inference contract are recorded in:
 
 ```text
-apps/extension-next/assets/models/koen-e5-tiny/model-manifest.json
+apps/extension/assets/models/koen-e5-tiny/model-manifest.json
 ```
 
 `npm run build` begins with `scripts/checkProviderAssets.mjs`. If the model is
@@ -42,7 +42,7 @@ remote model at runtime.
 
 ## Parity contract
 
-`apps/extension-next/src/providers/tier0Wasm.test.ts` covers:
+`apps/extension/src/providers/tier0Wasm.test.ts` covers:
 
 - deterministic tokenizer IDs and 128-token truncation;
 - finite 384-dimensional normalized vectors;
@@ -54,7 +54,7 @@ These tests validate engine parity, not product calibration. The shipped O4
 operating point is `tauOk=0.59`; the trajectory anchor is disabled by default
 (`ANCHOR_WINDOW=0`). Calibration evidence is under
 `docs/benchmarks/tier0-embedding-o4/` and
-`docs/results-2026-07-24-anchor-floor-o4.md`.
+`docs/research/anchor/results-2026-07-24-anchor-floor-o4.md`.
 
 ## Provenance and recovery
 

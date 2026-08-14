@@ -1,0 +1,49 @@
+{
+  "manifest_version": 3,
+  "name": "Kibitzer",
+  "version": "1.0.0",
+  "description": "목표를 선언하면 브라우징을 조용히 지켜보다 딴짓이 쌓일 때만 자연스럽게 훈수하는 몰입 도우미.",
+  "minimum_chrome_version": "123",
+  "incognito": "not_allowed",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "tabs",
+    "webNavigation",
+    "scripting",
+    "alarms",
+    "storage",
+    "idle",
+    "downloads",
+    "offscreen",
+    "notifications"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ]
+}

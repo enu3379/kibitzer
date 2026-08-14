@@ -27,7 +27,7 @@
 1. **작업 지시서에서 시작** — 배경과 수용 기준을 이슈(또는 `docs/handoff-*.md`)에 적는다. 사람이든 에이전트든 그 문서만 보고 착수할 수 있어야 한다.
 2. `dev`에서 브랜치를 딴다.
 3. PR을 `dev`로 연다. 제목은 Conventional Commits 형식, 관련 이슈가 있으면 본문에 `Closes #이슈번호`.
-4. CI(macOS·Windows, Node 22: extension-next 빌드) 통과 후 squash 머지한다. 리뷰 승인은 머지 조건이 아니지만, CODEOWNERS가 상대에게 리뷰 요청을 자동으로 보낸다.
+4. CI(macOS·Windows, Node 22: extension 빌드) 통과 후 squash 머지한다. 리뷰 승인은 머지 조건이 아니지만, CODEOWNERS가 상대에게 리뷰 요청을 자동으로 보낸다.
 
 ## PR 제목 = 커밋 컨벤션
 

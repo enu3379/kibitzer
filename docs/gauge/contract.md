@@ -1,11 +1,11 @@
 # Gauge v0 — language-neutral behavior contract
 
 Status: v0 (2026-07-21), authoritative TypeScript runtime after the 2026-07-24
-cutover. Frozen semantics come from `docs/analysis-plan-a-gauge-design.md`
+cutover. Frozen semantics come from `docs/research/gauge/analysis-plan-a-gauge-design.md`
 §1–§6 and planning-notes D9.
 
 The production implementation is the pure reducer under
-`apps/extension-next/src/core/gauge/`. The retired Python reducer was used only
+`apps/extension/src/core/gauge/`. The retired Python reducer was used only
 as an independent validation track; it remains reachable through
 `pre-serverless-cutover-2026-07-24`. Shared fixtures and historical
 cross-language results remain evidence for this contract.
@@ -47,8 +47,11 @@ reduceGauge(state: GaugeState, event: GaugeEvent, config: GaugeConfig) -> GaugeT
 | `nagN` | int | 0 | 이번 에피소드 나깅 순번 (m≤0에서 리셋) |
 | `renagDebt` | float | 0 | 마지막 나깅 이후 이탈 부채 |
 | `lastNagTs` | int ms \| null | null | — |
+| `sZeroConfirms` | int | 0 | 이번 에피소드의 s_zero 확인 요청 횟수 (첫 요청만 Writer 사용, m≤0에서 리셋) |
+| `nagRefunded` | bool | false | 이번 에피소드에서 전달 실패한 나깅을 이미 한 번 되돌렸는지 (m≤0에서 리셋) |
 | `celebrateArmed` | bool | false | S ≤ C_arm에서 set, 칭찬 발송 시 clear |
-| `snoozedUntil` | int ms \| null | null | 사용자 스누즈 (유일한 외부 게이트) |
+| `snoozedUntil` | int ms \| null | null | 사용자 스누즈 |
+| `quiet` | bool | false | 사용자가 설정한 조용한 시간 안인지. 나깅을 결정할 수 있는 이벤트가 각자 실어 오고, 1분 틱은 재석/부재와 무관하게 실어 온다 — 경계에서 최대 한 틱 늦는다 |
 
 IndexedDB의 gauge checkpoint는 이 구조를 직렬화한다.
 
@@ -56,15 +59,24 @@ IndexedDB의 gauge checkpoint는 이 구조를 직렬화한다.
 
 | type | fields | source |
 |---|---|---|
-| `nav` | `pageKey, verdict("OK"\|"DRIFT"), r0?, tauOk?, degraded?, ts` | extension Tier 0/1 observation pipeline |
-| `heartbeat` | `ts` | presence 하트비트 틱 (활성 중) |
-| `inactive` | `ts` | 자리 비움/탭 블러 — 적분 정지 |
+| `nav` | `pageKey, verdict("OK"\|"DRIFT"), r0?, tauOk?, degraded?, quiet?, ts` | extension Tier 0/1 observation pipeline. 관찰은 창 포커스만 보고 presence는 보지 않으므로 `quiet`를 스스로 실어 온다 |
+| `heartbeat` | `quiet?, ts` | presence 하트비트 틱 (활성 중). `quiet`는 조용한 시간 창을 재기록한다(생략 시 기존 값 유지) |
+| `inactive` | `quiet?, ts` | 자리 비움/탭 블러 — 적분 정지. 부재 중 유일하게 도는 틱이라 `quiet`를 함께 실어 창을 갱신한다 |
 | `tier2_result` | `flow("drift"\|"ok"), pageKey, ts` | Tier2 Judge 응답 (승격/S=0 관문) |
 | `snooze` | `until, ts` | 사용자 스누즈 |
 
 `nav`은 활성 페이지·verdict를 교체하고 즉발 효과는 없다(§4). `r0`/`tauOk`는 축퇴 모드
 마진용이며 정상 모드에선 무시. 중복 이벤트(동일 사건 재전달)는 호출부가 event id로
 걸러 reducer에 넣지 않는다 — reducer는 들어온 이벤트를 항상 적분한다.
+
+확장 배선만 발행하고 공유 픽스처는 발행하지 않는 **배선 전용** 이벤트가 셋 더 있다. 파이썬
+트랙의 패리티 대상이 아니므로 위 표에는 넣지 않는다.
+
+| type | fields | 하는 일 |
+|---|---|---|
+| `neutral` | `pageKey, ts` | 관찰됐으나 아직 판정 전인 페이지: 직전 페이지를 그 순간까지 정산한 뒤 verdict를 비운다. 정산은 하되 떠나는 페이지에 대해 어떤 효과도 내지 않는다 |
+| `tier2_cancel` | `requestId, ts` | 응답이 stale해진 Tier2 요청의 pendingTier2 슬롯만 반환한다 |
+| `nag_undelivered` | `ts` | 생성된 나깅이 화면에 닿지 못했을 때 `nagN`을 한 칸 되돌린다. 에피소드당 한 번(`nagRefunded`로 잠금), `renagDebt`와 시각은 건드리지 않는다 |
 
 ## 4. GaugeEffect (intents)
 
@@ -115,6 +127,9 @@ else:                        s' = min(100, s + Rrecover * ((1 - m') / kRecover)
 - 칭찬: `s ≤ Carm`에서 `celebrateArmed=true`; armed 상태에서 `s ≥ Ccelebrate` 첫 도달 시
   `celebrate` emit + clear.
 - 스누즈: `now < snoozedUntil`이면 `nag`·`request_tier2` 억제, 적분은 계속.
+- 조용한 시간: `quiet`가 참이면 나깅을 결정하는 게이트(재나깅·S=0·S=0 복구·Tier2 s_zero 적용)를
+  스누즈와 동일하게 억제한다. 적분은 계속하고, 승격 요청은 억제하지 않는다 — 창 안에서 `nagN`이
+  오르지 않아야 창이 끝난 직후 곧바로 나깅할 수 있다.
 
 ## 7. Fixture format (`fixtures/gauge/*.json`)
 
